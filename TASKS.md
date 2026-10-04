@@ -274,6 +274,35 @@ WorkBuddy 在 `0ac5365` 中**主动撤回该判定**，确认本任务的判断�
 - ⚠️ 本任务未走 Merge Gate（§11/§8 的 spec 修订按流程不走代码 Gate），合入方式待定。
 ~~~
 
+### ✅ 并发初始化缺陷：已修（WorkBuddy，06:30）
+
+`test_concurrent_initialization_and_events_have_one_order` 在 main 上 **0/5 失败**
+（不是 flaky，是确定性失败），报
+`sqlite3.OperationalError: database is locked`，位置 `app/db/connection.py:39`
+的 `PRAGMA journal_mode=WAL`。
+
+**根因**：`connect()` 每次都设 `journal_mode=WAL`，而变更 journal mode 需要排他锁，
+且 SQLite 有两个限制：
+
+1. `busy_timeout` 对 `PRAGMA journal_mode` **不生效**（不能靠超时重试）；
+2. **禁止在事务内变更 journal mode**
+   （`cannot change into wal mode from within a transaction`）——
+   所以第一版修法用 `BEGIN IMMEDIATE` 包住，反而直接报错。
+
+**修法**：`connect()` 不再设 journal mode；新增幂等的 `ensure_wal()`，
+用 `<db>-wal.lock` 旁路文件做**跨进程互斥**（Windows `msvcrt.locking` /
+POSIX `fcntl.flock`），进锁后重新确认模式，已是 WAL 则立即返回。
+
+**验证**：并发测试 **10/10 通过**（修前 0/5）；全量 20 passed；
+门禁三道全绿（docstate 88/88、ruff check、ruff format）。
+
+**方法论**：该缺陷在 Codex 分支上 `pytest` 显示 20 passed，合并到 main 后才暴露。
+**单次通过不等于通过** —— R10 要求重复验证的用例必须多次复跑（本例 10 次），
+不能只看 CI 的一次绿灯。
+
+改动文件：`backend/app/db/connection.py`（属 MVP-02 目录，跨任务改动已在此登记，
+分支 `agent/workbuddy/fix-concurrent-init`）
+
 ## 关键路径
 
 ~~~text
