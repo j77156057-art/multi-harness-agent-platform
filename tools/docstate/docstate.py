@@ -105,6 +105,63 @@ def extract_allowlist(text):
     return out
 
 
+def parse_schema_definitions(sec8):
+    """解析 §8 canonical 表定义行，返回 [(表, 主键/唯一键, 关键字段)]。"""
+    rows = []
+    for line in sec8.split("\n"):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        parts = [cell.strip() for cell in stripped.split("|")]
+        if len(parts) < 5:
+            continue
+        name = parts[1]
+        if name == "表" or set(name) <= set("-: "):
+            continue
+        rows.append((name, parts[2], parts[3]))
+    return rows
+
+
+def parse_required_fields(text):
+    """解析 §37.6 补充清单，返回 {表名: 必要字段单元格}（合并写法按 `/` 展开）。"""
+    if "### 37.6" not in text:
+        return {}
+    section = text.split("### 37.6")[1].split("### 37.7")[0]
+    fields = {}
+    for line in section.split("\n"):
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        parts = [cell.strip() for cell in stripped.split("|")]
+        if len(parts) < 4 or parts[1] == "表" or set(parts[1]) <= set("-: "):
+            continue
+        for name in parts[1].split("/"):
+            fields[name.strip()] = parts[2]
+    return fields
+
+
+def parse_unique_columns(keys_cell):
+    """取出主键/唯一键单元格中 `unique(...)` 引用的列名。"""
+    columns = []
+    for group in re.findall(r"unique\(([^)]*)\)", keys_cell):
+        columns.extend(column.strip() for column in group.split(",") if column.strip())
+    return columns
+
+
+def is_parseable_required(cell):
+    """§37.6 必要字段单元格是否可机器解析：须以 `、` 分列，且不含合并写法或散文分句。"""
+    return bool(cell) and "、" in cell and "/" not in cell and "；" not in cell
+
+
+def column_tokens(*cells):
+    """把若干单元格切成列名 token 集合。§8 用 `,`，§37.6 用 `、`，散文里还有括号。"""
+    tokens = set()
+    for cell in cells:
+        if cell:
+            tokens.update(token for token in re.split(r"[,\s、()（）]+", cell) if token)
+    return tokens
+
+
 def run(spec_path, verbose=False):
     r = Result()
     text = load_spec(spec_path)
@@ -205,6 +262,69 @@ def run(spec_path, verbose=False):
     r.chk("patch_base_commit" in sec8, "artifacts 补 patch_base_commit", "schema")
     r.chk("budget_override_by` 是唯一权威列名" in text, "R10-14 命名统一声明存在", "schema")
     r.chk("attempt_no" in text.split("## 11. Claim")[1][:2000], "§11 Claim SQL 引用 attempt_no", "schema")
+
+    # --- 组 7b：§8 主键/唯一键与关键字段一致性（R10-fix-09） ---
+    # 覆盖边界（与 §38 R10-fix-09 一致，勿静默扩大）：本组只对 §37.6 必要字段单元格
+    # 可机器解析的表生效——不含 "/"、不含"；"。§37.6 对 task_outputs 等表使用有意的
+    # 合并/散文写法（R10-08 记录过），那些行**跳过而非判失败**，属已知覆盖缺口。
+    # check 消息带上实际检查表数与跳过表名，复核者据此判断覆盖面，不静默缩小。
+    definitions = parse_schema_definitions(sec8)
+    required = parse_required_fields(text)
+
+    offenders = []
+    checked_tables = 0
+    skipped_tables = []
+    for name, keys_cell, fields_cell in definitions:
+        columns = parse_unique_columns(keys_cell)
+        if not columns:
+            continue
+        required_cell = required.get(name)
+        if required_cell is not None and not is_parseable_required(required_cell):
+            skipped_tables.append(name)
+            continue
+        checked_tables += 1
+        declared = column_tokens(fields_cell, required_cell)
+        missing = sorted(column for column in columns if column not in declared)
+        if missing:
+            offenders.append("%s 引用未声明列 %s" % (name, ",".join(missing)))
+    r.chk(
+        not offenders,
+        "§8 唯一键引用的列均已声明；越界=%s（检查 %d 张表，跳过 %d 张：%s）"
+        % (offenders or "无", checked_tables, len(skipped_tables), skipped_tables or "无"),
+        "schema-keys",
+    )
+
+    unresolved = []
+    checked_ddls = 0
+    if "## 11. Claim" in text:
+        section11 = text.split("## 11. Claim")[1].split("## 12.")[0]
+        for match in re.finditer(r"([a-z_][a-z0-9_]*)\(([^()]*)\)", section11):
+            table, column_text = match.group(1), match.group(2)
+            names = []
+            for column in column_text.split(","):
+                stripped = re.sub(
+                    r"\s+(?:PRIMARY\s+KEY|NOT\s+NULL|DEFAULT\b.*|CHECK\b.*)$",
+                    column.strip(),
+                    flags=re.I,
+                ).strip()
+                if re.fullmatch(r"[a-z_][a-z0-9_]*", stripped):
+                    names.append(stripped)
+            if len(names) < 2:
+                continue
+            checked_ddls += 1
+            declared = column_tokens(required.get(table))
+            declared |= column_tokens(
+                *[cells for row_name, _, cells in definitions if row_name == table]
+            )
+            missing = sorted(name for name in names if name not in declared)
+            if missing:
+                unresolved.append("%s 声明了未登记列 %s" % (table, ",".join(missing)))
+    r.chk(
+        not unresolved,
+        "§11 DDL 列均落在 §8/§37.6 声明内；越界=%s（检查 %d 处 DDL）"
+        % (unresolved or "无", checked_ddls),
+        "schema-keys",
+    )
 
     # --- 组 8：§37.6 schema 补充清单 ---
     if "### 37.6" in text:
