@@ -30,6 +30,13 @@
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
 
+> ⚠️ **MVP-04 开工前必读**：`main` 上的 R10 §8 仍带一处已知自相矛盾（`claim_requests`
+> 行声明了一个该行未定义的 `task_id` 列）。修正已在 `MVP-02-amend` 完成但尚未合入。
+> **照 main 实现会误判 schema 少一张表、进而走回已被否决的拆表方案。**
+> per-task 幂等的正确契约：唯一性落在 `task_claims UNIQUE(claim_request_id, task_id)`，
+> 重试回放用 `SELECT * FROM task_claims WHERE claim_request_id = ?`。
+> 开工前先确认 §8 `claim_requests` 行是否已改为单列 `claim_request_id`。
+
 ## 认领登记（R10 §0 总协调规则第 2 条）
 
 **规则：领取任务前必须在任务清单写入 `task_id`、Harness 名称、时间、分支。**
