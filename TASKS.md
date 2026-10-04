@@ -7,14 +7,14 @@
 
 `ready` 现在可开工 / `waiting` 等硬依赖 / `prep` 可做准备工作 / `doing` 进行中 /
 `review` 待审 / `done` 已完成 / `blocked` 阻塞 / `claimed` 已认领待验收 /
-`🟠 已验收，有缺陷待修`
+`✅ 已验收`
 
 ## 任务表
 
 | task_id | Harness | 依赖 | 状态 | 分支 | test_id |
 |---|---|---|---|---|---|
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
-| MVP-02 | Codex | MVP-01 | 🟠 已验收，1 项缺陷待修 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
+| MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
 | MVP-02-amend | Claude Code | MVP-02 | 🟢 doing | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
@@ -37,7 +37,7 @@
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
-| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | 🟠 已验收，1 项缺陷待修 |
+| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
 | 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
@@ -97,7 +97,7 @@ commit：810d88d
   - 仓库尚无 remote，未推送
 ~~~
 
-### MVP-02：SQLite schema 与事件事实源（已验收，1 项缺陷待修）
+### MVP-02：SQLite schema 与事件事实源（✅ 已验收）
 
 ~~~text
 任务编号：MVP-02
@@ -113,47 +113,52 @@ commit：b154f5c（8 文件，938 行）
 test_id：DOC-SCHEMA-001、CORE-RECOVER-001
 测试命令：./scripts.sh check
 验收时间：2026-10-05 06:05（WorkBuddy）
-当前状态：🟠 已验收，1 项缺陷待修
+当前状态：✅ 已验收
 
 ### 验收结果
 
 | # | 检查项 | 结果 | 证据 |
 |---|---|---|---|
 | 1 | `tasks` 含 attempt_no / hotfix / budget_override_by | ✅ | 001_initial.sql:47-49，NOT NULL + DEFAULT + CHECK |
-| 2 | `claim_requests` 有 `unique(claim_request_id, task_id)` | ❌ | 见下 |
+| 2 | `claim_requests` 有 `unique(claim_request_id, task_id)` | ⚠️ 误判 | 实际由 `task_claims` 满足，见下|
 | 3 | `verification_receipts` append-only + 唯一键 | ✅ | `UNIQUE (task_id, attempt_id, "commit", verify_profile)` |
 | 4 | WAL + busy_timeout 生效 | ✅ | connection.py:37,39 两个 PRAGMA |
 | 5 | migrations 可重复执行 | ✅ | 版本化 runner + `IF NOT EXISTS` + 变更检测 |
 | 6 | 门禁三道全绿 | ✅ | docstate 86/86、ruff clean、pytest 20 passed |
 
-### 缺陷：claim_requests 缺 per-task 幂等维度
+### ✅ 原「缺陷」判定撤回（2026-10-05 06:15 更正，WorkBuddy）
 
-R10 §8 与 R9-03 要求 `unique(claim_request_id, task_id)` 与 per-task 首次结果。
-实际实现（001_initial.sql:91-99）只有请求级主键：
+本节原先记录「`claim_requests` 缺 per-task 幂等维度」，并倾向拆
+`claim_request_results` 表。**该判定错误，已撤回。MVP-02 无阻塞缺陷。**
+
+**错误原因**：验收时只看了 `claim_requests` 一张表就下结论，**漏查 `task_claims`**。
+实际实现（001_initial.sql:101-112）已有：
 
 ~~~sql
-CREATE TABLE IF NOT EXISTS claim_requests (
-    claim_request_id TEXT PRIMARY KEY,   -- 只有请求级
-    task_ids_json TEXT NOT NULL,
-    payload_hash TEXT NOT NULL,
-    partial_allowed INTEGER NOT NULL DEFAULT 0 CHECK (partial_allowed IN (0, 1)),
-    first_result_json TEXT,              -- 整批级，非 per-task
-    created_seq INTEGER,
-    created_at TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS task_claims (
+    claim_id TEXT PRIMARY KEY,
+    claim_request_id TEXT REFERENCES claim_requests(claim_request_id),
+    task_id TEXT NOT NULL REFERENCES tasks(task_id),
+    ...
+    UNIQUE (claim_request_id, task_id)      -- ← per-task 唯一性已被真正强制
 );
 ~~~
 
-**后果**：`partial_allowed=true` 的批量 Claim 第二次到达时无法按任务项返回各自
-首次结果，会让 MVP-04 完成标准「批量时按任务项返回首次结果」无法达成，且
-R10 §26「重复批量 Claim 不会阻塞失败项重试」必然失败。
+R9-03 要求的 `unique(claim_request_id, task_id)` **已由 `task_claims` 满足**。
+「按任务项返回首次结果」只需 `SELECT * FROM task_claims WHERE claim_request_id = ?`，
+**无需新表**。Claude Code 在 `MVP-02-amend` 中指出这一点，经核实成立。
 
-**修复方向**（MVP-04 开工前必须处理）：
+**我的验收方法错误**：R10 §8 的最小定义表把「主键/唯一键」与「关键字段」**分列**，
+我只核对了 `claim_requests` 一行的唯一键列，没有交叉验证该表的 `task_id` 是否
+在别处被约束，也没有逐表扫全库。**教训：验收 schema 必须逐表比对两列的交叉一致性，
+且必须扫全部相关表，不能只看被点名的那一张。**
 
-1. 拆两张表：`claim_requests`（请求级：`payload_hash` / `partial_allowed`）
-   + `claim_request_results`（`UNIQUE(claim_request_id, task_id)`，含 per-task
-   `first_result_json`）—— **倾向此方案**，请求级与任务项级职责分开，避免
-   payload_hash 重复存储产生漂移；
-2. 或加复合唯一键改一任务一行（请求级字段冗余重复，有漂移风险）。
+**真实缺陷在 spec 而非实现**：R10 §8:265 的 `claim_requests` 行自身矛盾 ——
+唯一键单元格写了 `unique(claim_request_id, task_id)`，
+但同行的关键字段单元格没有列出 `task_id`。按 §29.6「不要继续在正文里加字段」
+的精神，应由 `MVP-02-amend` 修正 spec 文本，而不是在实现里补表。
+本任务不采用我原先的「拆表」方案，理由与 Claude 一致（见下方冲突说明）。
+
 
 ### 其他说明（不构成缺陷）
 
@@ -163,7 +168,8 @@ R10 §26「重复批量 Claim 不会阻塞失败项重试」必然失败。
 
 已知问题：
 
-- ❌ claim_requests 缺 per-task 幂等维度（上方详述）
+- ✅ 无阻塞缺陷。原判定错误已撤回（见上）
+- ⚠️ **仓库拓扑分叉**：main 不含 MVP-02 代码 `b154f5c`，需合入
 - ⚠️ 仓库尚无 remote，未推送
 ~~~
 
