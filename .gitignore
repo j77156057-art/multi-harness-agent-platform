@@ -10,6 +10,9 @@ __pycache__/
 # 运行期数据
 data/
 wt/
+# 每个 AI 的独立工作区（见 docs/dev-convention.md「工作区隔离」）。
+# 与 wt/ 不同：wt/ 是 MVP-05 的 worktree 物理目录，本项是 git worktree 隔离区。
+.worktrees/
 canonical.git
 *.db
 *.db-wal

@@ -160,6 +160,47 @@ Refs: DOC-SCHEMA-001
 - ❌ 禁止 `force push`
 - ❌ 禁止 `rebase` 到非任务分支
 
+## H-7 工作区隔离（每个 AI 一个 git worktree）
+
+**多个 AI 共享同一个 git 工作区会丢代码。** 本项目已因此丢失提交 4 次，其中一次是
+别人的提交被 `git reset` 丢弃。任何人在共享工作区执行 `git checkout` / `git switch` /
+`git reset`，都会改变**所有人**的 HEAD 和工作树——正在编辑的文件会被无声冲掉，
+`git status` 看起来还是干净的。
+
+因此每个 AI 有且只有一个入口目录：
+
+| Harness | 工作区 | 驻留分支 |
+|---|---|---|
+| WorkBuddy | `.worktrees/workbuddy/` | `agent/workspace/workbuddy` |
+| Codex | `.worktrees/codex/` | `agent/workspace/codex` |
+| Claude Code | `.worktrees/claude/` | `agent/workspace/claude` |
+| 协调者 | 仓库根 `new agent/` | **只做合并与门禁，不编辑文件** |
+
+规则：
+
+1. **只在分配给自己的工作区里编辑文件。** 需要新任务时在该工作区内
+   `git switch -c agent/<group-short>/<harness>/<task-id>/<attempt-id>`（从 `main` 起）；
+2. **只移动自己拥有的分支引用。** 分支引用仍是跨工作区共享的，
+   `git branch -f` / `git reset` 到别人的分支等于删别人的工作；
+3. **仓库根目录只用于合并和在 `main` 上跑门禁**，不要在那里编辑；
+4. `.venv` 通过目录联接共享，所以 `./scripts.sh check` 在每个工作区都能直接跑，
+   无需各建 venv；
+5. `.worktrees/` 已在 `.gitignore`，不会被提交（它与 `wt/` 不同：`wt/` 是 MVP-05 的
+   worktree 物理目录）。
+
+创建新 AI 的工作区：
+
+~~~bash
+git worktree add -b agent/workspace/<harness> .worktrees/<harness> main
+# Windows 上补 .venv 联接，PowerShell：
+New-Item -ItemType Junction -Path .worktrees\<harness>\.venv -Target (Resolve-Path .venv).Path
+~~~
+
+回收：`git worktree remove .worktrees/<harness>`（先确认其中无未提交改动）。
+
+**每个 AI 各自的工作区不解决共享分支引用的问题** —— 见规则 2。本项目至今发生过
+「A 在 B 的分支上提交」和「`git reset` 丢弃 A 的提交」两次，都源于此。
+
 ## 依赖管理
 
 - `backend/requirements.txt` 运行时依赖，**必须钉死版本**

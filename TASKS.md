@@ -30,12 +30,14 @@
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
 
-> ⚠️ **MVP-04 开工前必读**：`main` 上的 R10 §8 仍带一处已知自相矛盾（`claim_requests`
-> 行声明了一个该行未定义的 `task_id` 列）。修正已在 `MVP-02-amend` 完成但尚未合入。
-> **照 main 实现会误判 schema 少一张表、进而走回已被否决的拆表方案。**
-> per-task 幂等的正确契约：唯一性落在 `task_claims UNIQUE(claim_request_id, task_id)`，
-> 重试回放用 `SELECT * FROM task_claims WHERE claim_request_id = ?`。
-> 开工前先确认 §8 `claim_requests` 行是否已改为单列 `claim_request_id`。
+> ⚠️ **MVP-04 开工前必读**：R10 §8 `claim_requests` 行曾声明一个该行未定义的 `task_id`
+> 列（唯一键单元格与关键字段单元格矛盾），已由 `MVP-02-amend` 按 R10-fix-09 修正并合入
+> `main`（`d7bf8d0`）。**该矛盾已不存在，但由此产生的错误结论仍需防复发：**
+> **不要因为看到 §11 的 `unique(claim_request_id, task_id)` 就断定 `schema` 少一张
+> `claim_request_results` 表——该拆表方案已被否决**（R10 §29.6 要求不再往正文加表）。
+> per-task 幂等的唯一落点是 `task_claims UNIQUE(claim_request_id, task_id)`，
+> 重试回放用 `SELECT * FROM task_claims WHERE claim_request_id = ?`，
+> 两层职责划分见 R10 §11。
 
 ## 认领登记（R10 §0 总协调规则第 2 条）
 
@@ -45,7 +47,8 @@
 |---|---|---|---|---|---|
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
-| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done（待合入 main） |
+| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
+| 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -365,15 +368,82 @@ commit：
    正确做法：任务分支改完 → 立刻 `git checkout main && git merge --ff-only` →
    确认 `git show main:TASKS.md` 能读到登记。
 
-###本项目已发生的三次同类失误
+### 本项目已发生的协作失误（4 次）
+
+前 3 次是登记与合并纪律问题，共同根因：把"提交"当成了终点。共享协作文档的终点是
+**main 上可读**。
 
 | # | 失误 | 后果 | 修法 |
 |---|---|---|---|
 | 1 | MVP-01 干活前未登记 | Codex 看不到 MVP-01 已占用 | 登记规则第 0 条 |
 | 2 | MVP-01 直接提交 main | 未经 Merge Gate 的 commit 成为基线 | 登记规则第 6 条 + `MVP-RETRO-001` |
 | 3 | 两次登记都只提交在任务分支 | main 上读不到，等于没登记 | 登记规则第 8 条（本次新增） |
+| 4 | **多 AI 共享同一 git 工作区** | **提交被无声丢弃 4 次** | **`docs/dev-convention.md` H-7 工作区隔离（本次新增）** |
 
-**共同根因**：把"提交"当成了终点。共享协作文档的终点是 **main 上可读**。
+### 第 4 次事故：共享工作区导致提交丢失（2026-10-05，代码未受损）
+
+与前 3 次不同，这次是**代码/提交丢失**，不是纪律问题。全部发生在 MVP-02-amend 期间：
+
+| 时刻 | 发生了什么 | 损失 |
+|---|---|---|
+| 1 | 我的 docstate 断言已写入未提交，另一 agent `git checkout` 到别的分支 | 约 50 行改动无声消失，`git status` 干净；已重做 |
+| 2 | 我提交「MVP-04 提示」时 HEAD 已被切到 `agent/workbuddy/fix-concurrent-init` | 提交落在**别人分支**上，不在我的分支也不在 main |
+| 3 | 某次 `git reset a43baac` 丢弃了 `a0fd0cd` | **那是别的 agent 的提交**（「record MVP-02 merge and concurrent-init flaky defect」），对象仍在 reflog，未恢复——应由其作者处理 |
+| 4 | 同类 reset/移动分支再次清掉已作废的 `e0d60f7` | 无实质损失（该提示内容已过时） |
+
+**根因**：所有 AI 共用仓库根目录这一个工作树，任一 agent 的 `git checkout` / `git switch`
+/ `git reset` 都会改变所有人的 HEAD 与工作树。这不是"可能出错"，是**必然出错**。
+
+**修法**：`docs/dev-convention.md` 新增 H-7 —— 每个 AI 一个 `git worktree`
+（`.worktrees/<harness>/`），仓库根目录只做合并与门禁、不编辑文件。
+已为 workbuddy / codex / claude 建好，并共享 `.venv` 联接使门禁可直接运行。
+
+**仍未解决**：分支引用跨工作区共享。`git branch -f` / `git reset` 到别人的分支仍会
+删掉别人的工作（事故 3 即此）。H-7 规则 2 要求"只移动自己拥有的分支引用"，
+但这靠自觉，无机制强制。
+
+### worktree-isolation：工作区隔离（doing）
+
+~~~text
+任务编号：worktree-isolation
+负责人 Harness：Claude Code
+开始时间：2026-10-05 06:58
+依赖任务：无（由第 4 次事故触发）
+真相源引用：docs/dev-convention.md H-7（本次新增）；事故记录见 TASKS.md 第 4 次失误
+允许修改目录：docs/dev-convention.md、TASKS.md、.gitignore
+禁止修改目录：backend/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/claude/worktree-isolation/a1
+test_id：MVP-PROCESS-001（新增，协作纪律类，无代码断言）
+测试命令：./scripts.sh check + git worktree list
+当前状态：doing
+
+交付：
+1. `.worktrees/{workbuddy,codex,claude}/` 三个独立工作区，各带驻留分支
+   `agent/workspace/<harness>`；仓库根只做合并与门禁
+2. 各工作区 `.venv` 目录联接共享主 venv，`./scripts.sh check` 可直接跑
+3. `docs/dev-convention.md` 新增 H-7 工作区隔离（5 条规则 + 创建/回收命令）
+4. `.gitignore` 加 `.worktrees/`
+5. TASKS.md 第 4 次事故登记（4 个时刻的逐条记录）
+6. 顺带纠正 main 上已过时的 MVP-04 提示（原称「§8 仍有矛盾」，而 §8 已由 d7bf8d0 修好）
+
+验证结果：
+  docstate      : 88 项检查，0 项失败
+  ruff check    : All checks passed!
+  ruff format   : 13 files already formatted
+  pytest        : 20 passed in 1.50s
+  worktree 冒烟  : 在 .worktrees/codex 内跑 docstate 88/0 + pytest 20 passed
+  worktree list  : 4 条，主树 + 3 个隔离树
+
+**本次又违反了登记规则第 0 条**（先干活后补登记）。讽刺但如实记录：修协作纪律的任务
+本身没遵守协作纪律。根因与事故 4 相同 —— 共享工作区让"先登记"变得不可靠。
+
+已知问题：
+- ⚠️ 分支引用仍跨工作区共享，`git branch -f` / `git reset` 到别人的分支仍会删掉别人的
+  工作（事故 3 即此）。H-7 规则 2 只靠自觉，无机制强制。
+- ⚠️ 事故 3 丢弃的 `a0fd0cd`（别的 agent 的提交）仍在 reflog，未恢复，待其作者处理。
+- ⚠️ 仓库根目录当前检出 `agent/local/claude/worktree-isolation/a1` 而非 `main`；
+  H-7 生效后应让根目录常驻 `main` 或保持不动，仅用于合并。
+~~~
 
 ## 提交前自检
 
