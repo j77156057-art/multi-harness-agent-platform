@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
 | MVP-02 | Codex | MVP-01 | 🟠 已验收，1 项缺陷待修 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
+| MVP-02-amend | Claude Code | MVP-02 | 🟢 doing | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -37,6 +38,7 @@
 |---|---|---|---|---|---|
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | 🟠 已验收，1 项缺陷待修 |
+| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -163,6 +165,64 @@ R10 §26「重复批量 Claim 不会阻塞失败项重试」必然失败。
 
 - ❌ claim_requests 缺 per-task 幂等维度（上方详述）
 - ⚠️ 仓库尚无 remote，未推送
+~~~
+
+### MVP-02-amend：修正 R10 §8 唯一键自相矛盾 + 补机械断言（doing）
+
+~~~text
+任务编号：MVP-02-amend
+负责人 Harness：Claude Code
+开始时间：2026-10-05 06:09
+依赖任务：MVP-02（🟠 已验收，1 项缺陷待修 —— 即本任务要修的那一项）
+真相源引用：R10 §8（canonical schema）、§11（Claim 幂等）、§37.6（schema 补充清单）、
+            §29.6（R11 复审请求）、§38（修订映射与增量规范）
+允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**、README.md、
+            docs/dev-convention.md、TASKS.md
+禁止修改目录：backend/migrations/001_initial.sql（已冻结，checksum 校验）、
+            docs/spec/mvp-task-checklist.md、backend/**
+交付分支：agent/local/claude/MVP-02-amend/a1
+test_id：DOC-SCHEMA-001、DOC-STATE-001
+测试命令：./scripts.sh check
+当前状态：doing
+
+### 与 MVP-02 验收记录（9e4605e）的修复方向冲突 —— 必须先读
+
+MVP-02 的验收记录把修复方向写为「**倾向此方案**：拆 `claim_requests` +
+`claim_request_results` 两张表」（即 C 方案）。**本任务不采用该方向**，理由两条：
+
+1. R10 §29.6（`0.3-R10.md:1845`）明确要求下一轮复审「把注意力转向阶段 0a 冻结表
+   与 0b 检查工具的实际交付质量，**而不是继续在正文里加字段**」。C 方案要往 §8 加表，
+   与该约束正面冲突。
+2. 核对实现后确认 C 不必要：`001_initial.sql:107` 的 `task_claims` 已有
+   `UNIQUE (claim_request_id, task_id)`，per-task 唯一性已被真正强制；「按任务项返回
+   首次结果」只需 `SELECT * FROM task_claims WHERE claim_request_id=?`，无需新表。
+
+实际采用的缺陷定性比 MVP-02 验收记录**更靠上游**：§8 `:265` 这一行**自身**引用了一个
+从未声明的 `task_id` 列（唯一键单元格里有、关键字段单元格里没有）。这是 spec 缺陷，
+不是实现缺陷 —— 先改 spec 才谈得上实现。
+
+### 仓库拓扑异常（跨任务，影响合入）
+
+`main` 已前进到 `c0ba8cc`，但**不含 MVP-02 的代码 `b154f5c`**。两条线自 `810d88d` 分叉：
+
+~~~text
+main / 本任务分支:810d88d → 50719d7 → 9e4605e → c0ba8cc   (仅 TASKS.md)
+Codex 的 MVP-02:  810d88d → b154f5c                          (仅 backend 代码)
+~~~
+
+本分支基线为 `c0ba8cc`，不含 MVP-02 那 8 个文件。所幸本任务要改的 5 个文件与 MVP-02
+的 8 个文件零重叠，两线可干净合并。但合入前需确认：MVP-02 的代码是否已进 main？
+若未进，本任务的门禁只能在缺少 MVP-02 测试的基线上跑，`pytest` 计数会低于预期。
+
+另注：`9e4605e`、`c0ba8cc` 直接提交在 `main` 上，与本文件登记规则第 6 条
+（「禁止在 main 上直接提交」）冲突；第 8 条又要求 TASKS.md 的改动必须尽快到 main。
+两条规则对纯文档 commit 的处理未定义 —— 列为待澄清。
+
+已知问题：
+
+- ⚠️ 断言 A 为部分覆盖：§37.6 使用合并/散文写法的行（如 `task_outputs`）会被跳过而非
+  判失败。check 消息会带上实际检查表数，覆盖边界写进代码注释与 §38 条目。
+- ⚠️ 本分支缺 MVP-02 的 backend 代码，`pytest` 计数低于 MVP-02 分支的实测值。
 ~~~
 
 ## 关键路径
