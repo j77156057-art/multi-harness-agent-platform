@@ -37,7 +37,7 @@ MVP 只实现部分状态，这是**允许的**，但必须在 `docs/state-proje
 
 ## H-2 规范检查器是门禁，不是工具
 
-`tools/docstate/docstate.py` 对 R10 跑 86 项机械断言。CI 与应用启动都会跑它。
+`tools/docstate/docstate.py` 对 R10 跑 88 项机械断言。CI 与应用启动都会跑它。
 
 ```bash
 make check          # docstate + pytest + ruff

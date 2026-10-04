@@ -47,7 +47,7 @@ make dev
 | 地址 | 说明 |
 |---|---|
 | <http://127.0.0.1:8848/health> | 存活 + 配置摘要 |
-| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（86 项） |
+| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（88 项） |
 | <http://127.0.0.1:8848/docs> | OpenAPI 交互文档 |
 
 启动时会自动跑规范检查；**不通过会拒绝启动**（`AP_CHECK_SPEC=0` 可临时跳过，
@@ -58,7 +58,7 @@ make dev
 ## 常用命令
 
 ~~~bash
-make docstate   # 只跑规范一致性检查（86 项断言）
+make docstate   # 只跑规范一致性检查（88 项断言）
 make test       # pytest
 make lint       # ruff check + format --check
 make fmt        # ruff 自动修复 + 格式化
@@ -114,7 +114,7 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 
 | 门禁 | 数量 | 作用 |
 |---|---|---|
-| `docstate` | 86 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、test_id 无悬空 |
+| `docstate` | 88 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
 | `test_spec_mirror.py` | 11 项 | 代码侧枚举与 R10 正文的交叉验证 |
 | `ruff` | check + format | 代码风格 |
 

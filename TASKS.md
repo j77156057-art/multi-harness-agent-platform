@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
 | MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
-| MVP-02-amend | Claude Code | MVP-02 | 🟢 doing | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| MVP-02-amend | Claude Code | MVP-02 | ✅ done | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -38,7 +38,7 @@
 |---|---|---|---|---|---|
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
-| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | 🟢 doing |
+| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done（待合入 main） |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -173,13 +173,14 @@ R9-03 要求的 `unique(claim_request_id, task_id)` **已由 `task_claims` 满�
 - ⚠️ 仓库尚无 remote，未推送
 ~~~
 
-### MVP-02-amend：修正 R10 §8 唯一键自相矛盾 + 补机械断言（doing）
+### MVP-02-amend：修正 R10 §8 唯一键自相矛盾 + 补机械断言（done）
 
 ~~~text
 任务编号：MVP-02-amend
 负责人 Harness：Claude Code
 开始时间：2026-10-05 06:09
-依赖任务：MVP-02（🟠 已验收，1 项缺陷待修 —— 即本任务要修的那一项）
+完成时间：2026-10-05 06:32
+依赖任务：MVP-02（✅ 已验收）
 真相源引用：R10 §8（canonical schema）、§11（Claim 幂等）、§37.6（schema 补充清单）、
             §29.6（R11 复审请求）、§38（修订映射与增量规范）
 允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**、README.md、
@@ -189,46 +190,81 @@ R9-03 要求的 `unique(claim_request_id, task_id)` **已由 `task_claims` 满�
 交付分支：agent/local/claude/MVP-02-amend/a1
 test_id：DOC-SCHEMA-001、DOC-STATE-001
 测试命令：./scripts.sh check
-当前状态：doing
+当前状态：done
+commit：8faf9e2、e253406、0a8d06b + 本卡收尾
 
-### 与 MVP-02 验收记录（9e4605e）的修复方向冲突 —— 必须先读
+### 完成标准与验证结果
 
-MVP-02 的验收记录把修复方向写为「**倾向此方案**：拆 `claim_requests` +
-`claim_request_results` 两张表」（即 C 方案）。**本任务不采用该方向**，理由两条：
+| # | 完成标准 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | §8 `claim_requests` 行自洽 | ✅ | 删 `unique(claim_request_id, task_id)`，注明 per-task 唯一性由 `task_claims` 承担 |
+| 2 | 新增机械断言能复现该矛盾 | ✅ | 修复前 `docstate` 88 项 1 失败，输出 `claim_requests 引用未声明列 task_id`（原文见 §38 R10-fix-09） |
+| 3 | 修复后门禁全绿 | ✅ | `docstate 88 项检查，0 项失败`；`ruff check: All checks passed!`；`ruff format: 13 files already formatted`；`pytest: 20 passed in 0.54s` |
+| 4 | 应用启动自检通过 | ✅ | `[ok] 规范一致性检查通过 88 项`；`GET /spec/status -> 200`（total 88 / failed 0）；`GET /health -> 200` |
+| 5 | 断言非空跑 | ✅ | 断言 B「检查 1 处 DDL」，断言 A「检查 3 张表，跳过 5 张」 |
 
-1. R10 §29.6（`0.3-R10.md:1845`）明确要求下一轮复审「把注意力转向阶段 0a 冻结表
-   与 0b 检查工具的实际交付质量，**而不是继续在正文里加字段**」。C 方案要往 §8 加表，
-   与该约束正面冲突。
-2. 核对实现后确认 C 不必要：`001_initial.sql:107` 的 `task_claims` 已有
-   `UNIQUE (claim_request_id, task_id)`，per-task 唯一性已被真正强制；「按任务项返回
-   首次结果」只需 `SELECT * FROM task_claims WHERE claim_request_id=?`，无需新表。
+### 实际命中 3 张表，不止 1 张 —— 计划外的范围扩大
 
-实际采用的缺陷定性比 MVP-02 验收记录**更靠上游**：§8 `:265` 这一行**自身**引用了一个
-从未声明的 `task_id` 列（唯一键单元格里有、关键字段单元格里没有）。这是 spec 缺陷，
-不是实现缺陷 —— 先改 spec 才谈得上实现。
-
-### 仓库拓扑异常（跨任务，影响合入）
-
-`main` 已前进到 `c0ba8cc`，但**不含 MVP-02 的代码 `b154f5c`**。两条线自 `810d88d` 分叉：
+新断言首次运行同时命中 `artifacts` 与 `reviews`：
 
 ~~~text
-main / 本任务分支:810d88d → 50719d7 → 9e4605e → c0ba8cc   (仅 TASKS.md)
-Codex 的 MVP-02:  810d88d → b154f5c                          (仅 backend 代码)
+越界=['claim_requests 引用未声明列 task_id',
+      'artifacts 引用未声明列 attempt_id,task_id',
+      'reviews 引用未声明列 attempt_id,review_revision,reviewer_harness_id,task_id']
 ~~~
 
-本分支基线为 `c0ba8cc`，不含 MVP-02 那 8 个文件。所幸本任务要改的 5 个文件与 MVP-02
-的 8 个文件零重叠，两线可干净合并。但合入前需确认：MVP-02 的代码是否已进 main？
-若未进，本任务的门禁只能在缺少 MVP-02 测试的基线上跑，`pytest` 计数会低于预期。
+三者同为「§8 行声明复合唯一键却未在同一行列出那些列」。但只有 `claim_requests` 是真矛盾
+（§11 声明单列 PRIMARY KEY，`unique()` 里的 `task_id` 无处落地）；`artifacts` 与 `reviews`
+的缺失列是真实外键，本就存在于 `001_initial.sql` 且本就在各自 UNIQUE 约束内，属同类但无害。
 
-另注：`9e4605e`、`c0ba8cc` 直接提交在 `main` 上，与本文件登记规则第 6 条
-（「禁止在 main 上直接提交」）冲突；第 8 条又要求 TASKS.md 的改动必须尽快到 main。
-两条规则对纯文档 commit 的处理未定义 —— 列为待澄清。
+因门禁必须绿才能合入（`main.py` 在 docstate 失败时拒绝启动），三行一并修：把列名补进
+「关键字段」单元格 —— 与 R10-12/13/14 同一手法，不新增表、不新增列，§8 表清单仍 41 张。
+
+### 与 MVP-02 验收记录（9e4605e）的关系：已收敛，非冲突
+
+`9e4605e` 曾把修复方向写为「拆 `claim_requests` + `claim_request_results` 两张表」。
+WorkBuddy 在 `0ac5365` 中**主动撤回该判定**，确认本任务的判断成立，并把 spec 修正交由
+本任务执行。故 C 方案（C 拆两表）未采纳，理由与本任务一致：
+
+1. R10 §29.6（`0.3-R10.md`）要求下一轮复审「不是继续在正文里加字段」；
+2. `001_initial.sql` 的 `task_claims` 已有 `UNIQUE (claim_request_id, task_id)`，
+   per-task 唯一性已被真正强制，重试回放用
+   `SELECT * FROM task_claims WHERE claim_request_id = ?`，无需新表。
+
+**R9-03 是位置迁移不是撤销**：per-task 首次结果能力未减，只是唯一性约束落在 `task_claims`。
+§38.6 对 R9-03 记的「通过」结论已按此修正。
+
+### 仓库拓扑（已解决）
+
+开工时 `main`（`c0ba8cc`）不含 MVP-02 代码 `b154f5c`，两线自 `810d88d` 分叉。期间
+`c614d51` 已把 MVP-02 合入 `main`，本分支 ff 到 `c614d51` 后基线完整，门禁计数正常
+（`pytest 20 passed`）。
+
+### 过程中的事故：未提交改动被并发 checkout 丢弃（重要）
+
+第一版 docstate 断言在写入后、提交前被**完全丢弃**——工作区被并发 agent 的
+`git checkout` / 分支切换冲掉，`git status` 显示干净，改动无声消失。当时已写的两段代码
+（约 50 行）需要全部重做。
+
+**根因**：多个 AI 共享同一个 git 工作区且无隔离，任一 agent 切分支即改变所有人的
+工作树。本任务此后每改完一个文件立即 commit，不再让改动裸露在工作区。
+
+**建议**：为每个 AI 分配独立 worktree（`git worktree add`），否则并发提交丢失是必然而非意外。
+
+### 遗留待办（不在本任务范围）
+
+1. `docs/traceability.md` 被 `dev-convention.md` H-4 与 README 引用，但**文件不存在**；
+2. `schema-keys` 组覆盖 3 张 / 跳过 5 张，跳过的 5 张（`task_attempts`、`task_outputs`、
+   `test_case_results`、`verification_receipts`、`side_effect_intents`）因 §37.6 用合并或
+   散文写法而未被检查。扩到全覆盖需先把 §37.6 改为可解析列清单，属阶段 0a 冻结表工作；
+3. `9e4605e`/`c0ba8cc` 等直接提交在 `main`，与登记规则第 6 条冲突；第 8 条又要求
+   TASKS.md 改动尽快到 main。两条规则对纯文档 commit 的处理未定义。
 
 已知问题：
 
-- ⚠️ 断言 A 为部分覆盖：§37.6 使用合并/散文写法的行（如 `task_outputs`）会被跳过而非
-  判失败。check 消息会带上实际检查表数，覆盖边界写进代码注释与 §38 条目。
-- ⚠️ 本分支缺 MVP-02 的 backend 代码，`pytest` 计数低于 MVP-02 分支的实测值。
+- ⚠️ `schema-keys` 为部分覆盖，跳过表清单与计数实时输出在 check 消息里，未静默缩小。
+- ⚠️ 断言 B 当前只覆盖 1 处 DDL（§11 的 `claim_requests`），覆盖面随 §11 正文增长而扩大。
+- ⚠️ 本任务未走 Merge Gate（§11/§8 的 spec 修订按流程不走代码 Gate），合入方式待定。
 ~~~
 
 ## 关键路径
