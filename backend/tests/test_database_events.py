@@ -1,0 +1,215 @@
+"""MVP-02 storage and event-source tests (DOC-SCHEMA-001/CORE-RECOVER-001)."""
+
+from __future__ import annotations
+
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+
+import pytest
+
+from app.db import Database, MigrationError, apply_migrations
+from app.events import EventStore
+from app.spec import EventKind, TaskStatus
+
+
+def test_migrations_are_idempotent_and_enable_wal(tmp_path):
+    database = Database(tmp_path / "state.db")
+    assert database.initialize() == 1
+    assert database.initialize() == 0
+
+    with database.connect() as connection:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert {"schema_migrations", "tasks", "task_events", "verification_receipts"} <= tables
+
+
+def test_event_store_is_append_only_and_replayable(tmp_path):
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+    store = EventStore(database)
+
+    first = store.append(
+        event_name=EventKind.PLAN_APPROVE,
+        aggregate_type="task",
+        aggregate_id="T-001",
+        actor_type="human",
+        actor_id="alice",
+        payload={"status": TaskStatus.READY},
+    )
+    second = store.append(
+        event_name=EventKind.CLAIM,
+        aggregate_type="task",
+        aggregate_id="T-001",
+        actor_type="harness",
+        actor_id="h-1",
+        payload={"attempt_no": 1},
+    )
+
+    assert (first.seq, second.seq) == (1, 2)
+    assert store.latest_seq() == 2
+    assert [event.event_name for event in store.iter_since(0)] == [
+        EventKind.PLAN_APPROVE,
+        EventKind.CLAIM,
+    ]
+    replayed = store.replay(lambda state, event: state + [event.event_name], [])
+    assert replayed == [EventKind.PLAN_APPROVE, EventKind.CLAIM]
+
+    with database.connect() as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute("UPDATE task_events SET event_name='tampered' WHERE seq=1")
+
+
+def test_event_and_domain_write_can_share_one_transaction(tmp_path):
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+    store = EventStore(database)
+
+    with database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+            ("p-1", "demo", "2026-01-01T00:00:00+00:00"),
+        )
+        event = store.append(
+            event_name=EventKind.PLAN_APPROVE,
+            aggregate_type="project",
+            aggregate_id="p-1",
+            actor_type="human",
+            actor_id="alice",
+            connection=connection,
+        )
+    assert event.seq == 1
+    assert database.read("SELECT COUNT(*) AS n FROM projects")[0]["n"] == 1
+    assert database.read("SELECT COUNT(*) AS n FROM task_events")[0]["n"] == 1
+
+
+def test_failed_migration_rolls_back_ddl_and_metadata(tmp_path):
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    script = migrations / "001_broken.sql"
+    script.write_text(
+        "CREATE TABLE probe (id INTEGER); INSERT INTO missing VALUES (1);", encoding="utf-8"
+    )
+    database = Database(tmp_path / "state.db")
+    with database.connect() as connection, pytest.raises(sqlite3.OperationalError):
+        apply_migrations(connection, migrations)
+    assert not database.read("SELECT name FROM sqlite_master WHERE name='probe'")
+    script.write_text("CREATE TABLE probe (id INTEGER);", encoding="utf-8")
+    with database.connect() as connection:
+        assert apply_migrations(connection, migrations) == 1
+    script.write_text("CREATE TABLE probe (id TEXT);", encoding="utf-8")
+    with database.connect() as connection, pytest.raises(MigrationError):
+        apply_migrations(connection, migrations)
+
+
+def test_concurrent_initialization_and_events_have_one_order(tmp_path):
+    database = Database(tmp_path / "state.db")
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        counts = list(pool.map(lambda _: database.initialize(), range(2)))
+    assert sorted(counts) == [0, 1]
+    store = EventStore(database)
+
+    def append(index):
+        return store.append(
+            event_name=EventKind.CLAIM,
+            aggregate_type="task",
+            aggregate_id=f"T-{index}",
+            actor_type="harness",
+            actor_id="h-1",
+            payload={"index": index},
+        ).seq
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        seqs = list(pool.map(append, range(12)))
+    assert sorted(seqs) == list(range(1, 13))
+    assert [event.seq for event in store.iter_since(6)] == list(range(7, 13))
+
+
+def test_failed_domain_transaction_has_no_orphan_event(tmp_path):
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+    store = EventStore(database)
+    with pytest.raises(RuntimeError), database.transaction() as connection:
+        connection.execute(
+            "INSERT INTO projects VALUES (?, ?, ?, ?)",
+            ("p-1", "demo", "active", "2026-10-05T00:00:00+00:00"),
+        )
+        store.append(
+            event_name=EventKind.PLAN_APPROVE,
+            aggregate_type="project",
+            aggregate_id="p-1",
+            actor_type="human",
+            actor_id="alice",
+            connection=connection,
+        )
+        raise RuntimeError("simulated crash before commit")
+    assert not database.read("SELECT * FROM projects")
+    assert store.latest_seq() == 0
+
+
+def test_event_delete_unknown_event_and_unscoped_write_are_rejected(tmp_path):
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+    store = EventStore(database)
+    arguments = {
+        "event_name": EventKind.PLAN_APPROVE,
+        "aggregate_type": "task",
+        "aggregate_id": "T-1",
+        "actor_type": "human",
+        "actor_id": "alice",
+    }
+    with pytest.raises(ValueError):
+        store.append(**(arguments | {"event_name": "not-registered"}))
+    with database.connect() as connection, pytest.raises(ValueError):
+        store.append(**arguments, connection=connection)
+    store.append(**arguments)
+    with database.transaction() as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute("DELETE FROM task_events")
+    with pytest.raises(sqlite3.OperationalError):
+        database.read("DELETE FROM task_events")
+    assert store.latest_seq() == 1
+
+
+def test_discarded_projection_can_be_rebuilt_after_reopening_database(tmp_path):
+    path = tmp_path / "state.db"
+    database = Database(path)
+    database.initialize()
+    store = EventStore(database)
+    for event, status in [
+        (EventKind.PLAN_APPROVE, TaskStatus.READY),
+        (EventKind.CLAIM, TaskStatus.CLAIMED),
+        (EventKind.START, TaskStatus.IN_PROGRESS),
+    ]:
+        store.append(
+            event_name=event,
+            aggregate_type="task",
+            aggregate_id="T-1",
+            actor_type="scheduler",
+            actor_id="local",
+            payload={"status": status},
+        )
+
+    def reducer(state, event):
+        state[event.aggregate_id] = {"status": event.payload["status"], "seq": event.seq}
+        return state
+
+    projection = store.replay(reducer, {})
+    assert projection == {"T-1": {"status": TaskStatus.IN_PROGRESS, "seq": 3}}
+    projection.clear()
+    recovered = EventStore(Database(path)).replay(reducer, {})
+    assert recovered == {"T-1": {"status": TaskStatus.IN_PROGRESS, "seq": 3}}
+
+
+def test_foreign_keys_and_sql_keyword_columns_are_usable(tmp_path):
+    database = Database(tmp_path / "state.db")
+    database.initialize()
+    with database.transaction() as connection, pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO groups VALUES (?, ?, ?, ?, ?)",
+            ("g-1", "missing", "group", "active", "now"),
+        )
+    assert database.read('SELECT "commit" FROM verification_receipts') == []
+    assert database.read("PRAGMA foreign_key_check") == []
