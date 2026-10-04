@@ -48,7 +48,7 @@
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
 | 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
-| 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | 🟢 doing |
+| 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -388,8 +388,8 @@ commit：
 |---|---|---|
 | 1 | 我的 docstate 断言已写入未提交，另一 agent `git checkout` 到别的分支 | 约 50 行改动无声消失，`git status` 干净；已重做 |
 | 2 | 我提交「MVP-04 提示」时 HEAD 已被切到 `agent/workbuddy/fix-concurrent-init` | 提交落在**别人分支**上，不在我的分支也不在 main |
-| 3 | 某次 `git reset a43baac` 丢弃了 `a0fd0cd` | **那是别的 agent 的提交**（「record MVP-02 merge and concurrent-init flaky defect」），对象仍在 reflog，未恢复——应由其作者处理 |
-| 4 | 同类 reset/移动分支再次清掉已作废的 `e0d60f7` | 无实质损失（该提示内容已过时） |
+| 3 | 某次 `git reset a43baac` 丢弃了 `a0fd0cd` | commit 对象成为孤儿，**但内容未丢** —— 其作者已把「并发初始化缺陷：已修」重新记录到 main 的 TASKS.md（`j77156057-art`，06:41）。无需恢复 |
+| 4 | 同类 reset/移动分支再次清掉已作废的 `e0d60f7` | 无实质损失（该提示内容已过时，其纠正版本已随 `247ddc7` 进 main） |
 
 **根因**：所有 AI 共用仓库根目录这一个工作树，任一 agent 的 `git checkout` / `git switch`
 / `git reset` 都会改变所有人的 HEAD 与工作树。这不是"可能出错"，是**必然出错**。
@@ -402,7 +402,7 @@ commit：
 删掉别人的工作（事故 3 即此）。H-7 规则 2 要求"只移动自己拥有的分支引用"，
 但这靠自觉，无机制强制。
 
-### worktree-isolation：工作区隔离（doing）
+### worktree-isolation：工作区隔离（done）
 
 ~~~text
 任务编号：worktree-isolation
@@ -415,34 +415,37 @@ commit：
 交付分支：agent/local/claude/worktree-isolation/a1
 test_id：MVP-PROCESS-001（新增，协作纪律类，无代码断言）
 测试命令：./scripts.sh check + git worktree list
-当前状态：doing
+当前状态：done（已合入 main `247ddc7`）
+commit：f9fd072（H-7 + 三工作区 + 事故登记）、247ddc7（自服务 provisioning 脚本）
 
 交付：
 1. `.worktrees/{workbuddy,codex,claude}/` 三个独立工作区，各带驻留分支
    `agent/workspace/<harness>`；仓库根只做合并与门禁
 2. 各工作区 `.venv` 目录联接共享主 venv，`./scripts.sh check` 可直接跑
-3. `docs/dev-convention.md` 新增 H-7 工作区隔离（5 条规则 + 创建/回收命令）
+3. `docs/dev-convention.md` 新增 H-7 工作区隔离（5 条规则 + 同一任务拆分给多 AI 的分支口径）
 4. `.gitignore` 加 `.worktrees/`
 5. TASKS.md 第 4 次事故登记（4 个时刻的逐条记录）
-6. 顺带纠正 main 上已过时的 MVP-04 提示（原称「§8 仍有矛盾」，而 §8 已由 d7bf8d0 修好）
+6. 纠正 main 上已过时的 MVP-04 提示（原称「§8 仍有矛盾」，而 §8 已由 d7bf8d0 修好）
+7. `scripts/new-ai.ps1`：加 AI 自服务，一条命令开工作区（幂等 + 3 次 ref 锁重试）
 
 验证结果：
   docstate      : 88 项检查，0 项失败
   ruff check    : All checks passed!
   ruff format   : 13 files already formatted
-  pytest        : 20 passed in 1.50s
+  pytest        : 20 passed
   worktree 冒烟  : 在 .worktrees/codex 内跑 docstate 88/0 + pytest 20 passed
   worktree list  : 4 条，主树 + 3 个隔离树
+  脚本自测      : 建工作区成功；对已存在的工作区幂等拒绝；测试用的 worktree 与分支已清理
+  合入后状态     : main = 247ddc7，仓库根检出 main，4 个工作区全部对齐 247ddc7
 
 **本次又违反了登记规则第 0 条**（先干活后补登记）。讽刺但如实记录：修协作纪律的任务
 本身没遵守协作纪律。根因与事故 4 相同 —— 共享工作区让"先登记"变得不可靠。
 
 已知问题：
 - ⚠️ 分支引用仍跨工作区共享，`git branch -f` / `git reset` 到别人的分支仍会删掉别人的
-  工作（事故 3 即此）。H-7 规则 2 只靠自觉，无机制强制。
-- ⚠️ 事故 3 丢弃的 `a0fd0cd`（别的 agent 的提交）仍在 reflog，未恢复，待其作者处理。
-- ⚠️ 仓库根目录当前检出 `agent/local/claude/worktree-isolation/a1` 而非 `main`；
-  H-7 生效后应让根目录常驻 `main` 或保持不动，仅用于合并。
+  工作（事故 3 即此）。H-7 规则 2 只靠自觉，无机制强制；要根治需加 hook 拦截。
+- ⚠️ `scripts/new-ai.ps1` 仅在 Windows PowerShell 5.1 实测过；bash 等价命令只写在
+  H-7 文档里，未提供脚本。
 ~~~
 
 ## 提交前自检
