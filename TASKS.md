@@ -6,14 +6,15 @@
 ## 状态图例
 
 `ready` 现在可开工 / `waiting` 等硬依赖 / `prep` 可做准备工作 / `doing` 进行中 /
-`review` 待审/ `done` 已完成 / `blocked` 阻塞
+`review` 待审 / `done` 已完成 / `blocked` 阻塞 / `claimed` 已认领待验收 /
+`🟠 已验收，有缺陷待修`
 
 ## 任务表
 
 | task_id | Harness | 依赖 | 状态 | 分支 | test_id |
 |---|---|---|---|---|---|
-| MVP-01 | **WorkBuddy** | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
-| MVP-02 | **Codex** | MVP-01 | 🟡 claimed（待验收） | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
+| MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
+| MVP-02 | Codex | MVP-01 | 🟠 已验收，1 项缺陷待修 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -35,7 +36,7 @@
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
 | 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
-| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | 🟡 claimed，待验收 |
+| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | 🟠 已验收，1 项缺陷待修 |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -94,7 +95,7 @@ commit：810d88d
   - 仓库尚无 remote，未推送
 ~~~
 
-### MVP-02：SQLite schema 与事件事实源（claimed，待验收）
+### MVP-02：SQLite schema 与事件事实源（已验收，1 项缺陷待修）
 
 ~~~text
 任务编号：MVP-02
@@ -108,14 +109,60 @@ commit：810d88d
 交付分支：agent/local/codex/MVP-02/a1
 commit：b154f5c（8 文件，938 行）
 test_id：DOC-SCHEMA-001、CORE-RECOVER-001
-当前状态：claimed —— ⚠️ WorkBuddy 尚未验收
-待验收项：
-  - tasks 表是否含 attempt_no / hotfix / budget_override_by（R10-12/13/14）
-  - claim_requests 是否有 unique(claim_request_id, task_id)（R9-03）
-  - verification_receipts 是否 append-only + 唯一键（R10 §16）
-  - WAL + busy_timeout 是否生效
-  - migrations 是否可重复执行
-  - 门禁（docstate + ruff + pytest）是否仍全绿
+测试命令：./scripts.sh check
+验收时间：2026-10-05 06:05（WorkBuddy）
+当前状态：🟠 已验收，1 项缺陷待修
+
+### 验收结果
+
+| # | 检查项 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | `tasks` 含 attempt_no / hotfix / budget_override_by | ✅ | 001_initial.sql:47-49，NOT NULL + DEFAULT + CHECK |
+| 2 | `claim_requests` 有 `unique(claim_request_id, task_id)` | ❌ | 见下 |
+| 3 | `verification_receipts` append-only + 唯一键 | ✅ | `UNIQUE (task_id, attempt_id, "commit", verify_profile)` |
+| 4 | WAL + busy_timeout 生效 | ✅ | connection.py:37,39 两个 PRAGMA |
+| 5 | migrations 可重复执行 | ✅ | 版本化 runner + `IF NOT EXISTS` + 变更检测 |
+| 6 | 门禁三道全绿 | ✅ | docstate 86/86、ruff clean、pytest 20 passed |
+
+### 缺陷：claim_requests 缺 per-task 幂等维度
+
+R10 §8 与 R9-03 要求 `unique(claim_request_id, task_id)` 与 per-task 首次结果。
+实际实现（001_initial.sql:91-99）只有请求级主键：
+
+~~~sql
+CREATE TABLE IF NOT EXISTS claim_requests (
+    claim_request_id TEXT PRIMARY KEY,   -- 只有请求级
+    task_ids_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    partial_allowed INTEGER NOT NULL DEFAULT 0 CHECK (partial_allowed IN (0, 1)),
+    first_result_json TEXT,              -- 整批级，非 per-task
+    created_seq INTEGER,
+    created_at TEXT NOT NULL
+);
+~~~
+
+**后果**：`partial_allowed=true` 的批量 Claim 第二次到达时无法按任务项返回各自
+首次结果，会让 MVP-04 完成标准「批量时按任务项返回首次结果」无法达成，且
+R10 §26「重复批量 Claim 不会阻塞失败项重试」必然失败。
+
+**修复方向**（MVP-04 开工前必须处理）：
+
+1. 拆两张表：`claim_requests`（请求级：`payload_hash` / `partial_allowed`）
+   + `claim_request_results`（`UNIQUE(claim_request_id, task_id)`，含 per-task
+   `first_result_json`）—— **倾向此方案**，请求级与任务项级职责分开，避免
+   payload_hash 重复存储产生漂移；
+2. 或加复合唯一键改一任务一行（请求级字段冗余重复，有漂移风险）。
+
+### 其他说明（不构成缺陷）
+
+- `seq` 取自 `cursor.lastrowid`：当前 schema 未声明 `WITHOUT ROWID`，rowid 即自增
+  主键，成立。但需在 MVP-08 引入多进程写入后重新验证 R10 §13 的「seq 全局单调」。
+- 列名用 `commit`（`verification_receipts`）在 SQLite 中合法，且与 R10 文档一致。
+
+已知问题：
+
+- ❌ claim_requests 缺 per-task 幂等维度（上方详述）
+- ⚠️ 仓库尚无 remote，未推送
 ~~~
 
 ## 关键路径
