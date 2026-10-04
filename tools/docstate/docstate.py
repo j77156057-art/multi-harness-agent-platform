@@ -296,14 +296,20 @@ def run(spec_path, verbose=False):
 
     unresolved = []
     checked_ddls = 0
+    # 只把「§8/§37.6 里真实存在的表」当表处理，避免把 unique(...)、coalesce(...)
+    # 之类的函数调用误判成表定义。
+    known_tables = set(required) | {name for name, _, _ in definitions}
     if "## 11. Claim" in text:
         section11 = text.split("## 11. Claim")[1].split("## 12.")[0]
         for match in re.finditer(r"([a-z_][a-z0-9_]*)\(([^()]*)\)", section11):
             table, column_text = match.group(1), match.group(2)
+            if table not in known_tables:
+                continue
             names = []
             for column in column_text.split(","):
                 stripped = re.sub(
                     r"\s+(?:PRIMARY\s+KEY|NOT\s+NULL|DEFAULT\b.*|CHECK\b.*)$",
+                    "",
                     column.strip(),
                     flags=re.I,
                 ).strip()
