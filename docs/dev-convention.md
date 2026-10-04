@@ -167,7 +167,18 @@ Refs: DOC-SCHEMA-001
 `git reset`，都会改变**所有人**的 HEAD 和工作树——正在编辑的文件会被无声冲掉，
 `git status` 看起来还是干净的。
 
-因此每个 AI 有且只有一个入口目录：
+因此每个 AI 有且只有一个入口目录。**新增 AI 不要手工建目录，用一条命令：**
+
+~~~powershell
+./scripts/new-ai.ps1 -Harness <名字>          # 例如 -Harness qoder
+~~~
+
+该脚本会建 `.worktrees/<名字>/`、切出驻留分支 `agent/workspace/<名字>`、把主 `.venv`
+以目录联接接进去、并冒烟验证解释器可用。**幂等**：工作区已存在时报错退出，不做任何改动。
+本机多个 AI 并发跑 git 时 ref 锁会瞬时冲突，脚本内置 3 次重试；仍失败则报错并输出
+git 原文，不会留下半成品。
+
+当前已分配（以 `git worktree list` 为准，本表可能滞后）：
 
 | Harness | 工作区 | 驻留分支 |
 |---|---|---|
@@ -175,6 +186,14 @@ Refs: DOC-SCHEMA-001
 | Codex | `.worktrees/codex/` | `agent/workspace/codex` |
 | Claude Code | `.worktrees/claude/` | `agent/workspace/claude` |
 | 协调者 | 仓库根 `new agent/` | **只做合并与门禁，不编辑文件** |
+
+同一任务拆给多个 AI 时（如 MVP-04 建议的 Claim/幂等 与 Lease/fencing 分工），每个 AI
+各用自己的工作区与分支，分支名靠 `<harness>` 与 `<attempt-id>` 区分：
+
+~~~text
+agent/<group-short>/<harness-a>/<task-id>/a1
+agent/<group-short>/<harness-b>/<task-id>/a1
+~~~
 
 规则：
 
@@ -188,15 +207,8 @@ Refs: DOC-SCHEMA-001
 5. `.worktrees/` 已在 `.gitignore`，不会被提交（它与 `wt/` 不同：`wt/` 是 MVP-05 的
    worktree 物理目录）。
 
-创建新 AI 的工作区：
-
-~~~bash
-git worktree add -b agent/workspace/<harness> .worktrees/<harness> main
-# Windows 上补 .venv 联接，PowerShell：
-New-Item -ItemType Junction -Path .worktrees\<harness>\.venv -Target (Resolve-Path .venv).Path
-~~~
-
-回收：`git worktree remove .worktrees/<harness>`（先确认其中无未提交改动）。
+回收：`git worktree remove .worktrees/<harness>`（先确认其中无未提交改动），
+分支随之用 `git branch -D agent/workspace/<harness>` 删除。
 
 **每个 AI 各自的工作区不解决共享分支引用的问题** —— 见规则 2。本项目至今发生过
 「A 在 B 的分支上提交」和「`git reset` 丢弃 A 的提交」两次，都源于此。
