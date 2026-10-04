@@ -1,0 +1,23 @@
+:root {
+  --ink: #1a1a1a;
+  --bone: #faf8f5;
+  --line: #d8d4cd;
+  --ok: #1a7f37;
+  --bad: #b3261e;
+  --muted: #6b6b6b;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: var(--ink);
+  background: var(--bone);
+}
+main { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
+h1 { font-size: 1.25rem; letter-spacing: -0.01em; }
+h2 { font-size: 1rem; margin-top: 2rem; }
+.muted { color: var(--muted); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+ul { padding-left: 1.2rem; }
+li { margin: 0.25rem 0; }

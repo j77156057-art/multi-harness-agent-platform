@@ -1,0 +1,39 @@
+[project]
+name = "agent-platform-backend"
+version = "0.1.0"
+description = "多 Harness Agent 协作与调度平台 —— MVP 后端"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "C4",   # comprehensions
+    "SIM",  # simplify
+]
+ignore = [
+    "E501",    # 行宽由 formatter 管
+    "B008",    # FastAPI Depends() 惯用法
+    "N818",    # 异常名不用 Error 后缀是 Go 习惯，不适用
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # 允许 assert
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: 耗时较长的测试",
+    "integration: 需要真实 git 仓库或子进程",
+]

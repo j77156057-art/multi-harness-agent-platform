@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# 运行期数据
+data/
+wt/
+canonical.git
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# 前端
+node_modules/
+dist/
+.vite/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# 凭据（严禁提交）
+.env
+.env.local
+*.pem
+*.key
+credentials.json

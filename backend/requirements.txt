@@ -1,0 +1,12 @@
+# MVP-01 最小依赖集（后续任务按需追加，追加必须走 PR）
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-multipart==0.0.20
+
+# 测试
+pytest==8.3.4
+pytest-asyncio==0.25.0
+httpx==0.28.1
+
+# 规范检查器无外部依赖（纯标准库），故不列入

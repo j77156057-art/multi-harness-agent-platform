@@ -1,0 +1,197 @@
+# 开发约定（MVP-01 交付物）
+
+本文件是所有参与者的**强制约定**。开工前必读，违反即打回。
+
+真相源优先级（冲突时从高到低）：
+
+1. `docs/spec/0.3-R10.md` —— 状态机、事件名、schema、权限的唯一真相源
+2. 本文件 —— 目录边界、命名、流程约定
+3. `docs/spec/mvp-task-checklist.md` —— 任务范围与依赖
+4. 代码里的字面量 —— **最低优先级，禁止作为依据**
+
+---
+
+## H-1 状态机唯一真相源
+
+R10 §10 的 23 个状态、R10 §37.7 的 88 项 allowlist（74 M / 13 O / 1 R）是**唯一**定义。
+代码侧镜像在 `backend/app/spec.py`，由 `backend/tests/test_spec_mirror.py` 做机械比对。
+
+禁止行为：
+
+- ❌ 在业务代码里写状态名/事件名字面量（必须 `from app.spec import TaskStatus`）
+- ❌ 在代码里新增状态或事件（哪怕只是"先加上"）
+- ❌ 只改代码不改 R10，或只改 R10 不改代码
+
+正确流程：
+
+1. 在 R10 正文提出修订（走复审流程，升 schema_version）
+2. 同一次提交内更新 `app/spec.py`
+3. `make check` 必须全绿
+
+### MVP 允许的状态投影
+
+MVP 只实现部分状态，这是**允许的**，但必须在 `docs/state-projection.md` 登记省略项与理由。
+未登记的省略 =违规。
+
+---
+
+## H-2 规范检查器是门禁，不是工具
+
+`tools/docstate/docstate.py` 对 R10 跑 86 项机械断言。CI 与应用启动都会跑它。
+
+```bash
+make check          # docstate + pytest + ruff
+python tools/docstate/docstate.py --verbose   # 看单项
+python tools/docstate/docstate.py --json      # 机器可读
+```
+
+启动时校验失败会**拒绝启动**（除非 `AP_CHECK_SPEC=0`）。这是刻意的：
+带着不自洽的规范写代码，产出的实现必然继承那些矛盾。
+
+---
+
+## H-3 技术栈偏离已记录
+
+R10 §5 规定 Go + React。本项目用 Python FastAPI + Vue3，偏离理由与回退条件见
+`docs/adr/ADR-DEV-001-stack-deviation.md`。
+
+---
+
+## H-4 没有 test_id 的完成标准不可验收
+
+每个任务的完成标准必须引用 R10 §26 的检查 ID 或新增 `MVP-*` ID，并登记到
+`docs/traceability.md`。
+
+"功能可用"、"跑通了"、"基本没问题"这类描述**不被接受**为完成标准。
+
+---
+
+## H-5 文件所有权与并行安全
+
+多个 AI 并行时，**修改范围不得重叠**。每个任务卡里的"允许修改目录"是硬边界。
+
+跨边界改动必须：
+
+1. 在群里说明；
+2. 取得该目录 owner 同意；
+3. 单独提交，不混入本任务 commit。
+
+`docs/prep/` 是共享区，各 AI 的准备工作放这里，**不进主分支**，避免互相污染。
+
+---
+
+## H-6 状态变更只能走 API
+
+（R10 §0 总协调规则第 8 条）
+
+任何任务状态、owner、lease、epoch、receipt、review 结论的变更，**禁止直接改数据库**。
+测试里也禁止用裸 SQL 改状态字段（schema migration 除外）。
+
+原因：R10 的 fencing 与幂等语义建立在"所有写都经过同一事务入口"之上。
+绕过 API 的写入会同时绕过 fencing 检查和 `task_events` 记录，导致投影无法重建。
+
+---
+
+## 目录边界
+
+~~~text
+backend/app/          业务代码
+backend/tests/        测试
+frontend/             前端
+docs/spec/            R10 正文（只读！改动走复审流程）
+docs/adr/             架构决策记录
+docs/prep/            各 AI 的准备工作（共享区，不进主分支）
+tools/docstate/       规范检查器
+data/                 运行期数据（DB、日志），git 忽略
+wt/                   worktree 物理目录（R10 §14 短 ID 口径），git 忽略
+canonical.git调度中心持有的 bare 仓库，git 忽略
+~~~
+
+## 分支命名
+
+R10 §14 统一口径：
+
+~~~text
+任务分支：agent/<group-short>/<harness>/<task-id>/<attempt-id>
+help 分支：agent/<group-short>/<harness>/<task-id>/help-<n>
+物理目录：wt/<短ID>            # 不用完整分支名，避免 Windows 长路径
+~~~
+
+R10-09 要求 §14 口径、§17 权限矩阵、Push Proxy 白名单三处**必须一致**。
+MVP-05 实现时以本节为准。
+
+## Commit 格式
+
+~~~text
+<type>(<task-id>): <祈使句摘要>
+
+<空行>
+
+<body：为什么改，不是改了什么>
+
+Refs: <R10 章节或 test_id>
+~~~
+
+type取值：`feat` `fix` `docs` `test` `refactor` `chore` `perf` `build` `ci`
+
+例：
+
+~~~text
+feat(mvp-02): add tasks table with attempt_no and hotfix
+
+R10 §8 的 tasks 最小定义要求这两个字段，缺任一个都会让 MVP-04 的
+条件 UPDATE 编译失败（R10-12）。
+
+Refs: DOC-SCHEMA-001
+~~~
+
+规则：
+
+- 摘要用祈使句，≤ 72 字符，不加句号
+- body 写**为什么**，特别是"为什么必须这样"（引用 R10 条款）
+- 涉及状态机/事件/schema 的改动**必须**在 body 引用 R10 章节号
+- 一个 commit 只做一件事
+
+## 分支策略
+
+- `main`：只接受通过 Merge Gate 的合并（R10 §21）
+- `agent/<harness>/<task-id>/<attempt-id>`：任务分支，唯一允许写入的分支
+- ❌ 禁止直接 push `main` / `integration`
+- ❌ 禁止 `force push`
+- ❌ 禁止 `rebase` 到非任务分支
+
+## 依赖管理
+
+- `backend/requirements.txt` 运行时依赖，**必须钉死版本**
+- `backend/requirements-dev.txt` 开发依赖
+- 新增依赖必须写明用途；大依赖（如 playwright）在 PR 里单独论证
+- `tools/docstate/` 保持**零外部依赖**（纯标准库），保证任何环境都能跑
+
+## 测试
+
+- 每个 MVP 任务至少一个 `test_id`，并登记到 `docs/traceability.md`
+- 失败必须能定位到 `task_id` / `attempt_id` / `event seq`（R10 §清单 MVP-11）
+- 慢测试标`@pytest.mark.slow` 或 `@pytest.mark.integration`
+- ❌ 禁止为了让测试通过而放宽断言
+
+## 本地启动
+
+见 `README.md`。最短路径：
+
+~~~bash
+make install
+make dev        # 启动后端 http://127.0.0.1:8848
+make check      # 全量门禁
+make test
+make lint
+make fmt
+make docstate   # 只跑规范检查
+~~~
+
+## 提交前自检
+
+```bash
+make check
+```
+
+必须全绿。`docstate` 失败说明规范被改坏了或代码与规范脱节，**不要绕过**。

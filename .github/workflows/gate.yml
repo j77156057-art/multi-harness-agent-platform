@@ -1,0 +1,62 @@
+# 门禁 CI（H-2：docstate 是门禁不是工具）
+#
+# 这个 workflow 的存在理由：R10 复审证明"人工判定的已闭环"与"实际自洽"
+# 差距巨大。CI 必须在每个 PR 上跑机械检查。
+name: gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gate:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # R10 全流程在 Windows 上验证，Linux 跑一遍是为了提前发现路径假设
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements-dev.txt
+
+      # ---- 门禁 1：规范一致性（R10 §29.3 阶段 0 通过条件）----
+      - name: docstate (spec consistency)
+        run: python tools/docstate/docstate.py --verbose
+
+      # ---- 门禁 2：lint ----
+      - name: ruff check
+        working-directory: backend
+        run: ruff check .
+
+      - name: ruff format check
+        working-directory: backend
+        run: ruff format --check .
+
+      # ---- 门禁 3：测试 ----
+      - name: pytest
+        working-directory: backend
+        run: pytest -v
+
+      # ---- 输出机器可读结果供其他工具消费 ----
+      - name: Upload docstate report
+        if: always()
+        run: python tools/docstate/docstate.py --json > docstate-report.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docstate-report-${{ matrix.os }}
+          path: docstate-report.json
