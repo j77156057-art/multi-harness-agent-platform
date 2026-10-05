@@ -26,7 +26,7 @@
 | worktree-isolation | Claude Code | — | ✅ done | `agent/local/claude/worktree-isolation/a1` | `MVP-PROCESS-001` |
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
-| MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03 | Codex | MVP-02 | doing | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -61,6 +61,7 @@
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
 | 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
+| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -117,6 +118,33 @@ commit：810d88d
   - main 的 MVP-01 未走 Merge Gate，作为既成事实接受
   - AO 的 ao_managed_git 宿主模式经源码核对判定 no-go，见 docs/ao-capability-audit.md
   - 仓库尚无 remote，未推送
+~~~
+
+### MVP-03：状态机与 Plan 校验（doing）
+
+~~~text
+任务编号：MVP-03
+负责人 Harness：Codex
+开始时间：2026-10-05 09:07
+依赖任务：MVP-02（✅ 已验收）
+工作区：.worktrees/codex/
+真相源引用：R10 §10（状态机与迁移表）、§37.7（事件 allowlist）、
+            §8（tasks 与 task_dependencies schema）、§9（Plan/任务契约）、§26（检查 ID）
+允许修改目录：backend/app/state/** backend/app/plan/** backend/tests/**
+禁止修改目录：docs/spec/**、tools/docstate/**、backend/app/db/**、backend/app/events/**
+交付分支：agent/local/codex/MVP-03/a1
+完成标准：
+  1. 已实现状态只能通过 R10 allowlist 中的迁移事件变更；非法迁移被拒绝
+  2. 任务依赖 DAG 拒绝环、孤立引用和重复边
+  3. Plan 校验拒绝未注册能力、非法依赖、不可满足产出契约和超规模输入
+  4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段
+test_id：DOC-STATE-001、DOC-PLAN-001
+测试命令：./scripts.sh check
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
 ~~~
 
 ### MVP-02：SQLite schema 与事件事实源（✅ 已验收）
