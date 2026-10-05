@@ -109,7 +109,10 @@ def run_one(name: str, fname: str, find: str, repl: str, expect: str) -> bool:
 
         proc = subprocess.run(
             [sys.executable, str(HERE / "check_contract.py"), "--here", str(tmp)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         out = proc.stdout + proc.stderr
         caught = proc.returncode != 0
@@ -130,10 +133,15 @@ def main() -> int:
     print(f"baseline (unmutated contract):")
     base = subprocess.run(
         [sys.executable, str(HERE / "check_contract.py"), "--here", str(HERE)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     if base.returncode != 0:
-        print("  the unmutated contract already fails; fix that before mutation testing")
+        print(
+            "  the unmutated contract already fails; fix that before mutation testing"
+        )
         print(base.stdout[-2000:])
         return 1
     print("  exit 0, clean")

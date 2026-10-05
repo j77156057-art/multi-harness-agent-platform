@@ -3,6 +3,7 @@
 
 运行（仓库根）：python -m pytest tools -q
 """
+
 import importlib.util
 import os
 import shutil
@@ -20,6 +21,7 @@ _SPEC.loader.exec_module(d)
 
 # ---------- 纯解析 ----------
 
+
 def test_parse_merge_subject_standard_forms():
     assert d.parse_merge_subject("Merge branch 'agent/local/trae/x/a1'") == [
         "agent/local/trae/x/a1"
@@ -29,9 +31,7 @@ def test_parse_merge_subject_standard_forms():
     ) == ["origin/agent/local/x"]
     assert d.parse_merge_subject("Merge branches 'a' and 'b'") == ["a", "b"]
     # 同步主线：能解析出 main，由上层过滤
-    assert d.parse_merge_subject(
-        "Merge branch 'main' into agent/local/x"
-    ) == ["main"]
+    assert d.parse_merge_subject("Merge branch 'main' into agent/local/x") == ["main"]
     # 手写标题无法机械映射 —— 已知盲区，返回空而非猜测
     assert d.parse_merge_subject("Merge MVP-02 (SQLite schema) into main") == []
     assert d.parse_merge_subject("not a merge") == []
@@ -91,34 +91,44 @@ def registry_checks(tmp_path, claim_names):
 
 
 def test_claim_serials_must_be_unique(tmp_path):
-    checks = registry_checks(tmp_path, [
-        "01-h--t1.md",
-        "01-h--t2.md",
-    ])
+    checks = registry_checks(
+        tmp_path,
+        [
+            "01-h--t1.md",
+            "01-h--t2.md",
+        ],
+    )
     unique_msg = next(msg for msg in checks if msg.startswith("认领文件序号唯一"))
     assert checks[unique_msg] is False
     assert "重复=['01']" in unique_msg
 
 
 def test_claim_serials_must_be_contiguous(tmp_path):
-    checks = registry_checks(tmp_path, [
-        "01-h--t1.md",
-        "03-h--t2.md",
-    ])
+    checks = registry_checks(
+        tmp_path,
+        [
+            "01-h--t1.md",
+            "03-h--t2.md",
+        ],
+    )
     cont_msg = next(msg for msg in checks if msg.startswith("认领文件序号连续"))
     assert checks[cont_msg] is False
     assert "缺号=[2]" in cont_msg
 
 
 def test_claim_serials_happy_path(tmp_path):
-    checks = registry_checks(tmp_path, [
-        "01-h--t1.md",
-        "02-h--t2.md",
-    ])
+    checks = registry_checks(
+        tmp_path,
+        [
+            "01-h--t1.md",
+            "02-h--t2.md",
+        ],
+    )
     assert all(checks.values())
 
 
 # ---------- merge 组：注入假 lister，不依赖 git ----------
+
 
 def fake_lister(branches, ok=True, detail=""):
     return lambda repo_root: (ok, branches, detail)
@@ -127,8 +137,11 @@ def fake_lister(branches, ok=True, detail=""):
 def run_merge(tasks, claims, cards, branches, **kw):
     result = d.Result()
     d.check_merge(
-        result, ".",
-        tasks=tasks, claims=claims, cards=cards,
+        result,
+        ".",
+        tasks=tasks,
+        claims=claims,
+        cards=cards,
         lister=fake_lister(branches, **kw),
     )
     return {c["msg"]: c["ok"] for c in result.checks}
@@ -151,9 +164,11 @@ GOOD_CARD = {
 
 
 def test_merge_fail_closed_when_git_unavailable():
-    checks = run_merge(TASKS, CLAIMS, {}, [], ok=False, detail="当前目录不是 git 工作区")
+    checks = run_merge(
+        TASKS, CLAIMS, {}, [], ok=False, detail="当前目录不是 git 工作区"
+    )
     assert len(checks) == 1
-    (msg, passed), = checks.items()
+    ((msg, passed),) = checks.items()
     assert passed is False and "fail-closed" in msg
 
 
@@ -193,10 +208,15 @@ def test_merge_sync_main_branch_is_filtered_by_lister():
 
 # ---------- 临时 git 仓库：真实 git 集成 ----------
 
+
 def git(repo, *args):
     subprocess.run(
-        ("git",) + args, cwd=repo, capture_output=True, text=True,
-        timeout=60, check=True,
+        ("git",) + args,
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
     )
 
 
@@ -232,8 +252,11 @@ def test_git_lister_on_real_repository(tmp_path):
     shallow = tmp_path / "shallow"
     shutil.copytree(repo, shallow)
     head = subprocess.run(
-        ("git", "rev-parse", "HEAD"), cwd=str(repo),
-        capture_output=True, text=True, check=True,
+        ("git", "rev-parse", "HEAD"),
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     with open(os.path.join(str(shallow), ".git", "shallow"), "w") as handle:
         handle.write(head + "\n")

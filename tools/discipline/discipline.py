@@ -22,6 +22,7 @@ dev-convention.md 里声明的 docstate 断言数是否与实际相符。
 
 退出码：0 = 全部通过；1 = 存在失败项；2 = 找不到被检查的文件
 """
+
 import argparse
 import collections
 import io
@@ -185,7 +186,9 @@ def parse_cards(text):
             if cards and task_id is None:
                 cards[-1]["body"] += "\n### " + block
             continue
-        cards.append({"title": title, "fields": fields, "body": block, "task_id": task_id})
+        cards.append(
+            {"title": title, "fields": fields, "body": block, "task_id": task_id}
+        )
     return cards
 
 
@@ -206,7 +209,9 @@ def has_verification_evidence(card):
     因此这里接受两种形式，而不是逼着改写历史记录。
     """
     body = card["body"]
-    if re.search(r"验证结果[：:]\s*\n\s*\S", body) or re.search(r"验证结果[：:]\s*\S", body):
+    if re.search(r"验证结果[：:]\s*\n\s*\S", body) or re.search(
+        r"验证结果[：:]\s*\S", body
+    ):
         return True
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
@@ -227,7 +232,12 @@ def check_registry(result, tasks_text, repo_root=None):
     result.chk(
         not dup_seq,
         "认领文件序号唯一；重复=%s（%d 个文件，序号范围 %s~%s）"
-        % (dup_seq or "无", len(seqs), min(seqs) if seqs else "-", max(seqs) if seqs else "-"),
+        % (
+            dup_seq or "无",
+            len(seqs),
+            min(seqs) if seqs else "-",
+            max(seqs) if seqs else "-",
+        ),
         "registry",
     )
     tids = [c["task_id"] for c in claims]
@@ -243,8 +253,7 @@ def check_registry(result, tasks_text, repo_root=None):
     seq_nums = [int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")]
     expected = set(range(1, len(claims) + 1))
     result.chk(
-        len(seq_nums) == len(claims)
-        and set(seq_nums) == expected,
+        len(seq_nums) == len(claims) and set(seq_nums) == expected,
         "认领文件序号连续为 1..%d；缺号=%s，越界/非数字=%s"
         % (
             len(claims),
@@ -254,8 +263,11 @@ def check_registry(result, tasks_text, repo_root=None):
         "registry",
     )
 
-    bad_status = [t["task_id"] for t in tasks if not any(
-        keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)]
+    bad_status = [
+        t["task_id"]
+        for t in tasks
+        if not any(keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)
+    ]
     result.chk(
         not bad_status,
         "任务表状态列取值合法；非法=%s" % (bad_status or "无"),
@@ -344,12 +356,18 @@ def check_cards(result, tasks_text, claims):
     result.chk(
         claim_ids <= set(cards),
         "已认领且非在途的任务都有任务卡；缺卡=%s（豁免在途 %d 个：%s）"
-        % (sorted(claim_ids - set(cards)) or "无", len(in_flight), sorted(in_flight) or "无"),
+        % (
+            sorted(claim_ids - set(cards)) or "无",
+            len(in_flight),
+            sorted(in_flight) or "无",
+        ),
         "cards",
     )
 
     missing_truth = [
-        task_id for task_id, card in cards.items() if not card["fields"].get("真相源引用")
+        task_id
+        for task_id, card in cards.items()
+        if not card["fields"].get("真相源引用")
     ]
     result.chk(
         not missing_truth,
@@ -357,7 +375,9 @@ def check_cards(result, tasks_text, claims):
         "cards",
     )
 
-    missing_test_id = [task_id for task_id, card in cards.items() if not card["fields"].get("test_id")]
+    missing_test_id = [
+        task_id for task_id, card in cards.items() if not card["fields"].get("test_id")
+    ]
     result.chk(
         not missing_test_id,
         "任务卡均有 test_id（H-4：没有 test_id 的完成标准不可验收）；缺=%s"
@@ -367,7 +387,8 @@ def check_cards(result, tasks_text, claims):
 
     # 工作区（H-7）只对未完成的任务强制：字段是后加的，不追溯改写历史卡片
     unfinished = [
-        task_id for task_id, card in cards.items()
+        task_id
+        for task_id, card in cards.items()
         if not is_finished(card["fields"].get("当前状态", ""))
     ]
     without_worktree = [
@@ -382,8 +403,10 @@ def check_cards(result, tasks_text, claims):
 
     # 完成的卡片必须留下可追溯的 commit 与验证证据（登记规则第 3 条）
     bad_commit = [
-        task_id for task_id, card in cards.items()
-        if is_finished(card["fields"].get("当前状态", "")) and not card["fields"].get("commit")
+        task_id
+        for task_id, card in cards.items()
+        if is_finished(card["fields"].get("当前状态", ""))
+        and not card["fields"].get("commit")
     ]
     result.chk(
         not bad_commit,
@@ -392,7 +415,8 @@ def check_cards(result, tasks_text, claims):
     )
 
     no_evidence = [
-        task_id for task_id, card in cards.items()
+        task_id
+        for task_id, card in cards.items()
         if is_finished(card["fields"].get("当前状态", ""))
         and not has_verification_evidence(card)
     ]
@@ -499,7 +523,9 @@ def expand_dependency_cell(cell):
         r"(MVP-)?(\d+)([a-z]?)\s*[~～]\s*(?:MVP-)?(\d+)([a-z]?)", expand_range, cell
     )
 
-    tokens = [t for t in re.split(r"[\s、,，/＋+]+", cell) if t and t not in {"稳定", "个"}]
+    tokens = [
+        t for t in re.split(r"[\s、,，/＋+]+", cell) if t and t not in {"稳定", "个"}
+    ]
     expanded = set()
     for token in tokens:
         bare = re.fullmatch(r"(MVP-)?(\d+)([a-z]?)", token)
@@ -527,7 +553,7 @@ def parse_checklist_dependencies(repo_root):
     deps = {}
     for match in re.finditer(r"^### (MVP-\d+)[：:][^\n]*$", text, re.M):
         task_id = match.group(1)
-        block = text[match.end():match.end() + 400]
+        block = text[match.end() : match.end() + 400]
         found = set()
 
         declared = re.search(r"^依赖：(.+)$", block, re.M)
@@ -603,7 +629,7 @@ def _shared_file_owners(tasks_text):
     m = re.search(r"^##\s*共享文件改动声明.*$", tasks_text, re.M)
     if not m:
         return set()
-    block = tasks_text[m.end():]
+    block = tasks_text[m.end() :]
     nxt = re.search(r"^##\s", block, re.M)
     if nxt:
         block = block[: nxt.start()]
@@ -691,7 +717,8 @@ def check_dependencies(result, repo_root, tasks):
             continue
         if deps != declared[task_id]:
             mismatched.append(
-                "%s 表=%s 清单=%s" % (task_id, sorted(deps) or "无", sorted(declared[task_id]) or "无")
+                "%s 表=%s 清单=%s"
+                % (task_id, sorted(deps) or "无", sorted(declared[task_id]) or "无")
             )
     result.chk(
         not mismatched,
@@ -700,8 +727,11 @@ def check_dependencies(result, repo_root, tasks):
     )
 
     # 清单 §0.2 声明的关键路径必须是依赖图里的一条最长路径
-    critical = re.search(r"### 0\.2.*?~~~text\n(.*?)\n~~~", read(
-        os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")), re.S)
+    critical = re.search(
+        r"### 0\.2.*?~~~text\n(.*?)\n~~~",
+        read(os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")),
+        re.S,
+    )
     if not critical:
         result.chk(False, "清单缺少 §0.2 关键路径区块", "deps")
         return
@@ -724,7 +754,9 @@ def check_dependencies(result, repo_root, tasks):
     # 散文里手写的那个数字才是真正会漂移的地方：原缺陷就出在这句
     # 「关键路径长度 7 个任务」上，而上面的图当时也跟着写错了，两者一起错才没被发现。
     # 只校验图会漏掉「图对了但数字忘了改」这种更常见的情况。
-    checklist_text = read(os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md"))
+    checklist_text = read(
+        os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")
+    )
     prose = re.search(r"关键路径长度\s*\*\*(\d+)\s*个任务\*\*", checklist_text)
     if not prose:
         result.chk(False, "清单 §0.2 未声明「关键路径长度 N 个任务」", "deps")
@@ -737,7 +769,7 @@ def check_dependencies(result, repo_root, tasks):
         )
 
     # 关键路径上的每个相邻对必须是真实的依赖边。链里 a → b 表示「b 依赖 a」，
-# 而 registry[task] 存的是 task 自己的依赖，所以要查 a 是否在 registry[b] 里。
+    # 而 registry[task] 存的是 task 自己的依赖，所以要查 a 是否在 registry[b] 里。
     broken_edges = [
         "%s→%s" % (a, b)
         for a, b in zip(longest_chain, longest_chain[1:])
@@ -752,7 +784,9 @@ def check_dependencies(result, repo_root, tasks):
     # TASKS.md 的「关键路径」是同一份数据的第二个副本，同样必须校验。上一轮只管了
     # 清单那份，于是 TASKS.md 里的旧副本（漏了 MVP-03 与 MVP-10b）无人拦，下一个读
     # TASKS.md 的人会拿到已被推翻的结论。
-    tasks_critical = section(read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径")
+    tasks_critical = section(
+        read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径"
+    )
     if not tasks_critical:
         result.chk(False, "TASKS.md 缺少「## 关键路径」章节", "deps")
         return
@@ -784,19 +818,30 @@ def check_traceability(result, repo_root, tasks):
     """
     path = os.path.join(repo_root, "docs", "traceability.md")
     if not os.path.exists(path):
-        result.chk(False, "docs/traceability.md 存在（H-4 要求登记于此）", "traceability")
+        result.chk(
+            False, "docs/traceability.md 存在（H-4 要求登记于此）", "traceability"
+        )
         return
 
     text = read(path)
-    registered = set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text))
+    registered = set(
+        re.findall(
+            r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text
+        )
+    )
     used = set()
     for task in tasks:
-        used |= set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b",
-                               task["test_id"]))
+        used |= set(
+            re.findall(
+                r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b",
+                task["test_id"],
+            )
+        )
     missing = sorted(used - registered)
     result.chk(
         not missing,
-        "任务表用到的 test_id 均已登记到 traceability.md；未登记=%s" % (missing or "无"),
+        "任务表用到的 test_id 均已登记到 traceability.md；未登记=%s"
+        % (missing or "无"),
         "traceability",
     )
 
@@ -833,7 +878,9 @@ def branch_tokens(cell):
     反引号片段；无反引号时退回整格文本。
     """
     tokens = re.findall(r"`([^`]+)`", cell or "")
-    return [token.strip() for token in tokens if token.strip()] or [normalize_branch(cell)]
+    return [token.strip() for token in tokens if token.strip()] or [
+        normalize_branch(cell)
+    ]
 
 
 def git_merged_branches(repo_root):
@@ -842,11 +889,15 @@ def git_merged_branches(repo_root):
     fail-closed：不是 git 工作区、git 不可用、**浅克隆**都判失败。浅克隆时
     `git log --merges` 可能为空，静默放行等于没有这道检查；CI 必须 fetch-depth: 0。
     """
+
     def git(*args):
         try:
             return subprocess.run(
-                ("git",) + args, cwd=repo_root, capture_output=True,
-                text=True, timeout=30,
+                ("git",) + args,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -907,18 +958,15 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
     )
 
     merged_tasks = {
-        branch_to_task[branch]: branch
-        for branch in merged if branch in branch_to_task
+        branch_to_task[branch]: branch for branch in merged if branch in branch_to_task
     }
     unfinished = sorted(
-        task_id for task_id in merged_tasks
-        if not is_finished(status.get(task_id, ""))
+        task_id for task_id in merged_tasks if not is_finished(status.get(task_id, ""))
     )
     result.chk(
         not unfinished,
         "已合入 main 的任务在任务表均已完成；未完成=%s（含分支 %s）"
-        % (unfinished or "无",
-           {t: merged_tasks[t] for t in unfinished} or "无"),
+        % (unfinished or "无", {t: merged_tasks[t] for t in unfinished} or "无"),
         "merge",
     )
 
@@ -931,16 +979,18 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
     # 只对已完成卡强制证据：未完成的已在上一条列出，避免一条问题刷两次红灯。
     no_evidence = sorted(
-        task_id for task_id in merged_tasks
+        task_id
+        for task_id in merged_tasks
         if task_id in cards
         and is_finished(cards[task_id]["fields"].get("当前状态", ""))
-        and (not cards[task_id]["fields"].get("commit")
-             or not has_verification_evidence(cards[task_id]))
+        and (
+            not cards[task_id]["fields"].get("commit")
+            or not has_verification_evidence(cards[task_id])
+        )
     )
     result.chk(
         not no_evidence,
-        "已合入 main 的完成任务卡均填 commit 与验证证据；缺=%s"
-        % (no_evidence or "无"),
+        "已合入 main 的完成任务卡均填 commit 与验证证据；缺=%s" % (no_evidence or "无"),
         "merge",
     )
     result.chk(
@@ -952,11 +1002,15 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
 def git_local_branches(repo_root):
     """枚举本地分支名。fail-closed：git 不可用或不在工作区时返回 (False, [], 原因)。"""
+
     def git(*args):
         try:
             return subprocess.run(
-                ("git",) + args, cwd=repo_root, capture_output=True,
-                text=True, timeout=30,
+                ("git",) + args,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -969,22 +1023,31 @@ def git_local_branches(repo_root):
     listed = git("for-each-ref", "--format=%(refname:short)", "refs/heads/")
     if listed.returncode != 0:
         return False, [], "无法列出本地分支"
-    return True, [line.strip() for line in listed.stdout.splitlines() if line.strip()], ""
+    return (
+        True,
+        [line.strip() for line in listed.stdout.splitlines() if line.strip()],
+        "",
+    )
 
 
 def git_out(repo_root, *args):
     """跑一条只读 git 命令并返回 stdout；不可用或失败时返回 None。"""
     try:
         proc = subprocess.run(
-            ("git",) + args, cwd=repo_root, capture_output=True,
-            text=True, timeout=30,
+            ("git",) + args,
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     return proc.stdout if proc.returncode == 0 else None
 
 
-def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches, out=git_out):
+def check_branch_visibility(
+    result, repo_root, tasks, lister=git_local_branches, out=git_out
+):
     """组 N：未合入 main 但已有提交的任务分支，其认领是否已登记。
 
     与 merge 组互补：merge 组只看**已合入**的分支是否登记过；本组看**还没合入**
@@ -1025,11 +1088,16 @@ def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches,
         matched = next((s for s in segments[1:] if s in status), None)
         if matched is None or not is_waiting(status[matched]):
             continue
-        count = (out(repo_root, "rev-list", "--count", "main..%s" % branch) or "").strip()
+        count = (
+            out(repo_root, "rev-list", "--count", "main..%s" % branch) or ""
+        ).strip()
         if count in {"", "0"}:
             continue  # 没有 main 之外的提交，不是在途工作
         # 尾斜杠表示「列出目录内容」；不带则只返回目录条目本身，查不到文件
-        listing = out(repo_root, "ls-tree", "--name-only", branch, "--", CLAIMS_DIR + "/") or ""
+        listing = (
+            out(repo_root, "ls-tree", "--name-only", branch, "--", CLAIMS_DIR + "/")
+            or ""
+        )
         entry = "%s（领先 main %s 提交）" % (branch, count)
         (pending if matched in listing else unregistered).append(entry)
 
@@ -1078,12 +1146,18 @@ def main():
         return 2
 
     if args.json:
-        print(json.dumps({
-            "total": len(result.checks),
-            "passed": len(result.passed),
-            "failed": len(result.failed),
-            "checks": result.checks,
-        }, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "total": len(result.checks),
+                    "passed": len(result.passed),
+                    "failed": len(result.failed),
+                    "checks": result.checks,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print("=== discipline: %s ===" % args.repo)
         groups = collections.OrderedDict()

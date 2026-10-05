@@ -101,7 +101,14 @@ def _git_common_dir_cached(key: str) -> str:
     # encoding 必须显式指定：Windows 上 text=True 默认按 GBK 解码，而 git 输出
     # 的路径/提交信息含 UTF-8 中文，会直接抛 UnicodeDecodeError。
     out = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",

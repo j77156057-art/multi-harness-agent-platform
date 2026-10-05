@@ -274,6 +274,29 @@ def test_cli_refuses_when_not_on_main(repo: Path):
     assert "只允许在 main 上运行" in r.stderr
 
 
+def test_cli_detects_foreign_git_activity(repo: Path):
+    """别人裸跑 git 时留下的锁，必须在动手前就被挡下。
+
+    互斥锁只拦走本入口的合并。实测踩到过：锁取到了、门禁也绿，
+    但 `git merge` 写 ORIG_HEAD 时撞上别的 agent，报
+    `fatal: update_ref failed for ref 'ORIG_HEAD'`。等到 git 自己撞锁就太晚了。
+    """
+    for lock_name in ("index.lock", "ORIG_HEAD.lock"):
+        (guard.git_common_dir(repo) / lock_name).write_text("", encoding="utf-8")
+        r = _cli(repo, "merge", "main", "--task-id", "T-0")
+        assert r.returncode == 7, (lock_name, r.returncode, r.stdout, r.stderr)
+        assert "另一个 agent 正在这个仓库跑 git" in r.stderr
+        (guard.git_common_dir(repo) / lock_name).unlink()
+
+
+def test_cli_detects_foreign_merge_in_progress(repo: Path):
+    """别人发起的合并正在进行 —— 也必须挡下，不能接管别人的现场。"""
+    (guard.git_common_dir(repo) / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    r = _cli(repo, "merge", "main", "--task-id", "T-0")
+    assert r.returncode == 7, (r.returncode, r.stdout, r.stderr)
+    assert "进行中的合并" in r.stderr
+
+
 def test_cli_releases_lock_when_gates_skipped(repo: Path):
     """跳过门禁的路径：不提交，但**必须释放锁**。
 

@@ -4,6 +4,7 @@
 git 调用通过 `lister` / `out` 两个注入点替换，**不monkeypatch subprocess**
 （早先直接替换 subprocess 模块，污染了同目录的 test_discipline.py）。
 """
+
 import importlib.util
 import os
 
@@ -47,6 +48,7 @@ def _failed(result):
 
 # ---------- 应该变红 ----------
 
+
 def test_unregistered_wip_branch_fails():
     """开工中的分支既没登记到 main、也没登记到自己分支 → 变红。"""
     messages = _failed(_run(["agent/local/x/MVP-07/a1"], claim_files=()))
@@ -65,6 +67,7 @@ def test_five_segment_standard_branch_name_detected():
 
 # ---------- 不该变红 ----------
 
+
 def test_registered_on_own_branch_does_not_fail():
     """已在自己分支登记、只是还没合入 main → 不变红（正确流程的中间态）。"""
     assert _failed(_run(["agent/local/x/MVP-07/a1"])) == []
@@ -74,7 +77,8 @@ def test_pending_registration_is_still_reported():
     """不报红，但要让复核者看得见有待合入的登记。"""
     result = _run(["agent/local/x/MVP-07/a1"])
     notes = [
-        c["msg"] for c in result.checks
+        c["msg"]
+        for c in result.checks
         if c["group"] == "branches" and "待合入" in c["msg"]
     ]
     assert notes and "MVP-07" in notes[0], notes
@@ -105,6 +109,7 @@ def test_unknown_branch_shapes_skipped_quietly():
 
 # ---------- fail-closed ----------
 
+
 def test_lister_failure_fails_closed():
     """git 不可用 → 报红，不静默放行。"""
     result = d.Result()
@@ -115,6 +120,7 @@ def test_lister_failure_fails_closed():
 
 
 # ---------- 真实仓库（只读） ----------
+
 
 def test_git_local_branches_on_real_repo():
     ok, branches, detail = d.git_local_branches(".")
