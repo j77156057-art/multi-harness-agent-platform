@@ -1749,8 +1749,9 @@ MVP-10b）无人拦，读 TASKS.md 的人会拿到已被推翻的结论。本次
 ### 落地时查出的真实缺陷
 
 1. TASKS.md 关键路径仍是 7 节副本 —— 本次断言的直接目标，已修
-2. `docs/claims/` 里 `claim-nullable` 有两个内容完全相同的文件（拆分工具按 TASKS.md
-   的行生成，而该任务在表里出现了两次）。**待授权删除** `18-workbuddy--claim-nullable.md`
+2. `docs/claims/` 里 `claim-nullable` 曾有两个内容完全相同的文件（拆分工具按 TASKS.md
+   的行生成，而该任务在表里出现了两次）。**已由 `ec7ae01` 去重并重编号为 01~24**，
+   本任务落地时该文件已不存在，无需再删
 
 ### 与 main 上认领登记拆分的冲突（本任务的主要波折）
 
@@ -1768,14 +1769,21 @@ Qoder 已把认领登记拆成 `docs/claims/*.md` 并同步改了 discipline.py�
 ### 验证结果
 
   docstate    : 90 项检查，0 项失败
-  discipline  : 28 项检查，1 项失败（唯一失败为 claim-nullable 重复文件，待授权删除）
+  discipline  : 32 项检查，0 项失败（main 合入前为 28 项，本任务净增 4 项）
+  ruff check  : All checks passed!
+  ruff format : 40 files already formatted
+  pytest      : 111 passed
   负向测试    : TASKS.md 关键路径改回 7 节 → FAIL；还原转绿
                 任务表插入重复 task_id 行 → FAIL「任务表无重复 task_id」
+                认领文件序号撞号（我的 23- 与 main 已有 23-）→ FAIL「认领文件序号唯一」
+                —— 这条是 main 新加的断言，落地第一个就抓到我自己的文件
+
+commit：`90047d5`（已合入 main）
 
 已知问题：
-- `docs/claims/18-workbuddy--claim-nullable.md` 与 `14-` 内容哈希相同，待授权删除
-- 认领登记表的「序号」前缀仍可能重复（拆分后已无序号列，改用文件名前缀）
 - `traceability.md` 的「强制状态」列由人手写，无断言覆盖
+- 本任务卡里曾把「待授权删除某文件」写成待办，实际那份文件已由 `ec7ae01` 删除 ——
+  **陈旧的待办比没有待办更坏**，它让人以为还有事没做。已改为记录实际结果
 ~~~
 
 ## 提交前自检
