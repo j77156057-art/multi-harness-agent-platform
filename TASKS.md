@@ -32,6 +32,7 @@
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
+| gate-baseline-repair | OpenCode | R10-fix-10 | 🟢 doing | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | 🟢 doing ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -73,6 +74,7 @@
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
+| 14 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -715,6 +717,47 @@ test_id：MVP-PROCESS-001
 
 **本任务自己又违反了登记规则第 0 条**（先加任务表行、后补认领登记），被自己写的
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
+~~~
+
+### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（doing）
+
+~~~text
+任务编号：gate-baseline-repair
+负责人 Harness：OpenCode
+开始时间：2026-10-05 10:22
+依赖任务：R10-fix-10（✅ done，但缺任务卡）
+工作区：.worktrees/opencode/
+真相源引用：AGENTS.md §1（认领登记）、§5（分支与提交）、
+            dev-convention.md H-7（工作区隔离）、「会被门禁红掉的」清单
+允许修改目录：TASKS.md
+禁止修改目录：backend/**、docs/spec/**、tools/**、docs/traceability.md
+交付分支：agent/local/opencode/gate-baseline-repair/a1
+背景：main 在 b4619a9 上 discipline 仍有 1 项失败（24 项检查，1 失败）——
+      `R10-fix-10` 在任务表与认领登记里都标了 ✅ done，但 TASKS.md 里没有对应的
+      `### R10-fix-10` 任务卡。该断言会卡住所有 AI 的 ./scripts.sh check。
+      同一时间窗内 WorkBuddy 工作区处于 detached HEAD（1b51e2c），H-7 高危组合。
+完成标准：
+  1. `### R10-fix-10` 任务卡补齐，字段与该任务实际改动一致     ✅
+  2. `discipline` 24 项检查 0 失败                              ✅
+  3. `docstate` 90 项检查 0 项失败                              ✅
+  4. WorkBuddy 工作区脱离 detached HEAD，未提交改动零丢失       ✅
+  5. 本任务自身也留下任务卡（dogfood 纪律检查器）              ✅
+test_id：MVP-PROCESS-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：doing
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
+已知问题：
+  - 完成标准 1 的卡片内容依据 R10-fix-10 的 commit `32f4e45` 的正文与 §38 记载
+    回填；本人未参与该任务，卡片内容为**事后追认**，不是第一手记录。若与
+    WorkBuddy 自己的追认不一致，以 WorkBuddy 的版本为准。
+  - TASKS.md 正被至少 3 个 AI 并发编辑（Qoder、TRAE、WorkBuddy 均有未提交改动），
+    本卡合入 main 时大概率需要人工解决冲突。这是登记表机制的结构性问题，
+    不是本任务能修的，建议后续单独评估（H-5 只约定 backend/docs 目录边界，
+    未约定 TASKS.md 的并发写协议）。
+  - 完成标准 4 涉及移动 `agent/workspace/workbuddy` 引用，超出 H-7 规则 2
+    「只移动自己拥有的分支引用」的边界，已事先取得用户确认后执行。
 ~~~
 
 ### graph-traceability：依赖图机械校验 + 补 traceability.md（done）
