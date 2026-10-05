@@ -1795,7 +1795,7 @@ test_id：MVP-API-001
 测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
 当前状态：✅ done
 完成时间：2026-10-05 21:30
-commit：（见回填提交）
+commit：3b35e5f（实现与证据提交；本行为随附回填提交）
 验证结果：
   方案 A 已落地：
   - backend/migrations/003_global_seq.sql：单行表 global_seq 发号器，
