@@ -35,9 +35,12 @@
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | ✅ done（初验 Conditional Fail，P1 由 MVP-03-amend 闭环；TRAE 20:47 凭证据关单） | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
-| MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` `MVP-TRANSITION-MIRROR-001` || graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
+| gate-baseline-repair | OpenCode | R10-fix-10 | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
+| trace-closure | OpenCode | MVP-03-amend | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
+| merge-interlock | OpenCode | discipline | ✅ done | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
@@ -45,6 +48,7 @@
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
+| message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -105,6 +109,8 @@
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
+<!-- message-refs-persist → docs/claims/30-trae--message-refs-persist.md
+     （原拟用 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延为 30） -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -558,6 +564,101 @@ commit：9b4b663
 已知问题：
   - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
+~~~
+
+### merge-interlock：给共享 main 合并加互斥锁（✅ done）
+
+~~~text
+任务编号：merge-interlock
+负责人 Harness：OpenCode
+开始时间：2026-10-05 20:40
+依赖任务：discipline（✅ done，工具形态参照它）
+工作区：.worktrees/opencode/
+真相源引用：AGENTS.md §0与 H-7（共享工作区会丢提交，本项目已丢 4 次）、
+            dev-convention.md「会被门禁红掉的」/「靠自觉的」两张清单、
+            TASKS.md 违规记录章节
+允许修改目录：tools/mergeguard/**、backend/tests/test_merge_guard.py、
+            scripts.sh、Makefile、docs/dev-convention.md、docs/traceability.md、
+            TASKS.md
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/opencode/merge-interlock/a1
+背景：今天实际发生两次，不是理论风险。
+      (1) `git merge` 在根工作区解完冲突后，`MERGE_HEAD` 凭空消失、工作区恢复
+          干净 —— 被并发 git 操作静默 abort，我的冲突解决成果零提交丢失。
+      (2) 再次尝试直接 `fatal: update_ref failed for ref 'ORIG_HEAD'`。
+      根因：7 个 worktree 共享同一个 `.git`，但只有 `HEAD` 与 index 是per-worktree
+      的，`refs/`、`ORIG_HEAD`、锁文件全是共享的，而根工作区按 AGENTS.md 是
+      「协调者专用合并区」——**没有任何互斥保护**。dev-convention.md 的
+      「靠自觉的」清单里已列「禁止在 main 上直接提交 —— 没有 hook，纯自觉」，
+      合并这一环连自觉都没有。
+完成标准：
+  1. 合并互斥锁落在 git common dir（跨 worktree 共享），非per-worktree   ✅
+  2. 用原子 `mkdir` 实现；已有锁时**明确报错并打印持有者与时间**，不静默等待 ✅
+  3. 锁持有者进程已死且超过 TTL 时可判定为 stale 并接管                  ✅
+  4. `scripts.sh merge <branch>` 受控入口：脏工作区拒绝、冲突不自动 abort、
+     门禁红则不提交merge commit✅
+  5. `status` 子命令可查当前锁状态                                     ✅
+  6. `backend/tests/test_merge_guard.py` 覆盖并发拒绝、stale 接管、
+     脏工作区拒绝、锁释放                                             ✅
+  7. **修`Makefile` 的 `check` 不含 discipline**（与 `scripts.sh` 不等价） ✅
+  8. `docstate` / `discipline` / `ruff` / `pytest` 全绿                 ✅
+test_id：MVP-MERGE-LOCK-001、MVP-PROCESS-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：done
+commit：d5fb2fd（登记）+ 本卡收尾
+完成时间：2026-10-05 21:20
+验证结果：
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，3 失败 —— **全部继承自 main**
+    （`verify-mvp-04`孤儿 / `MVP-04-inject` 未登记 / 缺 `verify-mvp-04` 卡），
+    本任务未引入任何新失败
+  - ruff check : All checks passed!
+  - ruff format: 41 files already formatted
+  - pytest     : 125 passed（本任务前 111）
+  - `test_merge_guard.py` **连跑 15 次 0 失败**（初版有~55% flake，见下）
+  - 目录边界  : tools/mergeguard/**、backend/tests/test_merge_guard.py、
+                scripts.sh、Makefile、docs/dev-convention.md、
+                docs/traceability.md、TASKS.md
+
+### 工具自身在开发中被抓出的 4 个缺陷（全部已修）
+
+1. **锁的临界路径上 spawn `git rev-parse`**。初版 `git_common_dir()` 每次调用都
+   起一个 git 子进程。并发 8 线程抢锁时随机 `CalledProcessError(0xC000013A)`
+   （STATUS_CONTROL_C_EXIT），实测 **11/20 次失败**。已改为纯文件探测
+   （读 `.git` 是目录还是文件），子进程只作兜底。**互斥原语的热路径上不该有
+   任何子进程**——它必须能在 git 不可用时也能工作。
+2. **线程异常静默吞掉**。并发测试第一版只统计 winners/losers，结果 8 个线程里
+   有 1 个抛了非 `LockError` 的异常后**静默消失**，pytest 默认不会因线程抛异常
+   而失败，于是断言「losers == 7」变成 6，看起来像业务 bug。已改为显式收集
+   `errors` 并先断言它为空。教训：线程里的异常必须显式收集。
+3. **`subprocess(text=True)` 在 Windows 上按 GBK 解码**。本仓库 commit message
+   全是中文，第一次真合并 `git log` 就会抛 `UnicodeDecodeError`。已在
+   `guard.py` / `cli.py` /测试 helper 全部显式指定
+   `encoding="utf-8", errors="replace"`。
+4. **`REPO_ROOT` 硬编码成脚本所在仓库**。合并的语义是「把你脚下这个仓库的 main
+   合进去」，取脚本路径会在跨仓库调用时**静默合错地方**。已改为
+   `git rev-parse --show-toplevel` 取 cwd 所属仓库。
+
+前两个是单测抓到的，后两个是**CLI 端到端演练**抓到的 —— 演练脚本一度被我
+判定为「环境问题」，但它暴露的是自己的真bug，所以最后把演练固化成了
+`test_cli_*` 5 个用例。**只做单测会漏掉 3 和 4**：它们只在真跑 `cli.py` 时
+才发生。
+
+### 对「安静窗口」一词的更正
+
+我在提出本任务时用了「等一个安静窗口」的说法。那是错的表述——它把「机制缺失」
+包装成了「操作方案」。本任务就是那个机制：等待是运气，锁才是控制。
+  - 本任务**不阻止**直接在根工作区跑裸 `git merge`。git 没有提供「禁止某命令」
+    的机制，wrapper 只能提供受控入口与协作约定。它能保证的是：用受控入口时不会
+    互相踩，且踩了会明确失败；裸跑仍然可能撞锁。这一条必须写进 dev-convention，
+    否则会给人「已经安全了」的错觉。
+  - 锁只保护合并，不保护 `git commit` 到 `refs/heads/main`。后者由分支策略
+    （禁直接提交 main）约束，目前仍无机制强制。
+  - 完成标准 7 是顺带发现的另一个洞：`make check` 只跑 docstate+lint+test，
+    **不跑 discipline**，比 `./scripts.sh check` 弱。AGENTS.md 要求跑
+    `scripts.sh check`，所以弱点未造成实际损失，但两者同名不同义是陷阱。
+  - 本任务完成后仍需单独合并 `gate-baseline-repair`（9 commits，纯文档）。
+    届时应改用 `./scripts.sh merge` 走受控入口，顺带验证本工具在真实场景下可用。
 ~~~
 
 ### plan-evidence-failclosed：evidence source 校验改 fail-closed + 补断言（✅ done）
@@ -1389,6 +1490,142 @@ test_id：MVP-PROCESS-001
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
+> **本卡已撤回**：TRAE 在 `5a1876e`（`agent/local/trae/r10-fix-10-card/a1`）已就同一
+> 缺陷补卡并合入 main，其版本标题更准确（`R10-fix-10：task_claims 权威唯一键缺陷修复`），
+> 且登记了独立任务 `R10-fix-10-card`。合入本卡会为同一 task_id 产生两张任务卡 ——
+> 这正是本项目反复出现过的「两份真相」问题。**保留 TRAE 的版本，本卡作废。**
+> 本任务（`gate-baseline-repair`）的实际价值只剩解除 WorkBuddy 的 detached HEAD，
+> 以及下面记录的过程教训。
+
+### trace-closure：补 MVP-TRANSITION-MIRROR-001 + 收窄 CORE-STATE-COVERAGE-001（doing）
+
+~~~text
+任务编号：trace-closure
+负责人 Harness：OpenCode
+开始时间：2026-10-05 10:40
+依赖任务：MVP-03-amend（✅ done，已合入 main `b4619a9`）
+工作区：.worktrees/opencode/
+真相源引用：dev-convention.md H-4（没有 test_id 的完成标准不可验收）、
+            R10 §26（检查 ID 阶段落点）、§10（迁移表）、§37.7（事件 allowlist）、
+            docs/spec/mvp-task-checklist.md MVP-11
+允许修改目录：docs/traceability.md、TASKS.md
+禁止修改目录：backend/**、docs/spec/**、tools/**、docs/dev-convention.md
+交付分支：agent/local/opencode/gate-baseline-repair/a1（与 gate-baseline-repair 同分支，
+          见「已知问题」第 1 条）
+背景：两处追溯登记与实现脱节。
+      (1) `test_transition_mirror.py`（TRAE 于 MVP-03-amend 交付，4 项断言：138 个
+          展开三元组双向零差异、展开三元组计数、R10 §10 的状态/事件全部在代码注册、
+          表结构诊断为空）没有任何 test_id，只挂在 `DOC-STATE-001` 名下。H-4 明确
+          「没有 test_id 的完成标准不可验收」。
+      (2) `DOC-PLAN-001` 标注「⚠️ 仅声明 / 未实现（MVP-03 交付）」，但 MVP-03 的
+          `backend/app/plan/validator.py` 与 `test_state_plan.py` 已实现其四项要求
+          （拒绝环、非法引用、超规模、不可满足 evidence）。该行是过期信息。
+完成标准：
+  1. `MVP-TRANSITION-MIRROR-001` 登记，并指明 4 项断言分别是什么     ✅
+  2. `DOC-PLAN-001` 强制状态改为「✅ 有断言」并指明测试文件          ✅
+  3. `CORE-STATE-COVERAGE-001` 收窄到「行为层」并写明与
+     `MVP-TRANSITION-MIRROR-001`（声明层）的分工                    ✅
+  4. 「现状小结」的 ID 总数与有断言数重新算准                       ✅
+  5. `docstate` / `discipline` / `ruff` / `pytest` 全绿              ✅
+test_id：MVP-PROCESS-001、MVP-TRANSITION-MIRROR-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：done
+commit：412e7f2（登记）、本卡收尾
+完成时间：2026-10-05 10:52
+验证结果：
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，0 项失败
+    （登记后、登记 `MVP-TRANSITION-MIRROR-001` 之前，traceability 组曾当场报出
+      `未登记=['MVP-TRANSITION-MIRROR-001']` —— 工具对自己生效）
+  - ruff check : All checks passed!
+  - ruff format: 29 files already formatted
+  - pytest     : 85 passed in 4.26s
+  - 目录边界  : docs/traceability.md + TASKS.md
+    （git diff --name-only main...HEAD）
+  - 数字复核  : 29 个 ID / 10 有断言 / 1 部分 / 18 仅声明，
+    按四张表逐行点数得出
+已知问题：
+  - 本任务与 `gate-baseline-repair` 共用同一交付分支。原因是 TASKS.md 正在被
+    多个 AI 并发编辑（本分支两次 merge main 都产生冲突），合并次数越少，
+    冲突窗口越小。这是对并发写协议的临时规避，不是推荐做法。
+  - 本任务只改追溯登记，**不新增任何断言**。`MVP-TRANSITION-MIRROR-001` 指向的
+    4 项断言已由 MVP-03-amend 写好，本任务只是给它们一个 ID。登记表声称的
+    「✅ 有断言」等级不因此变高——`traceability.md` 自己写明「强制状态列本身
+    不被断言，判断某个 ID 是否真的覆盖了它声称的行为仍需人读」。
+  - 未处理：`CORE-SPLIT-001` 标注「未实现（MVP-03/04）」。核对后确认该标注
+    **正确**——MVP-03-amend 只补了 `split_parent_blocked` / `all_children_merged`
+    两条边，代码里没有任何创建子任务、继承预算、写父子依赖边的逻辑
+    （`parent_task_id` 只是投影上的字段）。故不在本任务范围内改动。
+~~~
+
+### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（doing）
+
+~~~text
+任务编号：gate-baseline-repair
+负责人 Harness：OpenCode
+开始时间：2026-10-05 10:22
+依赖任务：R10-fix-10（✅ done）
+工作区：.worktrees/opencode/
+真相源引用：AGENTS.md §1（认领登记）、§5（分支与提交）、
+            dev-convention.md H-7（工作区隔离）、「会被门禁红掉的」清单
+允许修改目录：TASKS.md
+禁止修改目录：backend/**、docs/spec/**、tools/**、docs/traceability.md
+交付分支：agent/local/opencode/gate-baseline-repair/a1
+背景：main 在 b4619a9 上 discipline 仍有 1 项失败（24 项检查，1 失败）——
+      `R10-fix-10` 在任务表与认领登记里都标了 ✅ done，但 TASKS.md 里没有对应的
+      `### R10-fix-10` 任务卡。该断言会卡住所有 AI 的 ./scripts.sh check。
+      同一时间窗内 WorkBuddy 工作区处于 detached HEAD（1b51e2c），H-7 高危组合。
+完成标准：
+  1. `### R10-fix-10` 任务卡补齐                ⚠️ 作废，见下方撤回说明
+  2. `discipline` 24 项检查 0 失败                            ✅
+  3. `docstate` 90 项检查 0 项失败                            ✅
+  4. WorkBuddy 工作区脱离 detached HEAD，未提交改动零丢失     ✅
+  5. 本任务自身也留下任务卡（dogfood 纪律检查器）              ✅
+test_id：MVP-PROCESS-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：done
+commit：df30958（登记）、b4d771c（补卡）、d8e5201（merge main）、本卡收尾
+完成时间：2026-10-05 10:31
+验证结果：
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，0 项失败（修复前 24 项 1 失败）
+  - ruff check : All checks passed!
+  - ruff format: 19 files already formatted
+  - pytest     : 54 passed in 0.67s
+  - 目录边界  : 仅 TASKS.md（git diff --name-only main...HEAD）
+  - detached  : `git -C .worktrees/workbuddy symbolic-ref --short HEAD`
+                 → agent/workspace/workbuddy（修复前为 detached HEAD 1b51e2c）
+
+### 过程教训：写卡片之前必须先查 main
+
+完成标准 1 作废的原因值得单独记：**我在补卡之前没有重新确认 main 的状态**。
+从「discipline 报缺 R10-fix-10 卡」到「我补完卡准备合入」之间，TRAE 已经用
+`R10-fix-10-card` 把同一个缺陷解决了并合入 main（`5a1876e`）。如果我不检查
+就合入，同一个 `task_id` 会有两张任务卡 —— 这正是本项目第 3、4 次协作事故的
+同构错误（两份真相），而且是我在评审别人时反复指出的那一条。
+
+根因：登记表类缺陷的修复有**天然的竞态**——它是全局单点的（缺一张卡），
+而参与者有多个。正确做法是动手前先 `git fetch` + 重新读 TASKS.md 的相关章节，
+而不是基于几分钟前的快照开工。
+
+第二条教训：**合并冲突不是异常，是这个仓库的常态**。本任务 merge main 时
+TASKS.md 出现 2 处冲突（任务表状态列、认领登记序号），因为 Qoder、TRAE、
+WorkBuddy 在同一时间窗内各自改了同一张表两处。冲突本身好解（列取并集、
+序号重排），难的是意识到「两张真相」正在被制造。
+
+已知问题：
+  - TASKS.md 正被多个 AI 并发编辑，本任务 merge 时已实际发生 2 处冲突。
+    H-5 只约定 backend/docs 目录边界，未约定 TASKS.md 的并发写协议。
+    建议后续单独评估（例如：任务表/认领登记改为按 task_id 拆文件，或登记
+    走独立 API 串行化）。
+  - 完成标准 4 涉及移动 `agent/workspace/workbuddy` 引用，超出 H-7 规则 2
+    「只移动自己拥有的分支引用」的边界，已事先取得用户确认后执行。
+    采用 CAS（compare-and-swap）方式先把该引用快进到工作区当前 HEAD，
+    再切分支，保证工作树零变化、未提交改动零丢失。
+  - 本任务未修 `fix-flaky-init` 缺卡（它在本任务开工后短暂出现，随后由
+    WorkBuddy 自行撤回该任务）。这类「登记了又撤回」的卡片治理无规则可依。
+~~~
+
 ### graph-traceability：依赖图机械校验 + 补 traceability.md（done）
 
 ~~~text
@@ -1790,9 +2027,13 @@ commit：2440566
         未来要混合排序消息与事件，需序列表或消息入事件流，均要动 migrations
         （MVP-02 范畴）；checklist MVP-08 的交付条目原文只要求「消息与
         task_events 关联」（task_id 列已做），故不阻塞；
-     b) PostMessage 接受 refs 但 task_messages 无列、service 接收即丢、GET 不回显
-        （仅 POST 响应原样回显），契约静默说谎——修 a 时一并删字段或补列；
-        【a 已另案关闭，b 仍开放】
+     b) ✅ 已关闭（message-refs-persist，2026-10-05）：迁移 004 为
+        task_messages 增加 refs 列（JSON TEXT NOT NULL DEFAULT '[]'），
+        post_message 校验（list[str]、空串拒绝）后同事务落库，
+        list_messages 解码为数组回显；存量行回填 []。POST→GET 往返、
+        缺省 []、非法值 400/422、旧库升级回填均有机械断言。
+        原始问题存档：PostMessage 曾接受 refs 但无列、service 接收即丢、
+        GET 不回显（仅 POST 响应原样回显），契约静默说谎。
   4. MVP-05/06 落地后，须把 test_api_flow.py 里两处 service.start_task /
      record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
      Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
@@ -2102,7 +2343,8 @@ commit：087eb93（验收证据提交；本行为随附回填提交）
   1. 错误码越封闭表：claim.concurrent_claim、request.conflict（prep §0.1）；
   2. HTTP 状态不符：review.self_review_forbidden 实现 409/表定 403，
      request.invalid 服务层发 422/表定 400；
-  3. 消息 per-group seq 非全局、refs 字段接收即丢（schema 级，需 migration）；
+  3. 消息 per-group seq 非全局（已由 message-global-seq 关闭）、
+     refs 字段接收即丢（已由 message-refs-persist 关闭，迁移 004）；
   4. 两处脚手架迁移待 MVP-05/06 换成真实 HTTP 路径后 MVP-API-001 转 ✅。
   违规留档：第三次「先合 main 后验收」（3de2115）三段式记录见上文。
   MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
@@ -2185,7 +2427,8 @@ commit：3b35e5f（实现与证据提交；本行为随附回填提交）
     消息 seq=2，同空间连续。
   范围说明：R10/prep 均未改（openapi.yaml L1215 本就要求全局空间，
   本次是实现回归契约）；docs/traceability.md 仅追加关闭记录（跨任务
-  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）仍开放。
+  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）已由
+  message-refs-persist（迁移 004，2026-10-05）关闭。
 ~~~
 
 ### GATE-MERGE-CHECK-01：已合入 main 的任务必须已登记、已完成、证据完整（✅ done）
@@ -2244,4 +2487,62 @@ commit：1e6141d、724e013（原分支实现）；c244925（合 main 并移植�
     浅克隆 fail-closed 集成）；
   - 不回归：docstate 90/0、backend pytest 113 项退出 0、ruff check+format 全过、
     MVP-08 prep 契约 FAILURES 0、变异 10/10。
+~~~
+
+### message-refs-persist：消息 refs 字段落库与回读（✅ done，关闭 MVP-08 验收遗留 3b）
+
+~~~text
+任务编号：message-refs-persist
+负责人 Harness：TRAE
+开始时间：2026-10-05 22:21
+依赖任务：MVP-08（message-global-seq 之后，同面契约）
+工作区：.worktrees/trae/
+真相源引用：docs/prep/MVP-08/openapi.yaml（post_message 请求体 refs、
+            Message schema refs: string[]）、R10 §19（read_context 增量读消息）、
+            backend/migrations/001_initial.sql（task_messages 现状无 refs 列）
+允许修改目录：backend/migrations/** backend/app/tasks/** backend/app/api/**
+            backend/tests/** docs/** TASKS.md
+禁止修改目录：docs/spec/** tools/** docs/prep/**
+交付分支：agent/local/trae/message-refs-persist/a1
+背景：MVP-08 验收遗留 3b。POST /groups/{id}/messages 接收 refs 且在响应里
+      回显，但 task_messages 表没有该列，service 的 INSERT 不带 refs，
+      GET 走 SELECT * 永远读不回——引用信息静默丢失。与 3a 同属
+      「实现未回归 openapi 契约」，openapi 已声明故 R10/prep 无需改。
+完成内容：
+  1. 迁移 004_message_refs.sql：ALTER TABLE task_messages ADD COLUMN
+     refs TEXT NOT NULL DEFAULT '[]'（JSON TEXT，沿用 payload_json 惯例；
+     仅加带默认值列，SQLite 无需重建表）；存量行由默认值回填 []；
+  2. service.post_message：新增 _normalise_refs（None→[]；非 list 或
+     含非 str/空白元素→InvalidInput；保序不去重），在写事务内随消息
+     同 INSERT 落库（json.dumps ensure_ascii=False）；
+  3. service.list_messages：SELECT * 后将 refs JSON 文本解码为数组，
+     缺省/存量行得到 [] 而非 null；POST 响应 refs 与落库值一致；
+  4. 测试：
+     - test_api_events_messages.py：refs POST→GET 原样读回（3 条引用，
+       含斜杠/冒号的值）、不带 refs 读回 []；元素非字符串→边缘 400
+       request.invalid，空白元素→服务层 422 request.invalid；
+     - test_database_events.py：新增旧库（仅 001~003）升级专项——
+       004 应用计数、DDL 含新列、存量行 refs=='[]'、升级后新消息
+       多 refs 往返、服务层直接调用三种非法形状抛 InvalidInput；
+       既有全局 seq 迁移用例的 applied 期望 1→2 并追加存量 refs 断言。
+test_id：MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done
+完成时间：2026-10-05 22:30
+commit：cf2b46c（实现与证据提交；本行为随附回填提交）
+验证结果：
+  - backend pytest：116 项退出码 0（较基线 113 新增 3：2 API + 1 迁移）；
+  - ruff check app tests：All checks passed；ruff format --check：41 files；
+  - docstate：90 项 0 失败；discipline：39 项 0 失败；
+    tools pytest：14 passed；
+  - MVP-08 prep：check_contract FAILURES 0；mutation_test caught 10/10；
+  - 范围说明：R10/prep/openapi 均未改（refs 本就是 openapi 契约字段，
+    本次是实现回归契约）；docs/traceability.md 仅追加 3b 关闭记录
+    （跨任务登记，同 3a 先例）；MVP-08 验收卡与 message-global-seq 卡的
+    「3b 仍开放」标注同步更新。openapi 中 plan_id/review_id/
+    in_reply_to_seq/body_withheld/trusted 等未实现字段不在本任务范围。
+  合并后复验（main 已含 Qoder MVP-05，无代码冲突；claims 撞号顺延 30）：
+  backend pytest 135 项退出 0（116 + MVP-05 的 19）、ruff 49 files、
+  docstate 90/0、discipline 39/0、tools 14 passed、prep FAILURES 0、
+  mutation 10/10。
 ~~~

@@ -33,8 +33,41 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 代码风格 | `ruff check` / `ruff format --check` |
 | **登记表自身不自洽** | `tools/discipline` 42 项（CI + `scripts.sh check`） |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
+| **两个 agent 同时合并 `main`** | `tools/mergeguard` 互斥锁 —— **但仅在走 `./scripts.sh merge` 时** |
 | **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一且连续（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
 | **未合入 main 但已开工的分支，其认领是否已登记** | `tools/discipline` branches 组。**只对「分支有提交、main 仍写 waiting、且该分支自己也没有认领文件」变红**；已在自己分支登记只是待合并的**不报** —— 那是正确流程的中间态，报红等于惩罚正确行为。**只在多分支的本地克隆下有牙齿**，CI 只检出当前分支时近乎空跑 |
+
+### 合并必须走受控入口
+
+**7 个 worktree 共享同一个 `.git`。** 只有 `HEAD` 与 index 是 per-worktree 的，
+`refs/`、`ORIG_HEAD`、锁文件全部共享。而根目录按 H-7 是「协调者专用合并区」——
+所有合并挤在那里，曾经没有任何互斥。
+
+已实际发生两次，不是理论风险：
+
+1. 一次 `git merge` 解完冲突后 `MERGE_HEAD` 凭空消失、工作区恢复干净——
+   被并发的 git 操作静默 abort，冲突解决成果零提交丢失；
+2. 立即重试则 `fatal: update_ref failed for ref 'ORIG_HEAD'`。
+
+因此**合并 `main` 一律走**：
+
+~~~bash
+./scripts.sh lock                        # 先看锁状态
+./scripts.sh merge <branch> --task-id T-1   # 在根工作区执行
+~~~
+
+它与裸 `git merge` 的差别：先抢互斥锁（拿不到就明确失败并打印持有者，
+**不静默等待**——本项目的事故恰恰是静默的）、脏工作区直接拒绝、
+冲突不自动 abort、门禁红则不提交 merge commit。
+
+**它不能做什么（别误以为已经安全了）：**
+
+- **不阻止裸跑 `git merge`。** git 没有「禁止某命令」的机制，wrapper 只能提供
+  受控入口与协作约定。裸跑仍会撞锁。
+- **不保护 `git commit` 到 `refs/heads/main`。** 那条仍靠分支策略自觉
+  （见下方「靠自觉的」）。
+- **锁只挡合并，不挡 `git checkout` / `git reset`。** 在根工作区跑这两条
+  依然能移动所有人的 HEAD —— H-7 规则 1 的老问题，锁管不到。
 
 ### 靠自觉的（写了也没人会拦）
 
@@ -43,6 +76,8 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 - **禁止在 `main` 上直接提交** —— 没有 hook，纯自觉。**但经合并提交入主线的路径
   已被 discipline merge 组机械拦截**（已合入的任务必须已登记、已完成、卡证据完整）；
   残余盲区只剩直提 main：没有合并提交可供映射，要等 GitHub 分支保护（B 方案）
+- **禁止裸 `git merge`** —— 走 `./scripts.sh merge` 才有互斥锁，绕过它等于回到
+  事故前那套纯自觉
 - **禁止 `force push` / `rebase` 到非任务分支** —— 无强制
 - **只移动自己拥有的分支引用**（H-7 规则 2）—— 跨工作区共享引用，只能靠自觉
 - **R10 正文只读** —— 任何人都能改；本项目自己就改过（合法，走 §38 复审）
