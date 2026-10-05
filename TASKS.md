@@ -30,7 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
-| MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | 🟢 doing ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -68,6 +68,7 @@
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 10 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -688,6 +689,54 @@ commit：403e3a5
   pytest     : 20 passed
 已知问题：
   - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
+~~~
+
+### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（doing ★瓶颈）
+
+~~~text
+任务编号：MVP-04
+负责人 Harness：Qoder
+开始时间：2026-10-05 09:49
+依赖任务：MVP-02（✅ 已验收）、MVP-03（已合入 main `db9bc19`，状态 claimed 待验收）
+          ★ 依赖判据是「已合入 main 的代码」而非「已验收」——开工前已核对 main 上
+            backend/app/state/** 与 backend/app/plan/** 的实际接口。
+工作区：.worktrees/qoder/
+真相源引用：R10 §11（Claim、批量 Claim 和幂等）、§7（Adapter 的 claim/heartbeat）、
+            §8（tasks / claim_requests / task_claims / task_attempts / resource_leases
+            字段，含 R10-fix-09 与 R10-fix-10 的键修正）、§12（Attempt 和命令幂等键）、
+            §13（Lease、Heartbeat、fencing）、§10（claim / claim_deferred_resource /
+            lease_expire / reclaim / take_over 等迁移边）、§28（核心不变量）、
+            §26（CORE-CLAIM-001/002、CORE-LEASE-001、CORE-FENCE-001）
+允许修改目录：backend/app/claim/**、backend/app/lease/**、backend/tests/**
+            ── 跨任务改动（已在此登记，仿 fix-wal-lock-retry 卡的先例）：
+               docs/prep/MVP-08/check_contract.py 与 docs/prep/MVP-08/README.md ——
+               删除一条按设计已转红的哨兵断言（它断言 task_claims 没有 §8 行，
+               而该缺口 Q-6 已由 R10-fix-10 修复）。改动限于该 prep 目录，不碰 backend。
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**
+交付分支：agent/local/qoder/MVP-04/a1
+完成标准：
+  1. 两个真实 SQLite 连接并发 Claim 同一任务，只有一个成功（唯一 owner/attempt/Lease）
+  2. 重复 claim_request_id 返回首次结果；批量时按任务项返回首次结果，且每个任务项
+     （含失败项）都留下 task_claims 行，回放走 SELECT * FROM task_claims
+  3. Claim 走 BEGIN IMMEDIATE；条件 UPDATE 断言 RowsAffected == 1，guard 含
+     attempt_no < max_attempts OR budget_override_by IS NOT NULL
+  4. Lease 创建 / 续期 / 过期回收；旧 fencing epoch 的 heartbeat 与写入被拒
+  5. 资源预占失败只进 queued，不写 owner/attempt/Lease，且不是错误（R10 §11）
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
+测试命令：./scripts.sh check
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - ★ TASKS.md 建议本任务配 2 个 AI（一人 Claim/幂等、一人 Lease/fencing/巡检器）。
+    本人先做 Claim/幂等；若第二个 AI 加入，本卡更新后让出 backend/app/lease/** 与
+    对应测试，两边路径互不重叠。
+  - MVP-03 尚未「已验收」；若验收阶段改动 state/plan 的接口，本任务受影响部分需重跑。
+  - 与 MVP-08-prep 的关系：那份契约中的 Claim/幂等约定（IDEM-01～16）默认由本任务
+    落地，但 prep 不是实现，必须按当时的 R10 重新验证后再用。
 ~~~
 
 ## 提交前自检
