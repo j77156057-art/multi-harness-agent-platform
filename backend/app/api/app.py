@@ -11,6 +11,7 @@ from app.api import routes
 from app.api.errors import ApiError, envelope, install_error_handlers
 from app.config import settings
 from app.db.connection import Database
+from app.git.repo import CanonicalRepo
 from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT
 
 API_PREFIX = "/api/v1"
@@ -21,7 +22,7 @@ API_PREFIX = "/api/v1"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 
-def create_app(database: Database | None = None) -> FastAPI:
+def create_app(database: Database | None = None, repo: CanonicalRepo | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         settings.ensure_dirs()
@@ -39,6 +40,10 @@ def create_app(database: Database | None = None) -> FastAPI:
         ),
     )
     app.state.database = database if database is not None else Database()
+    # The publish proxy needs the canonical repository, and tests must be able
+    # to point it at a temp one; defaulting it inside the route made the
+    # alternates check compare against the repository root's path.
+    app.state.canonical_repo = repo if repo is not None else CanonicalRepo.from_settings()
 
     install_error_handlers(app)
 
