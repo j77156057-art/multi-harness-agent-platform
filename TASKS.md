@@ -64,6 +64,7 @@
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
 | claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
+| root-worktree-clean-review | TRAE | merge-interlock-review | 🟢 doing（被审对象 root-worktree-clean 分支，其任务行尚在作者分支未合 main） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -3267,4 +3268,41 @@ commit：611707a（结论提交；本行为随附回填提交）
   两组都照不到「未合入但标 done 且无 claim」的形态，属纪律检查盲区。
 
   评审后门禁（本分支仅 docs 变更）：docstate 90/0、discipline 42/0。
+~~~
+
+### root-worktree-clean-review：OpenCode root-worktree-clean 分支独立评审（doing）
+
+~~~text
+任务编号：root-worktree-clean-review
+负责人 Harness：TRAE
+开始时间：2026-10-06 03:42
+依赖任务：merge-interlock-review（被审分支包含整条 merge-interlock，旧 6 条为继承项）
+工作区：.worktrees/trae/
+真相源引用：AGENTS.md §0 与 H-7（仓库根目录只用于合并与跑门禁）；
+            被审分支作者卡（本文件搜 root-worktree-clean）；
+            merge-interlock-review 评审卡（本文件 L3170 起）
+被审分支：agent/local/opencode/root-worktree-clean/a1（tip f6080a5，
+          13 提交，merge-base d76eb07；自有提交 96bef8a / cc4e4af / 107fc94；
+          含整条未合入的 merge-interlock 9aaab42）
+允许修改目录：TASKS.md（仅本任务卡与本任务表行）、
+            docs/claims/42-trae--root-worktree-clean-review.md
+禁止修改目录：tools/**、backend/**、docs/spec/**、其他 harness 的 claim 与分支
+交付分支：agent/local/trae/root-worktree-clean-review/a1
+test_id：无编号 test_id（基础设施评审；机械证据为临时 git 仓库探针 +
+         detached worktree 实跑门禁与测试 + git merge-tree 合并树核查 +
+         双路独立代码复核）
+测试命令：detached worktree(f6080a5) 内 tools/discipline/discipline.py
+          与 pytest tools；tools/docstate/docstate.py；
+          tools/discipline/discipline.py（本分支 docs 变更后）
+当前状态：🟢 doing（取证完成，结论回填中）
+commit：（结论提交；本行随附回填）
+
+背景与评审计划：
+  作者意图：把「在共享主工作区做开发/留冲突」从「只挡住当次 mergeguard 合并」
+  升级为「所有人的 discipline 全局变红」的持续施压；实现为 discipline 新增
+  rootworktree 组（git rev-parse --git-common-dir 反推主工作区；
+  .git/MERGE_HEAD 存在即放行；fail-closed），随后又加 discipline --skip-group
+  并由 mergeguard 合并时豁免本组。评审方法：不采信提交信息，自有提交全量 diff
+  逐行读 + 临时仓库多场景机械探针 + 分支 tip detached worktree 实跑 +
+  独立子 agent 双路复核。结论随后回填。
 ~~~
