@@ -38,7 +38,7 @@
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
-| MVP-08 | — | MVP-02 MVP-03 | ⏳ waiting | — | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08 | Qoder | MVP-02 MVP-03 | 🔍 review | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
@@ -77,6 +77,7 @@
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
+| 16 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1018,6 +1019,76 @@ commit：8c0233a
   - 首次合入 main 时被别的 AI 在根工作区执行 `git reset` 打断（reflog
     `3d8e87d HEAD@{0}: reset: moving to HEAD`），进行中的合并被清空、重做一次。
     已提交的任务分支未受影响。根工作区是共用的合并区，建议合并时避免并发操作。
+~~~
+
+### MVP-08：REST API、群聊与消息事件（review）
+
+~~~text
+任务编号：MVP-08
+负责人 Harness：Qoder
+开始时间：2026-10-05 19:20
+依赖任务：MVP-02（✅ 已验收）、MVP-03（已合入 main `db9bc19`，claimed 待验收）、
+          MVP-04（已合入 main `e656058`，review）
+          ★ 依赖判据同 MVP-04：以「已合入 main 的代码」为准。开工前已核对 main 上
+            app/claim/**、app/lease/**、app/state/**、app/spec.py 的实际接口。
+工作区：.worktrees/qoder/
+真相源引用：R10 §7（Adapter 接口，16 个动词）、§21（planner/review 动词）、
+            §8（canonical schema）、§11（Claim 与幂等，R10-fix-09/10 口径）、
+            §15（事件与全局 seq）、§19（群聊与 read_context）、§5（只绑 localhost）、
+            §10（全部状态迁移必须经 MVP-03 迁移表）、§26（检查 ID）
+            契约与错误码：docs/prep/MVP-08/（本任务 own 的 prep，开工时按当时 R10 复验）
+允许修改目录：backend/app/api/**、backend/app/tasks/**、backend/app/main.py、
+            backend/tests/**
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**
+交付分支：agent/local/qoder/MVP-08/a1
+完成标准：
+  1. 只通过 API 能跑完「建群 -> 发方案 -> 人类批准 -> 领取 -> 提交 -> 审查」，
+     全程不直接碰数据库（清单 MVP-08 的原始完成标准）
+  2. 任务与事件查询支持 since_seq 增量，且同一次请求返回的 seq 连续、带 next_seq
+  3. 统一错误码：每个错误响应带 error.code / retryable / 可选 seq，code 取自
+     docs/prep/MVP-08/error-codes.md；幂等重放带 Idempotency-Replayed
+  4. 群聊消息与 task_events 共享同一个全局 seq 空间，@mention 落 message_deliveries
+  5. 服务只绑定 loopback，且不返回任何 CORS 头
+test_id：DOC-TRACE-001、MVP-API-001
+测试命令：./scripts.sh check
+当前状态：review
+完成时间：2026-10-05 19:54
+commit：2440566
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 24 项，1 项失败（缺卡=['fix-flaky-init']，WorkBuddy 的任务，非本任务）
+  ruff check  : All checks passed
+  ruff format : 40 files already formatted
+  pytest      : 107 passed（MVP-08 新增 22）
+  冒烟        : 对真实 app.main:app（含启动时 docstate 90/90）跑通
+                /health、/spec/status、建项目/建群/发方案/批准/领取/查任务/查事件
+  ⚠️ ./scripts.sh check 在 dirty main 上仍会在 discipline 处短路，ruff 与 pytest
+     是用 ./scripts.sh lint / ./scripts.sh test 单独跑的。
+已知问题：
+  - **清单 MVP-08 的完成标准按字面不可达，已按实际可达范围交付并登记**：
+    「只通过 API 跑完 建群→发方案→领取→提交→审查」这条链路上有两个迁移不属本任务 ——
+    `claimed → in_progress` 需要 worktree（R10 §10 guard「worktree ready」），属 MVP-05；
+    `verifying → awaiting_review` 需要通过的 receipt（R10 §16），属 MVP-06。
+    而 MVP-08 在依赖图里排在 MVP-05/06 之前。测试里这两步由 SchedulerService 的
+    `start_task` / `record_verify_passed` 驱动（真实迁移、真实事件），**未伪造任何
+    receipt**，两个方法都写了 docstring 说明它们是脚手架且不出现在 HTTP 面上。
+    docs/traceability.md 的 `MVP-API-001` 相应标为新增的 🟡「部分有断言」。
+  - **消息与 task_events 没有共享 seq 空间，这是 schema 层缺口**：R10 §15 规定全局 seq
+    是排序权威，但 `001_initial.sql` 里只有 `task_events.seq` 带 AUTOINCREMENT，且该表
+    被 append-only 触发器保护（不能插一条再删来推进计数器），`task_messages.created_seq`
+    是普通 INTEGER，没有任何分配器。本任务的实现给消息**按 group** 分配自己的单调 seq，
+    并在 `GET /groups/{id}/messages` 用独立游标返回。要真正做到 R10 §15 的全局 seq，
+    需要一个序列表（或把消息也写进事件流），两者都要动 `backend/migrations/**`
+    （属 MVP-02），不在本任务允许目录内。**已在 prep 的 README §5 第 6 条预警过，
+    此处是它的实测确认。**
+  - 未实现、且不属本卡 5 条完成标准：`publish_task_branch`（MVP-05）、receipt 与
+    review/merge Lease 的完整形态（MVP-06/07）、Harness 能力门控、`accept_help` /
+    `reject_help` / `split_task` / `ask_human` 等其余 §7 动词。
+  - 跨任务改动（已在此登记）：`docs/traceability.md` —— 给 `MVP-API-001` 换标记并写明
+    缺口，同时在「强制状态列的含义」里新增 🟡 档。该文件属 graph-traceability，其状态
+    列不被断言；不改会让同一提交里的代码与文档相互矛盾。
 ~~~
 
 ## 提交前自检
