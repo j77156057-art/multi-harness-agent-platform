@@ -59,7 +59,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 
 | test_id | 检查什么 | 强制状态 | 由谁检查 |
 |---|---|---|---|
-| `MVP-API-001` | 仅通过 API 能跑完「建群 → 发方案 → 领取 → 提交 → 审查」 | 🟡 部分有断言 | `test_api_flow.py` 覆盖 HTTP 面上的建群/发方案/批准/领取/心跳/提交/审查；**缺口**：链路上两个迁移不属 MVP-08 —— `claimed → in_progress` 需要 worktree（MVP-05），`verifying → awaiting_review` 需要 verify receipt（MVP-06）。测试里这两步由调度器服务层驱动并在用例注释中标注，**没有伪造 receipt**。消息与事件共享全局 seq 的缺口已由 `message-global-seq`（迁移 003 单行表 `global_seq` 统一发号、task_events 去 AUTOINCREMENT）关闭：`test_api_events_messages.py` 断言两流交错严格递增、跨群不重号，并集为同一连续区间；`test_database_events.py` 覆盖存量库迁移续号与回滚不空洞 |
+| `MVP-API-001` | 仅通过 API 能跑完「建群 → 发方案 → 领取 → 提交 → 审查」 | 🟡 部分有断言 | `test_api_flow.py` 覆盖 HTTP 面上的建群/发方案/批准/领取/心跳/提交/审查；**缺口**：链路上两个迁移不属 MVP-08 —— `claimed → in_progress` 需要 worktree（MVP-05），`verifying → awaiting_review` 需要 verify receipt（MVP-06）。测试里这两步由调度器服务层驱动并在用例注释中标注，**没有伪造 receipt**。消息与事件共享全局 seq 的缺口已由 `message-global-seq`（迁移 003 单行表 `global_seq` 统一发号、task_events 去 AUTOINCREMENT）关闭：`test_api_events_messages.py` 断言两流交错严格递增、跨群不重号，并集为同一连续区间；`test_database_events.py` 覆盖存量库迁移续号与回滚不空洞；消息 refs「接收即丢」的缺口已由 `message-refs-persist`（迁移 004 为 task_messages 增加 JSON TEXT 列 refs，存量行回填 `[]`；post_message 同事务落库、list_messages 解码回数组）关闭：`test_api_events_messages.py` 断言 POST→GET refs 原样读回、缺省为 `[]`、非法 refs 拒绝，`test_database_events.py` 覆盖旧库（001~003）升级回填与升级后新消息往返 |
 | `MVP-UI-001` | 人类不直接访问数据库即可完成一条完整任务链路 | ⚠️ 仅声明 | 未实现（MVP-09） |
 | `MVP-ADAPTER-001` | Fake Harness 完整跑通 | ⚠️ 仅声明 | 未实现（MVP-10a） |
 | `MVP-ADAPTER-002` | 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review | ⚠️ 仅声明 | 未实现（MVP-10b） |

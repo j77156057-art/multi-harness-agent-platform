@@ -172,6 +172,66 @@ def test_interleaved_events_and_messages_keep_one_global_order(tmp_path):
     assert sorted(event_seqs | message_seqs) == list(range(1, other_group + 1))
 
 
+def test_message_refs_are_persisted_and_read_back(tmp_path):
+    """Legacy 3b: refs must survive POST -> GET, not just echo off the request."""
+    client, _ = make_client(tmp_path)
+    _prepare(client)
+
+    posted = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={
+            "author_kind": "human",
+            "author_id": "human-1",
+            "body": "see these",
+            "task_id": "T-1",
+            "refs": ["T-1", "decision:7", "artifact://doc/42"],
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    # The POST response keeps echoing refs (as before), but now storage agrees.
+    assert posted.json()["refs"] == ["T-1", "decision:7", "artifact://doc/42"]
+
+    messages = client.get("/api/v1/groups/G-1/messages").json()["messages"]
+    assert messages[0]["refs"] == ["T-1", "decision:7", "artifact://doc/42"]
+
+    # A message without refs carries an empty array, never a missing/null field.
+    client.post(
+        "/api/v1/groups/G-1/messages",
+        json={"author_kind": "harness", "author_id": "h1", "body": "no refs here"},
+    )
+    messages = client.get("/api/v1/groups/G-1/messages").json()["messages"]
+    assert messages[1]["refs"] == []
+
+
+def test_message_refs_must_be_an_array_of_nonblank_strings(tmp_path):
+    client, _ = make_client(tmp_path)
+    _prepare(client)
+
+    wrong_shape = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={
+            "author_kind": "human",
+            "author_id": "h",
+            "body": "x",
+            "refs": [1, 2],
+        },
+    )
+    assert wrong_shape.status_code == 400, "pydantic edge validation maps to 400"
+    assert wrong_shape.json()["error"]["code"] == "request.invalid"
+
+    blank_entry = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={
+            "author_kind": "human",
+            "author_id": "h",
+            "body": "x",
+            "refs": ["  "],
+        },
+    )
+    assert blank_entry.status_code == 422, "blank refs are rejected by the service"
+    assert blank_entry.json()["error"]["code"] == "request.invalid"
+
+
 def test_message_mention_creates_a_delivery_row(tmp_path):
     client, database = make_client(tmp_path)
     _prepare(client)
