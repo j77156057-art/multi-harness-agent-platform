@@ -16,7 +16,14 @@ fabricated anywhere.
 
 from __future__ import annotations
 
-from tests.api_support import bootstrap, make_client, publish_plan, scheduler, worktree_manager
+from tests.api_support import (
+    advance_to_awaiting_review,
+    bootstrap,
+    make_client,
+    publish_plan,
+    scheduler,
+    worktree_manager,
+)
 
 
 def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
@@ -66,36 +73,23 @@ def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
     assert beat.status_code == 200, beat.text
     assert beat.json()["lease_until"] > item["lease_until"]
 
-    # claimed -> in_progress needs the worktree (MVP-05), so it is scaffolded.
-    service = scheduler(database)
-    service.start_task(
+    # claimed -> in_progress provisions the worktree. R10 §7 defines no
+    # harness-facing verb for it, so the scheduler drives this one step.
+    manager = worktree_manager(tmp_path, database)
+    scheduler(database).start_task(
+        task_id="A", attempt_id=attempt, fencing_epoch=epoch, worktrees=manager
+    )
+
+    # 提交 + 验证：真实 commit、真实发布、真实 receipt。MVP-06 之后这段没有脚手架。
+    commit = advance_to_awaiting_review(
+        client,
+        database,
+        tmp_path,
         task_id="A",
         attempt_id=attempt,
         fencing_epoch=epoch,
-        worktrees=worktree_manager(tmp_path, database),
+        manager=manager,
     )
-
-    # 提交
-    submitted = client.post(
-        "/api/v1/adapter/submit_result",
-        json={
-            "task_id": "A",
-            "attempt_id": attempt,
-            "fencing_epoch": epoch,
-            "completion": {
-                "commit": "commit-abc",
-                "task_id": "A",
-                "attempt_id": attempt,
-                "fencing_epoch": epoch,
-            },
-        },
-    )
-    assert submitted.status_code == 200, submitted.text
-    assert submitted.json()["lease_released"] is True
-    assert client.get("/api/v1/tasks/A").json()["status"] == "verifying"
-
-    # verifying -> awaiting_review needs a receipt (MVP-06), so it is scaffolded.
-    service.record_verify_passed(task_id="A", commit="commit-abc", actor_id="verify-worker-1")
     assert client.get("/api/v1/tasks/A").json()["status"] == "awaiting_review"
 
     # 审查
@@ -106,7 +100,7 @@ def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
             "attempt_id": attempt,
             "reviewer_harness_id": "harness-2",
             "verdict": "request_changes",
-            "reviewed_commit": "commit-abc",
+            "reviewed_commit": commit,
             "review_revision": 1,
             "findings": [{"severity": "high", "message": "needs work"}],
         },
@@ -128,22 +122,22 @@ def test_approve_then_review_approval(tmp_path):
         json={"claim_request_id": "cr-9", "harness_id": "h1", "task_ids": ["T-9"]},
     ).json()["items"][0]
     service = scheduler(database)
+    manager = worktree_manager(tmp_path, database)
     service.start_task(
         task_id="T-9",
         attempt_id=claimed["attempt_id"],
         fencing_epoch=claimed["fencing_epoch"],
-        worktrees=worktree_manager(tmp_path, database),
+        worktrees=manager,
     )
-    client.post(
-        "/api/v1/adapter/submit_result",
-        json={
-            "task_id": "T-9",
-            "attempt_id": claimed["attempt_id"],
-            "fencing_epoch": claimed["fencing_epoch"],
-            "completion": {"commit": "c9"},
-        },
+    commit = advance_to_awaiting_review(
+        client,
+        database,
+        tmp_path,
+        task_id="T-9",
+        attempt_id=claimed["attempt_id"],
+        fencing_epoch=claimed["fencing_epoch"],
+        manager=manager,
     )
-    service.record_verify_passed(task_id="T-9", commit="c9", actor_id="vw-1")
 
     approved = client.post(
         "/api/v1/review/submit",
@@ -152,7 +146,7 @@ def test_approve_then_review_approval(tmp_path):
             "attempt_id": claimed["attempt_id"],
             "reviewer_harness_id": "reviewer-1",
             "verdict": "approve",
-            "reviewed_commit": "c9",
+            "reviewed_commit": commit,
         },
     )
     assert approved.status_code == 200, approved.text

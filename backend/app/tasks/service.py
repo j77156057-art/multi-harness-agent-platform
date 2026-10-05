@@ -662,40 +662,91 @@ class SchedulerService:
             raise Conflict("the canonical repository has no integration HEAD")
         return head
 
-    def record_verify_passed(self, *, task_id: str, commit: str, actor_id: str) -> int:
-        """Scaffolding for the review path before MVP-06 exists.
+    def declare_differential_not_applicable(
+        self,
+        *,
+        task_id: str,
+        attempt_id: str,
+        fencing_epoch: int,
+        reason: str,
+        static_evidence: list[str],
+    ) -> dict[str, object]:
+        """R10 §16 step 5 / §10: ``verifying -> awaiting_human``.
 
-        Performs the real ``verifying -> awaiting_review`` transition. It does
-        **not** run tests and does **not** write a ``verification_receipts`` row,
-        which R10 §16 requires before a reviewer may claim. Not exposed over
-        HTTP. Tests use it to reach awaiting_review; production must wait for
-        MVP-06's Verify Worker.
+        A pure refactor, doc-only or deletion task may declare that a baseline
+        differential does not apply, but it must carry a reason and static
+        evidence and it goes to a human. This is the forward edge R10-fix-03
+        added; :meth:`resume_after_differential_review` is its reverse.
         """
+        if not reason.strip():
+            raise InvalidInput("differential: not_applicable requires a reason")
+        if not static_evidence:
+            raise InvalidInput("differential: not_applicable requires static evidence")
         with self.database.transaction() as conn:
-            task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+            task = conn.execute(
+                "SELECT status, current_epoch FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
             if task is None:
                 raise NotFound(f"unknown task: {task_id}")
             status = TaskStatus(str(task["status"]))
             if status is not TaskStatus.VERIFYING:
                 raise Conflict(f"{task_id} is {status.value}; need verifying")
+            if fencing_epoch != int(task["current_epoch"]):
+                raise Conflict("fencing epoch is stale", code="fencing.epoch_stale")
             record = self.store.append(
-                event_name=EventKind.VERIFY_PASSED.value,
+                event_name=EventKind.DIFFERENTIAL_NOT_APPLICABLE.value,
                 aggregate_type="task",
                 aggregate_id=task_id,
-                actor_type="verify_worker",
-                actor_id=actor_id,
-                payload={"commit": commit},
+                actor_type="harness",
+                actor_id=attempt_id,
+                payload={"reason": reason, "static_evidence": list(static_evidence)},
                 connection=conn,
             )
             apply_transition(
                 conn,
                 task_id=task_id,
                 current=status,
-                event=EventKind.VERIFY_PASSED,
+                event=EventKind.DIFFERENTIAL_NOT_APPLICABLE,
+                expected_epoch=fencing_epoch,
+                state_seq=record.seq,
+            )
+            return {"task_id": task_id, "event": record.event_name, "seq": record.seq}
+
+    def resume_after_differential_review(
+        self, *, task_id: str, decided_by: str
+    ) -> dict[str, object]:
+        """``awaiting_human -> verifying`` once a human confirmed the declaration.
+
+        Without this edge an ``awaiting_human`` task has no way back into
+        verification, and the declaration becomes a dead end.
+        """
+        with self.database.transaction() as conn:
+            task = conn.execute(
+                "SELECT status, current_epoch FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if task is None:
+                raise NotFound(f"unknown task: {task_id}")
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.AWAITING_HUMAN:
+                raise Conflict(f"{task_id} is {status.value}; need awaiting_human")
+            record = self.store.append(
+                event_name=EventKind.HUMAN_RESUME_VERIFY_NOT_APPLICABLE.value,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="human",
+                actor_id=decided_by,
+                payload={"decision": "confirmed differential:not_applicable"},
+                connection=conn,
+            )
+            apply_transition(
+                conn,
+                task_id=task_id,
+                current=status,
+                event=EventKind.HUMAN_RESUME_VERIFY_NOT_APPLICABLE,
                 expected_epoch=int(task["current_epoch"]),
                 state_seq=record.seq,
             )
-            return record.seq
+            return {"task_id": task_id, "event": record.event_name, "seq": record.seq}
 
     # -------------------------------------------------------------- messages
 

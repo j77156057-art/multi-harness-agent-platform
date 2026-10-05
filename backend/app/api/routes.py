@@ -139,10 +139,10 @@ def submit_result(body: schemas.SubmitResultRequest, service: SchedulerDep) -> d
 
 @adapter.post("/publish_task_branch")
 def publish_task_branch(
-    body: schemas.PublishTaskBranchRequest, database: DatabaseDep
+    body: schemas.PublishTaskBranchRequest, request: Request, database: DatabaseDep
 ) -> dict[str, Any]:
     """The only way an agent gitdir's objects reach canonical (R10 §13)."""
-    result = PublishProxy(database).publish_task_branch(
+    result = PublishProxy(database, request.app.state.canonical_repo).publish_task_branch(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
         branch=body.branch,

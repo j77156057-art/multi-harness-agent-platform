@@ -270,7 +270,13 @@ def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
 
     with database.connect() as connection:
         applied = apply_migrations(connection, real_dir)
-    assert applied == 1
+    # Assert *that 003 ran*, not how many migrations happened to be pending: the
+    # verify-fields migration (004) made `applied == 1` fail while the behaviour
+    # under test was still correct. A pinned count breaks on every new migration.
+    assert applied >= 1
+    with database.connect() as conn:
+        recorded = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")}
+    assert 3 in recorded, "the global-seq migration must have been applied"
 
     with database.connect() as conn:
         assert int(conn.execute("SELECT seq FROM global_seq WHERE id=1").fetchone()[0]) == 5
