@@ -16,7 +16,7 @@ fabricated anywhere.
 
 from __future__ import annotations
 
-from tests.api_support import bootstrap, make_client, publish_plan, scheduler
+from tests.api_support import bootstrap, make_client, publish_plan, scheduler, worktree_manager
 
 
 def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
@@ -68,7 +68,12 @@ def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
 
     # claimed -> in_progress needs the worktree (MVP-05), so it is scaffolded.
     service = scheduler(database)
-    service.start_task(task_id="A", attempt_id=attempt, fencing_epoch=epoch)
+    service.start_task(
+        task_id="A",
+        attempt_id=attempt,
+        fencing_epoch=epoch,
+        worktrees=worktree_manager(tmp_path, database),
+    )
 
     # 提交
     submitted = client.post(
@@ -124,7 +129,10 @@ def test_approve_then_review_approval(tmp_path):
     ).json()["items"][0]
     service = scheduler(database)
     service.start_task(
-        task_id="T-9", attempt_id=claimed["attempt_id"], fencing_epoch=claimed["fencing_epoch"]
+        task_id="T-9",
+        attempt_id=claimed["attempt_id"],
+        fencing_epoch=claimed["fencing_epoch"],
+        worktrees=worktree_manager(tmp_path, database),
     )
     client.post(
         "/api/v1/adapter/submit_result",
@@ -167,6 +175,7 @@ def test_owner_actions_over_http(tmp_path):
         task_id="T-1",
         attempt_id=claimed["attempt_id"],
         fencing_epoch=claimed["fencing_epoch"],
+        worktrees=worktree_manager(tmp_path, database),
     )
 
     helped = client.post(

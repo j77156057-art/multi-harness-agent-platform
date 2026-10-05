@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.db.connection import Database
+from app.git.repo import CanonicalRepo
+from app.git.worktree import WorktreeManager
 from app.tasks.service import SchedulerService
 from tests.claim_support import make_database
 
@@ -52,3 +54,15 @@ def publish_plan(
     response = client.post(f"/api/v1/groups/{group_id}/plans", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def worktree_manager(tmp_path: Path, database: Database) -> WorktreeManager:
+    """A worktree manager rooted in the test's temp directory.
+
+    ``SchedulerService.start_task`` provisions a real worktree, and its default
+    manager would reach for the repository's own ``wt/`` and ``canonical.git``,
+    which tests must not touch.
+    """
+    repo = CanonicalRepo(tmp_path / "canonical.git")
+    repo.ensure()
+    return WorktreeManager(database, repo, root=tmp_path / "wt")

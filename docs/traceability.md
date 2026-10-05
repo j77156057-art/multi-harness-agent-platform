@@ -46,9 +46,9 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 
 | test_id | 检查什么 | 强制状态 | 由谁检查 |
 |---|---|---|---|
-| `GIT-ACL-001` | 两个任务不共享可写 worktree | ⚠️ 仅声明 | 未实现（MVP-05） |
-| `GIT-ACL-002` | 直接写集成分支的测试失败；旧 epoch 发布失败 | ⚠️ 仅声明 | 未实现（MVP-05） |
-| `GIT-PACK-001` | Defender 开启时跨账户 pack/bundle 传输与 intent 对账 | ⚠️ 仅声明 | 未实现（MVP-05） |
+| `GIT-ACL-001` | 两个任务不共享可写 worktree | ✅ 有断言 | `test_git_worktree.py`（活动 workspace 路径互斥断言、同 attempt 重复 provision 幂等、短 ID 目录、归档校验通过才回收） |
+| `GIT-ACL-002` | 直接写集成分支的测试失败；旧 epoch 发布失败 | ✅ 有断言 | `test_publish.py`（真跑 `git push` 被 canonical 钩子拒绝；旧 epoch 发布被拒且不写 intent；alternates 越界被拒） |
+| `GIT-PACK-001` | Defender 开启时跨账户 pack/bundle 传输与 intent 对账 | 🟡 部分有断言 | 传输与 intent 对账已覆盖（`test_publish.py` 断言对象进入 canonical、`side_effect_intents(type=push)` 落库并可重放）；**缺口**：单账户下不存在跨账户传输，`Defender` 开启场景未覆盖，见 `docs/adr/ADR-DEV-002-single-account-acl.md` |
 | `VERIFY-DIFF-001` | baseline differential 语义 | ⚠️ 仅声明 | 未实现（MVP-06） |
 | `VERIFY-RECEIPT-001` | receipt 与待合并 commit 不一致时 Merge Gate 拒绝 | ⚠️ 仅声明 | 未实现（MVP-06） |
 | `MERGE-EXACT-001` | receipt / review / 分支 head 三方 commit 交叉断言 | ⚠️ 仅声明 | 未实现（MVP-07） |

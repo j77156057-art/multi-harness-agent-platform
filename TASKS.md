@@ -47,7 +47,7 @@
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
-| MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
+| MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
@@ -1079,6 +1079,75 @@ commit：见本任务提交
 （`810d88d`、`32f4e45`、`9d3d3ef`、`d5769e2`、`847cc69`），
 其中 `847cc69`（认领登记拆分）是 WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来 ——
 当时 `discipline` 24/24 全绿，缺陷却真实存在于树里。
+
+### MVP-05：Git worktree 与发布代理（✅ done）
+
+~~~text
+任务编号：MVP-05
+负责人 Harness：Qoder
+开始时间：2026-10-05 21:55
+依赖任务：MVP-03（代码已合入 main `db9bc19`）、MVP-04（✅ 已验收）
+          ★ 依赖判据是「已合入 main 的代码」，与 MVP-04/MVP-08 一致。
+工作区：.worktrees/qoder/
+真相源引用：R10 §14（worktree、路径和资源；分支命名与生命周期）、§13（canonical Git 拓扑、
+            Push Proxy、fencing 的执行点）、§12（attempt 与命令幂等键中的 publish 一条）、
+            ADR-058/ADR-059（宿主与发布模式、发布对象传输与账户边界）、§17（权限矩阵）、
+            §15（side_effect_intents）、§26（GIT-ACL-001/002、GIT-PACK-001）
+允许修改目录：backend/app/git/**、backend/app/api/**、backend/app/tasks/**、
+            backend/tests/**、docs/adr/**、docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-05/a1
+完成标准：
+  1. 每个 attempt 一个独立 worktree；两个任务不共享可写目录（有断言）
+  2. 分支命名 `agent/<group-short>/<harness>/<task-id>/<attempt-id>` 只有一处实现，
+     §14 的分支白名单与 Push Proxy 的校验调用同一个函数（R10-09 的三处口径一致）
+  3. publish_task_branch 在发布前校验 task / attempt / commit / fencing epoch / 分支白名单；
+     旧 epoch 发布失败
+  4. 直接写集成分支被拒（canonical 侧的 pre-receive 拒绝，不是靠调用方自觉）
+  5. worktree 回收前必须归档（git bundle + patch），归档校验通过才删目录
+  6. 触发 `claimed → in_progress` 的 start 现在会 provision worktree，
+     即 MVP-08 卡里标注为「脚手架」的那一步有了真实实现
+test_id：GIT-ACL-001、GIT-ACL-002、GIT-PACK-001
+测试命令：./scripts.sh check
+当前状态：done（作者完成并已合入 main；外部验收待认，参照 MVP-04-verify 形式）
+完成时间：2026-10-05 22:20
+commit：7e94166
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 32 项检查，0 项失败
+  ruff        : All checks passed，49 files already formatted
+  pytest      : 132 passed（MVP-05 新增 19）
+  真 git 断言  : 直接 push 集成分支被 canonical 钩子拒绝（真跑 git push，
+                断言 stderr 含拒绝原因且 ref 未移动）；任何客户端 push 均被拒；
+                旧 epoch 发布被拒且不落 intent；alternates 越界被拒；
+                归档 bundle 校验通过后才回收，目录确实消失（Windows 只读 object 处理过）
+已知问题：
+  - **`groups` 表没有 `group_short` 列**，而 R10 §14 的分支名第一段就是 group-short。
+    本任务把它作为参数传入并在分支名里持久化，`start_task` 缺省回落到 group_id。
+    要让分支命名可完全从库推导，需要一次迁移加列（属 MVP-02 的 backend/migrations/**）。
+  - **R10 §7 没有面向 Harness 的 `start` 动词**。§10 的 `claimed → in_progress`
+    由调度器驱动（guard 是"worktree ready"），所以本任务把它实现为
+    `SchedulerService.start_task`：先 provision worktree，再迁移。HTTP 面上**不新增**
+    `/adapter/start` —— 新增 §7 未定义的动词会破坏 MVP-08 立下的"路径逐字对齐 §7"。
+    代价：MVP-08 卡里"只通过 API"的链路仍有一步不经 HTTP（现由 MVP-10a 的 Fake Harness
+    在进程内驱动）。
+  - **发布没有可写的事件名**。§13 提到"intent 完成事件和审计记录"，但 §37.7 的 88 项
+    里没有 publish 类事件（与 MVP-08 prep 的 G-2 同类缺口）。当前用
+    `side_effect_intents(type=push)` + `command_idempotency` 记录，未自造事件名。
+  - Windows 上 git 把 object 文件标为只读，`shutil.rmtree(ignore_errors=True)` 会**静默**
+    删除失败 —— 回收看起来成功、目录还在。已修为先清只读位再删；这条值得其他任务注意。
+  - MVP-08 的 API 测试需注入临时 worktree 管理器：`start_task` 现在真的建目录，
+    缺省会落到仓库根的 `wt/` 与 `canonical.git`（测试不得碰）。
+  - MVP 简化（清单要求写明）：R10 §13/§17 的三账户 ACL（agent-scheduler /
+    agent-harness-<id> / agent-verify）在 MVP 阶段降级为单账户 +
+    `--insecure-single-account`。这是**临时措施**，阶段 2 前必须补齐；清单落点写在
+    docs/adr/ADR-DEV-002-single-account-acl.md，含阶段 2 前的三账户补齐清单。
+  - GIT-PACK-001（Defender 开启时的跨账户 pack/bundle 传输与 intent 对账）在单账户
+    模式下无法真实复现跨账户行为，只覆盖传输与对账路径本身，跨账户部分留待阶段 2。
+~~~
 
 ## 关键路径
 

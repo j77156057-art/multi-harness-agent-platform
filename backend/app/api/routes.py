@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.api import schemas
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
+from app.git.publish import PublishProxy
 from app.lease.service import renew_lease
 from app.tasks.service import SchedulerService
 
@@ -134,6 +135,22 @@ def submit_result(body: schemas.SubmitResultRequest, service: SchedulerDep) -> d
         "seq": record.seq,
         "lease_released": True,
     }
+
+
+@adapter.post("/publish_task_branch")
+def publish_task_branch(
+    body: schemas.PublishTaskBranchRequest, database: DatabaseDep
+) -> dict[str, Any]:
+    """The only way an agent gitdir's objects reach canonical (R10 §13)."""
+    result = PublishProxy(database).publish_task_branch(
+        task_id=body.task_id,
+        attempt_id=body.attempt_id,
+        branch=body.branch,
+        commit=body.commit,
+        fencing_epoch=body.fencing_epoch,
+        idempotency_key=body.idempotency_key,
+    )
+    return result.as_json()
 
 
 @adapter.post("/request_help")
