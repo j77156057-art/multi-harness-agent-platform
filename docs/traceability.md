@@ -64,11 +64,12 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-ADAPTER-001` | Fake Harness 完整跑通 | ⚠️ 仅声明 | 未实现（MVP-10a） |
 | `MVP-ADAPTER-002` | 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review | ⚠️ 仅声明 | 未实现（MVP-10b） |
 | `MVP-PROCESS-001` | 协作纪律：登记表自洽、任务卡字段完整、依赖图自洽 | ✅ 有断言 | `tools/discipline`（registry / cards / deps / counts 组） |
+| `MVP-PROCESS-002` | 合并纪律：已合入 main 的任务必须已登记、已完成且卡证据完整；认领序号唯一连续 | 🚧 建设中 | `tools/discipline` merge 组（GATE-MERGE-CHECK-01） |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
 ## 现状小结
 
-**20 个已登记的 ID 里，只有 4 个目前有断言**（`DOC-STATE-001`、`DOC-SCHEMA-001`、
+**21 个已登记的 ID 里，只有 4 个目前有断言**（`DOC-STATE-001`、`DOC-SCHEMA-001`、
 `DOC-TRACE-001`、`CORE-RECOVER-001`，外加 `MVP-PROCESS-001`）。
 
 阶段 1 与阶段 2 的 ID 几乎全部未实现 —— 这与「MVP 才走到 MVP-02」一致，

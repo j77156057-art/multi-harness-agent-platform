@@ -33,6 +33,7 @@
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
+| GATE-MERGE-CHECK-01 | TRAE | discipline | 🟢 doing | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -91,6 +92,7 @@
 | 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
 | 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
+| 22 | GATE-MERGE-CHECK-01 | TRAE | 2026-10-05 20:18 | `agent/local/trae/gate-merge-check-01/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1597,4 +1599,48 @@ commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违�
   - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
   - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
   - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
+~~~
+
+### GATE-MERGE-CHECK-01：已合入 main 的任务必须已登记、已完成、证据完整（🟢 doing）
+
+~~~text
+任务编号：GATE-MERGE-CHECK-01
+负责人 Harness：TRAE
+开始时间：2026-10-05 20:18
+依赖任务：discipline（扩展既有检查器，不另起工具）
+工作区：.worktrees/trae/
+真相源引用：docs/dev-convention.md「约束的强制程度」（discipline 断言表与
+            「靠自觉的：禁止在 main 上直接提交」）、TASKS.md 违规记录区三条
+            （MVP-03 db9bc19、MVP-04 e656058、claim-nullable d5769e2）、
+            tools/discipline/discipline.py、.github/workflows/gate.yml
+允许修改目录：tools/discipline/**、.github/workflows/gate.yml、docs/dev-convention.md、
+            docs/traceability.md、TASKS.md
+禁止修改目录：docs/spec/**、backend/**
+交付分支：agent/local/trae/gate-merge-check-01/a1
+背景：三次「先合 main 后验收/缺卡」证明文档规矩在并行压力下没有机械执行点，
+      discipline 只做 TASKS.md 快照自洽——main 带着红灯照样前进，红灯无阻断后果。
+完成内容（计划）：
+  1. discipline 新增 merge 组：`git log --merges` 解析合并提交里的任务分支，
+     对照认领表/任务表/任务卡，已合入 main 的任务必须：
+     (a) 分支已登记 (b) 任务表状态已完成 (c) 卡有 commit 与验证证据；
+  2. registry 组新增认领序号唯一且 1..N 连续断言（claim-nullable 违规纠正措施）；
+  3. git 不可用或浅克隆时 fail-closed（浅克隆会让 merge 列表为空而静默放行）；
+  4. gate.yml checkout 改 fetch-depth: 0；
+  5. dev-convention 把该规则从「靠自觉」移到「会红」，并写明直提 main 仍是盲区；
+  6. 启用前清理 TASKS.md：opencode 旧基线合并带回的 3 行重复认领、
+     verify-mvp-04 与任务表 MVP-04-inject 的命名不一致。
+完成标准：
+  1. 构造临时 git 仓库的单测覆盖：已合入未完成/未登记/缺证据各被拦，合规合并放行；
+     浅克隆与无 git 环境 fail-closed；序号重复/不连续被拦；
+  2. discipline 在本仓库全绿（含 MVP-08 review 状态的处理，见风险）；
+  3. docstate/ruff/pytest 不回归；README/dev-convention 的断言计数同步。
+test_id：MVP-PROCESS-002
+测试命令：.venv\Scripts\python.exe -m pytest tools -q；.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：doing
+已知风险：MVP-08（3de2115）已合入但任务表仍是 🔍 review，新检查启用即会报它；
+          需在本任务合并前由用户裁定（先验收 MVP-08 或接受 main 短期红灯）。
+完成时间：（完成后回填）
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
 ~~~
