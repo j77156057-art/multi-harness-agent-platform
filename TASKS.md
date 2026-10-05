@@ -120,7 +120,7 @@
      （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
-<!-- claim-denum → docs/claims/41-opencode--claim-denum.md -->
+<!-- claim-denum → docs/claims/42-opencode--claim-denum.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
