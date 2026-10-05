@@ -86,3 +86,12 @@ class PostMessage(BaseModel):
     mentions: list[str] = Field(default_factory=list)
     task_id: str | None = None
     refs: list[str] = Field(default_factory=list)
+
+
+class PublishTaskBranchRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    branch: str
+    commit: str
+    fencing_epoch: int
+    idempotency_key: str

@@ -27,6 +27,7 @@ from app.claim.guarded_write import (
 )
 from app.claim.service import IdempotencyConflict
 from app.claim.transitions import ConcurrentStateChange, IllegalTransition
+from app.git.publish import PublishRejected
 from app.lease.service import LeaseExpired, LeaseNotFound, LeaseTokenMismatch
 from app.tasks.service import Conflict, InvalidInput, NotFound
 
@@ -85,6 +86,9 @@ def _from_exception(exc: Exception) -> ApiError:
     """Map a domain exception onto a wire code. Order matters."""
     if isinstance(exc, ApiError):
         return exc
+    if isinstance(exc, PublishRejected):
+        retryable = exc.code in RETRYABLE
+        return ApiError(exc.code, exc.http_status, str(exc), retryable=retryable)
     if isinstance(exc, IdempotencyConflict):
         return ApiError(exc.code.value, 409, str(exc))
     if isinstance(exc, StaleFencingEpoch):
