@@ -30,6 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
+| chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/local/workbuddy/root-wip-chain-template` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -1746,6 +1747,45 @@ commit：622b1f2
     由调用方显式覆盖（R10 §17 的安全审查可在 MVP-11 复核这一默认）。
 ~~~
 
+### ❌ chain-template 优化：已做、已测、已否决（WorkBuddy，05:15-05:35）
+
+**结论：负收益，已撤销。** 记在这里是为了不让后来人重做一遍。
+
+做法：session 级模板 + `shutil.copytree`，把「建库 + 迁移 + canonical repo + seed」
+这四步（每个用例都相同）变成复制一份成品骨架。局部看极快：**建骨架 98.57s → 复制 0.09s**，
+快约 1000 倍。
+
+**但全量测下来更慢**（三次测量，环境均为 0 个 python 进程的空闲窗口）：
+
+三次全量测量（环境均为 0 个 python 进程的空闲窗口）：
+
+- 基线 run1：479s，17 passed
+- 基线 run2：525s，17 passed
+- 优化后：**647s**，17 passed
+
+**为什么不更快**：单链确实从 28.2s 降到 16-20s，但 17 个用例全量只省下约 100s，
+而全量反而多花 120-170s。差值来自**累积效应** —— 每个副本要在自己的
+`canonical.git` 上跑 `git worktree add`，副本越多、git 元数据操作越慢，
+这部分抵消了复制带来的收益。单链测得的好处在全量下不成立。
+
+**顺带纠正一个错误定位**：我曾把瓶颈归为「SQLite 关连接时的 WAL checkpoint
+30.1s × 3」。那是在 7 进程并发环境下测的。空闲环境重测：`initialize` 只要
+**0.32s**、开连接 + 关 0.11s。**旧的 cProfile 数据全部是并发污染的**，
+真实的 30s 来自别处（大概率是 worktree / git 操作），尚未定位。
+
+**方法论（今天栽了三次）**：
+1. **基线与优化必须同环境、同时间窗测**。我先在 7 进程环境测基线、后在 0 进程
+   环境测优化，两个数字根本不可比。
+2. **单链快 ≠ 全量快**。单链 16-20s vs 基线 28.2s 是真实收益，但全量 647s vs 479s
+   是真实亏损 —— 两个结论都成立，必须都测。
+3. **`exit=0` 不等于通过**。中途报过一次「优化后 1 小时 48 分 / exit=0」，实际输出
+   只有 2 个点，17 个测试只跑了 2 个就退出，SIGTERM 被吞。判结果要看测试点数。
+
+**改动去向**：WIP 曾被抢救到 `agent/local/workbuddy/root-wip-chain-template`
+（`fcfd303`），现已撤销；`backend/tests/chain_template.py` 删除，
+`test_verify.py` 的 `build_chain` 回到基线。认领记录见
+`docs/claims/45-workbuddy--chain-template-closeout.md`。
+
 ## 关键路径
 
 ~~~text
@@ -2535,6 +2575,38 @@ commit：2440566
      record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
      Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
      验收时检查，或单开收尾任务。
+~~~
+### chain-template-closeout：chain-template 优化收尾（✅ done，结论：撤销）
+
+~~~text
+任务编号：chain-template-closeout
+负责人 Harness：WorkBuddy
+开始时间：2026-10-06 05:15
+完成时间：2026-10-06 05:35
+依赖任务：无（收尾 MVP-06 的测试提速尝试）
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §23（SQLite WAL 与备份）、§26（VERIFY-DIFF-001 的验证要求）
+允许修改目录：backend/tests/**、docs/claims/**、TASKS.md
+禁止修改目录：backend/app/**、docs/spec/**
+交付分支：agent/local/workbuddy/root-wip-chain-template
+完成标准：
+  1. 在空闲环境（0 个 python 进程）测出可信的基线与优化后数据 ✅ 479/525 vs 647
+  2. 判定优化是收益还是负收益 ✅ 负收益
+  3. 负收益则撤销，不留未验证的改动 ✅ 已撤销
+  4. 把否证结果与被纠正的错误定位写进 TASKS.md ✅
+test_id：MVP-PROCESS-001
+测试命令：./scripts.sh check
+当前状态：done
+commit：（本次收尾提交）
+验证结果：
+  基线 479s / 525s，优化后 647s —— 优化是负收益
+  单链 28.2s -> 16-20s（真实收益）但全量 647s vs 479s（真实亏损）
+  撤销后 backend/tests/chain_template.py 已删除，build_chain 回到基线
+已知问题：
+  - 真实瓶颈仍未定位。旧cProfile 说「WAL checkpoint 30.1s x 3」，那是 7 进程
+    并发污染的数据；空闲环境重测 initialize 只要 0.32s，旧的 30s 来自别处
+  - 全量 647s（优化）与 479s（基线）之差仍未解释，怀疑是 git worktree 元数据
+    随副本数累积变慢，待后续用 --durations 定位
 ~~~
 
 ### tasks-critical-path：校验 TASKS.md 自己那份关键路径副本 + 查重复 task_id（done）
