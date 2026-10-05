@@ -45,6 +45,7 @@
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
+| message-refs-persist | TRAE | MVP-08 | 🟢 doing（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -104,6 +105,7 @@
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
+<!-- message-refs-persist → docs/claims/29-trae--message-refs-persist.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -2108,4 +2110,39 @@ commit：1e6141d、724e013（原分支实现）；c244925（合 main 并移植�
     浅克隆 fail-closed 集成）；
   - 不回归：docstate 90/0、backend pytest 113 项退出 0、ruff check+format 全过、
     MVP-08 prep 契约 FAILURES 0、变异 10/10。
+~~~
+
+### message-refs-persist：消息 refs 字段落库与回读（🟢 doing，关闭 MVP-08 验收遗留 3b）
+
+~~~text
+任务编号：message-refs-persist
+负责人 Harness：TRAE
+开始时间：2026-10-05 22:21
+依赖任务：MVP-08（message-global-seq 之后，同面契约）
+工作区：.worktrees/trae/
+真相源引用：docs/prep/MVP-08/openapi.yaml（post_message 请求体 refs、
+            Message schema refs: string[]）、R10 §19（read_context 增量读消息）、
+            backend/migrations/001_initial.sql（task_messages 现状无 refs 列）
+允许修改目录：backend/migrations/** backend/app/tasks/** backend/app/api/**
+            backend/tests/** docs/** TASKS.md
+禁止修改目录：docs/spec/** tools/** docs/prep/**
+交付分支：agent/local/trae/message-refs-persist/a1
+背景：MVP-08 验收遗留 3b。POST /groups/{id}/messages 接收 refs 且在响应里
+      回显，但 task_messages 表没有该列，service 的 INSERT 不带 refs，
+      GET 走 SELECT * 永远读不回——引用信息静默丢失。与 3a 同属
+      「实现未回归 openapi 契约」，openapi 已声明故 R10/prep 无需改。
+完成内容（计划）：
+  1. 迁移 004：task_messages 加列 refs TEXT NOT NULL DEFAULT '[]'
+     （JSON TEXT，沿用 payload_json/content_json 惯例）；存量消息回填 []；
+  2. post_message 在写事务内校验（list[str]，空串拒绝）并落库；
+  3. list_messages 解码 refs 为数组随消息返回；空引用返回 [] 而非 null；
+  4. 测试：POST→GET 往返保留、无 refs 默认 []、服务层非法值拒绝、
+     旧库（仅 001~003）升级后存量行 refs==[] 且新消息 refs 正常。
+test_id：MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：🟢 doing
+完成时间：（完成后回填）
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
 ~~~
