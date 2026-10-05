@@ -41,6 +41,7 @@
 | trace-closure | OpenCode | MVP-03-amend | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
 | merge-interlock | OpenCode | discipline | ✅ done | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
+| root-worktree-clean | OpenCode | merge-interlock | 🟢 doing | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
@@ -564,6 +565,64 @@ commit：9b4b663
 已知问题：
   - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
+~~~
+
+### root-worktree-clean：断言根工作区非合并状态下无未提交改动（doing）
+
+~~~text
+任务编号：root-worktree-clean
+负责人 Harness：OpenCode
+开始时间：2026-10-06 00:35
+依赖任务：merge-interlock（⏸️ 待合入）
+工作区：.worktrees/opencode/
+真相源引用：AGENTS.md §0与 H-7（仓库根目录只用于合并与跑门禁，不要在那里编辑）、
+            dev-convention.md「会被门禁红掉的」清单
+允许修改目录：tools/discipline/**、backend/tests/**、docs/dev-convention.md、
+            docs/traceability.md、TASKS.md
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/opencode/root-worktree-clean/a1
+背景：今天合并反复被挡，根因不是工具而是**有人在合并区里做开发**。AGENTS.md 规定
+      根目录「只做合并和在 main 上跑门禁」，但Qoder、TRAE 轮流在里面写代码、
+      留未解决冲突。互斥锁管不了这个——它只拦「合并」，不拦「在合并区开发」。
+      `mergeguard` 只能拒绝自己那一次合并，无法让占用者��担代价。
+完成标准：
+  1. `discipline` 新增 rootworktree 组：非合并状态下根工作区必须干净   ✅
+  2. 处于合并中（MERGE_HEAD 存在）时放行                            ✅
+  3. 无法定位根工作区 / git 不可用时 **fail-closed**，与 merge 组一致   ✅
+  4. 从任意 worktree 运行都能定位到根工作区（经git common dir 反推）  ✅
+  5. 单测覆盖：干净 / 有未提交改动 / 有未跟踪文件 / 合并中 / 无 git   ✅
+  6. `docstate` / `discipline` / `ruff` / `pytest` 结果如实记录       ✅
+test_id：MVP-PROCESS-002
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：doing
+commit：（完成后回填）
+验证结果：
+  - docstate  : 90 项检查，0 项失败
+  - discipline: **43 项检查，1 项失败** —— 唯一失败是本任务新增的
+    `rootworktree` 组，且是**如实报告当前根工作区正被占用**
+    （`M scripts/new-ai.ps1`、`?? scripts/lib/`）。这是断言生效的证据，不是缺陷。
+  - ruff check : All checks passed!
+  - pytest     : 169 passed
+  - `test_discipline.py` 21 passed（本任务前 14，新增 7 条）
+  - 新增用例覆盖：干净 / 有改动 / 有未跟踪文件 / 合并中放行 /
+    从 linked worktree 运行仍查主工作区 / 无 git 时 fail-closed /
+    断言确实落进 rootworktree 组且被 result.failed 收集
+  - 过程中我自己写错一次：`test_root_worktree_allows_merge_in_progress`
+    把 `MERGE_HEAD` 写在仓库根而非 `.git/`，得到假阴性。已修。
+    这也说明断言的判据位置必须写对，否则「放行」会变成「误报」。
+已知问题：
+  - **这条断言会让所有人的 `./scripts.sh check` 在别人占用根工作区时变红**，
+    包括正在自己 worktree 干净干活的人。这是刻意的强制函数——占用合并区不该
+    由别人替它付代价——但它确实把个人行为变成了全局门禁。若团队不接受这个
+    耦合，退路是降级为告警（只打印不失败），或改成只在根工作区自身运行时才断言。
+  - 与 `mergeguard` 的分工：mergeguard 是**事前阻止**（合并时不许有脏改动、
+    不许并发）；本断言是**持续施压**（占用合并区会让所有人的门禁变红）。
+    两者都需要，缺一不可。
+  - 本任务落地时根工作区正被 TRAE 占用（`MM TASKS.md` +
+    `docs/claims/36-trae--MVP-05-verify.md`），因此新断言**预期为红**。
+    这是断言正在生效的证据，不是缺陷；等对方提交或撤出后自然转绿。
+  - CI 里`git status` 恒为干净（全新检出），所以这条断言只在本地有意义。
+    不要把它当成CI 门禁来依赖。
 ~~~
 
 ### merge-interlock：给共享 main 合并加互斥锁（✅ done）

@@ -287,3 +287,89 @@ def test_git_lister_excludes_sync_merge(tmp_path):
     ok, branches, detail = d.git_merged_branches(str(repo))
     assert ok, detail
     assert branches == ["agent/h/t2"]
+
+
+# ---------- rootworktree 组：根工作区占用 ----------
+
+
+def _root_repo(tmp_path):
+    """一个「主工作区 + 一个 linked worktree」的仓库，返回主工作区路径。"""
+    repo = tmp_path / "rootrepo"
+    repo.mkdir()
+    git(str(repo), "init")
+    git(str(repo), "symbolic-ref", "HEAD", "refs/heads/main")
+    git(str(repo), "config", "user.email", "t@t")
+    git(str(repo), "config", "user.name", "t")
+    make_commit(str(repo), "f.txt", "base")
+    return repo
+
+
+def test_root_worktree_clean_passes(tmp_path):
+    repo = _root_repo(tmp_path)
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is True
+    assert "干净" in detail
+
+
+def test_root_worktree_dirty_tracked_file_fails(tmp_path):
+    repo = _root_repo(tmp_path)
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is False
+    assert "f.txt" in detail
+    assert ".worktrees" in detail, "失败信息要告诉人开发应在哪做"
+
+
+def test_root_worktree_untracked_file_fails(tmp_path):
+    """未跟踪文件同样算占用——新建 scripts/lib/ 这类最常见的占用形式。"""
+    repo = _root_repo(tmp_path)
+    (repo / "scratch").mkdir()
+    (repo / "scratch" / "note.md").write_text("x", encoding="utf-8")
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is False
+    assert "scratch" in detail
+
+
+def test_root_worktree_allows_merge_in_progress(tmp_path):
+    """合并进行中必须放行——那时工作区本来就该脏，否则正常合并会被自己拦住。
+
+    MERGE_HEAD 在 `.git/` 里，不在仓库根；写错位置会得到假阴性。
+    """
+    repo = _root_repo(tmp_path)
+    (repo / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is True
+    assert "合并中" in detail
+
+
+def test_root_worktree_checked_from_linked_worktree(tmp_path):
+    """从任务 worktree 运行也必须查到**主**工作区，而不是自己脚下那个。"""
+    repo = _root_repo(tmp_path)
+    linked = repo / "wt"
+    git(str(repo), "worktree", "add", "-b", "task", str(linked))
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+
+    assert d.root_worktree_of(str(linked)) == os.path.normpath(str(repo))
+    ok, detail = d.root_worktree_status(str(linked))
+    assert ok is False, f"从 linked worktree 运行应看到主工作区脏；{detail}"
+
+
+def test_root_worktree_fail_closed_without_git(tmp_path):
+    """定位不到主工作区时判失败——与 merge 组一致，静默放行等于没有这道检查。"""
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    ok, detail = d.root_worktree_status(str(plain))
+    assert ok is False
+    assert "fail-closed" in detail
+
+
+def test_check_root_worktree_records_group(tmp_path):
+    """确认这条断言真的落在 rootworktree 组里，且失败会被result.failed 收集。"""
+    repo = _root_repo(tmp_path)
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+    result = d.Result()
+    d.check_root_worktree(result, str(repo))
+    assert [c["group"] for c in result.checks] == ["rootworktree"]
+    assert len(result.failed) == 1
+    assert "未提交改动" in result.failed[0]["msg"]

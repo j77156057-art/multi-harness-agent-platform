@@ -846,6 +846,92 @@ def check_traceability(result, repo_root, tasks):
     )
 
 
+def root_worktree_of(repo_root):
+    """定位主工作区（仓库根）目录。
+
+    不能直接用 `repo_root`——本检查器常从任务 worktree 运行，那时
+    `repo_root` 指向 `.worktrees/<harness>`，而要检查的是仓库根。
+    借 `git rev-parse --git-common-dir` 反推：它返回共享 git 目录
+    `<root>/.git`，其父目录即主工作区。
+
+    刻意不用 `git worktree list`：那需要能列出 worktree，在裁剪过的
+    环境里可能不可用，而 common-dir 的反推只需要一个 git 仓库。
+    """
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo_root,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    common = os.path.normpath(proc.stdout.strip())
+    return os.path.dirname(common)
+
+
+def root_worktree_status(repo_root):
+    """(ok, detail)：根工作区在非合并状态下是否干净。
+
+    fail-closed 与 merge 组一致：定位不到根工作区、或 git 不可用，都判失败。
+    静默放行等于没有这道检查——而这正是本组要防的那类事故。
+
+    合并进行中（MERGE_HEAD 存在）时**必须放行**：那时工作区本来就该脏，
+    否则一次正常的合并会被自己的门禁拦住。
+    """
+    root = root_worktree_of(repo_root)
+    if root is None or not os.path.isdir(root):
+        return False, "无法定位主工作区（git 不可用或不在 git 仓库内）；fail-closed"
+
+    if os.path.exists(os.path.join(root, ".git", "MERGE_HEAD")):
+        return True, "根工作区正处于合并中，放行"
+
+    proc = subprocess.run(
+        ["git", "-C", root, "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return False, "git status 在主工作区失败：%s" % (proc.stderr or "").strip()
+
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    if not lines:
+        return True, "主工作区干净"
+
+    shown = lines[:8]
+    extra = "" if len(lines) <= 8 else "（另有 %d 行）" % (len(lines) - 8)
+    detail = "；".join(s.strip() for s in shown) + extra
+    return (
+        False,
+        "主工作区（%s）有未提交改动：%s。根目录只用于合并与跑门禁，"
+        "开发请在 .worktrees/<harness>/ 里做" % (os.path.basename(root), detail),
+    )
+
+
+def check_root_worktree(result, repo_root, reader=root_worktree_status):
+    """断言：根工作区在非合并状态下没有未提交改动。
+
+    为什么需要它：`mergeguard` 只能阻止「自己那一次合并」，无法让占用
+    合并区的人承担代价。实测今天 Qoder、TRAE 轮流在根工作区写代码并留下
+    未解决冲突，导致合并反复被挡。这条断言把「占用合并区」变成全局可见
+    的门禁失败——刻意的强制函数。
+
+    代价：别人占用根工作区时，所有人的 `./scripts.sh check` 都会变红，
+    包括正在自己 worktree 干活的人。退路是降级为告警。
+    """
+    ok, detail = reader(repo_root)
+    result.chk(ok, "根工作区在非合并状态下无未提交改动（%s）" % detail, "rootworktree")
+
+
 def parse_merge_subject(subject):
     """从合并提交标题提取被合并的分支名。
 
@@ -1129,6 +1215,7 @@ def run(repo_root="."):
     check_traceability(result, repo_root, tasks)
     check_merge(result, repo_root, tasks, claims, cards)
     check_branch_visibility(result, repo_root, tasks)
+    check_root_worktree(result, repo_root)
     return result
 
 
