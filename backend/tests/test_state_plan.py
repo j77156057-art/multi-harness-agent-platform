@@ -97,6 +97,78 @@ def test_plan_validator_accepts_contract_and_rejects_cycle_and_unknowns():
     assert any("unregistered capability" in error for error in result.errors)
 
 
+def _plan_with_acceptance(acceptance, **overrides):
+    """构造单任务方案，只让 acceptance 那一项决定evidence 校验结果。"""
+    raw = {
+        "plan_id": "plan-evidence",
+        "tasks": [{"id": "T-001", "acceptance": [acceptance]}],
+    }
+    raw.update(overrides)
+    return PlanSpec.from_mapping(raw)
+
+
+def test_plan_validator_requires_evidence_source_for_cmd_acceptance():
+    """R10 §9：门禁项的 evidence source 必须来自已注册能力。
+
+    旧实现是 `if source is not None:`，所以 `cmd` 判据不声明 evidence source
+    时完全不检查 —— 等于绕过了 §9 的整条要求。
+    """
+    result = PlanValidator().validate(
+        _plan_with_acceptance({"id": "ok", "check": "cmd"}, evidence_sources=["tests"])
+    )
+    assert not result.ok
+    assert any("cmd acceptance without an evidence source" in e for e in result.errors)
+
+    # 声明了且在注册表内 -> 放行
+    assert (
+        PlanValidator()
+        .validate(
+            _plan_with_acceptance(
+                {"id": "ok", "check": "cmd", "evidence_source": "tests"},
+                evidence_sources=["tests"],
+            )
+        )
+        .ok
+    )
+
+
+def test_plan_validator_rejects_evidence_source_when_registry_is_empty():
+    """fail-closed：`evidence_sources` 为空时不再静默放行未注册的 source。
+
+    旧实现是 `elif evidence_sources and ...`，注册表为空就整条跳过。叠加
+    「可以不声明 source」之后，一个既不声明 source、注册表又为空的方案能通过
+    全部 evidence 校验，等于把 ADR-032 要求的登记整体绕过。
+    """
+    result = PlanValidator().validate(
+        _plan_with_acceptance({"id": "ok", "check": "cmd", "evidence_source": "tests/anything.py"})
+    )
+    assert not result.ok
+    assert any("unregistered evidence source" in e for e in result.errors)
+
+
+def test_plan_validator_allows_human_acceptance_without_evidence_source():
+    """`human` 判据由人读，没有可执行文件可指，不应强制 evidence source。"""
+    assert (
+        PlanValidator()
+        .validate(
+            _plan_with_acceptance({"id": "review", "check": "human"}, evidence_sources=["tests"])
+        )
+        .ok
+    )
+
+
+def test_plan_validator_rejects_blank_evidence_source():
+    """声明了但为空白串：与未注册同属不可用证据，必须拒绝。"""
+    result = PlanValidator().validate(
+        _plan_with_acceptance(
+            {"id": "ok", "check": "cmd", "evidence_source": "   "},
+            evidence_sources=["tests"],
+        )
+    )
+    assert not result.ok
+    assert any("empty evidence source" in e for e in result.errors)
+
+
 def test_plan_validator_rejects_duplicate_dependency_edges_without_fake_cycle():
     """R10 §9：重复声明的依赖边必须被拒绝，且不能被 Kahn 误判成环。
 

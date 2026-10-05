@@ -196,13 +196,21 @@ class PlanValidator:
             if check not in {"cmd", "human"}:
                 errors.append(f"task {task.task_id} has invalid acceptance check {check!r}")
             source = acceptance.get("evidence_source")
-            if source is not None:
-                if not str(source).strip():
-                    errors.append(f"task {task.task_id} has an empty evidence source")
-                elif evidence_sources and str(source) not in evidence_sources:
+            if source is None:
+                # R10 §9：evidence source 必须能产生判据要求的证据形态。`cmd` 是
+                # 门禁项且要真跑一条命令，没有 evidence source 就无法确认它跑的是
+                # 什么，因此必须声明。`human` 判据由人读，没有可执行文件可指。
+                if check == "cmd":
                     errors.append(
-                        f"task {task.task_id} uses an unregistered evidence source {source}"
+                        f"task {task.task_id} has a cmd acceptance without an evidence source"
                     )
+            elif not str(source).strip():
+                errors.append(f"task {task.task_id} has an empty evidence source")
+            elif str(source) not in evidence_sources:
+                # fail-closed：注册表为空时不再静默放行。ADR-032 要求 evidence
+                # source 必须登记 id、类型、命令模板、输出形态、权限和 policy
+                # hash；空注册表意味着什么都没登记，任何 source 都算未登记。
+                errors.append(f"task {task.task_id} uses an unregistered evidence source {source}")
 
     @staticmethod
     def _normalize_glob(glob: str, errors: list[str]) -> str:
