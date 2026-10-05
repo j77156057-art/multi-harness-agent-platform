@@ -2720,6 +2720,7 @@ main** 的状态。真正的占用分布在所有分支上，登记表只是它�
 允许修改目录：TASKS.md、docs/claims/**
 禁止修改目录：backend/**、tools/**、docs/spec/**（本任务只落文档，不改实现）
 交付分支：agent/local/claude/dup-incident/a1
+commit：e830e35
 test_id：MVP-PROCESS-001
 当前状态：done
 
