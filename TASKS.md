@@ -40,7 +40,7 @@
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
-| MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -64,33 +64,36 @@
 
 ## 认领登记（R10 §0 总协调规则第 2 条）
 
+**本表只读**。每个 task 的认领记录在 `docs/claims/<序号>-<harness>--<task-id>.md`，
+各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
+
 **规则：领取任务前必须在任务清单写入 `task_id`、Harness 名称、时间、分支。**
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
-| 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
-| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
-| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
-| 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
-| 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
-| 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
-| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
-| 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
-| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | ✅ done |
-| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
-| 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
-| 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
-| 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
-| 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 15 | verify-mvp-04 | WorkBuddy | 2026-10-05 19:48 | `agent/workbuddy/verify-mvp-04` | ✅ done |
-| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
-| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
-| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
-| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
-| 18 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
-| 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
-| 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
+<!-- MVP-01 → docs/claims/01-workbuddy--MVP-01.md -->
+<!-- MVP-02 → docs/claims/02-codex--MVP-02.md -->
+<!-- MVP-02-amend → docs/claims/03-claude-code--MVP-02-amend.md -->
+<!-- worktree-isolation → docs/claims/04-claude-code--worktree-isolation.md -->
+<!-- agent-onboarding → docs/claims/05-claude-code--agent-onboarding.md -->
+<!-- discipline → docs/claims/06-claude-code--discipline.md -->
+<!-- MVP-03 → docs/claims/07-codex--MVP-03.md -->
+<!-- fix-wal-lock-retry → docs/claims/08-workbuddy--fix-wal-lock-retry.md -->
+<!-- MVP-08-prep → docs/claims/09-qoder--MVP-08-prep.md -->
+<!-- R10-fix-10 → docs/claims/10-workbuddy--R10-fix-10.md -->
+<!-- graph-traceability → docs/claims/11-claude-code--graph-traceability.md -->
+<!-- fix-flaky-init → docs/claims/12-workbuddy--fix-flaky-init.md -->
+<!-- MVP-03-amend → docs/claims/13-trae--MVP-03-amend.md -->
+<!-- claim-nullable → docs/claims/14-workbuddy--claim-nullable.md -->
+<!-- verify-mvp-04 → docs/claims/15-workbuddy--verify-mvp-04.md -->
+<!-- R10-fix-10-card → docs/claims/14-trae--R10-fix-10-card.md -->
+<!-- MVP-04 → docs/claims/15-qoder--MVP-04.md -->
+<!-- fix-flaky-init-card → docs/claims/16-trae--fix-flaky-init-card.md -->
+<!-- MVP-08 → docs/claims/17-qoder--MVP-08.md -->
+<!-- claim-nullable → docs/claims/18-workbuddy--claim-nullable.md -->
+<!-- MVP-04-verify → docs/claims/19-trae--MVP-04-verify.md -->
+<!-- claim-nullable-card → docs/claims/20-trae--claim-nullable-card.md -->
+<!-- plan-evidence-failclosed → docs/claims/21-opencode--plan-evidence-failclosed.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -591,7 +594,6 @@ R9-03 要求的 `unique(claim_request_id, task_id)` **已由 `task_claims` 满�
 的精神，应由 `MVP-02-amend` 修正 spec 文本，而不是在实现里补表。
 本任务不采用我原先的「拆表」方案，理由与 Claude 一致（见下方冲突说明）。
 
-
 ### 其他说明（不构成缺陷）
 
 - `seq` 取自 `cursor.lastrowid`：当前 schema 未声明 `WITHOUT ROWID`，rowid 即自增
@@ -827,79 +829,40 @@ R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表�
 - 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
   建议在 MVP-10b Adapter 实现时解决。
 
-### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
+### verify-mvp-04：MVP-04 验收的注入验证补充（✅ done）
 
-MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
-R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
-
-R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
-
-#### 三项注入
-
-| 注入 | 实测 | 结论 |
-|---|---|---|
-| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
-| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
-| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
-
-第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
-互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
-
-> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
-> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
-> 第二项注入已证明测试能抓到它。
-
-#### 与 TRAE 验收的互补
-
-| | TRAE（代码核查） | WorkBuddy（注入验证） |
-|---|---|---|
-| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
-| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
-| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
-
-#### 补充建议（不阻塞）
-
-- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
-  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
-- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
-  建议在 MVP-10b Adapter 实现时解决。
-
-### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
-
-MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
-R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
-
-R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
-
-#### 三项注入
-
-| 注入 | 实测 | 结论 |
-|---|---|---|
-| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
-| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
-| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
-
-第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
-互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
-
-> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
-> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
-> 第二项注入已证明测试能抓到它。
-
-#### 与 TRAE 验收的互补
-
-| | TRAE（代码核查） | WorkBuddy（注入验证） |
-|---|---|---|
-| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
-| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
-| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
-
-#### 补充建议（不阻塞）
-
-- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
-  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
-- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
-  建议在 MVP-10b Adapter 实现时解决。
+~~~text
+任务编号：verify-mvp-04
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 19:48
+完成时间：2026-10-05 20:05
+依赖任务：MVP-04（✅ 已验收）
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §11（Claim 事务与条件 UPDATE）、§13（fencing）、
+            §26（CORE-CLAIM-002 / CORE-FENCE-001 的验证要求）
+允许修改目录：docs/**（仅 TASKS.md 登记）
+禁止修改目录：backend/**（验收对象，只读）、docs/spec/**
+交付分支：agent/workbuddy/verify-mvp-04
+完成标准：
+  1. 四个 test_id 逐条核验，结论可追溯到代码行与测试用例 ✅
+  2. 至少做一次注入验证（故意破坏防护 → 确认测试能抓到）✅ 三次
+  3. 验收结论与 TRAE 的代码核查结论可对照、不重复 ✅
+  4. 验收中发现的问题要么修掉、要么登记为遗留 ✅
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-FENCE-001
+测试命令：python tools/discipline/discipline.py && pytest
+当前状态：done
+commit：9108ca8
+验证结果：
+  门禁: docstate 90/90、pytest exit 0、ruff exit 0
+  注入 1（去掉 rowcount 断言）: 未被抓到，10/10 通过 —— BEGIN IMMEDIATE 写锁已挡双赢家
+  注入 2（去掉 status='ready' 条件）: 抓到，2 个并发测试 + 多个 claim 测试失败
+  注入 3（禁用 guarded_write epoch 检查）: 抓到，5 个测试失败（含 CORE-FENCE-001 两例）
+已知问题：
+  - 三次注入中第1 次未被抓到；非缺陷，但需固化「写锁是第一道防线」的认知
+  - 建议给 CORE-CLAIM-002 补一条显式用例断言「即使去掉 rowcount 仍只有一个 winner」
+  - 复放不重发 lease_token 的问题转 MVP-10b
+  详见下方「MVP-04 验收：注入验证补充」小节
+~~~
 
 ## 关键路径
 
@@ -947,6 +910,14 @@ commit：
 
 ## 登记规则
 
+0-a. **⚠️ 认领登记写进 `docs/claims/`，不要往 TASKS.md 的表里加行。**
+   2026-10-05 20:47 拆分：那11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+   冲突 100% 集中在这张表与任务卡两处 —— 它们是仓库里仅有的多写点。
+   认领登记已拆成「每 task 一个独占文件」，新认领请新建
+   `docs/claims/<序号>-<harness>--<task-id>.md`（字段照抄现有文件）。
+   TASKS.md 里的认领表**只读**，任何 AI 都不应再往里加行。
+   任务卡暂未拆分（原始数据里有 11 个 task 从未建过格式合规的卡，先补齐再拆），
+   任务卡仍写进 TASKS.md 的「## 任务卡」章节。
 0. **⚠️ 登记必须发生在开工之前，不是之后。** 顺序是：
    建任务分支 → 在「认领登记」表写入 task_id/Harness/时间/分支 → 开工。
    先干活后补登记会让其他 AI 看不见占用（本项目已因此发生一次，见违规记录）。

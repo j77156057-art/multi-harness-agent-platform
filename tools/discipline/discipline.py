@@ -31,6 +31,11 @@ import re
 import sys
 
 DEFAULT_TASKS = os.path.join("TASKS.md")
+# 2026-10-05 拆分：认领登记从 TASKS.md 的多写表格迁到「每task 一个独占文件」。
+# 理由：当天 11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+# 冲突 100% 集中在这张表与任务卡两处 —— 它们是仓库里仅有的多写点。
+# 任务卡暂未拆分（原始数据里有 11 个 task 从未建过格式合规的卡，先补齐再拆）。
+CLAIMS_DIR = os.path.join("docs", "claims")
 
 # 任务表「状态」列允许包含的关键字。与 TASKS.md「状态图例」保持一致；
 # 允许附加注记（如 "⏳ waiting ★瓶颈"），故用包含判定而非全等。
@@ -121,20 +126,36 @@ def parse_task_table(text):
     return entries
 
 
-def parse_claim_table(text):
-    """认领登记表 → [{task_id, harness, claimed_at, branch, status}]"""
+def _md_field(text, label):
+    """从 markdown 表格行 `| label | value |` 里取值。"""
+    m = re.search(r"^\|\s*" + re.escape(label) + r"\s*\|\s*(.*?)\s*\|", text, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def parse_claim_table(repo_root=None):
+    """docs/claims/*.md → [{task_id, harness, claimed_at, branch, status}]。
+
+    拆分前认领登记是 TASKS.md 里的一张表，多个 AI 各加一行必然冲突。
+    现在每个 task 一个独占文件，本函数读目录。
+    """
     entries = []
-    for cells in table_rows(section(text, "## 认领登记")):
-        if cells[0] == "序号":
+    root = repo_root or os.getcwd()
+    claims_dir = os.path.join(root, CLAIMS_DIR)
+    if not os.path.isdir(claims_dir):
+        return entries
+    for name in sorted(os.listdir(claims_dir)):
+        if not name.endswith(".md"):
             continue
+        body = read(os.path.join(claims_dir, name))
         entries.append(
             {
-                "seq": cells[0],
-                "task_id": cells[1] if len(cells) > 1 else "",
-                "harness": cells[2] if len(cells) > 2 else "",
-                "claimed_at": cells[3] if len(cells) > 3 else "",
-                "branch": cells[4] if len(cells) > 4 else "",
-                "status": cells[5] if len(cells) > 5 else "",
+                "seq": name.split("-", 1)[0],
+                "file": name,
+                "task_id": _md_field(body, "task_id").strip("`"),
+                "harness": _md_field(body, "Harness"),
+                "claimed_at": _md_field(body, "认领时间"),
+                "branch": _md_field(body, "分支").strip("`"),
+                "status": _md_field(body, "状态"),
             }
         )
     return entries
@@ -189,10 +210,10 @@ def has_verification_evidence(card):
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
 
-def check_registry(result, tasks_text):
+def check_registry(result, tasks_text, repo_root=None):
     """组 1：任务表与认领登记表自身的完整性。"""
     tasks = parse_task_table(tasks_text)
-    claims = parse_claim_table(tasks_text)
+    claims = parse_claim_table(repo_root)
 
     result.chk(bool(tasks), "任务表解析出 %d 行" % len(tasks), "registry")
     result.chk(bool(claims), "认领登记表解析出 %d 行" % len(claims), "registry")
@@ -636,7 +657,7 @@ def run(repo_root="."):
         raise FileNotFoundError(tasks_path)
 
     tasks_text = read(tasks_path)
-    tasks, claims = check_registry(result, tasks_text)
+    tasks, claims = check_registry(result, tasks_text, repo_root)
     check_cards(result, tasks_text, claims)
     check_counts(result, repo_root)
     check_dependencies(result, repo_root, tasks)
