@@ -2240,4 +2240,8 @@ commit：cf2b46c（实现与证据提交；本行为随附回填提交）
     （跨任务登记，同 3a 先例）；MVP-08 验收卡与 message-global-seq 卡的
     「3b 仍开放」标注同步更新。openapi 中 plan_id/review_id/
     in_reply_to_seq/body_withheld/trusted 等未实现字段不在本任务范围。
+  合并后复验（main 已含 Qoder MVP-05，无代码冲突；claims 撞号顺延 30）：
+  backend pytest 135 项退出 0（116 + MVP-05 的 19）、ruff 49 files、
+  docstate 90/0、discipline 39/0、tools 14 passed、prep FAILURES 0、
+  mutation 10/10。
 ~~~

@@ -27,3 +27,6 @@
   prep check_contract FAILURES 0、mutation 10/10。实现提交 cf2b46c，
   本行为随附回填提交。MVP-08 验收卡遗留 3b、message-global-seq 卡
   与 traceability 的开放标注均已同步关闭。
+- 2026-10-05 22:40：main 合入 Qoder 的 MVP-05（claims 29 已被占用，
+  本卡顺延为 30）；main 合入本分支无代码冲突，合并后复验 backend
+  pytest 135 项退出 0，其余门禁同前全绿。
