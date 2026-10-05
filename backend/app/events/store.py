@@ -18,6 +18,7 @@ from typing import Any
 
 from app.config import settings
 from app.db.connection import Database
+from app.db.sequence import next_global_seq
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,44 +82,29 @@ class EventStore:
         created_at = datetime.now(UTC).isoformat()
         sql = """
             INSERT INTO task_events(
-                event_name, aggregate_type, aggregate_id, actor_type, actor_id,
+                seq, event_name, aggregate_type, aggregate_id, actor_type, actor_id,
                 payload_json, payload_hash, schema_version, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
+        arguments = (
+            event_name,
+            aggregate_type,
+            aggregate_id,
+            actor_type,
+            actor_id,
+            serialized,
+            payload_hash,
+            schema_version,
+            created_at,
+        )
 
         if connection is not None:
-            cursor = connection.execute(
-                sql,
-                (
-                    event_name,
-                    aggregate_type,
-                    aggregate_id,
-                    actor_type,
-                    actor_id,
-                    serialized,
-                    payload_hash,
-                    schema_version,
-                    created_at,
-                ),
-            )
-            seq = int(cursor.lastrowid)
+            seq = next_global_seq(connection)
+            connection.execute(sql, (seq, *arguments))
         else:
             with self.database.transaction() as conn:
-                cursor = conn.execute(
-                    sql,
-                    (
-                        event_name,
-                        aggregate_type,
-                        aggregate_id,
-                        actor_type,
-                        actor_id,
-                        serialized,
-                        payload_hash,
-                        schema_version,
-                        created_at,
-                    ),
-                )
-                seq = int(cursor.lastrowid)
+                seq = next_global_seq(conn)
+                conn.execute(sql, (seq, *arguments))
         return EventRecord(
             seq=seq,
             event_name=event_name,

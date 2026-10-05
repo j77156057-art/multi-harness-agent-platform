@@ -42,7 +42,7 @@
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
-| message-global-seq | TRAE | MVP-08 | 🟢 doing | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
+| message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -94,7 +94,7 @@
 | 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
 | 22 | MVP-08-verify | TRAE | 2026-10-05 20:49 | `agent/local/trae/MVP-08-verify/a1` | ✅ done |
-| 23 | message-global-seq | TRAE | 2026-10-05 21:18 | `agent/local/trae/message-global-seq/a1` | 🟢 doing |
+| 23 | message-global-seq | TRAE | 2026-10-05 21:18 | `agent/local/trae/message-global-seq/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1556,14 +1556,18 @@ commit：2440566
      空消息体）。建议语义校验改用专属码（verdict→review.verdict_not_allowed、
      plan linter→plan.*），或在表内为 422 补一个通用语义码；
   3. 消息能力两处 schema 级缺口（卡片已自陈、traceability 已标 🟡，确认属实）：
-     a) 消息 seq 按 group 独立分配（MAX(created_seq)+1），不与 task_events 共享
-        全局 seq——R10 §19 read_context(since_seq) 未来要混合排序消息与事件，
-        需序列表或消息入事件流，均要动 migrations（MVP-02 范畴）；checklist
-        MVP-08 的交付条目原文只要求「消息与 task_events 关联」（task_id 列已做），
-        故不阻塞，但卡内完成标准第 4 条的「共享全局 seq」字样应在本遗留项关闭前
-        视为未达成；
+     a) ✅ 已关闭（message-global-seq，2026-10-05）：迁移 003 建单行表
+        global_seq 统一发号、task_events 去 AUTOINCREMENT 重建，消息与事件
+        同事务取号；两流交错连续、跨群不重号、存量库续号、回滚不空洞均有
+        机械断言（test_api_events_messages.py、test_database_events.py）。
+        原始问题存档：消息 seq 曾按 group 独立分配（MAX(created_seq)+1），
+        不与 task_events 共享全局 seq——R10 §19 read_context(since_seq)
+        未来要混合排序消息与事件，需序列表或消息入事件流，均要动 migrations
+        （MVP-02 范畴）；checklist MVP-08 的交付条目原文只要求「消息与
+        task_events 关联」（task_id 列已做），故不阻塞；
      b) PostMessage 接受 refs 但 task_messages 无列、service 接收即丢、GET 不回显
         （仅 POST 响应原样回显），契约静默说谎——修 a 时一并删字段或补列；
+        【a 已另案关闭，b 仍开放】
   4. MVP-05/06 落地后，须把 test_api_flow.py 里两处 service.start_task /
      record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
      Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
@@ -1747,7 +1751,7 @@ commit：087eb93（验收证据提交；本行为随附回填提交）
   MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
 ~~~
 
-### message-global-seq：消息与事件共享全局 seq（🟢 doing）
+### message-global-seq：消息与事件共享全局 seq（✅ done，关闭 MVP-08 验收遗留 3a）
 
 ~~~text
 任务编号：message-global-seq
@@ -1789,9 +1793,40 @@ commit：087eb93（验收证据提交；本行为随附回填提交）
      mutation_test；MVP-08 卡遗留项 3a 标记已关闭（refs 3b 不在本任务范围）。
 test_id：MVP-API-001
 测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
-当前状态：doing
-完成时间：（完成后回填）
-commit：（完成后回填）
+当前状态：✅ done
+完成时间：2026-10-05 21:30
+commit：（见回填提交）
 验证结果：
-  （完成后回填）
+  方案 A 已落地：
+  - backend/migrations/003_global_seq.sql：单行表 global_seq 发号器，
+    初值取两流历史 MAX；task_events 去 AUTOINCREMENT 重建（照 002 先例，
+    重建索引与两个 append-only 触发器，清 sqlite_sequence 旧条目）；
+  - backend/app/db/sequence.py：next_global_seq(conn) 强制在写事务内
+    UPDATE+SELECT 取号，无事务即 ValueError，回滚随事务不产生空洞；
+  - app/events/store.py：两条 connection 分支同事务显式带 seq 插入，
+    不再用 lastrowid；app/tasks/service.py post_message 删除 per-group
+    MAX+1，改取全局号（BEGIN IMMEDIATE 串行，并发安全）。
+  机械证据：
+  - test_api_events_messages.py：消息号 = 当前事件最大号 +1/+2；交错写
+    消息→claim 事件→消息，断言 m1 < event < m2 且 m2=m1+2；第二个群
+    消息不重新从 1 开始；两流并集 == 1..N 连续区间且互不重号；
+  - test_database_events.py：用 001+002 旧迁移造存量库（旧二进制式裸插：
+    事件 1..5、两个群各有 created_seq=1），应用 003 后 global_seq=5、
+    事件行全保留、DDL 无 AUTOINCREMENT，新事件取 6、新消息取 7；
+  - 既有无空洞语义不变：失败事务连号回滚（test_failed_domain_transaction…）、
+    12 线程并发取号 1..12 不重不漏，均仍通过。
+  门禁实测（2026-10-05 21:30）：
+  - docstate 90/0；pytest 全量 113 项退出码 0（本任务净增 2 项：
+    test_api_events_messages 8→9、test_database_events 9→10）；
+  - ruff check 全过；ruff format 41 files already formatted
+    （新增 sequence.py 计入）；
+  - check_contract.py FAILURES 0；mutation_test.py caught 10/10；
+  - discipline：3 项失败全是 main e6b3026 既有红灯（verify-mvp-04/
+    MVP-04-inject 命名与缺登记），由 GATE-MERGE-CHECK-01 分支清理，
+    本任务零新增红灯；
+  - 真实 app.main:app 冒烟（走 003 全新迁移）：批准事件 seq=1，随后
+    消息 seq=2，同空间连续。
+  范围说明：R10/prep 均未改（openapi.yaml L1215 本就要求全局空间，
+  本次是实现回归契约）；docs/traceability.md 仅追加关闭记录（跨任务
+  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）仍开放。
 ~~~
