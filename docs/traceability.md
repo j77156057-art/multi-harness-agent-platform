@@ -24,7 +24,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `DOC-STATE-001` | 状态机自洽：allowlist 封闭性、迁移表单值 next、自环清单、非终态出边 | ✅ 有断言 | `tools/docstate` structure/allowlist/transitions/r10-events/loops/states 组 |
 | `DOC-SCHEMA-001` | canonical schema 自洽：§8 唯一键引用的列已声明、§11 DDL 列已登记、§37.6 必要字段 | ✅ 有断言 | `tools/docstate` schema/schema-keys/schema-list 组 |
 | `DOC-TRACE-001` | test_id 无悬空：全文出现的 ID 必须落在阶段列表之一 | ✅ 有断言 | `tools/docstate` trace 组 |
-| `DOC-PLAN-001` | 计划 linter：拒绝环 / 非法引用 / 超规模 / 不可满足 evidence | ⚠️ 仅声明 | 未实现（MVP-03 交付） |
+| `DOC-PLAN-001` | 计划 linter：拒绝环 / 非法引用 / 超规模 / 不可满足 evidence | ✅ 有断言 | `test_state_plan.py`（拒绝环、未注册 capability、`limits` 超规模、重复依赖边、glob 重复、`cmd` 判据缺 evidence source、未注册 evidence source、空白 evidence source；`human` 判据免 evidence source）。原实现 fail-open（`if source is not None` + `elif evidence_sources and ...`），由 `plan-evidence-failclosed` 改为 fail-closed |
 | `DOC-AUTH-001` | 权限矩阵一致性 | ⚠️ 仅声明 | 未实现（MVP-05 交付） |
 | `DOC-ADR-001` | ADR 清单完整 | ⚠️ 仅声明 | 未实现 |
 | `DOC-AO-001` | AO 能力对照表 | ⚠️ 仅声明 | 人工产出 `docs/ao-capability-audit.md`，无断言 |
