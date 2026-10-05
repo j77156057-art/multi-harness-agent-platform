@@ -42,6 +42,12 @@
 R10-fix-09 把权威唯一键放在了它上面，且承载它的 §37.6 单元格恰好落在 `schema-keys`
 断言组的跳过名单里）。见 §4 Q-6。
 
+**Q-6 已于同日被 R10-fix-10 修复**（WorkBuddy，commit `32f4e45`）：§8 新增
+`task_claims` 行、§37.6 的合并单元格拆开、`tools/docstate` 的 `schema-keys` 组扩围
+44 行。本条记录保留，用于说明"一个按其自身规则查不出缺陷的断言组"是如何被发现的。
+随之本 prep 里那条**按设计会转红的哨兵断言已删除**，改为对修复结果的正向断言
+（J 组，`check_contract.py`）。
+
 **教训**：这次偏差是靠人工逐行比对 + 新增断言发现的，**不是**靠第一版那 9 组断言 ——
 它们在两版 R10 上都全绿。断言覆盖不到的地方，"0 失败"不含任何信息。
 
@@ -260,6 +266,14 @@ all-or-nothing 失败时，整个请求回滚 → 应该返回**单个** error�
 `exclusive_paths` 的具体路径、群聊正文"处理，标为 TODO，需要 §17 补口径。
 
 ### Q-6 `task_claims` 没有 §8 最小定义行，而 R10-fix-09 把权威唯一键放在了它上面
+> **状态：已修复（2026-10-05，R10-fix-10，commit `32f4e45`）。** 以下内容保留为
+> 问题记录。修复内容：§8 新增 `| task_claims | claim_id; unique(claim_request_id,
+> task_id) | ... |` 行；§37.6 的 `task_claims/task_attempts` 合并单元格拆成两行，
+> 使 `schema-keys` 组不再跳过；`tools/docstate` 的 `schema-keys` 组扩围 44 行。
+> 本 prep 的哨兵断言随之删除，J 组改为对修复结果的正向断言。
+>
+> 修复方式本身值得记一笔：**列名取自 `001_initial.sql` 的既成实现，而不是反过来
+> 让实现去凑规范** —— 这正是 Q-6 里建议的顺序。
 
 **这是本次落地时新发现的，比 Q-1～Q-5 都更需要裁定。**
 
@@ -315,8 +329,9 @@ R10-fix-09 的两条落点是：
    且能表达"这一项当时是什么结果"（含失败项的释放原因）。回放走
    `SELECT * FROM task_claims WHERE claim_request_id = ?`，**不从
    `first_result_json` 反解**（§11，R10-fix-09）。
-   **注意**：`task_claims` 目前没有 §8 最小定义行（见 Q-6），所以这张表的字段清单
-   应以 `001_initial.sql` 的既成实现为准，再把结果回写规范，不能反过来。
+   字段清单已由 R10-fix-10 落进 §8（`claim_id, claim_request_id, task_id,
+   attempt_id, owner, claimed_at, released_at, release_reason`），与本条要求一致；
+   以 §8 行为准，`001_initial.sql` 如与 §8 有出入则改实现（Q-6 已闭环）。
 2. **`claim_requests` 不得有 `task_id` 列**，也不得在该表上再建含 `task_id` 的
    复合唯一键。它是每请求一行（§8，R10-fix-09）。
 3. `claim_requests` 需要 `partial_allowed` 落库（§11 R8 约束明确要求"批量
@@ -368,12 +383,19 @@ worktree 里跑都指向本工作树的 R10，不会误读别处的副本。
 | G | 契约中所有被 `enum` 化的 error code 都在 `error-codes.md` 里有定义 |
 | H | `error-codes.md` 里每个带 `(M)`/`(O)`/`(R)` 标注的事件名，都真的在对应集合内 |
 | I | 契约里出现的手写计数只作为提示，不作为断言常量（§37.7 方法论） |
-| **J** | **R10-fix-09 回归**：§8 `claim_requests` 行不得声明含 `task_id` 的复合键、不得有 `task_id` 列；§11 必须保留"不从 JSON 里反解"和"失败项同样留行"两句；`idempotency.md` 不得把复合键放回 `claim_requests` |
+| **J** | **Claim 幂等落点回归**：§8 `claim_requests` 行不得声明含 `task_id` 的复合键、不得有 `task_id` 列；`task_claims` 行必须存在且声明 `unique(claim_request_id, task_id)`、`task_id` 同时在键列与字段列、保留失败项留行规则；§11 必须保留"不从 JSON 里反解"和"失败项同样留行"；`idempotency.md` 不得把复合键放回 `claim_requests`；§8 的节边界必须止于 §9 之前 |
 
 J 组存在的直接理由：本 prep 的第一版把 per-task 复合键放在了 `claim_requests` 上，
 正是 R10-fix-09 修掉的那个缺陷。没有 J 组，A～I 组全绿也发现不了。
 
-### 6.1 最近一次运行结果（2026-10-05，对仓库 `docs/spec/0.3-R10.md`）
+最后一条（节边界）是被 R10-fix-10 逼出来的：修好后 §8 与 §37.6 **各有一行
+`task_claims`**，而本脚本的 `section_bounds` 当时因层级解析写错（把标题里第一个
+空格分隔的 token 当层级，而 `## 8. Canonical 数据模型` 在 `##` 后紧跟空格，于是
+层级为空、边界一路延伸到文档末尾），使 §37.6 的那行**覆盖**了 §8 的那行，J 组转红。
+边界修正后 A～I 组也一并变严格（此前有若干组是"恰好取到第一个代码块"才通过的）。
+详见 §6.3。
+
+### 6.1 最近一次运行结果（2026-10-05 09:5x，对仓库 `docs/spec/0.3-R10.md` @ `32f4e45`）
 
 ~~~text
 counted: states=23  M=74  O=13  R=1  union=88
@@ -381,7 +403,7 @@ paths: 34   schemas: 27   $refs: 28 (all resolve)
 section 7 verbs: 16/16 mapped   section 21 verbs: 6/6 mapped
 error-codes.md defines 86 codes; contract enumerates 6 under a `code` property, all defined
 25 tagged event citations, all in the correct M/O/R set
-J: 8/8 pass, 其中一条是 Q-6 的哨兵（见下）
+J: 13/13 pass
 FAILURES : 0   (exit 0)
 ~~~
 
@@ -389,10 +411,11 @@ FAILURES : 0   (exit 0)
 这正是 §37.7 结论"allowlist 的任何数字都不得手写"要防的事，只不过这次错在清单而
 不在 R10。见 Q-1。
 
-**J 组里有一条是哨兵而非断言**：`task_claims still has NO section 8 minimum-definition
-row`。它断言"§8 目前没有 `task_claims` 行"，一旦 R10 按 Q-6 修好，这条就会转红，
-提示维护者重新核对契约并删掉该断言。故意让修复触发红灯，是为了避免 Q-6 被静默修掉
-而 prep 里那段"已知缺口"的描述变成陈旧的谎言。prep 不在 CI 内，这条不会阻断任何人。
+**J 组的哨兵已履行使命并删除**：它原本断言"§8 没有 `task_claims` 行"，用来防止
+Q-6 被静默修掉。R10-fix-10（`32f4e45`）修复后它按设计转红，于是改为对修复结果的
+正向断言（`task_claims` 行存在、键列与字段列都声明 `task_id`、保留失败项留行规则）。
+**让修复触发红灯是有意为之**：否则那份"已知缺口"的描述会变成陈旧谎言，而下一个人
+读到时无从判断它是否still成立。
 
 ### 6.2 校验脚本自身被变异测试过
 
@@ -427,6 +450,29 @@ row`。它断言"§8 目前没有 `task_claims` 行"，一旦 R10 按 Q-6 修好
   字符串匹配照样通过。要真正锁住语义，得解析 §11 的结构，那是 R10 复审的事；
 - **变异测试无法覆盖 R10 侧**。`mutation_test.py` 只把契约文件复制到临时目录，
   R10 始终读真实仓库副本 —— 因为"变异真相源"本身就不是这套工具该做的事；
+- **节边界回归靠一条哨兵断言 + 一次检查器自变异**。`section_bounds` 曾因层级解析写错
+  （把标题里第一个空格分隔 token 当层级，而 `## 8. ...` 在 `##` 后紧跟空格 → 层级为空
+  → 边界延伸到文档末尾），使 §8/§10/§11/§37.7 的边界**全部过宽**。当时 A～I 组之所以
+  全绿，是因为它们恰好只消费"区域内第一个代码块"或用全文档子串匹配 —— **是碰巧，
+  不是正确**。暴露的契机是 R10-fix-10 让 §37.6 也出现了一行 `task_claims`，覆盖了
+  §8 的那行。
+
+  修好后加了显式断言（"§8 的边界必须止于 §9 之前"）。**该断言已证伪**：把
+  `section_bounds` 的两行改回旧写法后重跑，它连同 3 条下游断言一起转红
+  （`FAILURES: 4`）：
+
+  ~~~text
+    FAIL  section 8 bounds stop before section 9 (section_bounds regression guard)
+    FAIL  task_claims row declares unique(claim_request_id, task_id)
+    FAIL  task_claims row declares task_id in both the key and field cells
+    FAIL  task_claims row keeps the failed-item-still-writes-a-row rule
+  ~~~
+
+  复现方法：把 `level = len(heading) - len(heading.lstrip("#"))` 换成
+  `level = heading.lstrip("#").split(" ")[0]`、把 `^#{{1,{level}}}\s` 换成
+  `^#{{{1},{len(level)+1}}}\s`，用 `--r10 <真实 R10> --here <临时目录>` 跑。
+  这一步没有并进 `mutation_test.py` —— 那个脚本只变异契约文件，不变异检查器自身；
+  要自动化它得再加一层，本轮未做。
 - **没有校验 R10 §10 迁移表本身**。即契约里的 `(status, event)` 组合是否真的都是
   §10 的一条边，本脚本不查。这需要先把 §10 迁移表解析成结构化数据，属于
   `tools/docstate` 的 `DOC-STATE-001` 职责，不该在 prep 里重复实现一份
