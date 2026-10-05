@@ -21,18 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 
 from fastapi import FastAPI, HTTPException  # noqa: E402
 
+from app.api.app import create_app  # noqa: E402
 from app.config import settings  # noqa: E402
-from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT  # noqa: E402
 
-app = FastAPI(
-    title="Agent Collaboration Platform — MVP",
-    version="0.1.0",
-    description=(
-        "多 Harness Agent 协作与调度平台 MVP。"
-        f"规范基线：R10（迁移边 {R10_TRANSITION_EDGE_COUNT} 条，"
-        f"allowlist {R10_ALLOWLIST_COUNTS['UNION']} 项）。"
-    ),
-)
+app: FastAPI = create_app()
 
 
 @app.get("/health", tags=["ops"])
