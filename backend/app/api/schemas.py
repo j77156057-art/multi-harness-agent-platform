@@ -103,3 +103,11 @@ class ReviewClaimRequest(BaseModel):
     attempt_id: str
     reviewer_harness_id: str
     review_id: str | None = None
+
+
+class ProbeRequest(BaseModel):
+    harness_id: str
+    adapter: str
+    adapter_version: str
+    self_reported_capabilities: list[str] = Field(default_factory=list)
+    host_mode: str | None = None

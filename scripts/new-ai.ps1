@@ -116,12 +116,15 @@ try {
         throw "git worktree add failed after 3 attempts. Output: $($added.Output -join ' | ')"
     }
 
-    # 每个 worktree 一个**独立** venv，不用 junction 指向根目录。
+    # One INDEPENDENT venv per worktree, not a junction to the main .venv.
     #
-    # 为什么改（2026-10-05 23:48 事故）：根 .venv 被清空重建过（只剩 pip，2 个包），
-    # 而当时 8 个 worktree 的 .venv 全是指向它的 junction —— 根一坏，全部一起坏，
-    # 且所有人的门禁都莫名失败（WorkBuddy 因此误判过一次假信号）。
-    # 代价：106 MB x N（磁盘可用 80 G，可接受）。需要共享时用 -SharedVenv 走 junction。
+    # Why (2026-10-06): three real benefits, none of them a past incident --
+    # an earlier draft of this comment blamed a venv wipe that later turned out
+    # never happened, so do not go looking for it.
+    #   1. isolation: one agent installing/uninstalling a package cannot break others
+    #   2. install once: adding a dependency costs one install, not N
+    #   3. versions may diverge when one agent needs to try a newer package
+    # Cost is 106 MB x N. Use -SharedVenv to fall back to the old junction.
     $targetVenv = Join-Path $repoRoot ".worktrees/$Harness/.venv"
     $reqFile = Join-Path $repoRoot 'backend/requirements-dev.txt'
 

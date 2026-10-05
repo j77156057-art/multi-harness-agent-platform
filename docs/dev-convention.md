@@ -301,11 +301,14 @@ agent/<group-short>/<harness-b>/<task-id>/a1
 2. **只移动自己拥有的分支引用。** 分支引用仍是跨工作区共享的，
    `git branch -f` / `git reset` 到别人的分支等于删别人的工作；
 3. **仓库根目录只用于合并和在 `main` 上跑门禁**，不要在那里编辑；
-4. **每个工作区有自己的 `.venv`（实体目录，不是联接）**，所以根目录 `.venv` 出问题
-   不会波及所有 AI。代价是约 106 MB × N。`./scripts.sh check` 在每个工作区都能直接跑。
-   存量 junction 用 `./scripts/migrate-venvs.sh` 迁移（先跑 `--dry-run` 看清楚）；
-   2026-10-05 23:48 根 `.venv` 被清空重建，8 个 junction 一起坏，
-   每个人的门禁都莫名失败 —— 这条规则就是那次事故的结果；
+4. **每个工作区有自己的 `.venv`（实体目录，不是联接）**。代价是约 106 MB × N。
+   `./scripts.sh check` 在每个工作区都能直接跑。存量 junction 用
+   `./scripts/migrate-venvs.sh` 迁移（先跑 `--dry-run` 看清楚）。
+   独立的三条实际收益：
+   - **环境隔离**：某个 AI 装/卸包不会影响其他人；
+   - **装依赖只付一次**：加新依赖时各自装，不必重装 N 次（迁移时体感明显）；
+   - **版本可分化**：必要时某个 AI 可以先升一个包做实验，不影响别人。
+   需要共享时用 `new-ai.ps1 -SharedVenv` 走 junction；
 5. `.worktrees/` 已在 `.gitignore`，不会被提交（它与 `wt/` 不同：`wt/` 是 MVP-05 的
    worktree 物理目录）。
 
