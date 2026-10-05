@@ -52,7 +52,7 @@
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
-| MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
+| MVP-07 | Qoder | MVP-06 | 🟢 doing | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
@@ -1332,6 +1332,51 @@ commit：1ab608d
     「flaky 放行不可用」，行为与未实现一致而不是假装实现）。
   - Verify 账户隔离（§16 的「低权限隔离 / 网络白名单 / canonical 对 Verify 账户拒绝写入」）
     随 ADR-DEV-002 的单账户降级一起延后；overlay 本身按新 gitdir + alternates 构造。
+~~~
+
+### MVP-07：Review、Merge Gate 与集成分支（doing）
+
+~~~text
+任务编号：MVP-07
+负责人 Harness：Qoder
+开始时间：2026-10-06 00:10
+依赖任务：MVP-06（已合入 main `e742882`，✅ done）、MVP-04（✅ 已验收）、
+          MVP-05（✅ done）
+工作区：.worktrees/qoder/
+真相源引用：R10 §21（Review 与 Merge Gate：交叉断言、集成健康状态机、revert recovery、
+            Merge Queue 背压）、§10（awaiting_review / approved / merging / changes_requested
+            的单值迁移边）、§13（分支冻结与 Push Proxy）、§16（receipt 唯一键与精确 commit）、
+            §28（不变量）、§26（MERGE-EXACT-001、MERGE-REVERT-001/002）
+允许修改目录：backend/app/merge/**、backend/app/tasks/**、backend/app/api/**、
+            backend/tests/**、docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            backend/app/git/**、backend/app/verify/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-07/a1
+完成标准：
+  1. Reviewer Claim 拿到独立于开发 Lease 的 review Lease；同一 attempt 的重复 claim 不产生第二条
+  2. 自审被拒：owner 不能审自己的 attempt，同 harness 也不能
+  3. Merge Gate 做三条交叉断言：receipt.commit == review.reviewed_commit == 待合并分支 head、
+     receipt.fencing_epoch == task.current_epoch、receipt.base_commit == task.base_commit；
+     任一条不成立则拒绝，且**不写集成分支**
+  4. 未经 Verify 或未经 Review 的代码进不了集成分支（有断言，不是靠调用方自觉）
+  5. 合并失败区分三类：merge_conflict / merge_conflict_needs_owner / merge_post_commit_failure，
+     且三条边各自的 next 与 R10 §10 单值一致（不出现「approved 或 changes_requested」）
+  6. revert recovery 机械断言 tree(revert_commit) == tree(first_parent(failed_merge_commit))，
+     断言失败即 escalated
+test_id：MERGE-EXACT-001、MERGE-REVERT-001、MERGE-REVERT-002
+测试命令：./scripts.sh check
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - Merge Queue 的容量与背压（§21：并发上限、最大队列长度、磁盘水位、hotfix 配额）在 MVP
+    只实现「队列满则 queued」这一条，其余限流属于阶段 2；不静默跳过，写在这里。
+  - 集成健康状态机的完整形态（merge_failure_detected / reverting / retesting / escalated
+    四个中间态与各自出边）MVP 只实现到能跑通 revert recovery 的程度，其余状态留待 MVP-11
+    的集成测试覆盖。
 ~~~
 
 ## 关键路径
