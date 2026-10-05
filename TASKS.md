@@ -59,8 +59,8 @@
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
-| MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ done（待外部验收，04:23 经 ae07649 先合 main） | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
-| MVP-10b-verify | TRAE | MVP-10b | 🟢 doing | `agent/local/trae/MVP-10b-verify/a1` | `MVP-ADAPTER-002` |
+| MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ 已验收（TRAE 外部核查，通过附遗留清单 5 项，无 P1；04:23 先合 main 已留档） | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
+| MVP-10b-verify | TRAE | MVP-10b | ✅ done（通过附遗留清单 5 项，无 P1） | `agent/local/trae/MVP-10b-verify/a1` | `MVP-ADAPTER-002` |
 | dup-incident | Claude Code | — | ✅ done | `agent/local/claude/dup-incident/a1` | `MVP-PROCESS-001` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -330,6 +330,32 @@ MVP-08 卡；本记录为第三条留档。
 此后第四次同模式违规将在合并前被本地门禁与 CI（fetch-depth: 0）同时
 拦截。残余盲区：直提 main 不产生合并提交，仍只能靠分支保护（B 方案，
 暂未启用）与事后留档兜底。
+
+### 违规记录：MVP-10b 第五次「先合 main 后验收」（ae07649）
+
+**事实**：Qoder 的 MVP-10b（作者完成提交 622b1f2，claims/43 状态
+✅ done）于 2026-10-06 04:23 由 `ae07649`（Merge branch
+'agent/local/qoder/MVP-10b/a1'，--no-ff 两父 c0ee564/8d50fb5）合入
+main；TRAE 的外部验收于 05:45 才登记（MVP-10b-verify，claims/46）。
+这是继 MVP-03 / MVP-04 / MVP-08 / MVP-06 之后**第五次同模式违规**，
+且 10b 是 MVP-11 的硬依赖（关键路径）。
+
+**为什么闸没拦住**：discipline merge 组只机械核对「任务已登记、卡为
+done、证据齐全、合并标题默认」——作者把自己的卡标 ✅ done 即满足，
+**「done」无法区分「作者自陈完成」与「外部验收通过」**。GATE-MERGE-
+CHECK-01 当年预见的残余盲区之外，这是第二个制度缺口：验收状态没有
+机器可判的独立枚举。
+
+**已采取的纠正**：TRAE 以 MVP-10b-verify 按 MVP-ADAPTER-002 / R10
+§25 阶段 5 退出条件逐条双证据核查（不采信卡片自陈），独立重跑
+docstate 90/0、discipline 42/0、tools 27、backend 224 全过、ruff clean，
+并对本机真实二进制逐字复核三 Adapter 的 argv 契约；结论 ✅ 通过附
+遗留清单（无 P1），已回填本卡末「验收意见」。
+
+**建议（不在本验收任务实施）**：任务表状态增加机器可判的
+「待外部验收」枚举（或约定 ✅ done 必须带验收者署名行，由 discipline
+正则核对），使 merge 组能在外部验收前 fail-closed；排入 MVP-11 或
+后续纪律任务。
 
 ## 任务卡
 
@@ -1749,7 +1775,83 @@ commit：622b1f2
     由调用方显式覆盖（R10 §17 的安全审查可在 MVP-11 复核这一默认）。
 ~~~
 
-### MVP-10b-verify：MVP-10b 外部验收（🟢 doing）
+### 验收意见（TRAE，2026-10-06 06:10，基线 main 09d7191，被验内容 ae07649）
+
+**结论：✅ 通过，附遗留清单 5 项（无 P1）。** 方法：不采信作者卡自陈，
+每条找代码行 + 机械断言双证据；门禁全部独立重跑；argv 契约对本机真实
+二进制逐字复核。
+
+逐条核查（8 条计划全部成立）：
+
+1. **三 Adapter 注册四元组 + argv 单点**：codex/claude-code/opencode 各有
+   pinned HarnessRegistration（harness_id/provider/adapter/adapter_version/
+   registration_version 齐），argv 只在各自 command() 单点构造；测试用例
+   `test_each_cli_contract_is_pinned` 逐字断言 flag 序列与输出解析。
+   **本机实测复核**：claude 2.1.274 `claude -p --output-format json
+   --permission-mode acceptEdits` 三 flag 均存在，acceptEdits 是合法 choice，
+   json 是合法 output-format；opencode v2.0.22 `opencode run --format json
+   --auto` 三 flag 均存在（json 在 choices 内）；codex 本机确实未安装，
+   docstring 已如实标注「契约来自文档」并有逐字测试钉死。与作者卡完全一致。
+2. **§7 十六动词**：测试直接解析 R10 §7 动词表（len==16），对三个类反射
+   断言无缺方法，且 UnsupportedVerb 集合恰为 {accept_help, reject_help,
+   split_task, ask_human}；release/probe/capabilities 等 12 个全部有真实
+   路由。10a 两个隐性 404（list_ready_tasks/read_context）确已补路由并
+   逐 Adapter 走 HTTP 断言；redacted 显式 422（request.invalid）有正反测试。
+3. **全链路**：`test_each_adapter_completes_claim_to_merged_over_http` ×3
+   真实 HTTP + 真实 worktree + 真实 Push Proxy 跑到 merged，heartbeat 回执、
+   changed_files、head_commit 落库均有断言；verify→review→merge 由真实
+   Worker 执行。模型进程 ScriptedRunner 替身边界在测试模块 docstring 与
+   作者卡双处如实声明，argv/解析/SubprocessRunner 各有独立断言补偿。
+4. **§25 阶段 5 退出条件 9 条**：probe/Claim/Heartbeat/Submit/Verify/
+   Push Proxy/超时/恢复/危险操作拒绝均逐 Adapter 参数化（CASES×3），
+   注册可追踪有 reg-001→reg-002 pinned 断言。`test_the_subprocess_runner_
+   kills_at_the_deadline` 对真实子进程验证 kill-on-deadline（0.5s 超时、
+   tick 触发、elapsed<15s），缺二进制 → CliUnavailable 独立用例。
+5. **恢复（verify-mvp-04 遗留项）**：`reissue_lease_token` 只在复放路径、
+   outcome=claimed、lease 活跃且 lease_until>now 时轮换；UPDATE 带
+   released_at IS NULL 谓词（rowcount≠1 即 LeaseNotFound），库中只存
+   哈希；test_claim 两新用例钉死「活跃轮换且新 token 可 renew、旧 token
+   LeaseTokenMismatch」「未扫但已过期不轮换」；real_adapters ×3 钉死
+   复放后 attempt_id 不变、attempt_no 仍为 1、可继续到 verifying。
+   join 风险已排除：leases 连接三谓词（attempt_id/kind=development/
+   released_at IS NULL）为基线既有，每 (task,attempt) 至多一条活跃 lease。
+6. **危险拒绝**：main 分支 publish.branch_not_allowed、不可达 commit
+   publish.commit_unreachable、旧 epoch fencing.epoch_stale、四个无路由
+   动词 UnsupportedVerb 全部在线断言；非本尝试分支与 main 同守卫（作者卡
+   已说明，接受）。
+7. **越界核查**：净变更 14 文件，唯一越界是 backend/app/lease/service.py
+   （+19 行纯增量 reissue_lease_token，见遗留 R1）；db/events/state/plan/
+   verify/merge/git、R10、docstate、discipline 零触碰。
+8. **独立门禁（本机，Python 3.13.14，基线 09d7191）**：docstate 90/0、
+   discipline 42/0、tools pytest 27 passed、ruff check All passed +
+   73 files formatted；backend 全量 PYTHONUTF8=1 下 **224 dots 零失败**
+   （test_real_adapters 29 + test_claim 17 在内，新套件单独跑 46/46
+   rc=0）。作者卡「不带 PYTHONUTF8 则 merge_guard 5 例失败」在当前 main
+   **不复现**：清除该环境变量（sys.flags.utf8_mode=0）跑 test_merge_guard
+   14/14 rc=0——merge-interlock 合入后子进程 encoding 已全部显式 utf-8
+   （遗留 R4）。
+
+遗留清单（不阻塞 MVP-11 开工，建议入其检查单）：
+
+- **R1（P2 流程）**：lease/service.py 在任务卡禁止目录内。功能归属正确
+  （哈希轮换本就该在 lease 模块，claim 层直接 UPDATE leases 会更糟），
+  但正确顺序是先修订任务卡允许目录再写代码。本次接受既成事实。
+- **R2（P2 健壮性）**：SubprocessRunner 超时用 process.kill()，Windows 只
+  杀直接子进程；claude/opencode 派生的 node/git 孙进程可能成孤儿。现有
+  kill 测试只对单层 python 子进程。建议 MVP-11 用 CREATE_NEW_PROCESS_GROUP
+  + taskkill /T（或 Job Object）做进程树杀灭并补孙进程用例；孤儿对账口径
+  参照 ADR-023。
+- **R3（P3 测试缺口）**：CLI 运行期间 heartbeat 被拒的路径
+  （tick → HarnessLeaseLost → kill → 上抛，不 submit、不 abandon）语义
+  正确（靠 lease 过期巡检判 stale），但无直接用例；建议补一个 on_tick
+  抛 AdapterError 的用例钉死「杀进程且绝不 submit」。
+- **R4（info）**：作者卡 PYTHONUTF8=1 已知问题在当前 main 不复现
+  （无环境变量 14/14）；证据命令保留该变量无害，该条 caveat 可撤。
+- **R5（info，作者已自陈，转入 MVP-11）**：模型进程替身的边界；codex
+  argv 待装有 codex 的机器首跑确认；claude acceptEdits 保守默认留 §17
+  安全审查复核。
+
+### MVP-10b-verify：MVP-10b 外部验收（✅ done，通过附遗留清单 5 项，无 P1）
 
 ~~~text
 任务编号：MVP-10b-verify
@@ -1797,10 +1899,17 @@ test_id：MVP-ADAPTER-002
 测试命令：.venv\Scripts\python.exe tools\docstate\docstate.py；
           .venv\Scripts\python.exe tools\discipline\discipline.py；
           cd backend; ..\.venv\Scripts\python.exe -m pytest -q -p no:warnings
-当前状态：🟢 doing（登记先于开工）
-完成时间：（完工回填）
-commit：（完工回填）
-验证结果：（完工回填）
+当前状态：✅ done（通过附遗留清单 5 项，无 P1；验收意见见本文件 MVP-10b 卡前）
+完成时间：2026-10-06 06:10
+commit：见本分支 tip（docs 验收回填提交）
+验证结果：
+  结论：✅ 通过，无 P1，遗留 R1-R5 五项（2×P2、1×P3、2×info），不阻塞 MVP-11。
+  docstate 90/0；discipline 42/0；tools 27 passed；ruff clean（73 files）；
+  backend 全量 224 dots 零失败（PYTHONUTF8=1）；新套件 46/46 rc=0；
+  argv 契约对本机 claude 2.1.274 / opencode v2.0.22 真实 --help 逐字复核一致，
+  codex 本机未安装与声明一致；作者卡 GBK 问题不复现（utf8_mode=0 下 14/14）。
+  流程：第五次先合后验（ae07649 04:23），已在违规记录区留档并提出
+  「待外部验收」机器可判枚举建议。
 ~~~
 
 ### ❌ chain-template 优化：已做、已测、已否决（WorkBuddy，05:15-05:35）
