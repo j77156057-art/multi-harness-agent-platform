@@ -26,12 +26,13 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 
 | 约束 | 由谁检查 |
 |---|---|
-| R10 自身不自洽 | `tools/docstate` 88 项（CI + 应用启动） |
+| R10 自身不自洽 | `tools/docstate` 90 项（CI + 应用启动） |
 | `app/spec.py` 的状态/事件超出 R10 集合 | `test_spec_mirror.py` 11 项 |
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
 | 代码风格 | `ruff check` / `ruff format --check` |
-| **登记表自身不自洽** | `tools/discipline` 16 项（CI + `scripts.sh check`） |
+| **登记表自身不自洽** | `tools/discipline` 24 项（CI + `scripts.sh check`） |
+| **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
 
 ### 靠自觉的（写了也没人会拦）
 
@@ -49,7 +50,7 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 
 - Merge Gate / Review / Verify（MVP-06、MVP-07）
 - 权限矩阵、分支保护、服务端 required checks
-- 任务依赖的机械校验（清单 §0.1 的依赖图无人验证）
+- ~~任务依赖的机械校验~~ → 已实现（`tools/discipline` deps 组，2026-10-05）
 - secret 扫描先于事件落库（R10 §28 要求）
 
 ### 已知盲区
@@ -90,7 +91,7 @@ MVP 只实现部分状态，这是**允许的**，但必须在 `docs/state-proje
 
 ## H-2 规范检查器是门禁，不是工具
 
-`tools/docstate/docstate.py` 对 R10 跑 88 项机械断言。CI 与应用启动都会跑它。
+`tools/docstate/docstate.py` 对 R10 跑 90 项机械断言。CI 与应用启动都会跑它。
 
 ```bash
 make check          # docstate + pytest + ruff

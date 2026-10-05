@@ -32,8 +32,12 @@ except ImportError:  # pragma: no cover
 
 # This script lives at <repo>/docs/prep/MVP-08/check_contract.py, so the repo
 # root is three levels up. Resolving from __file__ rather than hardcoding an
-# absolute path keeps the check runnable from any worktree.
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# absolute path keeps the check runnable from any worktree. If the script is
+# copied somewhere shallower there is no repo root to find, so fall back to the
+# script's own directory and let main() report a missing R10 cleanly instead of
+# raising IndexError at import time.
+_HERE = Path(__file__).resolve()
+REPO_ROOT = _HERE.parents[3] if len(_HERE.parents) > 3 else _HERE.parent
 DEFAULT_R10 = REPO_ROOT / "docs" / "spec" / "0.3-R10.md"
 
 FAILURES: list[str] = []
@@ -61,13 +65,26 @@ def fenced_blocks(text: str, start: int, end: int) -> list[str]:
 
 
 def section_bounds(text: str, heading: str) -> tuple[int, int]:
+    """Return [start, end) of a markdown section.
+
+    The section ends at the next heading of the same or higher level. The level
+    is the count of leading '#' characters, NOT the first whitespace-separated
+    token of the heading text -- headings like "## 8. Canonical 数据模型" have a
+    space right after the hashes, so tokenising the text yielded an empty level
+    and the bounds silently ran to the end of the document. That made several
+    groups pass only by luck (they happened to consume the first fenced block,
+    or matched a substring anywhere later in the file). Exposed when R10-fix-10
+    added a second `task_claims` row: the over-wide region let the section 37.6
+    row overwrite the section 8 one.
+    """
     m = re.search(rf"^{re.escape(heading)}\s*$", text, flags=re.M)
     if not m:
         raise SystemExit(f"heading not found: {heading}")
     rest = text[m.end():]
-    level = heading.lstrip("#").split(" ")[0]
-    nxt = re.search(rf"^#{{{1},{len(level)+1}}}\s", rest, flags=re.M)
-    return m.end(), m.end() + (nxt.start() if nxt else len(rest))
+    level = len(heading) - len(heading.lstrip("#"))
+    nxt = re.search(rf"^#{{1,{level}}}\s", rest, flags=re.M)
+    end = m.end() + (nxt.start() if nxt else len(rest))
+    return m.end(), end
 
 
 def parse_r10(path: Path) -> tuple[list[str], list[str], list[str], list[str]]:
@@ -130,6 +147,12 @@ def main() -> int:
     print(f"R10      : {args.r10}")
     print(f"contract : {oapi_path}")
     print()
+
+    for required in (args.r10, oapi_path, err_path, args.here / "idempotency.md"):
+        if not required.exists():
+            print(f"missing required input: {required}")
+            print("If this script was copied elsewhere, pass --r10 explicitly.")
+            return 2
 
     states, m_set, o_set, r_set = parse_r10(args.r10)
     allow = m_set + o_set + r_set
@@ -301,9 +324,11 @@ def main() -> int:
     print("== J. R10-fix-09: per-task claim idempotency stays on task_claims ==")
     # The contract's first draft put the composite key on claim_requests, which is
     # the exact defect R10-fix-09 corrected. These assertions stop a regression in
-    # the artifact itself. They do NOT police R10 -- see README Q-6 for the spec-side
-    # gap (task_claims has no section 8 minimum-definition row at all).
+    # the artifact itself. They do NOT police R10 itself; README Q-6 (now closed
+    # by R10-fix-10) documents the spec-side gap they were written alongside.
     s8, e8 = section_bounds(r10_text, "## 8. Canonical 数据模型")
+    check("## 9." not in r10_text[s8:e8] and "## 11." not in r10_text[s8:e8],
+          "section 8 bounds stop before section 9 (section_bounds regression guard)")
     s8_rows = {
         m.group(1): m.group(0)
         for m in re.finditer(r"^\|\s*([a-z_]+)\s*\|.*$", r10_text[s8:e8], flags=re.M)
@@ -315,9 +340,23 @@ def main() -> int:
     cr_fields = cr_row.split("|")[3] if cr_row.count("|") >= 3 else ""
     check(not re.search(r"\btask_id\b", cr_fields),
           "claim_requests key-column cell does not declare a task_id column")
-    check("task_claims" not in s8_rows,
-          "task_claims still has NO section 8 minimum-definition row "
-          "(if this now FAILS, R10 Q-6 was fixed -- re-verify the contract and delete this assertion)")
+    # R10-fix-10 (2026-10-05) closed the Q-6 gap: task_claims now has a section 8
+    # minimum-definition row, and the §37.6 merged cell was split so the
+    # schema-keys assertion group covers it. This was previously a sentinel that
+    # asserted the gap EXISTED; it is now a positive assertion on the fix.
+    tc_row = s8_rows.get("task_claims", "")
+    check(bool(tc_row), "section 8 now has a task_claims row (R10-fix-10 closed Q-6)")
+    if tc_row:
+        check("unique(claim_request_id, task_id)" in tc_row,
+              "task_claims row declares unique(claim_request_id, task_id)")
+        tc_key_cell = tc_row.split("|")[2]
+        tc_field_cell = tc_row.split("|")[3]
+        check(re.search(r"\btask_id\b", tc_key_cell) is not None
+              and re.search(r"\btask_id\b", tc_field_cell) is not None,
+              "task_claims row declares task_id in both the key and field cells "
+              "(the exact cross-cell defect schema-keys was added to catch)")
+        check("失败项" in tc_row,
+              "task_claims row keeps the failed-item-still-writes-a-row rule")
     s11, e11 = section_bounds(r10_text, "## 11. Claim、批量 Claim 和幂等")
     s11_text = r10_text[s11:e11]
     check("不从 JSON 里反解" in s11_text,

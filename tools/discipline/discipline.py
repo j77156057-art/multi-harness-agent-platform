@@ -260,10 +260,19 @@ def check_registry(result, tasks_text):
 def check_cards(result, tasks_text, claims):
     """组 2：任务卡本身的完整性。"""
     cards = {c["fields"]["任务编号"]: c for c in parse_cards(tasks_text)}
-    claim_ids = {c["task_id"] for c in claims}
+    # 任务卡豁免「doing」：登记规则第 0 条要求开工前写的是**认领登记表**
+    # （task_id / Harness / 时间 / 分支），而任务卡模板含「完成时间 / commit /
+    # 验证结果」，天然是完工时填的。把在途任务也要求填卡是我先前定严了。
+    in_flight = {
+        t["task_id"]
+        for t in parse_task_table(tasks_text)
+        if "doing" in t["status"] or "进行中" in t["status"]
+    }
+    claim_ids = {c["task_id"] for c in claims} - in_flight
     result.chk(
         claim_ids <= set(cards),
-        "已认领任务都有任务卡；缺卡=%s" % (sorted(claim_ids - set(cards)) or "无"),
+        "已认领且非在途的任务都有任务卡；缺卡=%s（豁免在途 %d 个：%s）"
+        % (sorted(claim_ids - set(cards)) or "无", len(in_flight), sorted(in_flight) or "无"),
         "cards",
     )
 
@@ -390,6 +399,236 @@ def check_counts(result, repo_root):
     )
 
 
+def expand_dependency_cell(cell):
+    """把依赖单元格展开成 task_id 集合。
+
+    需要处理三种写法（都实际存在于本项目）：
+      `—` / `无`          → 空
+      `MVP-02 MVP-03`      → 逐个列出
+      `MVP-04~10`          → 区间展开成 MVP-04…MVP-10
+      `10a MVP-05~07`      → 10a 加区间，且前半段没有 MVP- 前缀
+    """
+    cell = (cell or "").strip()
+    if not cell or cell in {"—", "-", "无", "N/A"}:
+        return set()
+
+    # 区间必须先展开再切分：`MVP-04~10` 若先按 ~ 切开就只剩 04 和 10，
+    # 中间的 05～09 会整个丢掉。清单同时使用半角 ~ 与全角 ～。
+    def expand_range(match):
+        prefix = match.group(1) or ""
+        start = int(match.group(2))
+        suffix = match.group(3) or ""
+        end = int(match.group(4))
+        if end < start:
+            return match.group(0)  # 写反了，原样留给后续检查报错
+        return " ".join("%s%02d%s" % (prefix, n, suffix) for n in range(start, end + 1))
+
+    cell = re.sub(
+        r"(MVP-)?(\d+)([a-z]?)\s*[~～]\s*(?:MVP-)?(\d+)([a-z]?)", expand_range, cell
+    )
+
+    tokens = [t for t in re.split(r"[\s、,，/＋+]+", cell) if t and t not in {"稳定", "个"}]
+    expanded = set()
+    for token in tokens:
+        bare = re.fullmatch(r"(MVP-)?(\d+)([a-z]?)", token)
+        if bare:
+            # 裸编号（`10a`、`06`）统一补上 MVP- 前缀：清单与登记表的写法不统一，
+            # 但指的是同一个任务，不该被判成悬空依赖。
+            expanded.add("MVP-%02d%s" % (int(bare.group(2)), bare.group(3)))
+            continue
+        expanded.add(token)
+    return expanded
+
+
+def parse_checklist_dependencies(repo_root):
+    """从任务清单 §2 解析每个任务的硬依赖，返回 {task_id: set(依赖)}。
+
+    清单里没有统一的 `依赖：` 行 —— 只有 MVP-01 有；其余把依赖写在
+    `状态：...（硬依赖 X、Y）` 的括号里，MVP-10 则写在 `拆分：` 行。
+    三处都要认，否则会把有依赖的任务读成无依赖。
+    """
+    path = os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")
+    if not os.path.exists(path):
+        return None
+    text = read(path)
+
+    deps = {}
+    for match in re.finditer(r"^### (MVP-\d+)[：:][^\n]*$", text, re.M):
+        task_id = match.group(1)
+        block = text[match.end():match.end() + 400]
+        found = set()
+
+        declared = re.search(r"^依赖：(.+)$", block, re.M)
+        if declared:
+            found |= expand_dependency_cell(declared.group(1))
+
+        hard = re.search(r"硬依赖\s*([^）]+)", block)
+        if hard:
+            found |= expand_dependency_cell(hard.group(1))
+
+        split = re.search(r"^拆分：(.+)$", block, re.M)
+        if split:
+            # `10a` 依赖 MVP-08；`10b` 依赖 10a + MVP-05/06/07 稳定
+            segments = re.split(r"[；;]", split.group(1))
+            for segment in segments:
+                part = re.search(r"`?(\d+[ab])`?\s*依赖\s*(.+)", segment)
+                if part:
+                    sub = "%s%s" % ("MVP-", part.group(1))
+                    deps[sub] = expand_dependency_cell(part.group(2))
+            continue
+
+        deps[task_id] = found
+    return deps
+
+
+def longest_path_length(edges):
+    """依赖图的最长链长度（节点数）。有环时返回 None。
+
+    edges: {task_id: set(依赖)}，边方向是 task -> 依赖。
+    """
+    memo = {}
+
+    def depth(task, seen):
+        if task in memo:
+            return memo[task]
+        if task in seen:
+            return None
+        seen = seen | {task}
+        best = 1
+        for dep in edges.get(task, ()):
+            if dep not in edges:
+                continue
+            child = depth(dep, seen)
+            if child is None:
+                return None
+            best = max(best, 1 + child)
+        memo[task] = best
+        return best
+
+    lengths = [depth(task, set()) for task in edges]
+    if any(length is None for length in lengths):
+        return None
+    return max(lengths) if lengths else 0
+
+
+def check_dependencies(result, repo_root, tasks):
+    """组 4：任务依赖自洽，且与任务清单一致。"""
+    registry = {t["task_id"]: expand_dependency_cell(t["deps"]) for t in tasks}
+    known = set(registry)
+
+    dangling = sorted(
+        "%s→%s" % (task, dep)
+        for task, deps in registry.items()
+        for dep in deps
+        if dep not in known
+    )
+    result.chk(
+        not dangling,
+        "任务表依赖均指向已知任务；悬空=%s" % (dangling or "无"),
+        "deps",
+    )
+
+    result.chk(
+        longest_path_length(registry) is not None,
+        "依赖图无环",
+        "deps",
+    )
+
+    declared = parse_checklist_dependencies(repo_root)
+    if declared is None:
+        result.chk(False, "找不到任务清单 docs/spec/mvp-task-checklist.md", "deps")
+        return
+
+    mismatched = []
+    for task_id, deps in sorted(registry.items()):
+        # 过程任务（登记纪律用的）不在清单的 MVP 任务表里，跳过比对但仍查悬空
+        if task_id not in declared:
+            continue
+        if deps != declared[task_id]:
+            mismatched.append(
+                "%s 表=%s 清单=%s" % (task_id, sorted(deps) or "无", sorted(declared[task_id]) or "无")
+            )
+    result.chk(
+        not mismatched,
+        "任务表依赖与任务清单一致；不一致=%s" % (mismatched or "无"),
+        "deps",
+    )
+
+    # 清单 §0.2 声明的关键路径必须是依赖图里的一条最长路径
+    critical = re.search(r"### 0\.2.*?~~~text\n(.*?)\n~~~", read(
+        os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")), re.S)
+    if not critical:
+        result.chk(False, "清单缺少 §0.2 关键路径区块", "deps")
+        return
+
+    longest_chain = []
+    for line in critical.group(1).splitlines():
+        # 箭头只是装饰（第二行还带反斜杠续行），直接按出现顺序取任务 id
+        chain = re.findall(r"MVP-\d+[ab]?", line)
+        if len(chain) > len(longest_chain):
+            longest_chain = chain
+    declared_length = longest_path_length(registry)
+    result.chk(
+        len(longest_chain) == declared_length,
+        "清单声明的关键路径长度 %d 与依赖图最长链 %d 一致"
+        % (len(longest_chain), declared_length if declared_length is not None else -1),
+        "deps",
+    )
+
+    # 散文里手写的那个数字才是真正会漂移的地方：原缺陷就出在这句
+    # 「关键路径长度 7 个任务」上，而上面的图当时也跟着写错了，两者一起错才没被发现。
+    # 只校验图会漏掉「图对了但数字忘了改」这种更常见的情况。
+    checklist_text = read(os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md"))
+    prose = re.search(r"关键路径长度\s*\*\*(\d+)\s*个任务\*\*", checklist_text)
+    if not prose:
+        result.chk(False, "清单 §0.2 未声明「关键路径长度 N 个任务」", "deps")
+    else:
+        result.chk(
+            int(prose.group(1)) == declared_length,
+            "清单散文声明的关键路径长度 %s 与依赖图最长链 %d 一致"
+            % (prose.group(1), declared_length if declared_length is not None else -1),
+            "deps",
+        )
+
+    # 关键路径上的每个相邻对必须是真实的依赖边。链里 a → b 表示「b 依赖 a」，
+# 而 registry[task] 存的是 task 自己的依赖，所以要查 a 是否在 registry[b] 里。
+    broken_edges = [
+        "%s→%s" % (a, b)
+        for a, b in zip(longest_chain, longest_chain[1:])
+        if a not in registry.get(b, set())
+    ]
+    result.chk(
+        not broken_edges,
+        "关键路径的每一步都是真实依赖边；断裂=%s" % (broken_edges or "无"),
+        "deps",
+    )
+
+
+def check_traceability(result, repo_root, tasks):
+    """组 5：`docs/traceability.md` 必须存在，且登记任务表里出现的全部 test_id。
+
+    H-4 要求完成标准引用的检查 ID 登记到 traceability.md，而该文件此前根本不存在
+    —— 硬约束指向一个空的地方，等于没有约束。
+    """
+    path = os.path.join(repo_root, "docs", "traceability.md")
+    if not os.path.exists(path):
+        result.chk(False, "docs/traceability.md 存在（H-4 要求登记于此）", "traceability")
+        return
+
+    text = read(path)
+    registered = set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text))
+    used = set()
+    for task in tasks:
+        used |= set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b",
+                               task["test_id"]))
+    missing = sorted(used - registered)
+    result.chk(
+        not missing,
+        "任务表用到的 test_id 均已登记到 traceability.md；未登记=%s" % (missing or "无"),
+        "traceability",
+    )
+
+
 def run(repo_root="."):
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
@@ -397,9 +636,11 @@ def run(repo_root="."):
         raise FileNotFoundError(tasks_path)
 
     tasks_text = read(tasks_path)
-    _tasks, claims = check_registry(result, tasks_text)
+    tasks, claims = check_registry(result, tasks_text)
     check_cards(result, tasks_text, claims)
     check_counts(result, repo_root)
+    check_dependencies(result, repo_root, tasks)
+    check_traceability(result, repo_root, tasks)
     return result
 
 

@@ -27,19 +27,20 @@
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
-| R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
-| MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | 🟢 doing ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | — | MVP-02 MVP-03 | ⏳ waiting | — | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
-| MVP-10b | — | 10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
-| MVP-11 | — | MVP-04~10 | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
+| MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
+| MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -67,9 +68,11 @@
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
-| 9 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
-| 10 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
-| 11 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
+| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
+| 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
+| 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
+| 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -457,6 +460,30 @@ PermissionError: [Errno 13] Permission denied:
 
 改动文件：`backend/app/db/connection.py`
 
+### ⚠️ 已知 flaky：并发初始化测试（09:55 观察）
+
+`test_concurrent_initialization_and_events_have_one_order` 在**连续两次全量跑**时
+偶发失败（本次 1/9），单独跑 6/6 通过，全量单跑 8/8 通过。
+
+**观察到的特征**：失败发生在"门禁三道里 pytest 紧接着又跑一次"的场景，
+即上一次 pytest 进程刚退出、`.lock` 文件与 SQLite 句柄尚未完全释放时立刻重跑。
+单独跑或间隔重跑不复现。
+
+**与今早已修缺陷的区别**：
+
+| | 症状 | 状态 |
+|---|---|---|
+| 早上（`403e3a5` 前） | 0/5 确定性失败，`PermissionError` | ✅ 已修 |
+| 现在 | 连续重跑偶发，1/9 | ⚠️ 未定位，疑似句柄释放延迟 |
+
+**处理**：登记为已知 flaky，不掩盖。归属 MVP-02（`backend/app/db/**`）。
+建议排查方向：`_lock_file` 的 `LK_UNLCK` 与 `conn.close()` 的顺序、
+以及 pytest tmp_path 目录在 Windows 上被 Defender 扫描导致的释放延迟。
+
+**门禁影响**：`./scripts.sh check` 一次跑通常通过（8/8），
+但**不保证 100%**。CI 若遇偶发红，应先复跑确认是否为该 flaky，
+不要直接当新缺陷排查。
+
 ## 关键路径
 
 ~~~text
@@ -470,12 +497,12 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 
 | 任务 | 可提前做 | 何时必须完成 |
 |---|---|---|
-| MVP-02 | schema 草案 DDL、事件 seq 分配器算法说明、"删投影后重建状态"的验证用例设计 | MVP-01 合入后立即 |
-| MVP-03 | 状态投影落地、`docs/state-projection.md` 完善、DAG 环检测用例 | MVP-02 前 |
-| MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-02 前 |
+| MVP-02 | schema 草案 DDL、事件 seq 分配器算法说明、"删投影后重建状态"的验证用例设计 | ✅ 已过（`b154f5c`） |
+| MVP-03 | 状态投影落地、`docs/state-projection.md` 完善、DAG 环检测用例 | ✅ 已过（`9b4b663`） |
+| MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-03 前（依赖已满足，**2026-10-05 09:53 放行**） |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 ｜ 🟢 **Qoder 在做**：`agent/local/qoder/MVP-08-prep/a1`（认领 2026-10-05 09:16，产出在 `.worktrees/qoder/docs/prep/MVP-08/`） |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`）｜ 🟢 **Qoder 在做**：`.worktrees/qoder/docs/prep/MVP-08/`（状态 doing，按规则 prep 不当结论用） |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
@@ -690,6 +717,70 @@ test_id：MVP-PROCESS-001
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
+### graph-traceability：依赖图机械校验 + 补 traceability.md（done）
+
+~~~text
+任务编号：graph-traceability
+负责人 Harness：Claude Code
+开始时间：2026-10-05 09:09
+工作区：.worktrees/claude/
+依赖任务：discipline（✅ 已合入 main）
+真相源引用：docs/spec/mvp-task-checklist.md §0.1 依赖图、§0.2 关键路径、§2 各任务依赖；
+            R10 §26 阶段检查 ID 体系；docs/dev-convention.md H-4
+允许修改目录：tools/discipline/**、docs/traceability.md、TASKS.md、README.md
+禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）、
+            docs/spec/mvp-task-checklist.md（本任务只读不改）
+交付分支：agent/local/claude/graph-traceability/a1
+commit：5100c7f
+test_id：MVP-PROCESS-001、DOC-PLAN-001
+当前状态：done
+
+交付：
+1. 依赖图机械校验（deps 组 5 项）：依赖均指向已知任务、无环、任务表与清单 §2 一致、
+   清单 §0.2 声明的关键路径必须是依赖图里的**最长链**且每一步都是真实依赖边
+2. `docs/traceability.md`：登记 R10 §26 全部检查 ID 及**当前强制状态**，
+   并加断言要求任务表出现的每个 test_id 必须在此登记
+
+### 检查查出的真实缺陷（已修，非误报）
+
+| # | 缺陷 | 性质 |
+|---|---|---|
+| 1 | §0.2 关键路径漏了 MVP-03，声明「7 个任务」 | §0.1 画了 MVP-03、§0.2 的线性路径漏了，**两节自相矛盾** |
+| 2 | §0.2 关键路径止于 MVP-07 → MVP-11，漏了 MVP-10b | §2 规定 MVP-11 硬依赖 10b，**§0.1 的图本来就画对了，错的只有 §0.2 与 §4** |
+| 3 | §4 写「10b 可以整体砍掉」，与 §2「MVP-11 汇总到 MVP-10」矛盾 | 已确认 **10b 在关键路径上**，改为「10a 优先于 10b」并说明如何重新获得砍掉它的余地 |
+| 4 | §0.1 图里的 `MVP-03b` 是 0.3 时代的拆分残留，已无此任务 | 改为 MVP-03 |
+| 5 | 清单用 `MVP-04～MVP-10`（全角波浪号），登记表拆成 MVP-10a/10b | 依赖悬空 `MVP-11→MVP-10`；两边统一为 `MVP-04~09 + MVP-10b` |
+
+第 1、2 条合起来是关键路径 **7 → 9**。这类数字此前完全靠手写，
+而项目自己的教训（§37.7 封闭规则第 1 条「allowlist 的任何数字不得手写」）
+早就在 R10 里立过规矩 —— 同一类错误在依赖图上重演了一次。
+
+### 工具自身的 3 个解析 bug（首次运行即暴露）
+
+写断言前先探了清单的真实结构，探查结论直接推翻了最初的三个假设：
+
+1. **只有 MVP-01 有 `依赖：` 行**，其余把依赖写在 `状态：...（硬依赖 X、Y）` 括号里，
+   MVP-10 写在 `拆分：` 行。按「依赖：」行解析会得到一片「无依赖」。
+2. **区间必须先展开再切分** —— 先按 `~` 切开 `MVP-04~10` 就只剩 04 和 10，
+   中间的 05～09 会整个丢掉。清单同时用半角 `~` 与全角 `～`。
+3. **边方向搞反了** —— `registry[task]` 存的是该任务的依赖，而链里 `a → b` 表示
+   「b 依赖 a」，应查 `a in registry[b]`。方向错时全链都报「断裂」。
+
+### 验证结果
+
+  docstate    : 88 项检查，0 项失败
+  discipline  : 24 项检查，0 项失败（registry 8 / cards 6 / counts 3 / deps 6 / traceability 1）
+  ruff check  : All checks passed!
+  ruff format : 13 files already formatted
+  pytest      : 20 passed
+  负向测试    : 把 §0.2 关键路径改回 7 个任务 → deps 组转红
+
+已知问题：
+- 清单的依赖表达是散文，解析基于正则；**若清单改写法，校验会误判而不是静默通过**，
+  这比静默通过好，但仍是脆弱点。要根治需把依赖图改成机器可读格式（如 front matter）
+- 本任务只做结构校验：不判断某个 test_id 是否真的覆盖了它声称的行为
+~~~
+
 ### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（doing）
 
 ~~~text
@@ -757,6 +848,58 @@ commit：403e3a5
   pytest     : 20 passed
 已知问题：
   - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
+~~~
+
+### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（doing ★瓶颈）
+
+~~~text
+任务编号：MVP-04
+负责人 Harness：Qoder
+开始时间：2026-10-05 09:49
+依赖任务：MVP-02（✅ 已验收）、MVP-03（已合入 main `db9bc19`，状态 claimed 待验收）
+          ★ 依赖判据是「已合入 main 的代码」而非「已验收」——开工前已核对 main 上
+            backend/app/state/** 与 backend/app/plan/** 的实际接口。
+工作区：.worktrees/qoder/
+真相源引用：R10 §11（Claim、批量 Claim 和幂等）、§7（Adapter 的 claim/heartbeat）、
+            §8（tasks / claim_requests / task_claims / task_attempts / resource_leases
+            字段，含 R10-fix-09 与 R10-fix-10 的键修正）、§12（Attempt 和命令幂等键）、
+            §13（Lease、Heartbeat、fencing）、§10（claim / claim_deferred_resource /
+            lease_expire / reclaim / take_over 等迁移边）、§28（核心不变量）、
+            §26（CORE-CLAIM-001/002、CORE-LEASE-001、CORE-FENCE-001）
+允许修改目录：backend/app/claim/**、backend/app/lease/**、backend/tests/**
+            ── 跨任务改动（已在此登记，仿 fix-wal-lock-retry 卡的先例）：
+               docs/prep/MVP-08/check_contract.py 与 docs/prep/MVP-08/README.md ——
+               删除一条按设计已转红的哨兵断言（它断言 task_claims 没有 §8 行，
+               而该缺口 Q-6 已由 R10-fix-10 修复），并修正一处潜伏的 section_bounds
+               越界 bug。改动限于该 prep 目录，不碰 backend。
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**
+交付分支：agent/local/qoder/MVP-04/a1
+完成标准：
+  1. 两个真实 SQLite 连接并发 Claim 同一任务，只有一个成功（唯一 owner/attempt/Lease）
+  2. 重复 claim_request_id 返回首次结果；批量时按任务项返回首次结果，且每个任务项
+     （含失败项）都留下 task_claims 行，回放走 SELECT * FROM task_claims
+  3. Claim 走 BEGIN IMMEDIATE；条件 UPDATE 断言 RowsAffected == 1，guard 含
+     attempt_no < max_attempts OR budget_override_by IS NOT NULL
+  4. Lease 创建 / 续期 / 过期回收；旧 fencing epoch 的 heartbeat 与写入被拒
+  5. 资源预占失败只进 queued，不写 owner/attempt/Lease，且不是错误（R10 §11）
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
+测试命令：./scripts.sh check
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - ★ TASKS.md 建议本任务配 2 个 AI（一人 Claim/幂等、一人 Lease/fencing/巡检器）。
+    本人先做 Claim/幂等；若第二个 AI 加入，本卡更新后让出 backend/app/lease/** 与
+    对应测试，两边路径互不重叠。
+  - MVP-03 尚未「已验收」；若验收阶段改动 state/plan 的接口，本任务受影响部分需重跑。
+  - 与 MVP-08-prep 的关系：那份契约中的 Claim/幂等约定（IDEM-01～16）默认由本任务
+    落地，但 prep 不是实现，必须按当时的 R10 重新验证后再用。
+  - 首次合入 main 时被别的 AI 在根工作区执行 `git reset` 打断（reflog
+    `3d8e87d HEAD@{0}: reset: moving to HEAD`），进行中的合并被清空、重做一次。
+    已提交的任务分支未受影响。根工作区是共用的合并区，建议合并时避免并发操作。
 ~~~
 
 ## 提交前自检

@@ -75,7 +75,7 @@ make dev
 | 地址 | 说明 |
 |---|---|
 | <http://127.0.0.1:8848/health> | 存活 + 配置摘要 |
-| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（88 项） |
+| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（90 项） |
 | <http://127.0.0.1:8848/docs> | OpenAPI 交互文档 |
 
 启动时会自动跑规范检查；**不通过会拒绝启动**（`AP_CHECK_SPEC=0` 可临时跳过，
@@ -86,7 +86,7 @@ make dev
 ## 常用命令
 
 ~~~bash
-make docstate   # 只跑规范一致性检查（88 项断言）
+make docstate   # 只跑规范一致性检查（90 项断言）
 make test       # pytest
 make lint       # ruff check + format --check
 make fmt        # ruff 自动修复 + 格式化
@@ -142,8 +142,8 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 
 | 门禁 | 数量 | 作用 |
 |---|---|---|
-| `docstate` | 88 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
-| `discipline` | 17 项断言 | 协作纪律：`TASKS.md` 两张表互相覆盖、任务卡有 test_id 与真相源引用、已完成卡有 commit 与验证证据、文档声明的断言数与实际相符 |
+| `docstate` | 90 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
+| `discipline` | 24 项断言 | 协作纪律：`TASKS.md` 两张表互相覆盖、任务卡有 test_id 与真相源引用、已完成卡有 commit 与验证证据、**依赖图无环且与任务清单一致、关键路径长度由依赖图算出**、文档声明的断言数与实际相符 |
 | `test_spec_mirror.py` | 11 项 | 代码侧枚举与 R10 正文的交叉验证 |
 | `test_database_events.py` | 9 项 | 事件只追加、并发定序、失败不留孤儿事件、迁移幂等 |
 | `ruff` | check + format | 代码风格 |
@@ -177,17 +177,22 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 
 ## 下一步
 
-按 `docs/spec/mvp-task-checklist.md`（0.4 重排版）：
+按 `docs/spec/mvp-task-checklist.md`（0.4 重排版）。**权威进度以
+[`TASKS.md`](TASKS.md) 为准**，下表仅供快速定位：
 
-| 任务 | 负责人 | 状态 |
-|---|---|---|
-| MVP-01 骨架与规范绑定 | AI-1 | ✅ 本次交付 |
-| MVP-02 SQLite schema 与事件事实源 | AI-2 | 🔜 下一个（关键路径） |
-| MVP-03 状态机与 Plan 校验 | AI-3 | 等待 MVP-02 |
-| MVP-04 Claim/Lease/fencing | AI-4 | ★ 瓶颈，MVP-02 后立即开工 |
-| 其余 | — | 见清单 |
+| 任务 | 状态 |
+|---|---|
+| MVP-01 骨架与规范绑定 | ✅ 已合入 |
+| MVP-02 SQLite schema 与事件事实源 | ✅ 已验收 |
+| MVP-03 状态机与 Plan 校验 | 🔜 下一个（关键路径上唯一可开工） |
+| MVP-04 Claim/Lease/fencing | ★ 瓶颈，等 MVP-03 |
+| 其余 | 见 TASKS.md |
 
-**关键路径**：`MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11`
+**关键路径（9 个任务）**：
+`MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-10b → MVP-11`
+
+该长度由 `tools/discipline` 从依赖图算出并断言，不是手写数字 —— 改依赖图而不改
+清单（或反之）会立刻变红。
 
 **被阻塞的 AI 不要空等**：每个任务卡都有"可提前做的 prep 项"
 （如 MVP-08 的 OpenAPI 契约草案可以在 MVP-02 落地前完成）。
