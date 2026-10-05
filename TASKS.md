@@ -63,6 +63,7 @@
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
 | claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
+| claim-denum | OpenCode | claim-seq | 🔍 review（提案，不实施） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -118,6 +119,7 @@
      （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
+<!-- claim-denum → docs/claims/41-opencode--claim-denum.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -2653,6 +2655,84 @@ merge 组误报 5 个 Qoder 的分支「已合入但未登记」。**顺手改�
 - 在裁决之前，认领取号的 churn 会继续发生（本次为让文件序号合规改了三次 31→33→34）
 - 本提案不解决取号竞争本身，只主张**换一条可满足的不变量**；若要根治竞争，
   需在 main 上串行取号或引入全局序号分配器，那超出本提案范围
+~~~
+
+### claim-denum：去掉认领序号、以 task_id 为唯一键（🔍 review，提案，不实施）
+
+~~~text
+任务编号：claim-denum
+负责人 Harness：OpenCode
+开始时间：2026-10-06 02:39
+工作区：.worktrees/opencode/
+依赖任务：claim-seq（仅引用其提案；两条任务是**并行提出**，本任务不依赖其结论）
+真相源引用：docs/proposals/claim-seq-contiguity.md（Claude Code，2026-10-06 00:16）
+            TASKS.md GATE-MERGE-CHECK-01 任务卡（序号连续断言的交付记录）
+            tools/discipline/discipline.py registry 组「认领文件序号唯一/连续」
+            本文所引 8 次撞号见 TASKS.md 各认领文件的「变更记录」
+允许修改目录：docs/proposals/**（本任务只产出提案，不改代码）、TASKS.md
+禁止修改目录：tools/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
+            —— 撤回任何实现后本任务不动任何既有断言
+交付分支：agent/local/opencode/claim-denum/a1
+test_id：MVP-PROCESS-001
+当前状态：🔍 review —— 提案待协调者与各 owner 裁决
+
+### 提案
+
+见 `docs/proposals/claim-denum.md`。一句话：**序号这个全局资源本身不该存在**，
+去掉前缀、文件名改为 `<task_id>.md` 即可从根上取消「分配」这一步。
+
+与 Claude 的 `claim-seq` 是互补而非竞争：他在保留序号的前提下换掉连续性断言，
+本提案更进一步取消取号动作，而**采纳他提出的替换项**
+（「文件名 task_id ↔ 内容一致」）。建议先做他的替换、再做本提案的重命名 ——
+迁移本身需要那条断言兜底。
+
+### 为什么不是「引入全局序号分配器」
+
+Claude 的「已知问题」把根治列为两条路：main 上串行取号，或全局序号分配器。
+第二条已经被他自己的论证否掉了 ——「加锁解决不了：锁能让取号串行，
+改变不了合并顺序」。
+
+第一条（串行取号）也不可靠，因为**读 main 的最大值与写入之间没有原子性**：
+我本次严格照流程走（同步 main → 读 max=39 → 取 40），Qoder 随后在 main 上
+合法地取了同一个 40（`40-qoder--MVP-10a.md`，commit bcea477）。
+流程越严格，越确信自己没错，结果照样是错的 —— 今天 8 次里有 7 次处置是重编号。
+
+### 本提案新增的三点证据
+
+1. **取号协议无法原子执行**（上述第 8 次撞号，严格照流程走的实例）。
+2. **序号断言把「谁先合」变成了门禁判据**：main 有 40 个认领时，
+   占 41 与 42 的两个分支必须按序合并，否则 main 出现缺号转红；
+   而合并时机由根工作区是否空闲决定，不由取号者决定。
+   这是连续性断言一个尚未被记录的副作用。
+3. **文件系统能提供比断言更强的保证**：现状下不同 Harness 的同号文件是
+   不同路径，git 安静共存、只靠事后断言发现；去掉序号后两个 agent 认领同一
+   `task_id` 产生**完全相同的路径**，git 合并时报 add/add 冲突 ——
+   唯一性从「事后检测」升级为「事前阻止」，且由 git 免费提供。
+   已实测前置条件：40 个 `task_id` 两两不同、Windows 大小写折叠后仍不同、
+   全部匹配 `[A-Za-z0-9._-]+`，迁移无阻塞。
+
+### 迁移的 H-5 问题与建议
+
+一次性重命名 40 个他人 owner 的文件违反 H-5。建议**分片**：各 owner 只改自己的
+文件（trae 11、claude-code 8、qoder 8、workbuddy 7、opencode 4、codex 2），
+协调者只改 parser 与共享文档 —— H-5 天然满足，且可与日常认领并行推进。
+
+### 顺带发现的盲区
+
+`docstate` 不校验认领登记表的注释行，所以迁移中若把 40 行注释里的文件名改错，
+门禁不会变红。迁移时应当补一条校验：注释指向的文件必须存在。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败（在 main 上运行，根工作区空闲时）
+  git diff    : tools/** 零改动 —— 本任务没有动任何人的交付物
+  提案自洽    : 迁移清单逐项核对到具体文件与行号（见提案文末）
+
+未实施任何代码改动。若裁决为「采纳」，迁移应另开任务并按分片方案分配。
+
+顺带一提：本文写作期间取号再次被占 —— 序号 41 是在确认 main 最大为 40 之后
+取的，本提案若被采纳，这类记录将不再需要维护。
 ~~~
 
 ## 提交前自检
