@@ -31,7 +31,8 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
 | 代码风格 | `ruff check` / `ruff format --check` |
-| **登记表自身不自洽** | `tools/discipline` 16 项（CI + `scripts.sh check`） |
+| **登记表自身不自洽** | `tools/discipline` 24 项（CI + `scripts.sh check`） |
+| **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
 
 ### 靠自觉的（写了也没人会拦）
 
@@ -49,7 +50,7 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 
 - Merge Gate / Review / Verify（MVP-06、MVP-07）
 - 权限矩阵、分支保护、服务端 required checks
-- 任务依赖的机械校验（清单 §0.1 的依赖图无人验证）
+- ~~任务依赖的机械校验~~ → 已实现（`tools/discipline` deps 组，2026-10-05）
 - secret 扫描先于事件落库（R10 §28 要求）
 
 ### 已知盲区
