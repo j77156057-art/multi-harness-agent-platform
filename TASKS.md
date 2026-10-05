@@ -50,7 +50,7 @@
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
-| MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
+| MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
@@ -108,6 +108,8 @@
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
+<!-- message-refs-persist → docs/claims/30-trae--message-refs-persist.md
+     （原拟用 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延为 30） -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1177,6 +1179,75 @@ commit：见本任务提交
 其中 `847cc69`（认领登记拆分）是 WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来 ——
 当时 `discipline` 24/24 全绿，缺陷却真实存在于树里。
 
+### MVP-05：Git worktree 与发布代理（✅ done）
+
+~~~text
+任务编号：MVP-05
+负责人 Harness：Qoder
+开始时间：2026-10-05 21:55
+依赖任务：MVP-03（代码已合入 main `db9bc19`）、MVP-04（✅ 已验收）
+          ★ 依赖判据是「已合入 main 的代码」，与 MVP-04/MVP-08 一致。
+工作区：.worktrees/qoder/
+真相源引用：R10 §14（worktree、路径和资源；分支命名与生命周期）、§13（canonical Git 拓扑、
+            Push Proxy、fencing 的执行点）、§12（attempt 与命令幂等键中的 publish 一条）、
+            ADR-058/ADR-059（宿主与发布模式、发布对象传输与账户边界）、§17（权限矩阵）、
+            §15（side_effect_intents）、§26（GIT-ACL-001/002、GIT-PACK-001）
+允许修改目录：backend/app/git/**、backend/app/api/**、backend/app/tasks/**、
+            backend/tests/**、docs/adr/**、docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-05/a1
+完成标准：
+  1. 每个 attempt 一个独立 worktree；两个任务不共享可写目录（有断言）
+  2. 分支命名 `agent/<group-short>/<harness>/<task-id>/<attempt-id>` 只有一处实现，
+     §14 的分支白名单与 Push Proxy 的校验调用同一个函数（R10-09 的三处口径一致）
+  3. publish_task_branch 在发布前校验 task / attempt / commit / fencing epoch / 分支白名单；
+     旧 epoch 发布失败
+  4. 直接写集成分支被拒（canonical 侧的 pre-receive 拒绝，不是靠调用方自觉）
+  5. worktree 回收前必须归档（git bundle + patch），归档校验通过才删目录
+  6. 触发 `claimed → in_progress` 的 start 现在会 provision worktree，
+     即 MVP-08 卡里标注为「脚手架」的那一步有了真实实现
+test_id：GIT-ACL-001、GIT-ACL-002、GIT-PACK-001
+测试命令：./scripts.sh check
+当前状态：done（作者完成并已合入 main；外部验收待认，参照 MVP-04-verify 形式）
+完成时间：2026-10-05 22:20
+commit：7e94166
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 32 项检查，0 项失败
+  ruff        : All checks passed，49 files already formatted
+  pytest      : 132 passed（MVP-05 新增 19）
+  真 git 断言  : 直接 push 集成分支被 canonical 钩子拒绝（真跑 git push，
+                断言 stderr 含拒绝原因且 ref 未移动）；任何客户端 push 均被拒；
+                旧 epoch 发布被拒且不落 intent；alternates 越界被拒；
+                归档 bundle 校验通过后才回收，目录确实消失（Windows 只读 object 处理过）
+已知问题：
+  - **`groups` 表没有 `group_short` 列**，而 R10 §14 的分支名第一段就是 group-short。
+    本任务把它作为参数传入并在分支名里持久化，`start_task` 缺省回落到 group_id。
+    要让分支命名可完全从库推导，需要一次迁移加列（属 MVP-02 的 backend/migrations/**）。
+  - **R10 §7 没有面向 Harness 的 `start` 动词**。§10 的 `claimed → in_progress`
+    由调度器驱动（guard 是"worktree ready"），所以本任务把它实现为
+    `SchedulerService.start_task`：先 provision worktree，再迁移。HTTP 面上**不新增**
+    `/adapter/start` —— 新增 §7 未定义的动词会破坏 MVP-08 立下的"路径逐字对齐 §7"。
+    代价：MVP-08 卡里"只通过 API"的链路仍有一步不经 HTTP（现由 MVP-10a 的 Fake Harness
+    在进程内驱动）。
+  - **发布没有可写的事件名**。§13 提到"intent 完成事件和审计记录"，但 §37.7 的 88 项
+    里没有 publish 类事件（与 MVP-08 prep 的 G-2 同类缺口）。当前用
+    `side_effect_intents(type=push)` + `command_idempotency` 记录，未自造事件名。
+  - Windows 上 git 把 object 文件标为只读，`shutil.rmtree(ignore_errors=True)` 会**静默**
+    删除失败 —— 回收看起来成功、目录还在。已修为先清只读位再删；这条值得其他任务注意。
+  - MVP-08 的 API 测试需注入临时 worktree 管理器：`start_task` 现在真的建目录，
+    缺省会落到仓库根的 `wt/` 与 `canonical.git`（测试不得碰）。
+  - MVP 简化（清单要求写明）：R10 §13/§17 的三账户 ACL（agent-scheduler /
+    agent-harness-<id> / agent-verify）在 MVP 阶段降级为单账户 +
+    `--insecure-single-account`。这是**临时措施**，阶段 2 前必须补齐；清单落点写在
+    docs/adr/ADR-DEV-002-single-account-acl.md，含阶段 2 前的三账户补齐清单。
+  - GIT-PACK-001（Defender 开启时的跨账户 pack/bundle 传输与 intent 对账）在单账户
+    模式下无法真实复现跨账户行为，只覆盖传输与对账路径本身，跨账户部分留待阶段 2。
+~~~
+
 ## 关键路径
 
 ~~~text
@@ -1955,9 +2026,13 @@ commit：2440566
         未来要混合排序消息与事件，需序列表或消息入事件流，均要动 migrations
         （MVP-02 范畴）；checklist MVP-08 的交付条目原文只要求「消息与
         task_events 关联」（task_id 列已做），故不阻塞；
-     b) PostMessage 接受 refs 但 task_messages 无列、service 接收即丢、GET 不回显
-        （仅 POST 响应原样回显），契约静默说谎——修 a 时一并删字段或补列；
-        【a 已另案关闭，b 仍开放】
+     b) ✅ 已关闭（message-refs-persist，2026-10-05）：迁移 004 为
+        task_messages 增加 refs 列（JSON TEXT NOT NULL DEFAULT '[]'），
+        post_message 校验（list[str]、空串拒绝）后同事务落库，
+        list_messages 解码为数组回显；存量行回填 []。POST→GET 往返、
+        缺省 []、非法值 400/422、旧库升级回填均有机械断言。
+        原始问题存档：PostMessage 曾接受 refs 但无列、service 接收即丢、
+        GET 不回显（仅 POST 响应原样回显），契约静默说谎。
   4. MVP-05/06 落地后，须把 test_api_flow.py 里两处 service.start_task /
      record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
      Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
@@ -2201,7 +2276,8 @@ commit：087eb93（验收证据提交；本行为随附回填提交）
   1. 错误码越封闭表：claim.concurrent_claim、request.conflict（prep §0.1）；
   2. HTTP 状态不符：review.self_review_forbidden 实现 409/表定 403，
      request.invalid 服务层发 422/表定 400；
-  3. 消息 per-group seq 非全局、refs 字段接收即丢（schema 级，需 migration）；
+  3. 消息 per-group seq 非全局（已由 message-global-seq 关闭）、
+     refs 字段接收即丢（已由 message-refs-persist 关闭，迁移 004）；
   4. 两处脚手架迁移待 MVP-05/06 换成真实 HTTP 路径后 MVP-API-001 转 ✅。
   违规留档：第三次「先合 main 后验收」（3de2115）三段式记录见上文。
   MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
@@ -2284,7 +2360,8 @@ commit：3b35e5f（实现与证据提交；本行为随附回填提交）
     消息 seq=2，同空间连续。
   范围说明：R10/prep 均未改（openapi.yaml L1215 本就要求全局空间，
   本次是实现回归契约）；docs/traceability.md 仅追加关闭记录（跨任务
-  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）仍开放。
+  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）已由
+  message-refs-persist（迁移 004，2026-10-05）关闭。
 ~~~
 
 ### GATE-MERGE-CHECK-01：已合入 main 的任务必须已登记、已完成、证据完整（✅ done）
@@ -2343,4 +2420,62 @@ commit：1e6141d、724e013（原分支实现）；c244925（合 main 并移植�
     浅克隆 fail-closed 集成）；
   - 不回归：docstate 90/0、backend pytest 113 项退出 0、ruff check+format 全过、
     MVP-08 prep 契约 FAILURES 0、变异 10/10。
+~~~
+
+### message-refs-persist：消息 refs 字段落库与回读（✅ done，关闭 MVP-08 验收遗留 3b）
+
+~~~text
+任务编号：message-refs-persist
+负责人 Harness：TRAE
+开始时间：2026-10-05 22:21
+依赖任务：MVP-08（message-global-seq 之后，同面契约）
+工作区：.worktrees/trae/
+真相源引用：docs/prep/MVP-08/openapi.yaml（post_message 请求体 refs、
+            Message schema refs: string[]）、R10 §19（read_context 增量读消息）、
+            backend/migrations/001_initial.sql（task_messages 现状无 refs 列）
+允许修改目录：backend/migrations/** backend/app/tasks/** backend/app/api/**
+            backend/tests/** docs/** TASKS.md
+禁止修改目录：docs/spec/** tools/** docs/prep/**
+交付分支：agent/local/trae/message-refs-persist/a1
+背景：MVP-08 验收遗留 3b。POST /groups/{id}/messages 接收 refs 且在响应里
+      回显，但 task_messages 表没有该列，service 的 INSERT 不带 refs，
+      GET 走 SELECT * 永远读不回——引用信息静默丢失。与 3a 同属
+      「实现未回归 openapi 契约」，openapi 已声明故 R10/prep 无需改。
+完成内容：
+  1. 迁移 004_message_refs.sql：ALTER TABLE task_messages ADD COLUMN
+     refs TEXT NOT NULL DEFAULT '[]'（JSON TEXT，沿用 payload_json 惯例；
+     仅加带默认值列，SQLite 无需重建表）；存量行由默认值回填 []；
+  2. service.post_message：新增 _normalise_refs（None→[]；非 list 或
+     含非 str/空白元素→InvalidInput；保序不去重），在写事务内随消息
+     同 INSERT 落库（json.dumps ensure_ascii=False）；
+  3. service.list_messages：SELECT * 后将 refs JSON 文本解码为数组，
+     缺省/存量行得到 [] 而非 null；POST 响应 refs 与落库值一致；
+  4. 测试：
+     - test_api_events_messages.py：refs POST→GET 原样读回（3 条引用，
+       含斜杠/冒号的值）、不带 refs 读回 []；元素非字符串→边缘 400
+       request.invalid，空白元素→服务层 422 request.invalid；
+     - test_database_events.py：新增旧库（仅 001~003）升级专项——
+       004 应用计数、DDL 含新列、存量行 refs=='[]'、升级后新消息
+       多 refs 往返、服务层直接调用三种非法形状抛 InvalidInput；
+       既有全局 seq 迁移用例的 applied 期望 1→2 并追加存量 refs 断言。
+test_id：MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done
+完成时间：2026-10-05 22:30
+commit：cf2b46c（实现与证据提交；本行为随附回填提交）
+验证结果：
+  - backend pytest：116 项退出码 0（较基线 113 新增 3：2 API + 1 迁移）；
+  - ruff check app tests：All checks passed；ruff format --check：41 files；
+  - docstate：90 项 0 失败；discipline：39 项 0 失败；
+    tools pytest：14 passed；
+  - MVP-08 prep：check_contract FAILURES 0；mutation_test caught 10/10；
+  - 范围说明：R10/prep/openapi 均未改（refs 本就是 openapi 契约字段，
+    本次是实现回归契约）；docs/traceability.md 仅追加 3b 关闭记录
+    （跨任务登记，同 3a 先例）；MVP-08 验收卡与 message-global-seq 卡的
+    「3b 仍开放」标注同步更新。openapi 中 plan_id/review_id/
+    in_reply_to_seq/body_withheld/trusted 等未实现字段不在本任务范围。
+  合并后复验（main 已含 Qoder MVP-05，无代码冲突；claims 撞号顺延 30）：
+  backend pytest 135 项退出 0（116 + MVP-05 的 19）、ruff 49 files、
+  docstate 90/0、discipline 39/0、tools 14 passed、prep FAILURES 0、
+  mutation 10/10。
 ~~~

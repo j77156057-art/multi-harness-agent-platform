@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.api.errors import envelope
-from tests.api_support import bootstrap, make_client, publish_plan
+from tests.api_support import bootstrap, make_client, publish_plan, worktree_manager
 from tests.claim_support import make_database
 
 
@@ -142,7 +142,10 @@ def test_review_refuses_self_review(tmp_path):
 
     service = scheduler(database)
     service.start_task(
-        task_id="T-1", attempt_id=item["attempt_id"], fencing_epoch=item["fencing_epoch"]
+        task_id="T-1",
+        attempt_id=item["attempt_id"],
+        fencing_epoch=item["fencing_epoch"],
+        worktrees=worktree_manager(tmp_path, database),
     )
     client.post(
         "/api/v1/adapter/submit_result",

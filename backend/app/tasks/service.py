@@ -28,6 +28,8 @@ from app.config import settings
 from app.db.connection import Database
 from app.db.sequence import next_global_seq
 from app.events.store import EventRecord, EventStore
+from app.git.repo import CanonicalRepo
+from app.git.worktree import WorktreeManager
 from app.lease.service import release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
 from app.spec import EventKind, TaskStatus
@@ -59,6 +61,23 @@ def _now() -> str:
 
 def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _normalise_refs(refs: list[str] | None) -> list[str]:
+    """Validate the message refs array (openapi post_message / Message schema).
+
+    The HTTP layer enforces ``list[str]`` via pydantic, but the service is also
+    called directly by tests and future in-process writers, so the shape is
+    checked here as well. A reference names something, so blank entries are
+    rejected rather than stored. Order and content are otherwise preserved.
+    """
+    if refs is None:
+        return []
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        raise InvalidInput("refs must be an array of strings")
+    if any(not ref.strip() for ref in refs):
+        raise InvalidInput("refs entries must not be blank")
+    return list(refs)
 
 
 def _hash(value: object) -> str:
@@ -579,26 +598,56 @@ class SchedulerService:
                 "seq": record.seq,
             }
 
-    def start_task(self, *, task_id: str, attempt_id: str, fencing_epoch: int) -> int:
-        """``claimed -> in_progress``.
+    def start_task(
+        self,
+        *,
+        task_id: str,
+        attempt_id: str,
+        fencing_epoch: int,
+        group_short: str | None = None,
+        worktrees: WorktreeManager | None = None,
+    ) -> dict[str, object]:
+        """``claimed -> in_progress``, provisioning the attempt worktree first.
 
-        R10 §10 gates this edge on "worktree ready and lease valid", and worktree
-        provisioning is MVP-05. This performs the real transition for the lease
-        holder but creates no worktree, so it is scaffolding for tests and for the
-        API contract, not a substitute for MVP-05. Kept out of the HTTP surface
-        for that reason.
+        R10 §10 gates this edge on "worktree ready and lease valid". Until MVP-05
+        this method only performed the transition, which is why the MVP-08 card
+        called it scaffolding; now the worktree is actually created here, so the
+        guard describes something real.
+
+        ``group_short`` is a parameter rather than a lookup because the schema
+        has no ``groups.group_short`` column (see the MVP-05 card's known
+        issues); it defaults to the group id.
         """
+        manager = worktrees or WorktreeManager(self.database, CanonicalRepo.from_settings())
         with self.database.transaction() as conn:
             guard = self._guard_owner(conn, task_id, attempt_id, fencing_epoch)
             if guard.status is not TaskStatus.CLAIMED:
                 raise Conflict(f"{task_id} is {guard.status.value}; start needs claimed")
+            task = conn.execute(
+                "SELECT group_id, base_commit FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            base_commit = task["base_commit"] or self._integration_head(conn, task_id)
+
+        worktree = manager.provision(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            group_short=group_short or str(task["group_id"]),
+            harness=guard.owner or "unknown",
+            base_commit=base_commit or self.repo_head(manager),
+        )
+
+        with self.database.transaction() as conn:
             record = self.store.append(
                 event_name=EventKind.START.value,
                 aggregate_type="task",
                 aggregate_id=task_id,
                 actor_type="harness",
                 actor_id=guard.owner or "",
-                payload={"attempt_id": attempt_id},
+                payload={
+                    "attempt_id": attempt_id,
+                    "branch": worktree.branch,
+                    "workspace_id": worktree.workspace_id,
+                },
                 connection=conn,
             )
             apply_transition(
@@ -613,7 +662,22 @@ class SchedulerService:
                 "UPDATE task_attempts SET status = ? WHERE attempt_id = ?",
                 (TaskStatus.IN_PROGRESS.value, attempt_id),
             )
-            return record.seq
+            return {
+                "task_id": task_id,
+                "attempt_id": attempt_id,
+                "seq": record.seq,
+                "branch": worktree.branch,
+                "workspace_id": worktree.workspace_id,
+                "worktree_path": str(worktree.path),
+            }
+
+    @staticmethod
+    def repo_head(manager: WorktreeManager) -> str:
+        """The canonical integration HEAD, used when a task froze no base."""
+        head = manager.repo.ref_commit(manager.repo.integration_ref)
+        if head is None:
+            raise Conflict("the canonical repository has no integration HEAD")
+        return head
 
     def record_verify_passed(self, *, task_id: str, commit: str, actor_id: str) -> int:
         """Scaffolding for the review path before MVP-06 exists.
@@ -665,6 +729,7 @@ class SchedulerService:
     ) -> dict[str, object]:
         if not body.strip():
             raise InvalidInput("body must not be empty")
+        normalised_refs = _normalise_refs(refs)
         with self.database.transaction() as conn:
             group = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
             if group is None:
@@ -679,9 +744,19 @@ class SchedulerService:
             message_id = f"msg-{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO task_messages(message_id, group_id, task_id, sender_type,"
-                " sender_id, body, created_seq, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (message_id, group_id, task_id, author_kind, author_id, body, seq, _now()),
+                " sender_id, body, created_seq, created_at, refs)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message_id,
+                    group_id,
+                    task_id,
+                    author_kind,
+                    author_id,
+                    body,
+                    seq,
+                    _now(),
+                    _canonical(normalised_refs),
+                ),
             )
             for recipient in mentions:
                 conn.execute(
@@ -695,7 +770,7 @@ class SchedulerService:
             "task_id": task_id,
             "seq": seq,
             "mentions": list(mentions),
-            "refs": list(refs or ()),
+            "refs": normalised_refs,
         }
 
     def list_messages(self, group_id: str, *, since_seq: int = 0, limit: int = 100) -> list[dict]:
@@ -704,7 +779,12 @@ class SchedulerService:
             " ORDER BY created_seq ASC LIMIT ?",
             (group_id, since_seq, limit),
         )
-        return [dict(row) for row in rows]
+        messages = [dict(row) for row in rows]
+        for message in messages:
+            # refs is a JSON TEXT column (004); the wire contract wants an array,
+            # and pre-004 rows default to '[]', never null.
+            message["refs"] = json.loads(str(message["refs"]))
+        return messages
 
     # ----------------------------------------------------------------- reads
 
@@ -738,6 +818,18 @@ class SchedulerService:
         return events[:limit]
 
     # --------------------------------------------------------------- helpers
+
+    def _integration_head(self, conn: sqlite3.Connection, task_id: str) -> str | None:
+        """The frozen integration commit recorded for this task's project."""
+        row = conn.execute(
+            "SELECT ih.integration_commit"
+            "  FROM tasks t"
+            "  JOIN groups g ON g.group_id = t.group_id"
+            "  LEFT JOIN integration_health ih ON ih.project_id = g.project_id"
+            " WHERE t.task_id = ?",
+            (task_id,),
+        ).fetchone()
+        return None if row is None else row["integration_commit"]
 
     def _guard_owner(
         self, conn: sqlite3.Connection, task_id: str, attempt_id: str, fencing_epoch: int
