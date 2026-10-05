@@ -18,4 +18,5 @@
 - 2026-10-05 21:18：认领。修复 MVP-08 验收遗留 3a：消息 per-group seq
   与 task_events 两套编号无法统一游标（方案 A：独立 global_seq 发号器）。
 - 2026-10-05 21:30：完成。113 项 pytest 退出 0，全门禁绿；遗留 3b
-  （refs 字段接收即丢）仍开放。
+  （refs 字段接收即丢）已于 2026-10-05 由 message-refs-persist
+  （迁移 004，claims/29）关闭。
