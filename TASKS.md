@@ -1724,7 +1724,7 @@ test_id：DOC-TRACE-001、MVP-API-001
 测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
 当前状态：✅ done
 完成时间：2026-10-05 21:00
-commit：（见回填提交）
+commit：087eb93（验收证据提交；本行为随附回填提交）
 验证结果：
   结论：✅ 通过（附遗留清单 4 项，无 P1）。逐条双证据（代码行 + 机械断言）
   与门禁实跑记录已回填于本文件 MVP-08 卡末「验收意见」，此处只摘门禁数字：
