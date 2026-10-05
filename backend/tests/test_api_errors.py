@@ -8,7 +8,13 @@ from fastapi.testclient import TestClient
 
 from app.api.app import create_app
 from app.api.errors import envelope
-from tests.api_support import bootstrap, make_client, publish_plan, worktree_manager
+from tests.api_support import (
+    advance_to_awaiting_review,
+    bootstrap,
+    make_client,
+    publish_plan,
+    worktree_manager,
+)
 from tests.claim_support import make_database
 
 
@@ -141,22 +147,22 @@ def test_review_refuses_self_review(tmp_path):
     from tests.api_support import scheduler
 
     service = scheduler(database)
+    manager = worktree_manager(tmp_path, database)
     service.start_task(
         task_id="T-1",
         attempt_id=item["attempt_id"],
         fencing_epoch=item["fencing_epoch"],
-        worktrees=worktree_manager(tmp_path, database),
+        worktrees=manager,
     )
-    client.post(
-        "/api/v1/adapter/submit_result",
-        json={
-            "task_id": "T-1",
-            "attempt_id": item["attempt_id"],
-            "fencing_epoch": item["fencing_epoch"],
-            "completion": {"commit": "c1"},
-        },
+    commit = advance_to_awaiting_review(
+        client,
+        database,
+        tmp_path,
+        task_id="T-1",
+        attempt_id=item["attempt_id"],
+        fencing_epoch=item["fencing_epoch"],
+        manager=manager,
     )
-    service.record_verify_passed(task_id="T-1", commit="c1", actor_id="vw")
 
     response = client.post(
         "/api/v1/review/submit",
@@ -165,7 +171,7 @@ def test_review_refuses_self_review(tmp_path):
             "attempt_id": item["attempt_id"],
             "reviewer_harness_id": "owner-1",
             "verdict": "approve",
-            "reviewed_commit": "c1",
+            "reviewed_commit": commit,
         },
     )
     assert response.status_code == 409

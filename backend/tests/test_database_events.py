@@ -270,7 +270,14 @@ def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
 
     with database.connect() as connection:
         applied = apply_migrations(connection, real_dir)
-    assert applied == 2
+    # Assert *that 003 ran*, not how many migrations happened to be pending.
+    # The count has already been edited once to follow the files (1 -> 2), and it
+    # broke again the moment another migration landed while the behaviour under
+    # test was still correct. Pinning it makes every future migration a false red.
+    assert applied >= 1
+    with database.connect() as conn:
+        recorded = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")}
+    assert 3 in recorded, "the global-seq migration must have been applied"
 
     with database.connect() as conn:
         assert int(conn.execute("SELECT seq FROM global_seq WHERE id=1").fetchone()[0]) == 5
@@ -344,7 +351,14 @@ def test_message_refs_migration_backfills_and_then_persists(tmp_path):
         )
 
     with database.connect() as connection:
-        assert apply_migrations(connection, real_dir) == 1
+        applied = apply_migrations(connection, real_dir)
+    # Assert *that 004 ran*, not how many migrations were pending. The count form
+    # breaks on every new migration: this one already needed editing once, and
+    # 005_verify_fields broke it again while the behaviour under test was fine.
+    assert applied >= 1
+    with database.connect() as conn:
+        recorded = {int(row[0]) for row in conn.execute("SELECT version FROM schema_migrations")}
+    assert 4 in recorded, "the message-refs migration must have been applied"
 
     with database.connect() as conn:
         ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name='task_messages'").fetchone()[0]
