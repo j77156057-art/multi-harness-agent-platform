@@ -9,7 +9,8 @@
 | 认领时间 | 2026-10-05 23:34 |
 | 分支 | `agent/local/trae/MVP-05-verify/a1` |
 | 状态 | ✅ done（通过附遗留清单） |
-| 登记序号 | 34（31~33 已被 OpenCode 的 gate-baseline-repair / trace-closure / merge-interlock 占用） |
+| 登记序号 | 36（切出自 719fca6 时为 34；main 并行合入 34-claude-code--branch-visibility
+与 35-qoder--MVP-06，按既有重编号先例改为 36） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `MVP-05-verify`。
 
@@ -31,3 +32,5 @@
   详见 TASKS.md MVP-05 卡末「验收意见」。环境注记：共享 .venv 原解释器被
   原地升级到 3.13.14 后 subprocess 崩溃，已按锁定依赖用系统 Python 3.13.3
   重建（旧目录留 .venv.bak）。
+- 2026-10-06 00:20：序号由 34 重编为 36——合并前发现 main 已并行合入
+  34-claude-code--branch-visibility 与 35-qoder--MVP-06（dc5a0fe 同类先例）。

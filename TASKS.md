@@ -111,7 +111,9 @@
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
 <!-- message-refs-persist → docs/claims/30-trae--message-refs-persist.md
      （原拟用 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延为 30） -->
-<!-- MVP-05-verify → docs/claims/34-trae--MVP-05-verify.md -->
+<!-- MVP-05-verify → docs/claims/36-trae--MVP-05-verify.md
+     （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
+     撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -2571,7 +2573,7 @@ commit：cf2b46c（实现与证据提交；本行为随附回填提交）
             docs/spec/mvp-task-checklist.md MVP-05（交付/完成标准/test_id、
             单账户降级要求）、docs/adr/ADR-DEV-002-single-account-acl.md、
             docs/prep/MVP-08/openapi.yaml（/adapter/publish_task_branch 契约）
-允许修改目录：TASKS.md、docs/claims/34-trae--MVP-05-verify.md（验收者不改被验代码）
+允许修改目录：TASKS.md、docs/claims/36-trae--MVP-05-verify.md（验收者不改被验代码）
 禁止修改目录：docs/spec/**、backend/**、tools/**、docs/adr/**、docs/prep/**、
             docs/claims/ 下非本任务的文件
 交付分支：agent/local/trae/MVP-05-verify/a1
