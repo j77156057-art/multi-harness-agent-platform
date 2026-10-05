@@ -26,6 +26,7 @@
 | worktree-isolation | Claude Code | — | ✅ done | `agent/local/claude/worktree-isolation/a1` | `MVP-PROCESS-001` |
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
+| fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | MVP-03 | Codex | MVP-02 | doing | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -62,6 +63,7 @@
 | 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | doing |
+| 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -345,6 +347,35 @@ POSIX `fcntl.flock`），进锁后重新确认模式，已是 WAL 则立即返�
 
 改动文件：`backend/app/db/connection.py`（属 MVP-02 目录，跨任务改动已在此登记，
 分支 `agent/workbuddy/fix-concurrent-init`）
+
+### ✅ WAL 锁 Windows 兼容性修复（WorkBuddy，09:20）
+
+早上修的并发初始化缺陷（`7531592`）在**根目录**复测时暴露第二个问题：
+
+~~~text
+PermissionError: [Errno 13] Permission denied:
+  "...\test_concurrent_initialization0\state.db-wal.lock"
+~~~
+
+**根因**：Windows 上 `msvcrt.locking` 的 `LK_LOCK` 虽是阻塞式，但当文件已被
+另一进程独占时，本进程的 **`open()` 会先抛 `PermissionError`**，而不是阻塞等待。
+早上的实现只用了 `LK_LOCK`，没有重试。
+
+**修法**（`_lock_file` + `ensure_wal`）：
+
+1. 加锁改用**非阻塞** `LK_NBLCK` / `LOCK_NB`，配合调用侧有限超时重试
+   （`errno` 为 `EACCES` / `EAGAIN` / `EDEADLK` 时重试，超时上限 10s）；
+2. **打开锁文件本身也纳入重试** —— 这是 Windows 特有的第三层坑，
+   只重试加锁不够；
+3. 抽出 `_LOCK_TIMEOUT_S` / `_LOCK_POLL_S` 常量，避免魔法数。
+
+**验证**：并发测试 **10/10**；全量 20 passed；docstate 88/88；ruff check + format 全绿。
+
+**教训**：早上的"10/10 通过"是在 worktree 外的根目录测的，用的是同一个 venv
+但不同路径 —— **修复必须在目标环境验证**。跨机器/跨路径的行为差异要显式复测，
+这与"单次通过不等于通过"是同一类问题。
+
+改动文件：`backend/app/db/connection.py`
 
 ## 关键路径
 
