@@ -30,7 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
-| fix-flaky-init-card | TRAE | fix-flaky-init | 🟢 doing | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
+| fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -78,7 +78,7 @@
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
-| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | 🟢 doing |
+| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -339,7 +339,7 @@ commit：9d3d3ef（仅 TASKS.md，经 e656058 合入 main）
     自 e656058 起 1 项失败，见本文件违规记录区。
 ~~~
 
-### fix-flaky-init-card：补录 fix-flaky-init 任务卡（🟢 doing）
+### fix-flaky-init-card：补录 fix-flaky-init 任务卡（✅ done）
 
 ~~~text
 任务编号：fix-flaky-init-card
@@ -358,10 +358,13 @@ commit：9d3d3ef（仅 TASKS.md，经 e656058 合入 main）
   3. 缺卡违规在违规记录区留档。
 test_id：MVP-PROCESS-001
 测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
-当前状态：doing
-commit：（完成后回填）
+当前状态：done
+完成时间：2026-10-05 19:29
+commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
 验证结果：
-  （完成后回填）
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，无 backend 改动，pytest 85 项/ruff 结论不变。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
