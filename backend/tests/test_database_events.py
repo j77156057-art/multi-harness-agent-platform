@@ -214,6 +214,97 @@ def test_discarded_projection_can_be_rebuilt_after_reopening_database(tmp_path):
     assert recovered == {"T-1": {"status": TaskStatus.IN_PROGRESS, "seq": 3}}
 
 
+def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
+    """003 seeds from the historical max; old per-group message numbers survive."""
+    import shutil
+
+    real_dir = Path(__file__).resolve().parents[1] / "migrations"
+    legacy_dir = tmp_path / "legacy_migrations"
+    legacy_dir.mkdir()
+    for name in ("001_initial.sql", "002_task_claims_nullable.sql"):
+        shutil.copy(real_dir / name, legacy_dir / name)
+
+    database = Database(tmp_path / "state.db")
+    with database.connect() as connection:
+        apply_migrations(connection, legacy_dir)
+
+    # Legacy state written by the OLD binary: events 1..5 via AUTOINCREMENT,
+    # messages numbered per group -- both groups carry seq 1. Rows are inserted
+    # with raw SQL because the current EventStore requires global_seq.
+    with database.transaction() as conn:
+        for index in range(5):
+            conn.execute(
+                "INSERT INTO task_events(event_name, aggregate_type, aggregate_id,"
+                " actor_type, actor_id, payload_json, payload_hash, schema_version,"
+                " created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+                (
+                    EventKind.PLAN_APPROVE.value,
+                    "task",
+                    f"T-{index}",
+                    "human",
+                    "alice",
+                    "{}",
+                    f"hash-{index}",
+                    "2026-01-01T00:00:00+00:00",
+                ),
+            )
+        conn.execute(
+            "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+            ("p-1", "demo", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO groups(group_id, project_id, name, created_at)" " VALUES (?, ?, ?, ?)",
+            ("g-a", "p-1", "a", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO groups(group_id, project_id, name, created_at)" " VALUES (?, ?, ?, ?)",
+            ("g-b", "p-1", "b", "2026-01-01T00:00:00+00:00"),
+        )
+        for group in ("g-a", "g-b"):
+            conn.execute(
+                "INSERT INTO task_messages(message_id, group_id, sender_type,"
+                " sender_id, body, created_seq, created_at)"
+                " VALUES (?, ?, 'human', 'h', 'x', 1, '2026-01-01T00:00:00+00:00')",
+                (f"msg-{group}", group),
+            )
+
+    with database.connect() as connection:
+        applied = apply_migrations(connection, real_dir)
+    assert applied == 1
+
+    with database.connect() as conn:
+        assert int(conn.execute("SELECT seq FROM global_seq WHERE id=1").fetchone()[0]) == 5
+        assert conn.execute("SELECT COUNT(*) AS n FROM task_events").fetchone()[0] == 5
+        assert (
+            "AUTOINCREMENT"
+            not in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name='task_events'"
+            ).fetchone()[0]
+        )
+
+    store = EventStore(database)
+    next_event = store.append(
+        event_name=EventKind.CLAIM,
+        aggregate_type="task",
+        aggregate_id="T-new",
+        actor_type="harness",
+        actor_id="h-1",
+        payload={},
+    )
+    assert next_event.seq == 6
+
+    from app.tasks.service import SchedulerService
+
+    message_seq = SchedulerService(database).post_message(
+        group_id="g-a",
+        author_kind="human",
+        author_id="h",
+        body="after upgrade",
+        mentions=[],
+    )["seq"]
+    assert message_seq == 7
+
+
 def test_foreign_keys_and_sql_keyword_columns_are_usable(tmp_path):
     database = Database(tmp_path / "state.db")
     database.initialize()
