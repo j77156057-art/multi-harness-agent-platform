@@ -28,12 +28,14 @@
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
+| fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | gate-baseline-repair | OpenCode | R10-fix-10 | 🟢 doing | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
-| MVP-04 | Qoder | MVP-02 MVP-03 | 🟢 doing ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | 🔍 review ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -72,9 +74,11 @@
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
-| 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
+| 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
-| 14 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | 🟢 doing |
+| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
+| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
+| 16 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -120,6 +124,23 @@ Codex 认领后）才补上本登记**。原始状态下：
 
 **根因**：验收被放在合并之后，Gate 没有卡住"未验收"的合入。**合并的前置条件
 必须是验收通过（含机械对拍），不能用"先合、验收问题再追 amend"替代。**
+
+### 违规记录：R10-fix-10 标记 done 但缺任务卡（1b51e2c）
+
+**事实**：WorkBuddy 在 `1b51e2c` 把 R10-fix-10 状态从 doing 改为 done
+（交付实为 `32f4e45`），但**没有补该任务的任务卡**。自 `1b51e2c` 起
+discipline `check_cards` 持续 1 项失败：
+「已认领且非在途的任务都有任务卡；缺卡=['R10-fix-10']」，
+即 main 在该任务完成期间门禁非全绿。
+
+**已采取的纠正**：TRAE 以独立任务 R10-fix-10-card
+（`agent/local/trae/r10-fix-10-card/a1`）按"登记先于开工"补录任务卡，
+事实全部取自 `32f4e45` 提交说明与 R10 §38.8，未改动该任务的任何交付内容；
+补卡后 discipline 恢复 0 失败。
+
+**根因**：关闭任务（doing → done）时只改了任务表/认领表状态，
+没把"done 卡必须含 commit 与验证证据"当作关闭动作的一部分。
+**标 done 的同一个提交里就应当包含完整任务卡；事后补卡是补救，不是流程。**
 
 ## 任务卡
 
@@ -198,6 +219,72 @@ commit：91e350e（登记先于开工）、b9f140e（修复 + 对拍测试 + 投
   - MVP-03 代码先合入 main（db9bc19）后完成验收，本任务整改也以 amend 形式追入，
     流程偏差已在验收记录中说明。
   - 本分支同样先改后合：合入 main 前对其他 AI 不可见，需 Gate/用户尽快合入。
+~~~
+
+### R10-fix-10：task_claims 权威键检查盲区修复（✅ done，任务卡事后补录）
+
+~~~text
+任务编号：R10-fix-10
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 09:35
+完成时间：2026-10-05 09:39（交付 32f4e45）；09:57 任务状态关闭（1b51e2c）
+依赖任务：MVP-02-amend（R10-fix-09 的载体；本修复是其同类镜像问题）
+真相源引用：R10 §8（canonical schema，补 task_claims 最小定义行）、
+            §11（Claim per-task 幂等 unique(claim_request_id, task_id)）、
+            §37.6（schema 补充清单，拆 task_claims/task_attempts 合并写法）、
+            §38.8（本修复的完整缺陷/修复/验证记录）
+允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**
+禁止修改目录：backend/**、docs/spec/mvp-task-checklist.md
+交付分支：agent/workbuddy/R10-fix-10-task-claims
+背景：Qoder 在 MVP-08 prep 交接提出 Q-6：R10-fix-09 把 per-task 唯一键
+      声明由 task_claims 承担，但 task_claims 不在 §8 表内，docstate
+      schema-keys 断言遍历不到，权威键落在检查器盲区。
+完成内容：
+  1. §8 补 task_claims 最小定义行（紧邻 claim_requests）；
+  2. §37.6 拆开 task_claims/task_attempts 合并写法；
+  3. docstate schema-keys 断言 1 条扩为 3 条（88 → 90 项），
+     消除「删 §8 字段仍能靠 §37.6 兜底通过」的注入漏洞。
+test_id：DOC-SCHEMA-001、DOC-STATE-001
+测试命令：./scripts.sh check
+当前状态：done
+commit：32f4e45（修复交付）、1b51e2c（任务状态关闭）
+验证结果：
+  - docstate 90 项检查 0 失败（修前 88 项）；
+  - 注入验证：删 task_claims.claim_request_id 后旧检查 88/88 放过，
+    新检查 90 项中 2 项失败（R10 §38.8 验证表）；
+  - 交付时 pytest 26 passed、ruff check + format 全绿（据 §38.8 与 32f4e45）。
+补录说明：
+  - 本卡由 TRAE 于 2026-10-05 10:12 依 32f4e45 提交说明与 R10 §38.8 事后补录：
+    WorkBuddy 在 1b51e2c 把任务标为 done 时遗漏了任务卡，导致 discipline
+    check_cards 自 main 1b51e2c 起持续 1 项失败，见本文件违规记录区。
+~~~
+
+### R10-fix-10-card：补录 R10-fix-10 任务卡（✅ done）
+
+~~~text
+任务编号：R10-fix-10-card
+负责人 Harness：TRAE
+开始时间：2026-10-05 10:12
+依赖任务：R10-fix-10（仅补登记，不改其交付内容）
+工作区：.worktrees/trae/
+真相源引用：tools/discipline/discipline.py 的 check_cards（缺卡判定）、
+            R10 §38.8 与提交 32f4e45/1b51e2c（补录事实来源）
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/r10-fix-10-card/a1
+完成标准：
+  1. R10-fix-10 任务卡字段完整（真相源引用、test_id、commit、验证证据）；
+  2. discipline 24 项检查 0 失败；
+  3. 缺卡违规在违规记录区留档。
+test_id：MVP-PROCESS-001
+测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：done
+完成时间：2026-10-05 10:15
+commit：ef07537（登记先于开工）、5e052d2（补卡 + 违规留档）
+验证结果：
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，无 backend 改动，pytest/ruff 不受影响。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
@@ -462,29 +549,38 @@ PermissionError: [Errno 13] Permission denied:
 
 改动文件：`backend/app/db/connection.py`
 
-### ⚠️ 已知 flaky：并发初始化测试（09:55 观察）
+### ⚠️ 更正：flaky 未能复现，撤回登记（10:10）
 
-`test_concurrent_initialization_and_events_have_one_order` 在**连续两次全量跑**时
-偶发失败（本次 1/9），单独跑 6/6 通过，全量单跑 8/8 通过。
+**原登记（09:55）**：称 `test_concurrent_initialization_and_events_have_one_order`
+"连续两次全量跑时偶发失败（1/9）"，并给出两个猜测原因（句柄释放延迟、Defender）。
 
-**观察到的特征**：失败发生在"门禁三道里 pytest 紧接着又跑一次"的场景，
-即上一次 pytest 进程刚退出、`.lock` 文件与 SQLite 句柄尚未完全释放时立刻重跑。
-单独跑或间隔重跑不复现。
+**撤回理由**：按 `fix-flaky-init` 任务做定向复现，**无法复现**：
 
-**与今早已修缺陷的区别**：
-
-| | 症状 | 状态 |
+| 复现方式 | 次数 | 结果 |
 |---|---|---|
-| 早上（`403e3a5` 前） | 0/5 确定性失败，`PermissionError` | ✅ 已修 |
-| 现在 | 连续重跑偶发，1/9 | ⚠️ 未定位，疑似句柄释放延迟 |
+| 单测连跑（退出码判定） | 20 | 20/20 通过 |
+| 全量连跑（退出码判定） | 15 | 15/15 通过 |
+| 复刻原场景（连续两次全量跑） | 16 | 16/16 通过 |
+| 模拟门禁三道（docstate + pytest ×2） | 12 | 12/12 通过 |
 
-**处理**：登记为已知 flaky，不掩盖。归属 MVP-02（`backend/app/db/**`）。
-建议排查方向：`_lock_file` 的 `LK_UNLCK` 与 `conn.close()` 的顺序、
-以及 pytest tmp_path 目录在 Windows 上被 Defender 扫描导致的释放延迟。
+**原判断的错误**：09:55 那次的"1/9"来自
+`pytest -q ... | tail -2` 的输出，而 `pytest -q` 成功时**只输出进度行**
+（`.... [100%]`），没有 `N passed` 汇总行。我当时把另一次命令的 `FAILED` 行
+误归因到这一轮，且**没抓到 `^E` 错误行**就下了根因判断。
+更早一次用 `grep -q "1 passed"` 判成功也不可靠 —— 单测通过时输出是 `.` 而非 `1 passed`。
 
-**门禁影响**：`./scripts.sh check` 一次跑通常通过（8/8），
-但**不保证 100%**。CI 若遇偶发红，应先复跑确认是否为该 flaky，
-不要直接当新缺陷排查。
+**结论**：当时**没有可归因的失败证据**。可能是：
+- 上一轮 docstate 注入缺陷实验改过 R10 文件、pytest 有测试读它（我确实做过
+  注入验证，还原后立即跑的那次）；
+- 或其他一次性环境因素。
+
+**给后续的纪律**：判 pytest 结果**一律用退出码**（`$?`），不要用 `tail`/`grep` 解析输出；
+失败时必须同时抓 `^E` 行与 `FAILED` 行，两者缺一不可归因。`scripts.sh check`
+本身用退出码，不受影响。
+
+**与今早已修缺陷的区分仍有效**：`403e3a5` 修的 `PermissionError` 是
+**确定性**失败（有明确 `^E` 行、0/5 复现），已闭环；本条是**无法复现**的
+一次性现象，两者不是同一问题。
 
 ## 关键路径
 
@@ -946,7 +1042,7 @@ commit：403e3a5
   - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
 ~~~
 
-### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（doing ★瓶颈）
+### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（review ★瓶颈）
 
 ~~~text
 任务编号：MVP-04
@@ -982,11 +1078,33 @@ commit：403e3a5
   5. 资源预占失败只进 queued，不写 owner/attempt/Lease，且不是错误（R10 §11）
 test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
 测试命令：./scripts.sh check
-当前状态：doing
-完成时间：
-commit：
+当前状态：review
+完成时间：2026-10-05 10:25
+commit：8c0233a
 验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 24 项，1 项失败（缺卡=['R10-fix-10']，WorkBuddy 的任务，非本任务）
+  ruff check  : All checks passed
+  ruff format : 28 files already formatted
+  pytest      : 57 passed（MVP-04 新增 31）
+  并发复跑    : test_claim_concurrency.py 连跑 10 次，10/10 通过
+  ⚠️ ./scripts.sh check 当前会在 discipline 处短路（set -e），dirty main 上 ruff 与
+     pytest 不会执行；上表后两行是用 ./scripts.sh lint 与 ./scripts.sh test 单独跑的。
 已知问题：
+  - **规范冲突，需要裁定**：task_claims.attempt_id 与 .owner 在 001_initial.sql 里是
+    NOT NULL，但 R10 §11 既要求「每个任务项（含失败项）都留一行」，又要求延迟资源时
+    「不写 owner/attempt/Lease」。两条规则按现有 schema 无法同时满足。当前实现用显式
+    命名的空串哨兵（NO_ATTEMPT）保留行、同时让值不可能被当成真实 attempt。正解是要么
+    把两列改可空（属 MVP-02 的 backend/migrations/**，不在本任务允许目录内），
+    要么改 R10。
+  - 跨任务改动（已在此登记）：docs/traceability.md 的 CORE-CLAIM-001/002、
+    CORE-LEASE-001、CORE-FENCE-001 四行从「未实现（MVP-04）」改为「有断言」并写上
+    承接文件。该文件属 graph-traceability；其「强制状态」列明确不被断言，留着不改会
+    让同一提交里的代码与文档相互矛盾。
+  - 复放的 claim 不重新发放 lease_token（库中只存哈希）。Adapter 若在重放后丢失了
+    首次拿到的 token，只能等 Lease 过期后走 reclaim/take_over。
+  - 未实现（不属本卡 5 条完成标准）：Harness 能力/质量门控（R10 §11 检查 5/9）、
+    exclusive_paths 的 path_conflicts 巡检、dependencies_not_merged 检查。
   - ★ TASKS.md 建议本任务配 2 个 AI（一人 Claim/幂等、一人 Lease/fencing/巡检器）。
     本人先做 Claim/幂等；若第二个 AI 加入，本卡更新后让出 backend/app/lease/** 与
     对应测试，两边路径互不重叠。
