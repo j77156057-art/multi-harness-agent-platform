@@ -27,7 +27,7 @@
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
-| R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -68,7 +68,7 @@
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
-| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
+| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 
@@ -391,6 +391,30 @@ PermissionError: [Errno 13] Permission denied:
 
 改动文件：`backend/app/db/connection.py`
 
+### ⚠️ 已知 flaky：并发初始化测试（09:55 观察）
+
+`test_concurrent_initialization_and_events_have_one_order` 在**连续两次全量跑**时
+偶发失败（本次 1/9），单独跑 6/6 通过，全量单跑 8/8 通过。
+
+**观察到的特征**：失败发生在"门禁三道里 pytest 紧接着又跑一次"的场景，
+即上一次 pytest 进程刚退出、`.lock` 文件与 SQLite 句柄尚未完全释放时立刻重跑。
+单独跑或间隔重跑不复现。
+
+**与今早已修缺陷的区别**：
+
+| | 症状 | 状态 |
+|---|---|---|
+| 早上（`403e3a5` 前） | 0/5 确定性失败，`PermissionError` | ✅ 已修 |
+| 现在 | 连续重跑偶发，1/9 | ⚠️ 未定位，疑似句柄释放延迟 |
+
+**处理**：登记为已知 flaky，不掩盖。归属 MVP-02（`backend/app/db/**`）。
+建议排查方向：`_lock_file` 的 `LK_UNLCK` 与 `conn.close()` 的顺序、
+以及 pytest tmp_path 目录在 Windows 上被 Defender 扫描导致的释放延迟。
+
+**门禁影响**：`./scripts.sh check` 一次跑通常通过（8/8），
+但**不保证 100%**。CI 若遇偶发红，应先复跑确认是否为该 flaky，
+不要直接当新缺陷排查。
+
 ## 关键路径
 
 ~~~text
@@ -404,12 +428,12 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 
 | 任务 | 可提前做 | 何时必须完成 |
 |---|---|---|
-| MVP-02 | schema 草案 DDL、事件 seq 分配器算法说明、"删投影后重建状态"的验证用例设计 | MVP-01 合入后立即 |
-| MVP-03 | 状态投影落地、`docs/state-projection.md` 完善、DAG 环检测用例 | MVP-02 前 |
-| MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-02 前 |
+| MVP-02 | schema 草案 DDL、事件 seq 分配器算法说明、"删投影后重建状态"的验证用例设计 | ✅ 已过（`b154f5c`） |
+| MVP-03 | 状态投影落地、`docs/state-projection.md` 完善、DAG 环检测用例 | ✅ 已过（`9b4b663`） |
+| MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-03 前（依赖已满足，**2026-10-05 09:53 放行**） |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 ｜ 🟢 **Qoder 在做**：`agent/local/qoder/MVP-08-prep/a1`（认领 2026-10-05 09:16，产出在 `.worktrees/qoder/docs/prep/MVP-08/`） |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`）｜ 🟢 **Qoder 在做**：`.worktrees/qoder/docs/prep/MVP-08/`（状态 doing，按规则 prep 不当结论用） |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
