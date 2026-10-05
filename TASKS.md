@@ -42,6 +42,7 @@
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| message-global-seq | TRAE | MVP-08 | 🟢 doing | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -93,6 +94,7 @@
 | 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
 | 22 | MVP-08-verify | TRAE | 2026-10-05 20:49 | `agent/local/trae/MVP-08-verify/a1` | ✅ done |
+| 23 | message-global-seq | TRAE | 2026-10-05 21:18 | `agent/local/trae/message-global-seq/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1743,4 +1745,53 @@ commit：087eb93（验收证据提交；本行为随附回填提交）
   4. 两处脚手架迁移待 MVP-05/06 换成真实 HTTP 路径后 MVP-API-001 转 ✅。
   违规留档：第三次「先合 main 后验收」（3de2115）三段式记录见上文。
   MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
+~~~
+
+### message-global-seq：消息与事件共享全局 seq（🟢 doing）
+
+~~~text
+任务编号：message-global-seq
+负责人 Harness：TRAE
+开始时间：2026-10-05 21:18
+依赖任务：MVP-08（已验收 087eb93；本任务关闭其验收遗留项 3a）
+工作区：.worktrees/trae/
+真相源引用：docs/spec/0.3-R10.md §15（事件带全局 seq、禁止空洞）、§19（read_context
+            用 since_seq 混合排序消息与事件）；
+            docs/prep/MVP-08/openapi.yaml L1215（消息 seq 取自与 task_events
+            相同的全局空间——契约原本如此要求，是实现偏离）；
+            MVP-08 验收遗留项 3a（TASKS.md）
+背景：task_messages.created_seq 是普通 INTEGER，post_message 按 group 做
+      MAX+1；消息不写 task_events，两流序号互不相干，§19 混合游标无法实现。
+      借号路径被 append-only 触发器与 §37.7 事件封闭集合双重封死（R10 无消息
+      事件名）。采用方案 A：独立全局序列表，事件与消息在各自写事务内同取一个号。
+允许修改目录：backend/migrations/**、backend/app/db/**、backend/app/events/**、
+            backend/app/tasks/**、backend/app/api/**、backend/tests/**、
+            docs/traceability.md（跨任务登记，同 MVP-08 先例）、TASKS.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/**、docs/prep/MVP-08/**（契约本就
+            要求全局 seq，无需改 prep）
+交付分支：agent/local/trae/message-global-seq/a1
+设计：
+  1. 迁移 003：建单行表 global_seq(id=1, seq)，初值=MAX(task_events.seq,
+     task_messages.created_seq)；重建 task_events 去掉 AUTOINCREMENT
+     （SQLite 不能 ALTER 列约束，照 002 先例建新表+拷贝+换名，重建索引与
+     两个 append-only 触发器，清 sqlite_sequence 旧条目）；
+  2. app/db/sequence.py：next_global_seq(conn) 在调用方事务内
+     UPDATE global_seq SET seq=seq+1 取号（BEGIN IMMEDIATE 串行，回滚不空洞）；
+  3. EventStore.append 显式带 seq 插入（两条 connection 分支同事务取号）；
+     post_message 用同一分配器，删除 per-group MAX+1；
+  4. /events 与 /groups/{id}/messages 仍是各自子集，但号同源——交错写入产生
+     的「缺口」是另一流的真实记录，非 §15 禁止的空洞。
+完成标准：
+  1. 交错写事件与消息，两流号严格递增、互不重复、并集在同一连续区间（有测试）；
+  2. 旧库迁移：已有事件/消息号保留，新号从历史最大值 +1 继续（有测试）；
+  3. 失败事务回滚不产生空洞（沿用 test_database_events 既有用例语义）；
+  4. 全门禁：docstate 90/0、discipline、pytest 全量、ruff、check_contract、
+     mutation_test；MVP-08 卡遗留项 3a 标记已关闭（refs 3b 不在本任务范围）。
+test_id：MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：doing
+完成时间：（完成后回填）
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
 ~~~
