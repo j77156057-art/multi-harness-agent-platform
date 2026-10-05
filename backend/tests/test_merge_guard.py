@@ -38,14 +38,34 @@ from pathlib import Path
 import pytest
 from mergeguard import cli, guard
 
+#: 单次 git 调用的上限。没有它，一次挂死就是**无限挂死**：pytest 不会报错，
+#: 只会永远等下去，直到调用方（人或 agent harness）超时把整棵进程树杀掉 ——
+#: 那正是「1~3 个 dot 后进程树死亡、零输出」的成因。
+GIT_TIMEOUT_SECONDS = 180
+
+
+def _git_base_kwargs() -> dict[str, object]:
+    """所有 git 子进程调用共用的安全参数。
+
+    - `stdin=DEVNULL`：git 会派生 `sh.exe` / `git-receive-pack` /
+      `git maintenance` 等 helper，它们**继承父进程的 stdin**。一旦某个
+      helper 去读一个没人写、也没人关的句柄，整个调用就永久阻塞。
+    - `timeout`：把「永久阻塞」变成「一条带上下文的失败」。
+    """
+    return {
+        "stdin": subprocess.DEVNULL,
+        "timeout": GIT_TIMEOUT_SECONDS,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+
 
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(repo), *args],
         check=True,
         capture_output=True,
-        encoding="utf-8",
-        errors="replace",
+        **_git_base_kwargs(),
     )
 
 
@@ -55,8 +75,7 @@ def _git_out(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        encoding="utf-8",
-        errors="replace",
+        **_git_base_kwargs(),
     ).stdout.strip()
 
 
@@ -139,6 +158,22 @@ def repo(tmp_path: Path) -> Path:
     _git(r, "init", "-b", "main")
     _git(r, "config", "user.email", "t@example.com")
     _git(r, "config", "user.name", "t")
+    # 关掉 git 自动维护 —— 这是本文件最大的稳定性杠杆，实测证据见下。
+    #
+    # GIT_TRACE2 实测：git 2.55 下**每一次写操作**（哪怕一条普通 commit）
+    # 都会派生一个 detached 子进程
+    #     child_start[0] git maintenance run --auto --quiet --detach
+    # 它 (a) 继承父进程的 stdout/stderr 句柄，于是 pytest 的 capture 管道
+    # 要等它退出才拿到 EOF；(b) 去抢 packed-refs / ref 锁。
+    # 本文件 34 条用例每条都要建真仓库、跑真 commit/merge/worktree，
+    # 于是会派生上百个这样的后台进程，彼此与父进程抢锁。
+    #
+    # 后果不是断言失败，而是**挂死**：调用方超时后把整棵进程树杀掉 ——
+    # 表现为「跑几个 dot 之后进程树死亡、零输出」，且 `-s` 也救不了
+    # （问题出在子进程继承的句柄，与 pytest 自己的 capture 无关）。
+    # 测试不需要 gc，所以这里直接掐掉触发源，而不是靠 xfail 掩盖症状。
+    _git(r, "config", "gc.auto", "0")
+    _git(r, "config", "maintenance.auto", "false")
     (r / "f.txt").write_text("x", encoding="utf-8")
     _git(r, "add", "f.txt")
     _git(r, "commit", "-m", "init")

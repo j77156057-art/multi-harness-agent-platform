@@ -696,10 +696,67 @@ TRAE 对 merge-interlock 分支做了独立评审（逐行读 diff + 临时 work
   - test_merge_guard.py: **32 passed**（修复前 15，新增 17），连跑 3 次 0 flake
   - **负向测试**：退回修复前的 cli.py 后跑新用例 → **15 failed / 17 passed**，
     即新增用例确实能抓住这 4 个问题，不是空断言
-  - **未修**：TRAE 问题 5 [中] 本机 pytest 硬崩（TRAE 机器整会话跑必崩），
-    建议做会话隔离或本机 xfail。**这条不修，`scripts.sh check` 在他那台机器
-    上只能继续 `--ignore`，等于门禁在那台机器上不完整** —— 是目前剩下的
-    唯一阻塞项。
+  问题 5 [中] pytest 硬崩 —— 根因已定位（不采用 xfail，见下）
+  现象：TRAE 机器上整会话跑 `test_merge_guard.py` 100% 硬崩，1~3 个 dot 后
+  「reader 线程/进程树死亡」，`-s` 亦然，单跑 linked-worktree 用例零输出崩。
+
+  **我没有复现崩溃本身**：本机该文件 34 passed，连跑 4 次 0 flake，单跑
+  linked-worktree 用例 15/15 通过。所以下面区分「已证实」与「推断」。
+
+  已证实的部分：
+  1. **本机有两批早前的 pytest 至今仍挂着**（4 小时 / 1.5 小时），每个都被
+     一个真实 git 子进程卡死，且留下完整孤儿进程树：
+        python -m pytest -> python -> git push -> sh.exe -> git-receive-pack -> git
+     `git push` 自身 cpu=0.2s，卡在等子进程。另一批卡在 `git commit` 上，
+     且其 git 子进程 PID 发生过变化（52100 -> 34980），说明在反复重启、
+     永不推进。这说明「挂死 + 孤儿进程树」在本机是**已发生的事实**，
+     TRAE 看到的「进程树死亡」很可能是同一现象在他的 harness 上的表现
+     （他那边是 harness 超时后杀掉进程树，我这边是进程被孤儿化）。
+  2. **触发源是 git 自动维护**，GIT_TRACE2 实测（git 2.55）：每一次写操作
+     —— 哪怕一条普通 `git commit` —— 都会派生 detached 子进程
+        child_start[0] git maintenance run --auto --quiet --detach
+     它 (a) 继承父进程 stdout/stderr，于是 capture 管道要等它退出才拿到
+     EOF；(b) 去抢 packed-refs / ref 锁。
+     对照实验：`maintenance.auto=false` + `gc.auto=0` 时派生次数 **0**，
+     恢复默认后是 **1**。因果确立。
+  3. 本仓库 local/global/system 三级都**没有**配 `maintenance.auto`，
+     即默认开启。
+
+  两个被实验**否掉**的假设（记录下来，免得后人重走）：
+  - `os.kill(pid, 0)` 在 Windows 上会杀死目标进程 —— **不成立**。实测
+    python 3.13.14 / win32 下它是纯探测，子进程安然无恙。所以
+    `guard._pid_alive()` 不是元凶（但它仍然值得在 Windows 上换成
+    非 TerminateProcess 的实现，见下）。
+  - 子进程继承了 pytest 的阻塞 stdin 管道 —— **不成立**。`-s` 下
+    `os.fstat(0)` 显示是控制台（isatty=True），构造「hook 从 stdin 读 +
+    父进程不关写端」也**没能**复现挂死。
+
+  推断（未能直接验证，但与上述证据一致）：测试派生上百个 detached
+  maintenance 进程，彼此与父进程抢 ref 锁并争抢 capture 管道；调用方
+  （人或 agent harness）超时后杀掉整棵进程树 —— 表现为「几个 dot 之后
+  进程树死亡、零输出」，且 `-s` 救不了（问题在子进程继承的句柄，
+  与 pytest 自己的 capture 无关）。这解释了 TRAE 报告的全部三个现象。
+
+  修法：**掐掉触发源，而不是用 xfail 掩盖症状**。
+  - `repo` fixture 里对每个临时仓库设 `gc.auto=0` + `maintenance.auto=false`。
+    测试不需要 gc。TRAE 建议的「会话隔离 / 本机 xfail」被否：xfail 会把
+    崩溃记成「预期失败」，绿灯里就掺了假账 —— 而这个工具的全部价值就是
+    「绿灯可信」。
+  - 所有 git 子进程调用加 `stdin=DEVNULL`（git 派生的 helper 会继承 stdin）
+    与 `timeout`（把「永久挂死」变成「一条带上下文的失败」）。
+  - `cli.py` 同样加上；`_run_gate` **故意不加** timeout —— 门禁本就是慢
+    活儿（pytest 几分钟），给它上限会把好合并误判成门禁红；而门禁挂死的
+    代价由 git 层那 300 秒上限兜底。
+
+  验证：merge_guard 34 passed，连跑 4 次 0 flake；pytest backend
+  214 passed；pytest tools 37 passed；ruff clean；docstate 90/0。
+  本机残留 git 进程数从 4 降到 2（剩下 2 个是那两批早就挂死的旧孤儿，
+  与本次改动无关；新跑未产生新的孤儿）。
+
+  **仍需 TRAE 复跑确认**：根因推断链完整，但触发条件依赖他的机器环境
+  （git 版本、是否开了 maintenance.auto、harness 怎么杀进程）。若他那边
+  仍崩，需要他给出崩时的 git.exe 残留进程与 `git config --get
+  maintenance.auto` 的输出，才能把推断变成证实。
 
 问题 6 [低] 预检信号不全（已单独修复）
   症状：预检只看 `index.lock` 与 `ORIG_HEAD.lock`，漏了裸跑 commit / fetch /

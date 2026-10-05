@@ -93,16 +93,28 @@ PENDING_FILENAME = "merge-pending.json"
 _REF_CONTENTION = ("update_ref failed", "cannot lock ref")
 
 
+#: 单次 git 调用的上限。没有它，一次挂死就是无限挂死，而本工具正在**持有
+#: 互斥锁**——锁的 stale 判定要等持有进程已死且超过 TTL，一次挂死会把整个仓库
+#: 的合并卡住直到 TTL（默认 900 秒）。
+GIT_TIMEOUT_SECONDS = 300
+
+
 def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     # encoding 必须显式指定：Windows 上 text=True 默认按 GBK 解码，而 git 输出
     # 的提交信息含 UTF-8 中文（本仓库的提交信息全是中文），不指定就会抛
     # UnicodeDecodeError —— 第一次真合并就会撞上。
+    #
+    # stdin=DEVNULL：git 会派生 helper（sh.exe / git-receive-pack /
+    # git maintenance），它们继承父进程的 stdin。某个 helper 去读一个没人写
+    # 也不关的句柄就会把这次调用永久挂住。
     return subprocess.run(
         ["git", "-C", str(REPO_ROOT), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.DEVNULL,
+        timeout=GIT_TIMEOUT_SECONDS,
         check=check,
     )
 
@@ -332,6 +344,14 @@ def _commit_with_retry(
 
 
 def _run_gate(name: str, args: list[str]) -> tuple[bool, str]:
+    """跑一道门禁。**不设上限**：门禁就是慢的活儿（pytest 动辄几分钟），
+    这里宁可等，也不该因为超时把一次好合并误判成门禁红。
+
+    超时的另一面是挂死保护：门禁脚本若自己卡死（比如它内部的 git 调用
+    撞上自动维护），本工具会一直持有合并锁。所以上面 `_git` 的
+    GIT_TIMEOUT_SECONDS 是给 git 用的，这里不给门禁用 —— 两者的
+    「合理的慢」不是一个量级。
+    """
     cmd = [sys.executable, *args]
     proc = subprocess.run(
         cmd,
@@ -340,6 +360,7 @@ def _run_gate(name: str, args: list[str]) -> tuple[bool, str]:
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.DEVNULL,
     )
     lines = [ln for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
     # 豁免行必须显示出来：门禁少跑一条断言这件事不能只存在于代码里。
