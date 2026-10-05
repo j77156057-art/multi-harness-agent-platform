@@ -216,7 +216,26 @@ def check_registry(result, tasks_text, repo_root=None):
     claims = parse_claim_table(repo_root)
 
     result.chk(bool(tasks), "任务表解析出 %d 行" % len(tasks), "registry")
-    result.chk(bool(claims), "认领登记表解析出 %d 行" % len(claims), "registry")
+    result.chk(bool(claims), "认领登记表解析出 %d 个" % len(claims), "registry")
+
+    # 拆分后「每task 一个独占文件」的两条不变量必须有守卫，否则绿灯不含信息
+    # （Qoder 复核发现②③④：序号 14/15 各重复、claim-nullable 有两个逐字相同的文件，
+    #  而当时 discipline 仍 24/24 全绿）。
+    seqs = [c["seq"] for c in claims]
+    dup_seq = sorted({q for q in seqs if seqs.count(q) > 1})
+    result.chk(
+        not dup_seq,
+        "认领文件序号唯一；重复=%s（%d 个文件，序号范围 %s~%s）"
+        % (dup_seq or "无", len(seqs), min(seqs) if seqs else "-", max(seqs) if seqs else "-"),
+        "registry",
+    )
+    tids = [c["task_id"] for c in claims]
+    dup_tid = sorted({t for t in tids if tids.count(t) > 1})
+    result.chk(
+        not dup_tid,
+        "一个 task_id 只对应一个认领文件；重复=%s" % (dup_tid or "无"),
+        "registry",
+    )
 
     bad_status = [t["task_id"] for t in tasks if not any(
         keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)]

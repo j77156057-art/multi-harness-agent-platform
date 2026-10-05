@@ -41,6 +41,7 @@
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| claims-split | WorkBuddy | — | ✅ done | `agent/workbuddy/split-tasks-md` | `MVP-PROCESS-001` |
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -79,22 +80,22 @@
 <!-- agent-onboarding → docs/claims/05-claude-code--agent-onboarding.md -->
 <!-- discipline → docs/claims/06-claude-code--discipline.md -->
 <!-- MVP-03 → docs/claims/07-codex--MVP-03.md -->
-<!-- fix-wal-lock-retry → docs/claims/08-workbuddy--fix-wal-lock-retry.md -->
-<!-- MVP-08-prep → docs/claims/09-qoder--MVP-08-prep.md -->
-<!-- R10-fix-10 → docs/claims/10-workbuddy--R10-fix-10.md -->
-<!-- graph-traceability → docs/claims/11-claude-code--graph-traceability.md -->
-<!-- fix-flaky-init → docs/claims/12-workbuddy--fix-flaky-init.md -->
-<!-- MVP-03-amend → docs/claims/13-trae--MVP-03-amend.md -->
-<!-- claim-nullable → docs/claims/14-workbuddy--claim-nullable.md -->
-<!-- verify-mvp-04 → docs/claims/15-workbuddy--verify-mvp-04.md -->
-<!-- R10-fix-10-card → docs/claims/14-trae--R10-fix-10-card.md -->
-<!-- MVP-04 → docs/claims/15-qoder--MVP-04.md -->
-<!-- fix-flaky-init-card → docs/claims/16-trae--fix-flaky-init-card.md -->
+<!-- fix-wal-lock-retry → docs/claims/09-workbuddy--fix-wal-lock-retry.md -->
+<!-- MVP-08-prep → docs/claims/10-qoder--MVP-08-prep.md -->
+<!-- R10-fix-10 → docs/claims/11-workbuddy--R10-fix-10.md -->
+<!-- graph-traceability → docs/claims/08-claude-code--graph-traceability.md -->
+<!-- fix-flaky-init → docs/claims/14-workbuddy--fix-flaky-init.md -->
+<!-- MVP-03-amend → docs/claims/12-trae--MVP-03-amend.md -->
+<!-- claim-nullable → docs/claims/19-workbuddy--claim-nullable.md -->
+<!-- verify-mvp-04 → docs/claims/21-workbuddy--verify-mvp-04.md -->
+<!-- R10-fix-10-card → docs/claims/15-trae--R10-fix-10-card.md -->
+<!-- MVP-04 → docs/claims/13-qoder--MVP-04.md -->
+<!-- fix-flaky-init-card → docs/claims/18-trae--fix-flaky-init-card.md -->
 <!-- MVP-08 → docs/claims/17-qoder--MVP-08.md -->
-<!-- claim-nullable → docs/claims/18-workbuddy--claim-nullable.md -->
-<!-- MVP-04-verify → docs/claims/19-trae--MVP-04-verify.md -->
-<!-- claim-nullable-card → docs/claims/20-trae--claim-nullable-card.md -->
-<!-- plan-evidence-failclosed → docs/claims/21-opencode--plan-evidence-failclosed.md -->
+<!-- claim-nullable → docs/claims/19-workbuddy--claim-nullable.md -->
+<!-- MVP-04-verify → docs/claims/20-trae--MVP-04-verify.md -->
+<!-- claim-nullable-card → docs/claims/22-trae--claim-nullable-card.md -->
+<!-- plan-evidence-failclosed → docs/claims/16-opencode--plan-evidence-failclosed.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -851,6 +852,60 @@ PermissionError: [Errno 13] Permission denied:
 **与今早已修缺陷的区分仍有效**：`403e3a5` 修的 `PermissionError` 是
 **确定性**失败（有明确 `^E` 行、0/5 复现），已闭环；本条是**无法复现**的
 一次性现象，两者不是同一问题。
+
+### claims-split：认领登记拆分为per-task 独占文件（✅ done）
+
+~~~text
+任务编号：claims-split
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 20:30
+完成时间：2026-10-05 20:47
+依赖任务：无
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §0 总协调规则第 2 条（领取任务前必须登记）、
+            docs/dev-convention.md H-7（隔离与验证）
+允许修改目录：TASKS.md、docs/claims/**、tools/discipline/discipline.py
+禁止修改目录：docs/spec/**、backend/**
+交付分支：agent/workbuddy/split-tasks-md
+完成标准：
+  1. 量化多写点成本（改动次数 / merge 次数 / 冲突集中点）✅ 11.5h内 40 次改动、19 个 merge
+  2. 认领登记拆成每 task 一个独占文件，TASKS.md 内表标记只读 ✅ 23 个文件
+  3. discipline 改读目录且保持检查能力 ✅ 由 4 项失败 → 24 项 0 失败
+  4. 拆分零丢失（内容计数不变）✅ 50 个 ### 小节与 6 个违规记录全部原位
+  5. 复核并修掉自己引入的缺陷 ✅ 见「Qoder 复核的回应」
+test_id：MVP-PROCESS-001
+测试命令：python tools/discipline/discipline.py
+当前状态：done
+commit：847cc69
+验证结果：
+  discipline: 24 项 0 失败（拆分前 4 项失败）
+  docstate: exit 0；pytest: exit 0；ruff: exit 0
+  TASKS.md: 1605 → 1576 行，50 个 ### 零丢失
+已知问题：
+  - 任务卡未拆（11 个 task 当时缺合规卡，Trae 已陆续补齐；拆分前置条件已满足）
+  - **本任务自身未登记**（Qoder 复核发现①），已于 21:20 补登记
+  - 拆分引入序号重复与同 task 双文件（Qoder 复核发现②③），已修，见下
+  - 当时无序号/task_id 唯一性守卫（④），已补断言
+~~~
+
+### Qoder 复核的回应（claims-split-review，21:20）
+
+Qoder 对 `847cc69` 做了独立复核，指出 4 项。逐条核对后**全部成立**，已修：
+
+| 编号 | Qoder 的发现 | 核对 | 处置 |
+|---|---|---|---|
+| ① | 拆分本身未登记（改登记结构与门禁本体却无登记） | ✅ 成立 | 补任务表行 + `docs/claims/24-workbuddy--claims-split.md` + 本卡 |
+| ② | 序号 `14` / `15` 各重复一次 | ✅ 成立 | 按认领时间重排序号，现 01–23 连续无重复 |
+| ③ | `claim-nullable` 两个文件内容逐字相同 | ✅ 成立 | 去重保留一份（24 → 23 个文件） |
+| ④ | discipline 无序号/task_id 唯一性断言，绿灯不含信息 | ✅ 成立（归属更正后） | 补两条断言，检查项 24 → 26 |
+
+**根因反思**：②③ 的成因是我拆分时从 TASKS.md 表格的「序号」列取号，而**其他 AI 在我
+拆分期间往表里插了新行**（Qoder 的 `claims-split-review` 拿了 22 号），我按旧快照取号
+就撞了号。**我只检查了自己有没有登记，没检查别人是否在改同一处** —— 这正是我上一轮
+拆分想解决的问题，却在拆分时自己犯了一次。
+
+**Qoder 复核的价值**：它在 `847cc69` 合入后立刻做了独立复核，把「discipline 24/24
+全绿」这个看似可信的结论戳破了一处。绿灯不等于正确 —— 断言没覆盖的地方，绿灯不含信息。
 
 ### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
 
