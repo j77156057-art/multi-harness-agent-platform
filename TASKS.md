@@ -53,6 +53,7 @@
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-05-verify | TRAE | MVP-05 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-05-verify/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
+| MVP-06-verify | TRAE | MVP-06 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-06-verify/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
@@ -115,6 +116,7 @@
 <!-- MVP-05-verify → docs/claims/36-trae--MVP-05-verify.md
      （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
+<!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1424,6 +1426,101 @@ commit：1ab608d
     「flaky 放行不可用」，行为与未实现一致而不是假装实现）。
   - Verify 账户隔离（§16 的「低权限隔离 / 网络白名单 / canonical 对 Verify 账户拒绝写入」）
     随 ADR-DEV-002 的单账户降级一起延后；overlay 本身按新 gitdir + alternates 构造。
+
+验收意见（TRAE，2026-10-06 00:47，基线 513de49；不采信卡片自陈，逐条找代码行+机械断言）：
+  总评：✅ 通过（附遗留清单 6 项，无 P1）。两条 test_id 的不变量均取得
+  「代码行 + 机械断言」双证据，证据套件 17/17 实跑退出 0；作者卡 6 条
+  已知问题逐条核实属实。
+
+  VERIFY-DIFF-001（baseline differential 语义）✅：
+  - 精确 commit 全新 detached overlay：app/verify/overlay.py create 用
+    init --separate-git-dir + fetch <精确 sha> + checkout --detach
+    FETCH_HEAD，checkout 后 is_clean（git status --porcelain 为空）否则
+    回收并抛 OverlayError；base/head 各一个 overlay（worker._execute，
+    base 用同一 job_id 的 -base 后缀并在退出时回收）。验收探针实测
+    head_commit == 请求 commit、is_clean == True；
+  - head 必须 0 才进 Review：worker 按 head 退出码定 failure_reason，
+    状态机里 verify_passed 是 verifying→awaiting_review 的唯一边
+    （app/state/machine.py）；test_failing_head_cannot_reach_review
+    断言 changes_requested + 事件流无 verify_passed +
+    merge_is_verifiable 为 False——结构性保证而非调用方自觉；
+  - MVP 简化单侧：required 模式跑 base 但只记录 baseline_exit_code、
+    不强制其失败（通过用例实测 baseline=1 仍放行）；receipt 里
+    flaky_registry_ids 恒 []、diff_intersection 恒 None 并附阶段 2
+    注释，符合 checklist「记录 + 标注、不得静默跳过」口径；
+  - failure_reason 三分类有负向测试：timeout→escalated、
+    env_failed→verifying 自环、code_failed→changes_requested；
+    new_test_files 取自 git diff --name-status base..head 的 A 类；
+  - differential:not_applicable 正反两边（tasks/service.py +
+    machine）：理由与静态证据必填、epoch 陈旧拒绝、human 恢复回
+    verifying，4 个用例钉死；
+  - 命令根人类 allowlist：profile.py 校验 command[0] ∈
+    command_roots、argv 元组非 shell，策略文件为仓库根
+    verify-profiles.json；越界根 VerifyPolicyError 有用例。
+
+  VERIFY-RECEIPT-001（receipt 与待合并 commit 不一致即拒）✅：
+  - append-only：001_initial.sql 的 receipt_no_update / no_delete
+    触发器 + UNIQUE(task_id, attempt_id, commit, verify_profile)；
+    worker 全程只 INSERT。验收探针实测 UPDATE/DELETE 均
+    "verification_receipts is append-only" ABORT 且行不变
+    （仓库测试套件本身无此断言，见遗留 1）；
+  - 幂等与精确匹配：四元组查重 + _replay 返回首次 receipt 不增行；
+    merge_is_verifiable 按精确 commit 查 failure_reason IS NULL 的
+    receipt，base commit/全零 sha 查不到即拒（2 个用例）；
+  - §16 字段：receipt_json 覆盖 commit/base/两个退出码/new_test_files/
+    differential_mode/diff_hash/verify_env_hash/toolchain/fencing_epoch/
+    failure_reason/log_hash/flaky/diff_intersection 等（用例逐字段断言）；
+    权威副本在库，completion.md / test-results.md /
+    verification/receipt.json 只是落 artifacts(uri+hash) 的只读视图；
+  - 迁移 005 只 ADD COLUMN（receipt 5 列、verify_jobs 7 列），
+    未改约束未加表，旧库升级路径随全量测试通过；
+  - overlay 成功即回收（目录断言为空）、失败保留现场（2 个用例）。
+
+  跨项核实：
+  - MVP-08 遗留第 4 项的 verify 半边已真关闭：tests/api_support.py 的
+    advance_to_awaiting_review 走真 commit → HTTP publish → HTTP
+    submit_result → 真 VerifyWorker + 真 receipt，无伪造 receipt；
+    start_task 半边仍由调度器驱动（§7 无动词，MVP-05 卡已裁定）；
+  - MVP-05 验收遗留 7 范围扩大：app/verify/overlay.py 写 alternates
+    与 worktree.py 同源文本写法，验收探针实测尾字节 0D 0A，
+    修复时两处一并改；
+  - 无新增 HTTP 动词（routes.py 15 条路由无 verify/start），与
+    「路径逐字对齐 §7」一致；ADR-DEV-002 单账户延后声明如实。
+
+  门禁实测（2026-10-06 00:47，513de49 worktree，Python 3.13.3 重建 venv）：
+  - docstate 90/0；discipline 42/0；pytest tools 27 passed；
+  - backend：证据套件 tests/test_verify.py 17/17 退出 0（真 git）；
+    除 tests/test_merge_guard.py 外全量 152 项退出 0（一次通过，
+    未复现 upload-pack 竞态；merge_guard 本机硬崩详见 MVP-05 卡遗留 5）；
+  - ruff check All checks passed、ruff format 56 files already formatted。
+
+  遗留/观察（不阻塞本验收）：
+  1. P2 append-only 触发器无仓库内测试钉死：触发器经本次验收探针实测
+     有效（UPDATE/DELETE 双 ABORT），但 test_verify.py 等套件无一条
+     断言它；003_global_seq.sql 曾重建 task_events 并重建触发器，
+     receipt 表未来若重建，触发器丢失不会被任何测试发现。建议 MVP-07
+     接入 merge.receipt_missing 时补 UPDATE/DELETE 拒绝用例。
+  2. P2 aborted 分类无产生路径：checklist 交付要求 failure_reason 区分
+     code_failed/env_failed/timeout/aborted 四类，STATUS_ABORTED 常量
+     存在但 worker 不会产出（Verify Worker 崩溃/原地重排未实现，作者卡
+     已自陈）。阶段 2 worker 池任务必须补齐 aborted 路径与用例，建议在
+     checklist/traceability 显式挂账，防止被误读为四分类已交付。
+  3. P3 Review 不核对 reviewed_commit 与 receipt 的精确匹配：
+     submit_review docstring 明示留 MVP-07，当前仅靠「awaiting_review
+     只能由 verify_passed 进入」结构兜底；Merge Gate 的精确 commit
+     核对（merge_is_verifiable 已备好待接）是 MVP-07 必须落地的一项。
+  4. P3 alternates CRLF：overlay.py 与 worktree.py 两处文本写法，
+     git 当前容忍（探针实证 objects? 警告路径见 MVP-05 卡遗留 7），
+     阶段 2 严格传输前改二进制写入。
+  5. P3 verify_jobs 池字段闲置：created_seq/updated_seq 写 NULL、
+     worker_id 硬编码 "verify-worker-1"，lease_until/boot_id/
+     resource_requirements/pid 未使用；§16 的 worker 注册/独立 Lease/
+     排队 SLA/concurrent_verify=3/崩溃原地重排均未实现（重排作者卡已
+     自陈，其余 checklist 交付未列，登记为阶段 2 观察项）。
+  6. P3 预置策略瑕疵：verify-profiles.json 的 lint-only profile 命令
+     为 python -m compileall -q src，仓库内无 src/ 目录（后端在
+     backend/app），该 profile 真跑会失败；人类维护文件，不阻塞，
+     下次改策略时修正路径。
 ~~~
 
 ## 关键路径
@@ -2781,4 +2878,82 @@ commit：f8f2483（验收证据提交；本行为随附回填提交）
     subprocess reader 线程崩溃，已按 backend/requirements(-dev).txt
     锁定版本用系统 Python 3.13.3 重建（旧目录改名 .venv.bak，junction
     与依赖版本均未变）。
+~~~
+
+### MVP-06-verify：MVP-06 独立验收（✅ done，通过附遗留清单 6 项）
+
+~~~text
+任务编号：MVP-06-verify
+负责人 Harness：TRAE
+开始时间：2026-10-06 00:45
+依赖任务：MVP-06（代码已合 main；验收基线取最新 main 513de49）
+工作区：.worktrees/trae/
+真相源引用：R10 §16（完成证据和 Verify：receipt 字段/append-only/精确 commit
+            全新 detached worktree/baseline differential/verify_jobs/环境隔离）、
+            §10（verifying 的出入口、differential_not_applicable 正反两边）、
+            §28（failure_reason 不变量）、§26（VERIFY-DIFF-001/002）、
+            docs/spec/mvp-task-checklist.md MVP-06（交付 8 条/完成标准 2 条/
+            MVP 简化口径）、docs/prep/MVP-08/error-codes.md（verify.* 与
+            review.requires_verify_receipt / merge.receipt_missing）、
+            docs/adr/ADR-DEV-002-single-account-acl.md
+允许修改目录：TASKS.md、docs/claims/37-trae--MVP-06-verify.md（验收者不改被验代码）
+禁止修改目录：docs/spec/**、backend/**、tools/**、docs/adr/**、docs/prep/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/trae/MVP-06-verify/a1
+背景：MVP-06 由 Qoder 完成并随 main 170e56e/513de49 合入（先合后验，第四次）。
+      claims/35-qoder--MVP-06 已 done，本任务补机械核查，决定 MVP-07 能否以它
+      为基线。同时复核 MVP-05 验收遗留 7（alternates CRLF）在 verify overlay
+      路径是否同样存在，以及 MVP-08 遗留第 4 项的 verify 半边是否真关闭。
+核查计划（逐条双证据：代码行 + 机械断言，不采信卡片自陈）：
+  VERIFY-DIFF-001（baseline differential 语义）：
+    1. verify 在精确 head_commit 的全新 detached overlay 执行
+       （--separate-git-dir + fetch 精确 commit + checkout --detach +
+       git status 为空断言），base/head 各一个 overlay；
+    2. head 必须 0 退出才进 awaiting_review；head 非 0 →
+       changes_requested 且事件流无 verify_passed（结构性，不靠自觉）；
+    3. MVP 简化：baseline 一侧只记录 baseline_exit_code 不强制；
+       flaky_registry_ids 恒 []、diff_intersection 恒 None 且明示阶段 2；
+    4. failure_reason 区分 code_failed / env_failed / timeout
+       （env_failed 自环留 verifying、timeout 进 escalated）；aborted
+       产生路径是否存在需核实（作者卡称崩溃重排未实现）；
+    5. new_test_files 取自 base..head diff 的 A 类测试文件；
+    6. differential:not_applicable 正反两边都实现，理由 + 静态证据必填、
+       epoch 校验；
+    7. 命令根来自人类维护 allowlist（argv 非 shell），越界 profile 拒绝加载。
+  VERIFY-RECEIPT-001（receipt 与待合并 commit 不一致时 Merge Gate 拒绝）：
+    1. verification_receipts append-only（001 触发器）+ UNIQUE 四元组；
+       触发器是否有机械断言（UPDATE/DELETE 被拒）需核实；
+    2. 同 attempt 重复 verify 返回首次 receipt 且不增行；不同 commit 独立
+       receipt；merge_is_verifiable 按精确 commit 查 passing（failure_reason
+       IS NULL），base/错误 commit 查不到即拒；
+    3. receipt §16 字段齐全（receipt_json），权威副本在库、仓库侧三件
+       （completion.md / test-results.md / verification/receipt.json）只是
+       带 hash 的只读视图并落 artifacts；
+    4. 迁移 005 只 ADD COLUMN 不改约束；旧库升级可应用；
+    5. overlay 成功回收、失败保留；
+    6. Review 侧防护口径：submit_review 不直接核对 receipt（作者称留
+       MVP-07），但 awaiting_review 只能由 verify_passed 进入——核实这条
+       结构保证与测试。
+  契约对齐：不新增 HTTP 动词（§7 无 verify）的口径是否成立；
+  ADR-DEV-002：环境隔离（低权限/网络白名单/canonical 拒写）随单账户延后的
+  声明是否如实。
+test_id：VERIFY-DIFF-001、VERIFY-RECEIPT-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest tests/test_verify.py -v；
+          全量 ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done（通过附遗留清单 6 项，无 P1）
+完成时间：2026-10-06 00:47
+commit：0eed6c9（验收证据提交；本行为随附回填提交）
+验证结果：
+  结论：✅ 通过。VERIFY-DIFF-001/002 逐条双证据全部成立，证据套件
+  tests/test_verify.py 17/17 退出 0；另以一次性探针补得两条套件外证据
+  （append-only 触发器 UPDATE/DELETE 双 ABORT；overlay alternates CRLF
+  与精确 checkout 实证）。完整逐条结论、门禁数字与 6 项遗留已回填于
+  本文件 MVP-06 卡末「验收意见（TRAE，2026-10-06 00:47，基线
+  513de49）」，此处只摘门禁：
+  - docstate 90/0、discipline 42/0、pytest tools 27 passed；
+  - backend：test_verify.py 17/17；除 tests/test_merge_guard.py 外
+    全量 152 项退出 0（merge_guard 本机硬崩见 MVP-05 卡遗留 5）；
+  - ruff check 全过、ruff format 56 files already formatted。
+  跨项确认：MVP-08 遗留第 4 项 verify 半边真关闭（真 receipt 链）；
+  MVP-05 遗留 7 扩到 overlay.py（同源 CRLF）。
 ~~~
