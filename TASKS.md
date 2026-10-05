@@ -63,6 +63,7 @@
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
 | claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
+| merge-interlock-review | TRAE | merge-interlock | 🟢 doing（独立代码评审） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -3164,4 +3165,39 @@ commit：0eed6c9（验收证据提交；本行为随附回填提交）
   - ruff check 全过、ruff format 56 files already formatted。
   跨项确认：MVP-08 遗留第 4 项 verify 半边真关闭（真 receipt 链）；
   MVP-05 遗留 7 扩到 overlay.py（同源 CRLF）。
+~~~
+
+### merge-interlock-review：OpenCode merge-interlock 分支独立评审（🟢 doing）
+
+~~~text
+任务编号：merge-interlock-review
+负责人 Harness：TRAE
+开始时间：2026-10-06 02:34
+依赖任务：无（评审对象为在途基础设施分支；与 MVP-05-verify 遗留 5、
+          MVP-06-verify 遗留观察相关）
+工作区：.worktrees/trae/
+真相源引用：docs/dev-convention.md H-7（工作区隔离与共享分支引用风险）；
+            TASKS.md「第 4 次事故」记录（abort 他人合并现场的事故形态）
+被审分支：agent/local/opencode/merge-interlock/a1（tip 9aaab42，
+          7 提交，merge-base 170e56e；作者卡见本文件 L577，分支内无 claim）
+允许修改目录：TASKS.md（仅本任务卡）、docs/claims/41-trae--merge-interlock-review.md
+禁止修改目录：tools/**、backend/**、docs/spec/**、其他 harness 的 claim
+交付分支：agent/local/trae/merge-interlock-review/a1
+test_id：无编号 test_id（基础设施评审；机械证据为分支自带测试实跑 +
+         git merge-tree 冲突模拟 + 双路独立代码复核）
+测试命令：分支 tip 临时 worktree 内 .venv python -m pytest
+          backend/tests/test_merge_guard.py（分组实跑）；
+          tools/docstate/docstate.py；tools/discipline/discipline.py
+当前状态：🟢 doing
+完成时间：（完成后回填）
+commit：（完成后回填）
+
+背景与评审计划：
+  该分支三件事：① git merge 改 --no-commit，门禁跑在 merge commit 落地前；
+  ② 入口预检他人裸跑 git 的现场（index.lock / MERGE_HEAD / ORIG_HEAD.lock）；
+  ③ merge 撞瞬时 ref 锁时 3/6/9s 有界退避重试。评审方法：不采信提交信息，
+  全量 diff 逐行读 + 临时 worktree 机械实跑 + 两个独立子 agent 对全部候选
+  问题双路复核。
+
+验证结果：（完成后回填）
 ~~~
