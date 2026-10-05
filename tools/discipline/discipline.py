@@ -65,6 +65,8 @@ class Result:
 
     def __init__(self):
         self.checks = []
+        #: 被显式豁免的组名。豁免必须留痕，不能悄悄少跑一条断言。
+        self.skipped = []
 
     def chk(self, ok, msg, group=""):
         self.checks.append({"ok": bool(ok), "msg": msg, "group": group})
@@ -1200,11 +1202,30 @@ def check_branch_visibility(
     )
 
 
-def run(repo_root="."):
+def run(repo_root=".", skip_groups=()):
+    """跑全部检查。`skip_groups` 里的组名会被剔除**且不计入总数**。
+
+    豁免必须是显式的、可见的：调用方（目前只有 `tools/mergeguard`）要在
+    自己的输出里说明豁免了哪一组、为什么，否则等于给了一条没人看得见的
+    后门。
+    """
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
     if not os.path.exists(tasks_path):
         raise FileNotFoundError(tasks_path)
+
+    skip = {g.strip() for g in skip_groups if g and g.strip()}
+
+    def keep(checks):
+        if not skip:
+            return checks
+        kept = [c for c in checks if c["group"] not in skip]
+        dropped = len(checks) - len(kept)
+        if dropped:
+            result.skipped.extend(
+                sorted({c["group"] for c in checks if c["group"] in skip})
+            )
+        return kept
 
     tasks_text = read(tasks_path)
     tasks, claims = check_registry(result, tasks_text, repo_root)
@@ -1216,6 +1237,7 @@ def run(repo_root="."):
     check_merge(result, repo_root, tasks, claims, cards)
     check_branch_visibility(result, repo_root, tasks)
     check_root_worktree(result, repo_root)
+    result.checks = keep(result.checks)
     return result
 
 
@@ -1224,13 +1246,35 @@ def main():
     parser.add_argument("--repo", default=".", help="仓库根目录")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     parser.add_argument("--verbose", action="store_true", help="打印通过项")
+    parser.add_argument(
+        "--skip-group",
+        action="append",
+        default=[],
+        metavar="GROUP",
+        help="豁免指定检查组，可重复。豁免的组不计入总数；"
+        "调用方须自行声明豁免理由。",
+    )
     args = parser.parse_args()
 
     try:
-        result = run(args.repo)
+        result = run(args.repo, skip_groups=args.skip_group)
     except FileNotFoundError as error:
         sys.stderr.write("not found: %s\n" % error)
         return 2
+
+    if args.skip_group:
+        note = "豁免组：%s（由调用方声明理由）" % ", ".join(
+            sorted(set(args.skip_group))
+        )
+        if args.json:
+            print(
+                json.dumps(
+                    {"skipped": sorted(set(args.skip_group))}, ensure_ascii=False
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print("[skip] " + note)
 
     if args.json:
         print(

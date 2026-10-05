@@ -610,7 +610,12 @@ commit：（完成后回填）
     `?? scripts/migrate-venvs.sh`）。这是断言生效的证据，不是缺陷。
   - ruff check : All checks passed!
   - pytest     : 169 passed
-  - `test_discipline.py` 21 passed（本任务前 14，新增 7 条）
+  - **豁免语义**：`discipline --skip-group rootworktree` → 42 项 0 失败，
+    并打印 `[skip] 豁免组：rootworktree（由调用方声明理由）`。
+  - `test_discipline.py` **24 passed**（本任务前 14，新增 10 条）
+  - **豁免后的门禁全绿**：`docstate 90/0`、`discipline --skip-group
+    rootworktree 42/0`、`ruff clean`、`pytest 169 passed`。
+    mergeguard 合并时走的就是这条豁免路径，所以它现在不会被自己的门禁锁死。
   - 新增用例覆盖：干净 / 有改动 / 有未跟踪文件 / 合并中放行 /
     从 linked worktree 运行仍查主工作区 / 无 git 时 fail-closed /
     断言确实落进 rootworktree 组且被 result.failed 收集

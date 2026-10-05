@@ -99,8 +99,13 @@ def _run_gate(name: str, args: list[str]) -> tuple[bool, str]:
         encoding="utf-8",
         errors="replace",
     )
-    tail = [ln for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
-    return proc.returncode == 0, f"{name}: " + (tail[-1] if tail else "(无输出)")
+    lines = [ln for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
+    # 豁免行必须显示出来：门禁少跑一条断言这件事不能只存在于代码里。
+    for ln in lines:
+        if ln.startswith("[skip]"):
+            print("  " + ln)
+    tail = lines[-1] if lines else "(无输出)"
+    return proc.returncode == 0, f"{name}: {tail}"
 
 
 def do_status() -> int:
@@ -227,7 +232,14 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
         print("\n合并无冲突，改动已 staged 但**未提交**（--no-commit）。开始跑门禁…")
         gates = [
             ("docstate", ["tools/docstate/docstate.py"]),
-            ("discipline", ["tools/discipline/discipline.py"]),
+            # 豁免 rootworktree 组：合并期间根工作区本来就该是「合并中」的脏状态，
+            # 那条断言会必然变红。而 mergeguard 自己已经查过脏工作区、也持有互斥锁，
+            # 重复把关只会造成死锁——占用者不清干净，合并就进不去。
+            # 豁免是显式的：下面会打印出来，不静默。
+            (
+                "discipline",
+                ["tools/discipline/discipline.py", "--skip-group", "rootworktree"],
+            ),
         ]
         failed = []
         for name, args in gates:

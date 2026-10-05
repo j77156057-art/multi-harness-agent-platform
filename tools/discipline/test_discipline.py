@@ -5,9 +5,11 @@
 """
 
 import importlib.util
+import io
 import os
 import shutil
 import subprocess
+from pathlib import Path
 
 # tools/ 与 tools/discipline/ 同时在路径上时，包目录会遮蔽同名模块；
 # 直接按文件路径加载，与调用方 sys.path 布局无关。
@@ -373,3 +375,84 @@ def test_check_root_worktree_records_group(tmp_path):
     assert [c["group"] for c in result.checks] == ["rootworktree"]
     assert len(result.failed) == 1
     assert "未提交改动" in result.failed[0]["msg"]
+
+
+def _stub_all_groups(monkeypatch, groups):
+    """把每个检查组替换成「往 result 里塞一条指定 group 的通过项」。
+
+    这样测的是 run() 里的**豁免逻辑**，而不是各组自己的业务断言。
+
+    注意替换函数必须先建好再赋值——若在替换函数体内再调用同名工厂，
+    会无限递归（第一版就踩了这个）。
+    """
+
+    def make(name, group):
+        def _inner(result, repo_root, *a, **k):
+            result.chk(True, "%s ok" % name, group)
+            if name == "check_registry":
+                return [], []
+            if name == "check_cards":
+                return {}
+            return None
+
+        return _inner
+
+    for name, group in groups.items():
+        monkeypatch.setattr(d, name, make(name, group))
+
+
+_GROUPS = {
+    "check_registry": "registry",
+    "check_cards": "cards",
+    "check_counts": "counts",
+    "check_shared_file_ownership": "ownership",
+    "check_dependencies": "deps",
+    "check_traceability": "traceability",
+    "check_merge": "merge",
+    "check_branch_visibility": "branches",
+    "check_root_worktree": "rootworktree",
+}
+
+
+def test_skip_group_removes_only_that_group(tmp_path, monkeypatch):
+    """豁免必须精确：只少被豁免的那一组，其他组一条不少。"""
+    _stub_all_groups(monkeypatch, _GROUPS)
+    io.open(tmp_path / "TASKS.md", "w", encoding="utf-8").write("x")
+
+    full = d.run(str(tmp_path))
+    assert "rootworktree" in {c["group"] for c in full.checks}
+    assert len(full.skipped) == 0
+
+    skipped = d.run(str(tmp_path), skip_groups=["rootworktree"])
+    groups = {c["group"] for c in skipped.checks}
+    assert "rootworktree" not in groups
+    assert {"merge", "branches"} <= groups, "豁免不能波及其他组"
+    assert skipped.skipped == ["rootworktree"], "豁免必须留痕"
+    assert len(skipped.checks) == len(full.checks) - 1
+
+
+def test_skip_group_unknown_name_is_harmless(tmp_path, monkeypatch):
+    """豁免一个不存在的组名不应报错，也不应少跑任何断言——避免手滑就静默放过。"""
+    _stub_all_groups(monkeypatch, _GROUPS)
+    io.open(tmp_path / "TASKS.md", "w", encoding="utf-8").write("x")
+
+    full = d.run(str(tmp_path))
+    typo = d.run(str(tmp_path), skip_groups=["rootworktree_typo"])
+    assert len(typo.checks) == len(full.checks)
+    assert typo.skipped == []
+
+
+def test_mergeguard_exempts_rootworktree_gate():
+    """mergeguard 合并时必须豁免 rootworktree，且豁免要在输出里可见。
+
+    不豁免会死锁：合并期间根工作区本就该是「合并中」的脏状态，那条断言必然
+    变红；而占用者不清干净就合不进去，于是谁也动不了。
+    """
+    cli = Path(d.__file__).with_name("mergeguard") / "cli.py"
+    if not cli.exists():  # discipline 的测试可能在只装了 discipline 的环境跑
+        return
+    text = io.open(cli, encoding="utf-8").read()
+    assert "--skip-group" in text
+    assert "rootworktree" in text
+    # 豁免信息必须被打出来，不能只存在于代码里
+    assert "[skip]" in text or "ln.startswith" in text
