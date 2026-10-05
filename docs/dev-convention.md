@@ -55,6 +55,10 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 ### 已知盲区
 
 - `discipline` 只做**结构**检查，不做**内容**检查。填了 `test_id` 但没真测，拦不住
+- `discipline` 只校验 **docstate** 的声明计数，**不校验它自己的**。
+  加断言后必须手工同步 README 里 `discipline` 那一行的数量 —— 本项目已因此写错一次
+  （写成 16，实际 17）。没做成自引用检查是刻意的：断言数包含该检查本身，
+  自引用会让数字难以推理
 - `docstate` 只读 R10，不读 `TASKS.md`（那是 `discipline` 的事）
 - 前端尚无任何静态检查（无 eslint / prettier），`docs/` 无 markdown lint、
   无链接检查

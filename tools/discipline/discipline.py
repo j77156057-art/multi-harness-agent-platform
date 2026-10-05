@@ -353,14 +353,21 @@ def check_counts(result, repo_root):
     }
     stale = []
     unchecked = []
+    ambiguous = 0
     for label, path in docs.items():
         if not os.path.exists(path):
             stale.append("%s（文件不存在）" % label)
             continue
         declared = set()
         for line in read(path).splitlines():
-            if "docstate" in line:
-                declared |= {int(n) for n in re.findall(r"(\d+)\s*项", line)}
+            if "docstate" not in line:
+                continue
+            if "discipline" in line:
+                # 同一行提到两个工具时，数字指向哪个无法判定，跳过而不是猜。
+                # 曾因此把 discipline 的 17 项误当成 docstate 的声明数。
+                ambiguous += 1
+                continue
+            declared |= {int(n) for n in re.findall(r"(\d+)\s*项", line)}
         if not declared:
             unchecked.append(label)
             continue
@@ -372,7 +379,8 @@ def check_counts(result, repo_root):
             stale.append("%s 声明了错误计数 %s，实际 %d" % (label, wrong, actual))
     result.chk(
         not stale,
-        "文档声明的 docstate 断言数与实际一致；不符=%s" % (stale or "无"),
+        "文档声明的 docstate 断言数与实际一致；不符=%s（跳过 %d 行同行提到两个工具的描述）"
+        % (stale or "无", ambiguous),
         "counts",
     )
     result.chk(
