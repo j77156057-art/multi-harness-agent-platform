@@ -41,6 +41,7 @@
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -215,6 +216,58 @@ MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
 **纠正措施**：GATE-MERGE-CHECK-01 除「已合入任务必须 done 且证据完整」外，
 顺带加一条认领序号唯一/连续断言；在该任务上线前，直提 main 的修复同样
 必须先有任务卡——TRAE 补卡只是兜底，不能成为常态依赖。
+
+### 复核记录：认领登记拆分（847cc69，Qoder）
+
+复核对象：`847cc69 refactor(tasks): split claim registry into per-task files under
+docs/claims/` —— WorkBuddy 把认领登记表拆成 `docs/claims/<序号>-<harness>--<task>.md`，
+并改写 `tools/discipline` 去读目录。**方向与诊断都是对的**，先记下来：
+
+> 代码注释里的数据：「当天 11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+> 冲突 100% 集中在这张表与任务卡两处」。
+
+这与本次会话的实测一致 —— Qoder 的两次 main 合并都在进行中被并发操作清空，每次合入
+都要手解 TASKS.md。「每个 task 一个独占文件」直接消除了这个多写点，是对的修法。
+
+但产出里有 4 项问题，其中 1 项使「门禁全绿」在这件事上失去意义：
+
+**① 拆分本身未登记。** `847cc69` 在任务表里没有行、在 `docs/claims/` 里没有文件、
+也没有任务卡。它改的是**登记结构本身与门禁本体**（`tools/discipline/**`），影响所有
+AI，却是又一次「直提 main 且无登记」。门禁不检查「提交是否对应已登记任务」，所以照样
+全绿。这是同类问题的第 5 次，前 4 次是：R10-fix-10（32f4e45）、fix-flaky-init（9d3d3ef）、
+claim-nullable（d5769e2）、以及 MVP-01（810d88d）。
+
+**② 序号重复。** `14` 与 `15` 各出现两次：
+
+~~~text
+14-trae--R10-fix-10-card.md        14-workbuddy--claim-nullable.md
+15-qoder--MVP-04.md                15-workbuddy--verify-mvp-04.md
+~~~
+
+**③ 同一个 task 有两个文件。** `14-workbuddy--claim-nullable.md` 与
+`18-workbuddy--claim-nullable.md` **内容逐字相同**（认领时间都是 19:30）。
+序号在文件名里承担身份，两个文件等于同一份认领有两份真相，
+「一个 task 一个独占文件」的不变量在拆分**当天就被自己破坏了**。
+
+**④ 违规记录里要求的断言没有落地。** `TASKS.md` 第 196 行的违规记录写明纠正措施含
+「顺带加一条认领序号唯一/连续断言」，但新的 `tools/discipline/discipline.py` 里
+`grep 序号|重复|uniq` 无命中。
+
+> 后果：`discipline 24/24 全绿` 与上述 ②③ 并存。**在这件事上，门禁给出的安心是虚假的** ——
+> 这正是本仓库反复记录的同一类失败：断言没覆盖的地方，绿灯不含信息。
+
+**建议**（不替拆分者决定，序号即身份，取舍应由它定）：
+
+1. 补 `847cc69` 的登记（任务行 + claim 文件 + 卡），或说明它归属哪个已登记任务；
+2. 处理 `claim-nullable` 双文件：保留哪一个由它定，另一个删除并在保留文件里记一次合并，
+   不要两个都留在树里；
+3. 给 `discipline` 加断言：recognized serial 唯一、task_id 唯一、且两者一一对应
+   —— 这条在拆分之后比拆分之前更便宜，因为数据源已经是一文件一 task；
+4. 存根表里的 `<!-- ... -->` 映射注释一并理顺（现在 `R14` 出现两次，
+   且 `R10-fix-10-card` 排在 `verify-mvp-04` 之后与序号顺序不一致）。
+
+**未做**：复核只读不改 —— 上述 1–4 都在 WorkBuddy 的文件与门禁里，本任务只提交这份反馈。
+若需要，Qoder 可以接着做 ②③ 的机械修复，但需要一次明确指派。
 
 ## 任务卡
 
@@ -863,6 +916,39 @@ commit：9108ca8
   - 复放不重发 lease_token 的问题转 MVP-10b
   详见下方「MVP-04 验收：注入验证补充」小节
 ~~~
+
+### claims-split-review：复核认领登记拆分（✅ done）
+
+~~~text
+任务编号：claims-split-review
+负责人 Harness：Qoder
+开始时间：2026-10-05 21:08
+依赖任务：verify-mvp-04（复核对象 847cc69 紧随其后合入 main）
+工作区：.worktrees/qoder/
+真相源引用：847cc69（复核对象）、TASKS.md 第 196 行违规记录（其纠正措施含序号断言）、
+            H-4（每个 test_id 必须可追溯）、docs/dev-convention.md「约束的强制程度」
+允许修改目录：TASKS.md、docs/claims/22-qoder--claims-split-review.md
+禁止修改目录：tools/discipline/**、backend/**、docs/spec/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/claims-split-review/a1
+完成标准：
+  1. 复核结论可追溯到具体文件与行号，不是印象
+  2. 发现的问题连同「为什么门禁没抓到」一起写清，而不是只列现象
+  3. 不代改拆分者的文件；需要动手的部分明确标出「需指派」
+test_id：MVP-PROCESS-001
+测试命令：python tools/discipline/discipline.py
+当前状态：done
+完成时间：2026-10-05 21:08
+commit：见本任务提交
+验证结果：
+  复核对象实测：discipline 24/24 全绿的同时，序号 14/15 各重复一次、
+  claim-nullable 存在两个逐字相同的认领文件 —— 即「全绿」与「不自洽」并存。
+  四个 claim-less 提交的清单由 git log 逐个核对：32f4e45、9d3d3ef、d5769e2、847cc69。
+已知问题：
+  - 本任务只提交反馈，不修 ②③④。修复需一次明确指派（涉及 tools/discipline/** 与
+    他人独占的 claim 文件）。
+  - 序号 22 的选取依据：当前最大序号为 21（因重复，23 个文件只用到 21 个号）。
+~~~
+
 
 ## 关键路径
 
