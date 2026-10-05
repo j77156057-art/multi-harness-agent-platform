@@ -270,8 +270,10 @@ Refs: DOC-SCHEMA-001
 ./scripts/new-ai.ps1 -Harness <名字>          # 例如 -Harness qoder
 ~~~
 
-该脚本会建 `.worktrees/<名字>/`、切出驻留分支 `agent/workspace/<名字>`、把主 `.venv`
-以目录联接接进去、并冒烟验证解释器可用。**幂等**：工作区已存在时报错退出，不做任何改动。
+该脚本会建 `.worktrees/<名字>/`、切出驻留分支 `agent/workspace/<名字>`、**建一个
+独立的 `.venv`**（从 `backend/requirements-dev.txt` 安装，约 1 分钟）、并冒烟验证
+解释器与 `pytest`/`fastapi` 可导入。**幂等**：工作区已存在时报错退出，不做任何改动。
+需要与主目录共享 venv（更快更省，但会一起坏）时加 `-SharedVenv`。
 本机多个 AI 并发跑 git 时 ref 锁会瞬时冲突，脚本内置 3 次重试；仍失败则报错并输出
 git 原文，不会留下半成品。
 
@@ -299,8 +301,11 @@ agent/<group-short>/<harness-b>/<task-id>/a1
 2. **只移动自己拥有的分支引用。** 分支引用仍是跨工作区共享的，
    `git branch -f` / `git reset` 到别人的分支等于删别人的工作；
 3. **仓库根目录只用于合并和在 `main` 上跑门禁**，不要在那里编辑；
-4. `.venv` 通过目录联接共享，所以 `./scripts.sh check` 在每个工作区都能直接跑，
-   无需各建 venv；
+4. **每个工作区有自己的 `.venv`（实体目录，不是联接）**，所以根目录 `.venv` 出问题
+   不会波及所有 AI。代价是约 106 MB × N。`./scripts.sh check` 在每个工作区都能直接跑。
+   存量 junction 用 `./scripts/migrate-venvs.sh` 迁移（先跑 `--dry-run` 看清楚）；
+   2026-10-05 23:48 根 `.venv` 被清空重建，8 个 junction 一起坏，
+   每个人的门禁都莫名失败 —— 这条规则就是那次事故的结果；
 5. `.worktrees/` 已在 `.gitignore`，不会被提交（它与 `wt/` 不同：`wt/` 是 MVP-05 的
    worktree 物理目录）。
 
