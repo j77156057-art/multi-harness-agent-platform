@@ -26,8 +26,11 @@
 | worktree-isolation | Claude Code | — | ✅ done | `agent/local/claude/worktree-isolation/a1` | `MVP-PROCESS-001` |
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
-| graph-traceability | Claude Code | discipline | 🟢 doing | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
-| MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
+| fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
+| R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -62,7 +65,11 @@
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
 | 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
-| 7 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | 🟢 doing |
+| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
+| 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
+| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
+| 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -119,6 +126,40 @@ commit：810d88d
   - main 的 MVP-01 未走 Merge Gate，作为既成事实接受
   - AO 的 ao_managed_git 宿主模式经源码核对判定 no-go，见 docs/ao-capability-audit.md
   - 仓库尚无 remote，未推送
+~~~
+
+### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
+
+~~~text
+任务编号：MVP-03
+负责人 Harness：Codex
+开始时间：2026-10-05 09:07
+完成时间：2026-10-05 09:21
+依赖任务：MVP-02（✅ 已验收）
+工作区：.worktrees/codex/
+真相源引用：R10 §10（状态机与迁移表）、§37.7（事件 allowlist）、
+            §8（tasks 与 task_dependencies schema）、§9（Plan/任务契约）、§26（检查 ID）
+允许修改目录：backend/app/state/** backend/app/plan/** backend/tests/**
+禁止修改目录：docs/spec/**、tools/docstate/**、backend/app/db/**、backend/app/events/**
+交付分支：agent/local/codex/MVP-03/a1
+完成标准：
+  1. 已实现状态只能通过 R10 allowlist 中的迁移事件变更；非法迁移被拒绝 ✅
+  2. 任务依赖 DAG 拒绝环、孤立引用和重复边 ✅
+  3. Plan 校验拒绝未注册能力、非法依赖、不可满足产出契约和超规模输入 ✅
+  4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段 ✅
+test_id：DOC-STATE-001、DOC-PLAN-001
+测试命令：./scripts.sh check
+当前状态：claimed 已认领待验收
+commit：9b4b663
+验证结果：
+  docstate   : 88 项检查，0 项失败
+  discipline : 17 项检查，0 项失败
+  ruff check : All checks passed
+  ruff format: 18 files already formatted
+  pytest     : 26 passed in 1.53s
+已知问题：
+  - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
+  - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
 ~~~
 
 ### MVP-02：SQLite schema 与事件事实源（✅ 已验收）
@@ -320,6 +361,35 @@ POSIX `fcntl.flock`），进锁后重新确认模式，已是 WAL 则立即返�
 改动文件：`backend/app/db/connection.py`（属 MVP-02 目录，跨任务改动已在此登记，
 分支 `agent/workbuddy/fix-concurrent-init`）
 
+### ✅ WAL 锁 Windows 兼容性修复（WorkBuddy，09:20）
+
+早上修的并发初始化缺陷（`7531592`）在**根目录**复测时暴露第二个问题：
+
+~~~text
+PermissionError: [Errno 13] Permission denied:
+  "...\test_concurrent_initialization0\state.db-wal.lock"
+~~~
+
+**根因**：Windows 上 `msvcrt.locking` 的 `LK_LOCK` 虽是阻塞式，但当文件已被
+另一进程独占时，本进程的 **`open()` 会先抛 `PermissionError`**，而不是阻塞等待。
+早上的实现只用了 `LK_LOCK`，没有重试。
+
+**修法**（`_lock_file` + `ensure_wal`）：
+
+1. 加锁改用**非阻塞** `LK_NBLCK` / `LOCK_NB`，配合调用侧有限超时重试
+   （`errno` 为 `EACCES` / `EAGAIN` / `EDEADLK` 时重试，超时上限 10s）；
+2. **打开锁文件本身也纳入重试** —— 这是 Windows 特有的第三层坑，
+   只重试加锁不够；
+3. 抽出 `_LOCK_TIMEOUT_S` / `_LOCK_POLL_S` 常量，避免魔法数。
+
+**验证**：并发测试 **10/10**；全量 20 passed；docstate 88/88；ruff check + format 全绿。
+
+**教训**：早上的"10/10 通过"是在 worktree 外的根目录测的，用的是同一个 venv
+但不同路径 —— **修复必须在目标环境验证**。跨机器/跨路径的行为差异要显式复测，
+这与"单次通过不等于通过"是同一类问题。
+
+改动文件：`backend/app/db/connection.py`
+
 ## 关键路径
 
 ~~~text
@@ -338,7 +408,7 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 | MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-02 前 |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 ｜ 🟢 **Qoder 在做**：`agent/local/qoder/MVP-08-prep/a1`（认领 2026-10-05 09:16，产出在 `.worktrees/qoder/docs/prep/MVP-08/`） |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
@@ -553,7 +623,7 @@ test_id：MVP-PROCESS-001
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
-### graph-traceability：依赖图机械校验 + 补 traceability.md（doing）
+### graph-traceability：依赖图机械校验 + 补 traceability.md（done）
 
 ~~~text
 任务编号：graph-traceability
@@ -567,8 +637,9 @@ test_id：MVP-PROCESS-001
 禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）、
             docs/spec/mvp-task-checklist.md（本任务只读不改）
 交付分支：agent/local/claude/graph-traceability/a1
+commit：5100c7f
 test_id：MVP-PROCESS-001、DOC-PLAN-001
-当前状态：doing
+当前状态：done
 
 交付：
 1. 依赖图机械校验（deps 组 5 项）：依赖均指向已知任务、无环、任务表与清单 §2 一致、
@@ -614,6 +685,75 @@ test_id：MVP-PROCESS-001、DOC-PLAN-001
 - 清单的依赖表达是散文，解析基于正则；**若清单改写法，校验会误判而不是静默通过**，
   这比静默通过好，但仍是脆弱点。要根治需把依赖图改成机器可读格式（如 front matter）
 - 本任务只做结构校验：不判断某个 test_id 是否真的覆盖了它声称的行为
+~~~
+
+### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（doing）
+
+~~~text
+任务编号：MVP-08-prep
+负责人 Harness：Qoder
+开始时间：2026-10-05 09:16
+依赖任务：无（prep 的定义就是不依赖 schema，见清单 prep 表）
+工作区：.worktrees/qoder/
+真相源引用：R10 §7（Adapter 接口）、§21（Planner/Review/Git 动词）、§8（canonical schema，
+            含 R10-fix-09 对 claim_requests / task_claims 的键修正）、§11（Claim 与幂等，
+            含两层幂等职责划分）、§12（命令幂等键）、§13（Lease/fencing）、
+            §15（事件与 seq）、§19（群聊与 read_context）、§26（检查 ID）、
+            §37.7（事件 allowlist，88 项）
+允许修改目录：docs/prep/MVP-08/**（本工作区内；prep 产出不进主分支）
+禁止修改目录：docs/spec/0.3-R10.md、docs/spec/mvp-task-checklist.md、backend/**、
+            tools/docstate/**、docs/traceability.md（属 graph-traceability）
+交付分支：agent/local/qoder/MVP-08-prep/a1
+完成标准：
+  1. OpenAPI 3.1 契约草案覆盖 R10 §7 全部 16 个动词与 §21 全部 6 个动词，
+     /adapter/* 的 path 段拼写与 §7 原文逐字一致（零转换表）
+  2. 统一错误码表：每个 code 标注 HTTP、触发条件、R10 引用、写入事件名、test_id；
+     写入的事件名必须在 §37.7 的 88 项 allowlist 内
+  3. 幂等响应约定：§12 的 7 类幂等键、双层 Claim 幂等（请求级 first_result_json /
+     per-task task_claims，R10-fix-09 口径）、payload_hash 算法、重放响应格式
+  4. check_contract.py 对仓库 docs/spec/0.3-R10.md 跑出 0 失败
+  5. mutation_test.py 对每条断言做变异，全部被捕获（证明断言非空跑）
+test_id：DOC-TRACE-001、MVP-API-001
+测试命令：python docs/prep/MVP-08/check_contract.py && python docs/prep/MVP-08/mutation_test.py
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - prep 产出不进主分支；MVP-08 真正开工时必须重新验证，不能直接当结论用
+  - 与 graph-traceability 的边界：本任务不建 docs/traceability.md，那是 Claude 的交付物
+  - R10-fix-09 之前写就的版本把 per-task 幂等落点放在 claim_requests，已在本次修正
+~~~
+
+### fix-wal-lock-retry：Windows WAL 锁重试修复（✅ 已完成）
+
+~~~text
+任务编号：fix-wal-lock-retry
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 09:12
+完成时间：2026-10-05 09:20
+依赖任务：MVP-02（✅ 已验收）
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §8（canonical schema）、§13（Lease/并发写入）、§15（事件顺序）、
+            docs/dev-convention.md H-7（隔离与验证）
+允许修改目录：backend/app/db/** backend/app/events/** backend/migrations/**
+禁止修改目录：backend/app/spec.py、docs/spec/**、tools/docstate/**
+交付分支：agent/workbuddy/fix-wal-lock-retry
+完成标准：
+  1. Windows 多进程 WAL 锁竞争在有限超时内重试，成功或返回明确超时错误 ✅
+  2. 锁文件打开失败与加锁失败均纳入可重试错误集合 ✅
+  3. 并发初始化与完整测试门禁通过 ✅
+test_id：CORE-RECOVER-001
+测试命令：./scripts.sh check
+当前状态：✅ 已完成
+commit：403e3a5
+验证结果：
+  docstate   : 88 项检查，0 项失败
+  ruff check : All checks passed
+  ruff format: 通过
+  pytest     : 20 passed
+已知问题：
+  - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
 ~~~
 
 ## 提交前自检

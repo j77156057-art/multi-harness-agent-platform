@@ -260,10 +260,19 @@ def check_registry(result, tasks_text):
 def check_cards(result, tasks_text, claims):
     """组 2：任务卡本身的完整性。"""
     cards = {c["fields"]["任务编号"]: c for c in parse_cards(tasks_text)}
-    claim_ids = {c["task_id"] for c in claims}
+    # 任务卡豁免「doing」：登记规则第 0 条要求开工前写的是**认领登记表**
+    # （task_id / Harness / 时间 / 分支），而任务卡模板含「完成时间 / commit /
+    # 验证结果」，天然是完工时填的。把在途任务也要求填卡是我先前定严了。
+    in_flight = {
+        t["task_id"]
+        for t in parse_task_table(tasks_text)
+        if "doing" in t["status"] or "进行中" in t["status"]
+    }
+    claim_ids = {c["task_id"] for c in claims} - in_flight
     result.chk(
         claim_ids <= set(cards),
-        "已认领任务都有任务卡；缺卡=%s" % (sorted(claim_ids - set(cards)) or "无"),
+        "已认领且非在途的任务都有任务卡；缺卡=%s（豁免在途 %d 个：%s）"
+        % (sorted(claim_ids - set(cards)) or "无", len(in_flight), sorted(in_flight) or "无"),
         "cards",
     )
 

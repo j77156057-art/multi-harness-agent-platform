@@ -7,8 +7,10 @@ with ``immediate=True`` to acquire SQLite's write lock before reading state.
 
 from __future__ import annotations
 
+import errno
 import os
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -16,26 +18,52 @@ from pathlib import Path
 from app.config import settings
 from app.db.migrations import apply_migrations
 
+#: 跨进程锁的等待上限与轮询间隔。Windows 上 ``open()`` 与 ``msvcrt.locking``
+#: 都不会阻塞等待（前者抛 PermissionError，后者需用 LK_NBLCK 配合重试），
+#: 所以超时必须由调用方自己兜。
+_LOCK_TIMEOUT_S = 10.0
+_LOCK_POLL_S = 0.02
 
-def _lock_file(handle) -> None:
-    """对文件句柄加跨进程排他锁。"""
-    if os.name == "nt":
-        import msvcrt
 
-        handle.seek(0)
-        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-    else:
-        import fcntl
+def _lock_file(handle, *, timeout_s: float = _LOCK_TIMEOUT_S, poll_s: float = _LOCK_POLL_S) -> None:
+    """对文件句柄加跨进程排他锁，带有限超时重试。
 
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    Windows 上有个坑：``msvcrt.locking`` 的``LK_LOCK`` 虽然是阻塞式的，但当
+    另一个进程已持有该文件的锁时，本进程的 ``open()`` 会先抛
+    ``PermissionError``，而不是阻塞等待。因此光靠 ``LK_LOCK`` 不够，
+    必须在**调用侧**做有限重试。
+    """
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except (OSError, PermissionError) as exc:
+            # Windows 上被独占时 open() 直接失败；POSIX 上 flock 也会报 EAGAIN
+            retryable = isinstance(exc, PermissionError) or getattr(exc, "errno", None) in {
+                errno.EACCES,
+                errno.EAGAIN,
+                errno.EDEADLK,
+            }
+            if not retryable or time.monotonic() >= deadline:
+                raise
+            time.sleep(poll_s)
 
 
 def _unlock_file(handle) -> None:
     """释放 :func:`_lock_file` 取到的锁。"""
+    handle.seek(0)
     if os.name == "nt":
         import msvcrt
 
-        handle.seek(0)
         msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
     else:
         import fcntl
@@ -89,6 +117,9 @@ class Database:
         解法：用 ``<db>-wal.lock`` 旁路文件做跨进程互斥（Windows 用
         ``msvcrt.locking``，POSIX 用 ``fcntl.flock``）。进锁后重新确认当前
         模式，已是 WAL 则立即返回，避免无谓的排他锁与写放大。
+
+        Windows 上还有第三��坑：文件被独占锁定时``open()`` 本身就会抛
+        ``PermissionError``，所以**打开锁文件也要重试**，不能只重试加锁。
         """
         with self.connect() as conn:
             row = conn.execute("PRAGMA journal_mode").fetchone()
@@ -96,7 +127,16 @@ class Database:
                 return
 
         lock_path = self.path.with_name(self.path.name + "-wal.lock")
-        with open(lock_path, "a+b") as lock_file:
+        deadline = time.monotonic() + _LOCK_TIMEOUT_S
+        while True:
+            try:
+                lock_file = open(lock_path, "a+b")  # noqa: SIM115
+                break
+            except PermissionError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(_LOCK_POLL_S)
+        with lock_file:
             _lock_file(lock_file)
             try:
                 # 拿到跨进程锁后必须重新确认：可能已被另一个进程设好
