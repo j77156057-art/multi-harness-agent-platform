@@ -52,7 +52,7 @@
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
-| MVP-07 | Qoder | MVP-06 | 🟢 doing | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
+| MVP-07 | Qoder | MVP-06 | ✅ done | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
@@ -1334,7 +1334,7 @@ commit：1ab608d
     随 ADR-DEV-002 的单账户降级一起延后；overlay 本身按新 gitdir + alternates 构造。
 ~~~
 
-### MVP-07：Review、Merge Gate 与集成分支（doing）
+### MVP-07：Review、Merge Gate 与集成分支（✅ done）
 
 ~~~text
 任务编号：MVP-07
@@ -1367,11 +1367,38 @@ commit：1ab608d
      断言失败即 escalated
 test_id：MERGE-EXACT-001、MERGE-REVERT-001、MERGE-REVERT-002
 测试命令：./scripts.sh check
-当前状态：doing
-完成时间：
-commit：
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-06 01:05
+commit：c41282a
 验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  ruff        : All checks passed，61 files already formatted
+  pytest      : 182 passed（MVP-07 新增 16）
+  关键断言     : 三条交叉断言各有独立拒绝用例（无 receipt / 无 review / review 的 commit 不符 /
+                 epoch 不再当前 / base 不符 / 分支 head 不符 / health 红）；
+                 **每一次拒绝都同时断言集成分支 ref 未移动、且没有新增 merge intent**；
+                 合并成功后断言 merge commit 的 ^1 / ^2 与内容；
+                 revert 断言 tree(revert)==tree(merge^1)、revert 是 merge 的直接子提交、
+                 merge..revert 只含 1 个提交
 已知问题：
+  - **在 MVP-08 的代码里发现一个真 bug**：`submit_result` 把 `tasks.current_attempt_id` 也清空了。
+    R10 §13 只说提交后释放 **Lease**，attempt 仍是被验证/审查的那一个（`receipt.attempt_id`
+    以它为准）。清掉它会让 Merge Gate 查不到当前 attempt。已改为只清 owner，保留 attempt。
+    这条是 MVP-07 的门禁逼出来的 —— 上一层的测试覆盖不到它。
+  - **`commit` 又是 SQL 保留字**：新写的 `review_claim` 里 `SELECT commit FROM
+    verification_receipts` 报 `near "commit": syntax error`。这是本任务第二次踩，说明
+    001 建表时给该列加引号这件事没有被任何东西提醒 —— 值得在 dev-convention 里写一句。
+  - **receipt 不可变导致交叉断言只能从任务侧构造**：`verification_receipts` 是 append-only
+    （有 UPDATE/DELETE 触发器），所以"receipt 与任务不符"的用例只能通过推进
+    `tasks.current_epoch` / 改 `tasks.base_commit` 来造。这反而更真实（reclaim 推进 epoch
+    正是让旧 receipt 失效的场景），但它意味着**没有任何测试能构造"被篡改的 receipt"** ——
+    因为那在实现上不可能发生，这是好事，只是不要误以为测试覆盖了篡改场景。
+  - review Lease 的**过期回收巡检器未实现**：Lease 到期后任务会卡在 awaiting_review，
+    只能靠 `review_lease_expire` 的巡检器回收（属 MVP-04 的巡检器扩展）。当前只有
+    submit 时的到期拒绝。
+  - §21「相同 Provider 的两个 Reviewer 需额外人类确认」未实现：harnesses 表还没有
+    provider 数据，无法判定同 provider；`reviews.reviewer_provider` 恒为 'unknown'。
   - Merge Queue 的容量与背压（§21：并发上限、最大队列长度、磁盘水位、hotfix 配额）在 MVP
     只实现「队列满则 queued」这一条，其余限流属于阶段 2；不静默跳过，写在这里。
   - 集成健康状态机的完整形态（merge_failure_detected / reverting / retesting / escalated
