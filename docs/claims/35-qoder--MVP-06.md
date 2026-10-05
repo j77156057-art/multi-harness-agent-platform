@@ -7,11 +7,17 @@
 | task_id | `MVP-06` |
 | Harness | Qoder |
 | 认领时间 | 2026-10-05 22:26 |
-| 分支 | `agent/local/qoder/MVP-06/a1` |
-| 状态 | 🟢 doing |
+| 分支 | `agent/local/qoder/MVP-06/a1` `agent/local/qoder/MVP-06-serial/a1` `agent/local/qoder/MVP-06-register/a1` |
+| 状态 | ✅ done |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `MVP-06`。
 
 ## 变更记录
 
 - 2026-10-05 22:26：认领。前置已核对：MVP-05 已合入 main（`e68a8d5`，✅ done）。
+- 2026-10-06：登记两个后续分支。`MVP-06-serial/a1` 与 `MVP-06-register/a1` 都是**登记
+  修正类**分支，不产生产品代码 —— 前者把认领序号 34 改成 35（Claude Code 并行取了 34），
+  后者把这两个分支本身补进本字段。
+  为什么用「多分支写在同一字段」而不是各开一个 task：`branch_tokens` 明确支持一格多分支
+  （"同一任务允许留下多个尝试分支"）。给每次登记修正单开任务会变成递归 —— 新任务的分支
+  又要再登记，而登记又需要新分支。**这个字段就是为此存在的。**
