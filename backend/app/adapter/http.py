@@ -6,10 +6,13 @@ needs the attempt and the fencing epoch to authorise the write; a real harness
 tracks its own attempts too, so keeping that state here is what lets the §7
 argument names stay intact instead of being widened with transport concerns.
 
-Four verbs -- ``accept_help``, ``reject_help``, ``split_task`` and ``ask_human``
--- have no route yet, because MVP-08 covered the verbs its own card listed. They
-raise :class:`UnsupportedVerb` rather than pretending, and the gap is recorded in
-the MVP-10a card and in docs/traceability.md.
+Two verbs gained their routes in MVP-10b, because the real adapters call them:
+``list_ready_tasks`` (the pull model's entry point; ``visibility=redacted`` is
+refused until R10 §17 defines redaction) and ``read_context`` (the task's
+event page). Four verbs -- ``accept_help``, ``reject_help``, ``split_task``
+and ``ask_human`` -- still have no route, because MVP-08 covered the verbs its
+own card listed. They raise :class:`UnsupportedVerb` rather than pretending,
+and the gap is recorded in the MVP-10a card and in docs/traceability.md.
 """
 
 from __future__ import annotations

@@ -29,7 +29,7 @@ from app.claim.transitions import ConcurrentStateChange, apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
-from app.lease.service import LeaseGrant, grant_lease, utc_now
+from app.lease.service import LeaseGrant, grant_lease, parse_iso, reissue_lease_token, utc_now
 from app.spec import OWNER_STATES, EventKind, TaskStatus
 
 OUTCOME_CLAIMED = "claimed"
@@ -218,7 +218,10 @@ class ClaimService:
     def _replay(
         self, conn: sqlite3.Connection, existing: sqlite3.Row, request: ClaimRequest
     ) -> ClaimResult:
-        items = self._read_items(conn, request.claim_request_id)
+        # Replay is the documented recovery path for a harness that lost its
+        # lease token (verify-mvp-04 deferral): a live, unreleased lease gets a
+        # freshly minted token, the old one stops working. See _read_items.
+        items = self._read_items(conn, request.claim_request_id, reissue_tokens=True)
         return ClaimResult(
             claim_request_id=request.claim_request_id,
             replayed=True,
@@ -242,11 +245,17 @@ class ClaimService:
             },
         )
 
-    def _read_items(self, conn: sqlite3.Connection, claim_request_id: str) -> tuple[ClaimItem, ...]:
+    def _read_items(
+        self,
+        conn: sqlite3.Connection,
+        claim_request_id: str,
+        *,
+        reissue_tokens: bool = False,
+    ) -> tuple[ClaimItem, ...]:
         rows = conn.execute(
             "SELECT tc.task_id, tc.attempt_id, tc.owner, tc.release_reason,"
             "       ta.attempt_no, ta.fencing_epoch, ta.base_commit, ta.base_locked_seq,"
-            "       l.lease_until"
+            "       l.lease_id, l.lease_until"
             "  FROM task_claims tc"
             "  LEFT JOIN task_attempts ta ON ta.attempt_id = tc.attempt_id"
             "  LEFT JOIN leases l ON l.task_id = tc.task_id"
@@ -276,6 +285,18 @@ class ClaimService:
                     else RejectCode.TASK_NOT_READY.value
                 )
                 queue_reason = None
+            lease_token = None
+            if (
+                reissue_tokens
+                and outcome == OUTCOME_CLAIMED
+                and row["lease_id"] is not None
+                and parse_iso(str(row["lease_until"])) > utc_now()
+            ):
+                # Only the hash is stored, so a replay cannot hand the original
+                # token back -- it mints a new one instead. An expired lease is
+                # not reissued: the attempt is about to be swept to stale and
+                # must go through reclaim, not keep its dead credential alive.
+                lease_token = reissue_lease_token(conn, lease_id=str(row["lease_id"]))
             items.append(
                 ClaimItem(
                     task_id=str(row["task_id"]),
@@ -284,9 +305,7 @@ class ClaimService:
                     attempt_no=int(row["attempt_no"]) if has_attempt else None,
                     owner=row["owner"] if has_attempt else None,
                     fencing_epoch=int(row["fencing_epoch"]) if has_attempt else None,
-                    # The plaintext token is never stored, only its hash, so a
-                    # replayed claim cannot hand it back. Documented behaviour.
-                    lease_token=None,
+                    lease_token=lease_token,
                     lease_until=row["lease_until"] if has_attempt else None,
                     base_commit=row["base_commit"] if has_attempt else None,
                     base_locked_seq=int(row["base_locked_seq"])
