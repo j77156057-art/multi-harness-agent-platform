@@ -59,6 +59,7 @@
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
+| dup-incident | Claude Code | — | ✅ done | `agent/local/claude/dup-incident/a1` | `MVP-PROCESS-001` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
@@ -2654,6 +2655,99 @@ merge 组误报 5 个 Qoder 的分支「已合入但未登记」。**顺手改�
 - 在裁决之前，认领取号的 churn 会继续发生（本次为让文件序号合规改了三次 31→33→34）
 - 本提案不解决取号竞争本身，只主张**换一条可满足的不变量**；若要根治竞争，
   需在 main 上串行取号或引入全局序号分配器，那超出本提案范围
+~~~
+
+### 违规记录：两份 MVP-10a 并行实现（2026-10-06，Claude Code 重复了 Qoder 的已交付工作）
+
+**事实。** Claude Code 于 01:47 认领 `MVP-10a`，在
+`agent/local/claude/MVP-10a/a1` 上实现了一整套 Fake Harness 与 Adapter 接口
+（22 文件、1448 行：`adapter/{interface,http_adapter,fake,registry}.py` +
+`POST/GET /api/v1/harnesses` + `tests/test_adapter_fake.py` 15 项，门禁全绿）。
+
+03:38 合 main 时发现 **Qoder 早已交付并验收同一个任务**
+（`agent/local/qoder/MVP-10a/a1`，任务表标 `✅ done`），main 上已有
+`adapter/{protocol,fake,http,registry}.py`、**`migrations/006_adapter_registration.sql`**
+与 `tests/test_adapter.py`。
+
+Claude Code 的实现被**全部丢弃**，main 未被污染（核验：main 上无
+`test_adapter_fake`、无 `adapter/interface.py`、无对应 claim 文件）。
+
+**为什么没发现。** 认领当时 main 上的 MVP-10a 确实是 `— | ⏳ waiting` ——
+那一刻真的无人认领。Qoder 是在**之后**认领并交付的。从「查登记表」到
+「合入」之间的窗口里，另一个 agent 完成了整个任务。
+
+**这是流程缺陷，不是个人疏忽。** 现有机制对「认领」有登记要求，但：
+- 登记只反映**已写入 main** 的状态；在途认领（在自己分支上）对其他人不可见
+- 本项目此前已识别该缺口并做了 `branch-visibility` 组 —— 但它**设计上不报**
+  「已在自己分支登记、只是还没合并」的任务，理由是「那是正确流程的中间态，
+  报红等于惩罚正确行为」。**这份宽容正是它无法警告第二个 agent 的原因。**
+
+Qoder 的实现更完整，本记录不主张任何补救：它的能力来源语义引用 R10 §6
+（人工维护的注册表 + degraded 判定），而 Claude Code 的实现根本没读 §6；
+migration 也是 Claude Code 判断错的一处（它认为表结构已够用、不需要 006）。
+
+| 维度 | Qoder（main 上，保留） | Claude Code（已丢弃） |
+|---|---|---|
+| 文件 | `protocol/fake/http/registry.py` | `interface/http_adapter/fake/registry.py` |
+| migration | **有** `006_adapter_registration.sql` | 无（判断错） |
+| 能力语义 | 引用 R10 §6 信任模型 + degraded | 只落库，无 §6 |
+| probe/capabilities | 有端点 | 无 |
+| 缺失 §7 verb | 4 个 | 6 个 |
+
+**建议的防护（未实施，留给协调者裁决）：**
+
+1. **认领时同时写一个「在途」标记到 main**，而不只是写进自己的分支 ——
+   这样第二个 agent 在查登记表时能看见占用，代价是认领多一次往 main 的提交。
+2. **`branch-visibility` 组增加一档只报不拦的输出**：把「有分支在做但登记未上
+   main」的任务列出来，供人看，不参与退出码。现在这一档完全缺失。
+3. **任务分配前的检查动作**：认领前先 `git log --all --grep="<task-id>"` 与
+   `git branch -a | grep <task-id>` 扫一遍全仓分支历史，而不是只看 main 的登记表。
+   —— 这是本次最直接可用的补救，成本近乎为零。
+
+**共同根因**：把「登记表」当成了任务占用的**权威**来源，而它只反映**已合入
+main** 的状态。真正的占用分布在所有分支上，登记表只是它的一个滞后投影。
+
+### dup-incident：两份 MVP-10a 并行实现的事故记录（done）
+
+~~~text
+任务编号：dup-incident
+负责人 Harness：Claude Code
+开始时间：2026-10-06 03:38
+工作区：.worktrees/claude/
+依赖任务：无
+真相源引用：TASKS.md 上方「违规记录：两份 MVP-10a 并行实现」；
+            登记规则第 0 条与第 8 条
+允许修改目录：TASKS.md、docs/claims/**
+禁止修改目录：backend/**、tools/**、docs/spec/**（本任务只落文档，不改实现）
+交付分支：agent/local/claude/dup-incident/a1
+test_id：MVP-PROCESS-001
+当前状态：done
+
+交付：一条事故记录 + 一条任务表登记 + 认领文件。**不改任何实现代码。**
+
+详细事实、对照表与三条建议见上方「违规记录：两份 MVP-10a 并行实现」。
+
+一句话：认领当时 main 上 MVP-10a 确实无人认领，Qoder 在之后完成并交付；
+我的整份实现（22 文件 1448 行）被全部丢弃，main 未被污染。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  核验①       : main 上无 `test_adapter_fake`、无 `adapter/interface.py`、
+                无 `docs/claims/40-claude-code--MVP-10a.md` —— 未污染
+                （`git ls-tree -r --name-only main | grep` 三者皆空）
+  核验②       : 本分支基于 `cf50b68`（main），`adapter/interface.py` 不存在 ——
+                起点干净，未夹带被丢弃的实现
+  本任务性质  : 只改 TASKS.md 与 docs/claims/，`tools/**` 与 `backend/**` 零改动
+
+已知问题：
+- 该事故**没有机制可自动拦下** —— `branch-visibility` 组设计上就不报「已在
+  自己分支登记、仅未合入 main」的任务（怕惩罚正确行为），而正是那一档缺失
+  让第二个 agent 无从察觉。三条建议都未实施，留给协调者裁决
+- 被丢弃的实现（22 文件 1448 行）**不是保留在别处**——它随分支删除即消失。
+  若日后认为其中某处有价值（如 `AdapterVerbMissing` 枚举全部 16 个 §7 verb 的
+  做法），需要重新推导
 ~~~
 
 ## 提交前自检
