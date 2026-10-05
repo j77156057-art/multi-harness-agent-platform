@@ -696,10 +696,39 @@ TRAE 对 merge-interlock 分支做了独立评审（逐行读 diff + 临时 work
   - test_merge_guard.py: **32 passed**（修复前 15，新增 17），连跑 3 次 0 flake
   - **负向测试**：退回修复前的 cli.py 后跑新用例 → **15 failed / 17 passed**，
     即新增用例确实能抓住这 4 个问题，不是空断言
-  - **未修**（TRAE 问题 5、6，属另一范围，用户指示只修 1-4）：
-    5 [中] 本机 pytest 硬崩（TRAE 机器整会话跑必崩），建议做会话隔离或 xfail
-    6 [低] 预检信号不全：漏 `refs/heads/main.lock`、`packed-refs.lock`、
-           `HEAD.lock`
+  - **未修**：TRAE 问题 5 [中] 本机 pytest 硬崩（TRAE 机器整会话跑必崩），
+    建议做会话隔离或本机 xfail。**这条不修，`scripts.sh check` 在他那台机器
+    上只能继续 `--ignore`，等于门禁在那台机器上不完整** —— 是目前剩下的
+    唯一阻塞项。
+
+问题 6 [低] 预检信号不全（已单独修复）
+  症状：预检只看 `index.lock` 与 `ORIG_HEAD.lock`，漏了裸跑 commit / fetch /
+  checkout 会留下、而 index 那时已经放开的 ref 侧锁。漏放的后果不是「晚一点
+  才失败」，而是要等到真正提交那步才撞 `cannot lock ref 'HEAD'` —— 那时锁
+  已取到、合并已完成、门禁已跑完，前置工作全白费。
+  修法：锁清单提为模块级常量 `FOREIGN_GIT_LOCKS`，补三个：
+  `refs/heads/main.lock`、`packed-refs.lock`、`HEAD.lock`。
+  新增 2 条用例：清单必须覆盖这三个 ref 侧锁；每个声明的路径都必须是 git
+  真的会写、且真的会挡住某个写操作的位置。
+
+  **布局是实测确认的，不是照抄文档**：造同名锁文件后让真 git 去操作，
+  看报错里的绝对路径 —— `index` / `HEAD` 是 per-worktree（linked worktree
+  的在 `<common>/worktrees/<name>/` 下），`refs/` 与 `packed-refs` 跨
+  worktree 共享。本工具只在根工作区跑，两种布局路径重合，故统一按 common
+  dir 拼接。若路径拼错（如写成 `refs/main.lock`），git 根本不碰它，预检就会
+  放行一个不存在的障碍 —— 比漏检更坏，所以这条路径正确性有专门断言。
+
+  **一个断言被实测纠正的记录**：我第一版断言「这三个锁必须挡住 `git commit`」，
+  实测 git 2.55 下 `packed-refs.lock` 对 commit 只打印 error 而退出码仍是 0，
+  它真正挡的是 `pack-refs`。断言按「git 因这个文件拒绝了某个操作」重写。
+  若照原样断言，一条**正确的**声明会被判成缺陷 —— 断言比实现更容易写错。
+  同理 git 报错里是**绝对路径且用正斜杠**（Windows 上亦然），按 `os.sep`
+  转换会匹配失败。
+
+  - 负向测试：从 `FOREIGN_GIT_LOCKS` 摘掉三个锁 → 覆盖断言转红；
+    端到端用例改为遍历该常量而非手写名字，将来加锁漏测会立刻暴露。
+  - 验证：`test_merge_guard.py` 32 → **34 passed**；pytest backend
+    212 → **214 passed**；ruff clean；docstate 90/0。
 
 序号说明：本分支认领序号 40 已被 main 上 Qoder 的 `40-qoder--MVP-10a.md`
 占用，合并时需改号。合并顺序必须为 **先 claim-denum（42）后本分支**，否则

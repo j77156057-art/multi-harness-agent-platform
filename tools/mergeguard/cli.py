@@ -355,6 +355,29 @@ def do_status() -> int:
     return 0
 
 
+#: 别人裸跑 git 时会留下的锁文件 -> 为什么会挡住本工具。
+#:
+#: 一律相对 **git common dir**。这个布局是实测确认的，不是照抄文档：
+#: - `index` / `HEAD` 是 **per-worktree**，linked worktree 的在
+#:   `<common>/worktrees/<name>/` 下；
+#: - `refs/` 与 `packed-refs` 是 **跨 worktree 共享**的。
+#: 本工具只在根工作区（main）跑，那里 common dir 就是主工作区的 gitdir，
+#: 两种布局路径重合，所以统一按 common dir 拼即可。
+#:
+#: 缺失 `refs/heads/main.lock` 与 `packed-refs.lock` 是 TRAE 评审指出的
+#: 漏洞（问题 6）：裸跑 `git commit` / `git fetch` 可能**只持 ref 侧锁**，
+#: index 那时已经放开，预检就漏放了；等真走到提交那步才撞
+#: `cannot lock ref 'HEAD'`，那时已经做完所有前置工作。
+FOREIGN_GIT_LOCKS: tuple[tuple[str, str], ...] = (
+    ("index.lock", "有未完成的 git 操作（index 被锁）"),
+    ("ORIG_HEAD.lock", "有未完成的 ref 更新"),
+    # 下面三个是裸跑 commit / fetch / checkout 会留下、而 index 那时已放开的：
+    ("refs/heads/main.lock", "有人正在提交 main（ref 被锁）"),
+    ("packed-refs.lock", "有人在打包 refs（pack-refs / fetch 后台 gc）"),
+    ("HEAD.lock", "有人在移动 HEAD（checkout / reset / commit 正在写）"),
+)
+
+
 def _detect_foreign_git_activity(repo: Path) -> str | None:
     """检测**别人**正在跑的 git 操作。
 
@@ -362,16 +385,13 @@ def _detect_foreign_git_activity(repo: Path) -> str | None:
     实测踩到过：锁取到了、门禁也绿，但 `git merge` 在写 ORIG_HEAD 时报
     `fatal: update_ref failed for ref 'ORIG_HEAD'`——别的 agent 正在合并。
 
-    这两个信号能提前把它挡下来，而不是等git 自己撞锁。
+    这些信号能提前把它挡下来，而不是等git 自己撞锁。
 
     `MERGE_HEAD` 不在这里判断：它需要和 `merge-pending.json` 对照才能分清
     「本工具的待提交合并」与「别人的合并」，由调用方单独处理。
     """
     common = guard.git_common_dir(repo)
-    for name, why in (
-        ("index.lock", "有未完成的 git 操作（index 被锁）"),
-        ("ORIG_HEAD.lock", "有未完成的 ref 更新"),
-    ):
+    for name, why in FOREIGN_GIT_LOCKS:
         if (common / name).exists():
             return f"{why}：{common / name}"
     return None

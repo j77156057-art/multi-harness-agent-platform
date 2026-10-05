@@ -369,13 +369,71 @@ def test_cli_detects_foreign_git_activity(repo: Path):
     互斥锁只拦走本入口的合并。实测踩到过：锁取到了、门禁也绿，
     但 `git merge` 写 ORIG_HEAD 时撞上别的 agent，报
     `fatal: update_ref failed for ref 'ORIG_HEAD'`。等到 git 自己撞锁就太晚了。
+
+    循环遍历 `cli.FOREIGN_GIT_LOCKS` 而不是手写名字：清单在代码里，加锁时
+    若忘了配套用例，这里会静默少测一条。
     """
-    for lock_name in ("index.lock", "ORIG_HEAD.lock"):
-        (guard.git_common_dir(repo) / lock_name).write_text("", encoding="utf-8")
+    for lock_name, _why in cli.FOREIGN_GIT_LOCKS:
+        lock_path = guard.git_common_dir(repo) / lock_name
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("", encoding="utf-8")
         r = _cli(repo, "merge", "main", "--task-id", "T-0")
         assert r.returncode == 7, (lock_name, r.returncode, r.stdout, r.stderr)
         assert "另一个 agent 正在这个仓库跑 git" in r.stderr
-        (guard.git_common_dir(repo) / lock_name).unlink()
+        lock_path.unlink()
+
+
+def test_detect_covers_ref_side_locks_beyond_index(repo: Path):
+    """裸跑 commit/fetch 可能**只持 ref 侧锁**，那时 index 已经放开了。
+
+    这是 TRAE 评审问题 6：`index.lock` 与 `ORIG_HEAD.lock` 之外的锁，早先
+    版本的预检漏放，于是要等到真走到提交那步才撞 `cannot lock ref` ——
+    那时锁已经取到、合并已经做完，前置工作全白费。
+    """
+    names = {n for n, _ in cli.FOREIGN_GIT_LOCKS}
+    assert {
+        "refs/heads/main.lock",
+        "packed-refs.lock",
+        "HEAD.lock",
+    } <= names, f"缺 ref 侧锁：{names}"
+
+
+def test_declared_lock_paths_are_real_git_lock_locations(repo: Path):
+    """清单里的路径必须是 git 真的会写、且真的会挡住某个写操作的位置。
+
+    不 mock git：造一个同名锁文件，然后让**真 git** 去操作，看它是否报
+    `File exists`。若路径拼错（比如写成 `refs/main.lock`），git 根本不会碰它，
+    预检就会放行一个不存在的障碍 —— 那比漏检更坏。
+
+    **不硬断言「一定挡住 commit」**：实测各锁的效力不同（git 2.55），
+    `packed-refs.lock` 对 `commit` 只打印 error 但退出码仍是 0，它真正挡的是
+    `pack-refs`。断言写成「commit 必须失败」会把一条**正确的**声明判成缺陷。
+    真正该保证的是：git 确实因为这个文件而拒绝做某件事。
+    """
+    probes = (
+        ("commit", ("commit", "--allow-empty", "-m", "probe")),
+        ("pack-refs", ("pack-refs", "--all")),
+    )
+    # git 在错误信息里打印的是**绝对路径且用正斜杠**（实测 git 2.55，
+    # Windows 上亦然）。按 lock_name 本身匹配，不要做分隔符转换。
+    for lock_name in ("refs/heads/main.lock", "packed-refs.lock", "HEAD.lock"):
+        lock_path = guard.git_common_dir(repo) / lock_name
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text("", encoding="utf-8")
+        blocked_by: list[str] = []
+        for label, argv in probes:
+            proc = subprocess.run(
+                ["git", "-C", str(repo), *argv],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            combined = proc.stdout + proc.stderr
+            if "File exists" in combined and lock_name in combined:
+                blocked_by.append(f"{label}(exit={proc.returncode})")
+        assert blocked_by, f"{lock_name} 没让 git 拒绝任何操作（路径可能拼错了）"
+        lock_path.unlink()
 
 
 def test_cli_detects_foreign_merge_in_progress(repo: Path):
