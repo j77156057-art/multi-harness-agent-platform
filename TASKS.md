@@ -815,50 +815,12 @@ test_id：MVP-PROCESS-001
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
-### R10-fix-10：给 task_claims 补 §8 行 + 关掉 schema-keys 盲区（done）
-
-> ⚠️ **本卡为事后追认**，由 `gate-baseline-repair` 补写，提交于 `1b51e2c` 之后。
-> 撰写者未参与本任务，内容依据 `32f4e45` 的 commit 正文、diff 与 §38 记载回填。
-> **本任务作者（WorkBuddy）如需修正，以其版本为准。**
-> 补写原因：`discipline` 的 cards 断言要求「已认领且非在途的任务都有任务卡」，
-> 本任务已在任务表与认领登记中标 ✅ done 却无卡，导致 main 的 `./scripts.sh check`
-> 对所有 AI 失败。
-
-~~~text
-任务编号：R10-fix-10
-负责人 Harness：WorkBuddy
-开始时间：2026-10-05 09:35
-完成时间：2026-10-05（合入 main `32f4e45`）
-依赖任务：MVP-02-amend（✅ done）
-工作区：.worktrees/workbuddy/
-真相源引用：R10 §8（canonical schema 最小定义表）、§11（两层幂等职责划分）、
-            §37.6（schema 补充清单）、§26（DOC-SCHEMA-001）
-允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**、TASKS.md
-交付分支：agent/workbuddy/R10-fix-10-task-claims
-缺陷来源：Qoder 在 MVP-08 prep 交接时提出 Q-6，核实后成立。
-test_id：DOC-SCHEMA-001、DOC-STATE-001
-测试命令：./scripts.sh check
-当前状态：done
-commit：32f4e45
-
-背景：R10-fix-09 把 claim_requests 的 per-task 唯一键声明为「由 task_claims 的
-unique(claim_request_id, task_id) 承担」（§8 写入方列 + §11），但 task_claims
-整张表不在 §8 最小定义表里，只在 §37.6 出现且写成 task_claims/task_attempts 的
-合并形式。docstate 的 schema-keys 断言只遍历 §8 的表定义行，因此承载权威唯一键
-的表本身落在检查范围外 —— 与 R10-fix-09 修复的 claim_requests 问题是同类镜像。
-
-完成标准与验证结果：
-
-| # | 完成标准 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | §8 补 task_claims 最小定义行 | ✅ | 紧邻 claim_requests；显式列出 claim_id / claim_request_id / task_id / attempt_id / owner / claimed_at / released_at / release_reason |
-| 2 | §37.6 拆开合并写法 | ✅ | `task_claims` 与 `task_attempts` 分行，消除 `/` 导致该表落入 schema-keys 跳过名单 |
-| 3 | schema-keys 断言从 1 条扩为 3 条 | ✅ | 88 → 90 项：拆为「§8 必须声明」「§8/§37.6 至少一处声明」「无 §37.6 兜底的隐式依赖」 |
-| 4 | 注入验证能抓住回归 | ✅ | 删 `task_claims.claim_request_id` 后：修前 88/88 放过，修后 90 项中 2 项失败 |
-| 5 | 门禁全绿 | ✅ | `docstate 90 项检查，0 项失败`；`ruff check + format --check` clean；`pytest 26 passed` |
-
-遗留（不在本任务范围）：TASKS.md 的缺卡问题由 `gate-baseline-repair` 补齐。
-~~~
+> **本卡已撤回**：TRAE 在 `5a1876e`（`agent/local/trae/r10-fix-10-card/a1`）已就同一
+> 缺陷补卡并合入 main，其版本标题更准确（`R10-fix-10：task_claims 权威唯一键缺陷修复`），
+> 且登记了独立任务 `R10-fix-10-card`。合入本卡会为同一 task_id 产生两张任务卡 ——
+> 这正是本项目反复出现过的「两份真相」问题。**保留 TRAE 的版本，本卡作废。**
+> 本任务（`gate-baseline-repair`）的实际价值只剩解除 WorkBuddy 的 detached HEAD，
+> 以及下面记录的过程教训。
 
 ### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（doing）
 
@@ -866,7 +828,7 @@ unique(claim_request_id, task_id) 承担」（§8 写入方列 + §11），但 t
 任务编号：gate-baseline-repair
 负责人 Harness：OpenCode
 开始时间：2026-10-05 10:22
-依赖任务：R10-fix-10（✅ done，但缺任务卡）
+依赖任务：R10-fix-10（✅ done）
 工作区：.worktrees/opencode/
 真相源引用：AGENTS.md §1（认领登记）、§5（分支与提交）、
             dev-convention.md H-7（工作区隔离）、「会被门禁红掉的」清单
@@ -878,15 +840,15 @@ unique(claim_request_id, task_id) 承担」（§8 写入方列 + §11），但 t
       `### R10-fix-10` 任务卡。该断言会卡住所有 AI 的 ./scripts.sh check。
       同一时间窗内 WorkBuddy 工作区处于 detached HEAD（1b51e2c），H-7 高危组合。
 完成标准：
-  1. `### R10-fix-10` 任务卡补齐，字段与该任务实际改动一致     ✅
-  2. `discipline` 24 项检查 0 失败                              ✅
-  3. `docstate` 90 项检查 0 项失败                              ✅
-  4. WorkBuddy 工作区脱离 detached HEAD，未提交改动零丢失       ✅
+  1. `### R10-fix-10` 任务卡补齐                ⚠️ 作废，见下方撤回说明
+  2. `discipline` 24 项检查 0 失败                            ✅
+  3. `docstate` 90 项检查 0 项失败                            ✅
+  4. WorkBuddy 工作区脱离 detached HEAD，未提交改动零丢失     ✅
   5. 本任务自身也留下任务卡（dogfood 纪律检查器）              ✅
 test_id：MVP-PROCESS-001
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
 当前状态：done
-commit：df30958（登记）、b4d771c（补 R10-fix-10 卡）+ 本卡收尾
+commit：df30958（登记）、b4d771c（补卡）、d8e5201（merge main）、本卡收尾
 完成时间：2026-10-05 10:31
 验证结果：
   - docstate  : 90 项检查，0 项失败
@@ -897,16 +859,35 @@ commit：df30958（登记）、b4d771c（补 R10-fix-10 卡）+ 本卡收尾
   - 目录边界  : 仅 TASKS.md（git diff --name-only main...HEAD）
   - detached  : `git -C .worktrees/workbuddy symbolic-ref --short HEAD`
                  → agent/workspace/workbuddy（修复前为 detached HEAD 1b51e2c）
+
+### 过程教训：写卡片之前必须先查 main
+
+完成标准 1 作废的原因值得单独记：**我在补卡之前没有重新确认 main 的状态**。
+从「discipline 报缺 R10-fix-10 卡」到「我补完卡准备合入」之间，TRAE 已经用
+`R10-fix-10-card` 把同一个缺陷解决了并合入 main（`5a1876e`）。如果我不检查
+就合入，同一个 `task_id` 会有两张任务卡 —— 这正是本项目第 3、4 次协作事故的
+同构错误（两份真相），而且是我在评审别人时反复指出的那一条。
+
+根因：登记表类缺陷的修复有**天然的竞态**——它是全局单点的（缺一张卡），
+而参与者有多个。正确做法是动手前先 `git fetch` + 重新读 TASKS.md 的相关章节，
+而不是基于几分钟前的快照开工。
+
+第二条教训：**合并冲突不是异常，是这个仓库的常态**。本任务 merge main 时
+TASKS.md 出现 2 处冲突（任务表状态列、认领登记序号），因为 Qoder、TRAE、
+WorkBuddy 在同一时间窗内各自改了同一张表两处。冲突本身好解（列取并集、
+序号重排），难的是意识到「两张真相」正在被制造。
+
 已知问题：
-  - 完成标准 1 的卡片内容依据 R10-fix-10 的 commit `32f4e45` 的正文与 §38 记载
-    回填；本人未参与该任务，卡片内容为**事后追认**，不是第一手记录。若与
-    WorkBuddy 自己的追认不一致，以 WorkBuddy 的版本为准。
-  - TASKS.md 正被至少 3 个 AI 并发编辑（Qoder、TRAE、WorkBuddy 均有未提交改动），
-    本卡合入 main 时大概率需要人工解决冲突。这是登记表机制的结构性问题，
-    不是本任务能修的，建议后续单独评估（H-5 只约定 backend/docs 目录边界，
-    未约定 TASKS.md 的并发写协议）。
+  - TASKS.md 正被多个 AI 并发编辑，本任务 merge 时已实际发生 2 处冲突。
+    H-5 只约定 backend/docs 目录边界，未约定 TASKS.md 的并发写协议。
+    建议后续单独评估（例如：任务表/认领登记改为按 task_id 拆文件，或登记
+    走独立 API 串行化）。
   - 完成标准 4 涉及移动 `agent/workspace/workbuddy` 引用，超出 H-7 规则 2
     「只移动自己拥有的分支引用」的边界，已事先取得用户确认后执行。
+    采用 CAS（compare-and-swap）方式先把该引用快进到工作区当前 HEAD，
+    再切分支，保证工作树零变化、未提交改动零丢失。
+  - 本任务未修 `fix-flaky-init` 缺卡（它在本任务开工后短暂出现，随后由
+    WorkBuddy 自行撤回该任务）。这类「登记了又撤回」的卡片治理无规则可依。
 ~~~
 
 ### graph-traceability：依赖图机械校验 + 补 traceability.md（done）
