@@ -2598,7 +2598,7 @@ test_id：GIT-ACL-001、GIT-ACL-002
           tests/test_git_worktree.py -v；全量 ..\.venv\Scripts\python.exe -m pytest -q
 当前状态：✅ done（通过附遗留清单；无指向 MVP-05 交付物的 P1）
 完成时间：2026-10-06 00:05
-commit：（验收证据提交；本行为随附回填提交）
+commit：f8f2483（验收证据提交；本行为随附回填提交）
 验证结果：
   结论：✅ 通过。GIT-ACL-001/002 逐条双证据全部成立，证据套件 19/19
   退出 0。完整逐条结论、门禁数字与 6 项遗留/观察已回填于本文件 MVP-05
