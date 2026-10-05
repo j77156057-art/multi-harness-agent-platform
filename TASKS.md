@@ -24,8 +24,8 @@
 | MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
 | MVP-02-amend | Claude Code | MVP-02 | ✅ done | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | worktree-isolation | Claude Code | — | ✅ done | `agent/local/claude/worktree-isolation/a1` | `MVP-PROCESS-001` |
-| agent-onboarding | Claude Code | worktree-isolation | 🟢 doing | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
-| discipline | Claude Code | agent-onboarding | 🟢 doing | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
+| agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
+| discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -59,8 +59,8 @@
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
 | 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
-| 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | 🟡 待合入 main |
-| 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | 🟢 doing |
+| 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
+| 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -460,7 +460,7 @@ commit：f9fd072（H-7 + 三工作区 + 事故登记）、247ddc7（自服务 pr
   H-7 文档里，未提供脚本。
 ~~~
 
-### agent-onboarding：让其他 AI 知道要在隔离工作区干活（待合入）
+### agent-onboarding：让其他 AI 知道要在隔离工作区干活（done）
 
 ~~~text
 任务编号：agent-onboarding
@@ -481,7 +481,7 @@ commit：a6ec7ae
 - ⚠️ 合入曾三次撞上 `couldn't set refs/...` / `ORIG_HEAD` ref 锁争用
 ~~~
 
-### discipline：协作纪律检查器（doing）
+### discipline：协作纪律检查器（done）
 
 ~~~text
 任务编号：discipline
@@ -496,8 +496,10 @@ commit：a6ec7ae
 禁止修改目录：backend/app/**、backend/tests/**、backend/migrations/**、
             docs/spec/0.3-R10.md（只读）、tools/docstate/discipline.py 以外的逻辑
 交付分支：agent/local/claude/discipline/a1
+commit：a7adf3c（工具 + 门禁接线 + 强制程度清单）、
+        be034b2（计数修正 + 同行双工具歧义守卫）
 test_id：MVP-PROCESS-001
-当前状态：doing
+当前状态：done（已合入 main `6643868`）
 
 交付：
 1. `tools/discipline/discipline.py`：把纯自觉的登记规则变成会红的断言
