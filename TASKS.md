@@ -38,8 +38,9 @@
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
-| MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 2026-10-05，附遗留清单） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -80,6 +81,8 @@
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
+| 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
+| 15 | verify-mvp-04 | WorkBuddy | 2026-10-05 19:48 | `agent/workbuddy/verify-mvp-04` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
 | 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
@@ -786,6 +789,117 @@ PermissionError: [Errno 13] Permission denied:
 **与今早已修缺陷的区分仍有效**：`403e3a5` 修的 `PermissionError` 是
 **确定性**失败（有明确 `^E` 行、0/5 复现），已闭环；本条是**无法复现**的
 一次性现象，两者不是同一问题。
+
+### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
+
+MVP-04 已由 TRAE 完成代码核查并验收（见上）。本节是**方法上的补充**：TRAE 逐行核对了
+实现与 R10 的对应关系，本节做的是**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
+
+R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
+
+#### 三项注入
+
+| 注入 | 实测 | 结论 |
+|---|---|---|
+| 去掉条件 UPDATE的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
+| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
+| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个专门用例 | fencing 防护有真实测试覆盖 |
+
+第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
+互斥，条件 UPDATE 的 rowcount 断言是纵深防御。但认知需要固化——
+
+> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
+> 只有第一道时，"条件 UPDATE 写错WHERE 条件"这类缺陷仍会漏过（第二项注入已证明
+> 测试能抓到它，因为去掉 WHERE 条件后 `current_attempt_id IS NULL` 之外不再有约束）。
+
+#### 与 TRAE 验收的互补
+
+| | TRAE（代码核查） | WorkBuddy（注入验证） |
+|---|---|---|
+| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
+| 发现 | `integration_health` 无行时 `base_commit` 落NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 断言是第二道防线，认知需固化 |
+| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
+
+#### 补充建议（不阻塞）
+
+- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，`BEGIN IMMEDIATE`
+  仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
+- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
+  建议在 MVP-10b Adapter 实现时解决。
+
+### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
+
+MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
+R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
+
+R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
+
+#### 三项注入
+
+| 注入 | 实测 | 结论 |
+|---|---|---|
+| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
+| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
+| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
+
+第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
+互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
+
+> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
+> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
+> 第二项注入已证明测试能抓到它。
+
+#### 与 TRAE 验收的互补
+
+| | TRAE（代码核查） | WorkBuddy（注入验证） |
+|---|---|---|
+| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
+| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
+| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
+
+#### 补充建议（不阻塞）
+
+- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
+  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
+- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
+  建议在 MVP-10b Adapter 实现时解决。
+
+### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
+
+MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
+R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
+
+R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
+
+#### 三项注入
+
+| 注入 | 实测 | 结论 |
+|---|---|---|
+| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
+| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
+| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
+
+第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
+互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
+
+> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
+> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
+> 第二项注入已证明测试能抓到它。
+
+#### 与 TRAE 验收的互补
+
+| | TRAE（代码核查） | WorkBuddy（注入验证） |
+|---|---|---|
+| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
+| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
+| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
+
+#### 补充建议（不阻塞）
+
+- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
+  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
+- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
+  建议在 MVP-10b Adapter 实现时解决。
 
 ## 关键路径
 
