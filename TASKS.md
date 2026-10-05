@@ -41,6 +41,7 @@
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| MVP-08-verify | TRAE | MVP-08 | 🟢 doing | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -91,6 +92,7 @@
 | 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
 | 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
+| 22 | MVP-08-verify | TRAE | 2026-10-05 20:49 | `agent/local/trae/MVP-08-verify/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1602,4 +1604,37 @@ commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违�
   - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
   - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
   - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
+~~~
+
+### MVP-08-verify：MVP-08 验收（🟢 doing）
+
+~~~text
+任务编号：MVP-08-verify
+负责人 Harness：TRAE
+开始时间：2026-10-05 20:49
+依赖任务：MVP-08（3de2115 已合入 main，状态 review，先合后验）
+工作区：.worktrees/trae/
+真相源引用：docs/spec/0.3-R10.md（§7/§21 REST API 与错误码、§11 幂等、§26 test_id）、
+            docs/prep/MVP-08/openapi.yaml、error-codes.md、
+            TASKS.md MVP-08 卡、backend/app/api/**、backend/tests/test_api_flow.py
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/MVP-08-verify/a1
+背景：MVP-08 在 TRAE 验收前经 3de2115 合入 main（第三次「先合后验」，
+      验收结论与违规留档是本任务的交付物）。GATE-MERGE-CHECK-01 以本任务
+      结论转 done 为全绿启用前提。
+验收方法（同 MVP-04-verify）：不采信卡片「有断言」，逐条 test_id 找
+      「代码行 + 测试断言」双证据，并实跑门禁。
+完成标准：
+  1. DOC-TRACE-001：API 链路与 R10 §7/§21/§11 逐点对应，错误码与 prep 表一致；
+  2. MVP-API-001：建群→发方案→批准→领取→心跳→提交→审查 全链路可仅经 API 完成，
+     测试有机械断言；卡片自陈缺口（两处迁移用服务层驱动）核实不伪造 receipt；
+  3. 违规留档（三段式）；MVP-08 任务表/认领表/卡片状态据结论更新。
+test_id：DOC-TRACE-001、MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：doing
+完成时间：（完成后回填）
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
 ~~~
