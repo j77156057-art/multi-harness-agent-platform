@@ -606,7 +606,8 @@ commit：（完成后回填）
   - docstate  : 90 项检查，0 项失败
   - discipline: **43 项检查，1 项失败** —— 唯一失败是本任务新增的
     `rootworktree` 组，且是**如实报告当前根工作区正被占用**
-    （`M scripts/new-ai.ps1`、`?? scripts/lib/`）。这是断言生效的证据，不是缺陷。
+    （`M docs/dev-convention.md`、`M scripts/new-ai.ps1`、`?? scripts/lib/`、
+    `?? scripts/migrate-venvs.sh`）。这是断言生效的证据，不是缺陷。
   - ruff check : All checks passed!
   - pytest     : 169 passed
   - `test_discipline.py` 21 passed（本任务前 14，新增 7 条）
