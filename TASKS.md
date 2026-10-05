@@ -30,6 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03-amend | TRAE | MVP-03 | 🟢 doing | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -67,7 +68,8 @@
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
-| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 10 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 11 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -124,6 +126,39 @@ commit：810d88d
   - main 的 MVP-01 未走 Merge Gate，作为既成事实接受
   - AO 的 ao_managed_git 宿主模式经源码核对判定 no-go，见 docs/ao-capability-audit.md
   - 仓库尚无 remote，未推送
+~~~
+
+### MVP-03-amend：状态机迁移表对拍整改（🟢 doing）
+
+~~~text
+任务编号：MVP-03-amend
+负责人 Harness：TRAE
+开始时间：2026-10-05 09:48
+依赖任务：MVP-03（代码已由 db9bc19 合入 main，本任务对其验收整改）
+工作区：.worktrees/trae/
+真相源引用：R10 §10（关键迁移表，86 行/138 个 state-event-next 三元组）、
+            §37.7（事件 allowlist）、§9（Plan linter：引用闭合与重复边）
+允许修改目录：backend/app/state/** backend/app/plan/** backend/tests/** docs/state-projection.md
+禁止修改目录：docs/spec/**（只读；本任务不改 R10 正文）、backend/app/spec.py、tools/**
+交付分支：agent/local/trae/MVP-03-amend/a1
+背景：TRAE 对 MVP-03 验收时机械对拍代码迁移表与 R10 §10，发现代码缺 25 条边、
+      多 11 条 R10 不允许的边（如 escalated|cancel、awaiting_human|escalation_reminder、
+      stale/reclaiming 误用 cancel 而非 human.cancel）；validator 未拒绝重复依赖边，
+      且重复边会使 indegree 虚高造成 Kahn 误报环。
+完成标准：
+  1. 代码迁移表与 R10 §10 全量三元组零差异（新增 test_transition_mirror.py 机械对拍）
+  2. depends_on 重复边被拒绝，且不再产生假环；有对应用例
+  3. state-projection.md 与实际投影（23 状态全量）一致
+  4. 全量门禁全绿
+test_id：DOC-STATE-001、DOC-PLAN-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：doing
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
+已知问题：
+  - MVP-03 代码先合入 main（db9bc19）后完成验收，本任务整改也以 amend 形式追入，
+    流程偏差已在验收记录中说明。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
