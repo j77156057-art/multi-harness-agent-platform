@@ -30,7 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | 🟢 doing | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
-| MVP-03-amend | TRAE | MVP-03 | 🟢 doing | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -69,7 +69,7 @@
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | 🟢 doing |
 | 10 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
-| 11 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | 🟢 doing |
+| 11 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -128,7 +128,7 @@ commit：810d88d
   - 仓库尚无 remote，未推送
 ~~~
 
-### MVP-03-amend：状态机迁移表对拍整改（🟢 doing）
+### MVP-03-amend：状态机迁移表对拍整改（✅ done）
 
 ~~~text
 任务编号：MVP-03-amend
@@ -152,13 +152,23 @@ commit：810d88d
   4. 全量门禁全绿
 test_id：DOC-STATE-001、DOC-PLAN-001
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
-当前状态：doing
-commit：（完成后回填）
+当前状态：done
+commit：91e350e（登记先于开工）、b9f140e（修复 + 对拍测试 + 投影文档）
+完成时间：2026-10-05 10:02
 验证结果：
-  （完成后回填）
+  - docstate：90 项检查 0 失败（tools/docstate/docstate.py）
+  - ruff：check backend 全过；format --check backend 全过
+  - pytest：54 passed（新增 test_transition_mirror.py 4 项 +
+    test_state_plan.py 重复边 1 项与 23 个参数化边用例；原 26 项不回归）
+  - 机械对拍：代码迁移表与 R10 §10 的 138 个展开三元组零差异
+    （删 11 条非法边、补 25 条缺失边，均落在 b9f140e）
+  - discipline：17 项中 15 过；2 项失败为 main 基线 32f4e45 既有
+    （R10-fix-10 进行中：缺任务卡、README/dev-convention 的 docstate
+    计数仍写 88 而实际 90），本任务未引入新失败，也未越权修改其范围
 已知问题：
   - MVP-03 代码先合入 main（db9bc19）后完成验收，本任务整改也以 amend 形式追入，
     流程偏差已在验收记录中说明。
+  - 本分支同样先改后合：合入 main 前对其他 AI 不可见，需 Gate/用户尽快合入。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
