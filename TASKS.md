@@ -40,6 +40,7 @@
 | gate-baseline-repair | OpenCode | R10-fix-10 | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
 | trace-closure | OpenCode | MVP-03-amend | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
+| merge-interlock | OpenCode | discipline | 🟢 doing | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
@@ -95,6 +96,7 @@
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
 | 22 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
 | 23 | trace-closure | OpenCode | 2026-10-05 10:40 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
+| 24 | merge-interlock | OpenCode | 2026-10-05 20:40 | `agent/local/opencode/merge-interlock/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -456,6 +458,62 @@ commit：9b4b663
 已知问题：
   - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
+~~~
+
+### merge-interlock：给共享 main 合并加互斥锁（doing）
+
+~~~text
+任务编号：merge-interlock
+负责人 Harness：OpenCode
+开始时间：2026-10-05 20:40
+依赖任务：discipline（✅ done，工具形态参照它）
+工作区：.worktrees/opencode/
+真相源引用：AGENTS.md §0与 H-7（共享工作区会丢提交，本项目已丢 4 次）、
+            dev-convention.md「会被门禁红掉的」/「靠自觉的」两张清单、
+            TASKS.md 违规记录章节
+允许修改目录：tools/mergeguard/**、backend/tests/test_merge_guard.py、
+            scripts.sh、Makefile、docs/dev-convention.md、docs/traceability.md、
+            TASKS.md
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/opencode/merge-interlock/a1
+背景：今天实际发生两次，不是理论风险。
+      (1) `git merge` 在根工作区解完冲突后，`MERGE_HEAD` 凭空消失、工作区恢复
+          干净 —— 被并发 git 操作静默 abort，我的冲突解决成果零提交丢失。
+      (2) 再次尝试直接 `fatal: update_ref failed for ref 'ORIG_HEAD'`。
+      根因：7 个 worktree 共享同一个 `.git`，但只有 `HEAD` 与 index 是per-worktree
+      的，`refs/`、`ORIG_HEAD`、锁文件全是共享的，而根工作区按 AGENTS.md 是
+      「协调者专用合并区」——**没有任何互斥保护**。dev-convention.md 的
+      「靠自觉的」清单里已列「禁止在 main 上直接提交 —— 没有 hook，纯自觉」，
+      合并这一环连自觉都没有。
+完成标准：
+  1. 合并互斥锁落在 git common dir（跨 worktree 共享），非per-worktree   ✅
+  2. 用原子 `mkdir` 实现；已有锁时**明确报错并打印持有者与时间**，不静默等待 ✅
+  3. 锁持有者进程已死且超过 TTL 时可判定为 stale 并接管                  ✅
+  4. `scripts.sh merge <branch>` 受控入口：脏工作区拒绝、冲突不自动 abort、
+     门禁红则不提交merge commit✅
+  5. `status` 子命令可查当前锁状态                                     ✅
+  6. `backend/tests/test_merge_guard.py` 覆盖并发拒绝、stale 接管、
+     脏工作区拒绝、锁释放                                             ✅
+  7. **修`Makefile` 的 `check` 不含 discipline**（与 `scripts.sh` 不等价） ✅
+  8. `docstate` / `discipline` / `ruff` / `pytest` 全绿                 ✅
+test_id：MVP-MERGE-LOCK-001、MVP-PROCESS-001
+测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
+当前状态：doing
+commit：（完成后回填）
+验证结果：
+  （完成后回填）
+已知问题：
+  - 本任务**不阻止**直接在根工作区跑裸 `git merge`。git 没有提供「禁止某命令」
+    的机制，wrapper 只能提供受控入口与协作约定。它能保证的是：用受控入口时不会
+    互相踩，且踩了会明确失败；裸跑仍然可能撞锁。这一条必须写进 dev-convention，
+    否则会给人「已经安全了」的错觉。
+  - 锁只保护合并，不保护 `git commit` 到 `refs/heads/main`。后者由分支策略
+    （禁直接提交 main）约束，目前仍无机制强制。
+  - 完成标准 7 是顺带发现的另一个洞：`make check` 只跑 docstate+lint+test，
+    **不跑 discipline**，比 `./scripts.sh check` 弱。AGENTS.md 要求跑
+    `scripts.sh check`，所以弱点未造成实际损失，但两者同名不同义是陷阱。
+  - 本任务完成后仍需单独合并 `gate-baseline-repair`（9 commits，纯文档）。
+    届时应改用 `./scripts.sh merge` 走受控入口，顺带验证本工具在真实场景下可用。
 ~~~
 
 ### plan-evidence-failclosed：evidence source 校验改 fail-closed + 补断言（✅ done）
