@@ -76,9 +76,14 @@ def test_tasks_can_be_listed_and_filtered_by_status(tmp_path):
     assert [task["task_id"] for task in waiting] == ["T-2"]
 
 
-def test_messages_carry_their_own_cursor_and_mentions(tmp_path):
+def test_messages_share_the_global_seq_space_with_events(tmp_path):
     client, _ = make_client(tmp_path)
     _prepare(client)
+
+    # Approving PL-1 wrote two events (approve + dependency_pending), so the
+    # global counter stands where the event log ends.
+    event_page = client.get("/api/v1/events").json()
+    last_event_seq = max(event["seq"] for event in event_page["events"])
 
     first = client.post(
         "/api/v1/groups/G-1/messages",
@@ -92,25 +97,79 @@ def test_messages_carry_their_own_cursor_and_mentions(tmp_path):
         },
     )
     assert first.status_code == 200, first.text
-    assert first.json()["seq"] == 1
+    assert first.json()["seq"] == last_event_seq + 1
 
     second = client.post(
         "/api/v1/groups/G-1/messages",
         json={"author_kind": "harness", "author_id": "harness-1", "body": "ack"},
     )
-    assert second.json()["seq"] == 2
+    assert second.json()["seq"] == last_event_seq + 2
 
     page = client.get("/api/v1/groups/G-1/messages").json()
-    assert [message["created_seq"] for message in page["messages"]] == [1, 2]
+    assert [message["created_seq"] for message in page["messages"]] == [
+        last_event_seq + 1,
+        last_event_seq + 2,
+    ]
     assert page["messages"][0]["task_id"] == "T-1"
-    assert page["next_seq"] == 2
+    assert page["next_seq"] == last_event_seq + 2
     assert page["has_more"] is False
 
-    incremental = client.get("/api/v1/groups/G-1/messages", params={"since_seq": 1}).json()
-    assert [message["created_seq"] for message in incremental["messages"]] == [2]
+    incremental = client.get(
+        "/api/v1/groups/G-1/messages", params={"since_seq": last_event_seq + 1}
+    ).json()
+    assert [message["created_seq"] for message in incremental["messages"]] == [last_event_seq + 2]
 
     deliveries = client.get("/api/v1/groups/G-1/messages").json()
     assert deliveries["messages"][0]["message_id"] == first.json()["message_id"]
+
+
+def test_interleaved_events_and_messages_keep_one_global_order(tmp_path):
+    client, _ = make_client(tmp_path)
+    _prepare(client)
+
+    def latest_event_seq() -> int:
+        rows = client.get("/api/v1/events").json()["events"]
+        return max(event["seq"] for event in rows)
+
+    message_a = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={"author_kind": "human", "author_id": "h", "body": "one"},
+    ).json()["seq"]
+
+    # A claim appends a real task event between the two messages.
+    client.post(
+        "/api/v1/adapter/claim",
+        json={"claim_request_id": "cr-seq", "harness_id": "h1", "task_ids": ["T-1"]},
+    )
+    in_between_event = latest_event_seq()
+
+    message_b = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={"author_kind": "harness", "author_id": "h1", "body": "two"},
+    ).json()["seq"]
+
+    assert message_a < in_between_event < message_b
+    assert message_b == message_a + 2, "the event consumed the number in between"
+
+    # A second group does NOT restart numbering: messages are global.
+    client.post("/api/v1/projects", json={"project_id": "P-2", "name": "p2"})
+    client.post("/api/v1/projects/P-2/groups", json={"group_id": "G-2", "name": "g2"})
+    other_group = client.post(
+        "/api/v1/groups/G-2/messages",
+        json={"author_kind": "human", "author_id": "h", "body": "elsewhere"},
+    ).json()["seq"]
+    assert other_group > message_b
+
+    event_seqs = {event["seq"] for event in client.get("/api/v1/events").json()["events"]}
+    message_seqs = set()
+    for group in ("G-1", "G-2"):
+        rows = client.get(f"/api/v1/groups/{group}/messages").json()["messages"]
+        message_seqs.update(int(message["created_seq"]) for message in rows)
+    assert event_seqs & message_seqs == set(), "the two streams never reuse a number"
+    # Both streams are subsets of one contiguous global interval.
+    assert min(event_seqs | message_seqs) == 1
+    assert max(event_seqs | message_seqs) == other_group
+    assert sorted(event_seqs | message_seqs) == list(range(1, other_group + 1))
 
 
 def test_message_mention_creates_a_delivery_row(tmp_path):

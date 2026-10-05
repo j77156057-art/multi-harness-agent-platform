@@ -26,6 +26,7 @@ from app.claim.guarded_write import guarded_write
 from app.claim.transitions import apply_transition
 from app.config import settings
 from app.db.connection import Database
+from app.db.sequence import next_global_seq
 from app.events.store import EventRecord, EventStore
 from app.lease.service import release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
@@ -672,12 +673,9 @@ class SchedulerService:
                 task = conn.execute("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
                 if task is None:
                     raise NotFound(f"unknown task: {task_id}")
-            row = conn.execute(
-                "SELECT COALESCE(MAX(created_seq), 0) AS seq FROM task_messages"
-                " WHERE group_id = ?",
-                (group_id,),
-            ).fetchone()
-            seq = int(row["seq"]) + 1
+            # Messages share the global seq space with task_events (R10 §15/§19,
+            # MVP-08 prep openapi): one ordering authority for read_context.
+            seq = next_global_seq(conn)
             message_id = f"msg-{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO task_messages(message_id, group_id, task_id, sender_type,"

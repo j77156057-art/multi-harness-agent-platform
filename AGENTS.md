@@ -1,7 +1,7 @@
 # AGENTS.md —— AI Harness 作业规则
 
 本仓库由多个 AI Harness 并行协作。**本文件是会话开始时自动载入的入口**，
-细节在 `docs/dev-convention.md`（H-1～H-7 硬约束）。两者冲突时以本文件为准。
+细节在 `docs/dev-convention.md`（H-1～H-8 硬约束）。两者冲突时以本文件为准。
 
 ## 0. 先做这一件事：进入你自己的工作区
 
@@ -76,6 +76,28 @@ git switch -c agent/<group-short>/<harness>/<task-id>/<attempt-id> main
 - 提交格式见 `docs/dev-convention.md`：`<type>(<task-id>): <祈使句摘要>`，
   body 写**为什么**，涉及状态机/事件/schema 的改动必须引用 R10 章节号。
 
+## 5b. 改共享文件前，先确认别人没在改同一处（H-8）
+
+要改`TASKS.md`、`docs/traceability.md`、`docs/dev-convention.md`、
+`tools/discipline/**`、`tools/docstate/**` 这类共享文件时，**动手之前**先查其他 AI
+的在途工作：
+
+~~~bash
+for d in .worktrees/*/; do
+  echo "$(basename $d) | $(git -C $d branch --show-current) | 未提交: $(git -C $d status --short | wc -l)"
+done
+git log --oneline main..<分支>          # 未合入的 commit
+git diff --name-only main..<分支># 它们改了哪些文件
+~~~
+
+2026-10-05 的认领登记拆分踩了这个坑：我按 TASKS.md 表里的「序号」取号，而 Qoder
+**在我拆分期间往同一张表插了新行**并占了 22 号，撞号导致序号重复与同 task 双文件。
+它的独立复核指出 4 项、**全部成立**，其中最刺眼的是：`discipline` 当时 24/24 全绿，
+而这些缺陷真实存在于树里 —— **断言没覆盖的地方，绿灯不含信息**。
+
+**这条与 H-1 同一个毛病：只看自己，不看全局。** H-1 说「真相源在哪」，
+H-8 说「动之前先看别人」。
+
 ## 6. 被阻塞时不要空等
 
 在 `docs/prep/<task-id>/` 做该任务的 `prep` 项（清单里每个任务都列了可提前做的部分）。
@@ -101,7 +123,7 @@ git log --oneline -1
 |---|---|
 | 有哪些任务、谁在做什么、依赖是什么 | `TASKS.md` |
 | 任务定义、依赖图、可提前做的 prep | `docs/spec/mvp-task-checklist.md` |
-| 硬约束 H-1～H-7、目录边界、分支与提交规范 | `docs/dev-convention.md` |
+| 硬约束 H-1～H-8、目录边界、分支与提交规范 | `docs/dev-convention.md` |
 | 权威规范（只读） | `docs/spec/0.3-R10.md` |
 | MVP 实现了哪些状态、遗漏了哪些及理由 | `docs/state-projection.md` |
 | 决策记录 | `docs/adr/` |

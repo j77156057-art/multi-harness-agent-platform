@@ -44,7 +44,15 @@ def test_normalize_branch():
     assert d.normalize_branch("") == ""
 
 
-# ---------- 认领序号断言 ----------
+def test_branch_tokens_multi_branch_cell():
+    # 同一任务两个尝试分支（a1 作废、a2 合入），注记里的提交号不得被当成分支
+    cell = "`agent/h/t/a1` `agent/h/t/a2`（a2 结卡合入 e6b3026）"
+    assert d.branch_tokens(cell) == ["agent/h/t/a1", "agent/h/t/a2"]
+    assert d.branch_tokens("`agent/h/t/a1`") == ["agent/h/t/a1"]
+    assert d.branch_tokens("agent/h/t/a1") == ["agent/h/t/a1"]
+
+
+# ---------- 认领序号断言（2026-10-05 起序号来自 docs/claims/ 文件名） ----------
 
 TASKS_HEADER = """## 任务表
 
@@ -53,44 +61,60 @@ TASKS_HEADER = """## 任务表
 | t1 | H | — | ✅ done | `agent/h/t1` | `MVP-PROCESS-001` |
 | t2 | H | — | 🟢 doing | `agent/h/t2` | `MVP-PROCESS-001` |
 
-## 认领登记
-
-| 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
-|---|---|---|---|---|---|
+## 认领登记（R10 §0 总协调规则第 2 条）
 """
 
 
-def registry_checks(rows_text):
+def claim_file(task_id, branch=None):
+    branch = branch or "agent/h/%s" % task_id
+    return (
+        "# 认领：%s\n\n"
+        "| 字段 | 值 |\n|---|---|\n"
+        "| task_id | `%s` |\n"
+        "| Harness | H |\n"
+        "| 认领时间 | 2026-10-05 09:00 |\n"
+        "| 分支 | `%s` |\n"
+        "| 状态 | ✅ done |\n"
+    ) % (task_id, task_id, branch)
+
+
+def registry_checks(tmp_path, claim_names):
+    """claim_names：docs/claims/ 下的文件名（序号在文件名前缀）。"""
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    for name in claim_names:
+        tid = name.split("--", 1)[-1][:-3]
+        (claims_dir / name).write_text(claim_file(tid), encoding="utf-8")
     result = d.Result()
-    tasks, claims = d.check_registry(result, TASKS_HEADER + rows_text)
-    return {c["msg"]: c["ok"] for c in result.checks if "认领序号" in c["msg"]}
+    d.check_registry(result, TASKS_HEADER, str(tmp_path))
+    return {c["msg"]: c["ok"] for c in result.checks if "序号" in c["msg"]}
 
 
-def test_claim_serials_must_be_unique():
-    checks = registry_checks(
-        "| 1 | t1 | H | 2026-10-05 09:00 | `agent/h/t1` | ✅ done |\n"
-        "| 1 | t2 | H | 2026-10-05 09:01 | `agent/h/t2` | 🟢 doing |\n"
-    )
-    unique_msg = next(msg for msg in checks if msg.startswith("认领序号唯一"))
+def test_claim_serials_must_be_unique(tmp_path):
+    checks = registry_checks(tmp_path, [
+        "01-h--t1.md",
+        "01-h--t2.md",
+    ])
+    unique_msg = next(msg for msg in checks if msg.startswith("认领文件序号唯一"))
     assert checks[unique_msg] is False
-    assert "重复序号=[1]" in unique_msg
+    assert "重复=['01']" in unique_msg
 
 
-def test_claim_serials_must_be_contiguous():
-    checks = registry_checks(
-        "| 1 | t1 | H | 2026-10-05 09:00 | `agent/h/t1` | ✅ done |\n"
-        "| 3 | t2 | H | 2026-10-05 09:01 | `agent/h/t2` | 🟢 doing |\n"
-    )
-    cont_msg = next(msg for msg in checks if msg.startswith("认领序号连续"))
+def test_claim_serials_must_be_contiguous(tmp_path):
+    checks = registry_checks(tmp_path, [
+        "01-h--t1.md",
+        "03-h--t2.md",
+    ])
+    cont_msg = next(msg for msg in checks if msg.startswith("认领文件序号连续"))
     assert checks[cont_msg] is False
     assert "缺号=[2]" in cont_msg
 
 
-def test_claim_serials_happy_path():
-    checks = registry_checks(
-        "| 1 | t1 | H | 2026-10-05 09:00 | `agent/h/t1` | ✅ done |\n"
-        "| 2 | t2 | H | 2026-10-05 09:01 | `agent/h/t2` | 🟢 doing |\n"
-    )
+def test_claim_serials_happy_path(tmp_path):
+    checks = registry_checks(tmp_path, [
+        "01-h--t1.md",
+        "02-h--t2.md",
+    ])
     assert all(checks.values())
 
 

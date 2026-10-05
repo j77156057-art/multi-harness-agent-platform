@@ -32,6 +32,11 @@ import subprocess
 import sys
 
 DEFAULT_TASKS = os.path.join("TASKS.md")
+# 2026-10-05 拆分：认领登记从 TASKS.md 的多写表格迁到「每task 一个独占文件」。
+# 理由：当天 11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+# 冲突 100% 集中在这张表与任务卡两处 —— 它们是仓库里仅有的多写点。
+# 任务卡暂未拆分（原始数据里有 11 个 task 从未建过格式合规的卡，先补齐再拆）。
+CLAIMS_DIR = os.path.join("docs", "claims")
 
 # 任务表「状态」列允许包含的关键字。与 TASKS.md「状态图例」保持一致；
 # 允许附加注记（如 "⏳ waiting ★瓶颈"），故用包含判定而非全等。
@@ -122,20 +127,36 @@ def parse_task_table(text):
     return entries
 
 
-def parse_claim_table(text):
-    """认领登记表 → [{task_id, harness, claimed_at, branch, status}]"""
+def _md_field(text, label):
+    """从 markdown 表格行 `| label | value |` 里取值。"""
+    m = re.search(r"^\|\s*" + re.escape(label) + r"\s*\|\s*(.*?)\s*\|", text, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def parse_claim_table(repo_root=None):
+    """docs/claims/*.md → [{task_id, harness, claimed_at, branch, status}]。
+
+    拆分前认领登记是 TASKS.md 里的一张表，多个 AI 各加一行必然冲突。
+    现在每个 task 一个独占文件，本函数读目录。
+    """
     entries = []
-    for cells in table_rows(section(text, "## 认领登记")):
-        if cells[0] == "序号":
+    root = repo_root or os.getcwd()
+    claims_dir = os.path.join(root, CLAIMS_DIR)
+    if not os.path.isdir(claims_dir):
+        return entries
+    for name in sorted(os.listdir(claims_dir)):
+        if not name.endswith(".md"):
             continue
+        body = read(os.path.join(claims_dir, name))
         entries.append(
             {
-                "seq": cells[0],
-                "task_id": cells[1] if len(cells) > 1 else "",
-                "harness": cells[2] if len(cells) > 2 else "",
-                "claimed_at": cells[3] if len(cells) > 3 else "",
-                "branch": cells[4] if len(cells) > 4 else "",
-                "status": cells[5] if len(cells) > 5 else "",
+                "seq": name.split("-", 1)[0],
+                "file": name,
+                "task_id": _md_field(body, "task_id").strip("`"),
+                "harness": _md_field(body, "Harness"),
+                "claimed_at": _md_field(body, "认领时间"),
+                "branch": _md_field(body, "分支"),
+                "status": _md_field(body, "状态"),
             }
         )
     return entries
@@ -190,13 +211,48 @@ def has_verification_evidence(card):
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
 
-def check_registry(result, tasks_text):
+def check_registry(result, tasks_text, repo_root=None):
     """组 1：任务表与认领登记表自身的完整性。"""
     tasks = parse_task_table(tasks_text)
-    claims = parse_claim_table(tasks_text)
+    claims = parse_claim_table(repo_root)
 
     result.chk(bool(tasks), "任务表解析出 %d 行" % len(tasks), "registry")
-    result.chk(bool(claims), "认领登记表解析出 %d 行" % len(claims), "registry")
+    result.chk(bool(claims), "认领登记表解析出 %d 个" % len(claims), "registry")
+
+    # 拆分后「每task 一个独占文件」的两条不变量必须有守卫，否则绿灯不含信息
+    # （Qoder 复核发现②③④：序号 14/15 各重复、claim-nullable 有两个逐字相同的文件，
+    #  而当时 discipline 仍 24/24 全绿）。
+    seqs = [c["seq"] for c in claims]
+    dup_seq = sorted({q for q in seqs if seqs.count(q) > 1})
+    result.chk(
+        not dup_seq,
+        "认领文件序号唯一；重复=%s（%d 个文件，序号范围 %s~%s）"
+        % (dup_seq or "无", len(seqs), min(seqs) if seqs else "-", max(seqs) if seqs else "-"),
+        "registry",
+    )
+    tids = [c["task_id"] for c in claims]
+    dup_tid = sorted({t for t in tids if tids.count(t) > 1})
+    result.chk(
+        not dup_tid,
+        "一个 task_id 只对应一个认领文件；重复=%s" % (dup_tid or "无"),
+        "registry",
+    )
+
+    # 序号即身份：除唯一外还必须连续为 1..N，否则撞号可以靠「跳号」规避
+    # （claim-nullable 违规记录承诺的纠正措施，GATE-MERGE-CHECK-01 落地）。
+    seq_nums = [int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")]
+    expected = set(range(1, len(claims) + 1))
+    result.chk(
+        len(seq_nums) == len(claims)
+        and set(seq_nums) == expected,
+        "认领文件序号连续为 1..%d；缺号=%s，越界/非数字=%s"
+        % (
+            len(claims),
+            sorted(expected - set(seq_nums)) or "无",
+            sorted(set(seq_nums) - expected) or "无",
+        ),
+        "registry",
+    )
 
     bad_status = [t["task_id"] for t in tasks if not any(
         keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)]
@@ -230,6 +286,21 @@ def check_registry(result, tasks_text):
     # 两张表必须互相覆盖 —— 但只有已开始的任务才该有认领记录，
     # 没人认领的 waiting 任务不需要占位。
     task_ids = {t["task_id"] for t in tasks}
+
+    # task_id 重复会**静默**通过下面所有基于集合的比较，所以必须单独查。
+    # 来源多为合并时两边各自追加了同一个任务的行（本次即遇到 claim-nullable
+    # 在认领登记表里出现两次 —— 拆分前的多写表格时代尤其容易发生）。
+    for label, ids in (
+        ("任务表", [t["task_id"] for t in tasks]),
+        ("认领登记", [c["task_id"] for c in claims]),
+    ):
+        counts = collections.Counter(ids)
+        repeated = sorted(name for name, count in counts.items() if count > 1)
+        result.chk(
+            not repeated,
+            "%s无重复 task_id；重复=%s" % (label, repeated or "无"),
+            "registry",
+        )
     claim_ids = {c["task_id"] for c in claims}
     result.chk(
         claim_ids <= task_ids,
@@ -253,35 +324,6 @@ def check_registry(result, tasks_text):
     result.chk(
         not incomplete,
         "认领登记均有时间与分支；缺=%s" % (incomplete or "无"),
-        "registry",
-    )
-
-    # 认领序号必须唯一且连续（claim-nullable 与 R10-fix-10-card 曾撞号 14，
-    # 旧基线合并还带回整批重复行；不查就静默存在）。
-    seq_nums = []
-    bad_seq = []
-    for claim in claims:
-        token = claim["seq"].strip()
-        if re.fullmatch(r"\d+", token):
-            seq_nums.append(int(token))
-        else:
-            bad_seq.append(claim["task_id"] or token)
-    duplicated = sorted(
-        num for num, count in collections.Counter(seq_nums).items() if count > 1
-    )
-    result.chk(
-        not duplicated and not bad_seq,
-        "认领序号唯一且为数字；重复序号=%s，非数字行=%s"
-        % (duplicated or "无", bad_seq or "无"),
-        "registry",
-    )
-    expected = set(range(1, len(claims) + 1))
-    gaps = sorted(expected - set(seq_nums))
-    out_of_range = sorted(set(seq_nums) - expected)
-    result.chk(
-        not gaps and not out_of_range,
-        "认领序号连续为 1..%d；缺号=%s，越界=%s"
-        % (len(claims), gaps or "无", out_of_range or "无"),
         "registry",
     )
     return tasks, claims
@@ -511,6 +553,16 @@ def parse_checklist_dependencies(repo_root):
     return deps
 
 
+def extract_longest_chain(block):
+    """从一个 ``` 区块里取最长的任务 id 链。箭头只是装饰，按出现顺序取。"""
+    best = []
+    for line in block.splitlines():
+        chain = re.findall(r"MVP-\d+[ab]?", line)
+        if len(chain) > len(best):
+            best = chain
+    return best
+
+
 def longest_path_length(edges):
     """依赖图的最长链长度（节点数）。有环时返回 None。
 
@@ -539,6 +591,69 @@ def longest_path_length(edges):
     if any(length is None for length in lengths):
         return None
     return max(lengths) if lengths else 0
+
+
+def _shared_file_owners(tasks_text):
+    """从 TASKS.md 的「共享文件改动」声明区解析 task_id 集合。
+
+    声明区格式（每行一条）：
+    | `task-id` | 改了什么 | commit |
+    任务表行里带「🔒」标记的 task 也算（它在动共享文件）。
+    """
+    m = re.search(r"^##\s*共享文件改动声明.*$", tasks_text, re.M)
+    if not m:
+        return set()
+    block = tasks_text[m.end():]
+    nxt = re.search(r"^##\s", block, re.M)
+    if nxt:
+        block = block[: nxt.start()]
+    out = set()
+    for line in block.splitlines():
+        s2 = line.strip()
+        if not s2.startswith("|"):
+            continue
+        cells = [c.strip() for c in s2.strip("|").split("|")]
+        if not cells or cells[0] in ("task_id", "---") or set(cells[0]) <= set("-: "):
+            continue
+        tid = cells[0].strip("`").strip()
+        if tid and tid != "task_id":
+            out.add(tid)
+    return out
+
+
+def check_shared_file_ownership(result, repo_root, tasks, claims, tasks_text):
+    """组5：改了登记结构/门禁本体的 task 必须在任务表里有行且已认领。
+
+    H-8 的可执行部分。2026-10-05 之前有 5 次「改了共享文件却没登记」
+    （MVP-01/810d88d、R10-fix-10/32f4e45、fix-flaky-init/9d3d3ef、
+    claim-nullable/d5769e2、claims-split/847cc69）—— 其中 claims-split 是
+    WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来。
+    """
+    # 动了登记结构/门禁本体的 task 必须在 TASKS.md 的「共享文件改动」区里声明。
+    # 用显式声明而不是硬编码task_id 列表 —— 否则新增这类 task 时检查器不会覆盖。
+    guard_rail = _shared_file_owners(tasks_text)
+    if not guard_rail:
+        result.chk(
+            False,
+            "TASKS.md 缺少「共享文件改动」声明区，无法检查 H-8",
+            "ownership",
+        )
+        return
+    task_ids = {t["task_id"] for t in tasks}
+    missing = sorted(guard_rail - task_ids)
+    result.chk(
+        not missing,
+        "动了登记结构/门禁本体的 task 均已在任务表登记；缺=%s" % (missing or "无"),
+        "ownership",
+    )
+    # 已登记的必须真的有认领文件（H-1 的「登记先于开工」在 claims 目录上的体现）
+    claim_ids = {c["task_id"] for c in claims}
+    no_claim = sorted(guard_rail & task_ids - claim_ids)
+    result.chk(
+        not no_claim,
+        "改了共享结构的 task 都有认领文件；缺=%s" % (no_claim or "无"),
+        "ownership",
+    )
 
 
 def check_dependencies(result, repo_root, tasks):
@@ -597,6 +712,7 @@ def check_dependencies(result, repo_root, tasks):
         chain = re.findall(r"MVP-\d+[ab]?", line)
         if len(chain) > len(longest_chain):
             longest_chain = chain
+    longest_chain = extract_longest_chain(critical.group(1))
     declared_length = longest_path_length(registry)
     result.chk(
         len(longest_chain) == declared_length,
@@ -630,6 +746,32 @@ def check_dependencies(result, repo_root, tasks):
     result.chk(
         not broken_edges,
         "关键路径的每一步都是真实依赖边；断裂=%s" % (broken_edges or "无"),
+        "deps",
+    )
+
+    # TASKS.md 的「关键路径」是同一份数据的第二个副本，同样必须校验。上一轮只管了
+    # 清单那份，于是 TASKS.md 里的旧副本（漏了 MVP-03 与 MVP-10b）无人拦，下一个读
+    # TASKS.md 的人会拿到已被推翻的结论。
+    tasks_critical = section(read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径")
+    if not tasks_critical:
+        result.chk(False, "TASKS.md 缺少「## 关键路径」章节", "deps")
+        return
+    block = re.search(r"~~~text\n(.*?)\n~~~", tasks_critical, re.S)
+    tasks_chain = extract_longest_chain(block.group(1) if block else "")
+    result.chk(
+        len(tasks_chain) == declared_length,
+        "TASKS.md 关键路径声明的长度 %d 与依赖图最长链 %d 一致"
+        % (len(tasks_chain), declared_length if declared_length is not None else -1),
+        "deps",
+    )
+    tasks_broken = [
+        "%s→%s" % (a, b)
+        for a, b in zip(tasks_chain, tasks_chain[1:])
+        if a not in registry.get(b, set())
+    ]
+    result.chk(
+        not tasks_broken,
+        "TASKS.md 关键路径每一步都是真实依赖边；断裂=%s" % (tasks_broken or "无"),
         "deps",
     )
 
@@ -679,15 +821,15 @@ def parse_merge_subject(subject):
 
 
 def normalize_branch(cell):
-    """认领表分支列 → 纯分支名。单元格常带反引号与注记（`main（⚠️…）`）。"""
+    """认领分支字段 → 纯分支名。字段值常带反引号与注记（`main（⚠️…）`）。"""
     match = re.search(r"`([^`]+)`", cell or "")
     return (match.group(1) if match else (cell or "")).strip()
 
 
 def branch_tokens(cell):
-    """一个认领单元格里登记的全部分支。
+    """一个认领分支字段里的全部分支。
 
-    同一任务允许留下多个尝试分支（如 a1 作废、a2 合入），单元格可写多个
+    同一任务允许留下多个尝试分支（如 a1 作废、a2 合入），字段可写多个
     反引号片段；无反引号时退回整格文本。
     """
     tokens = re.findall(r"`([^`]+)`", cell or "")
@@ -739,6 +881,7 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
     这是「先合 main 后验收 / 缺卡」三次违规的机械执行点：discipline 其余各组只看
     TASKS.md 快照，任务不合规照样能合；本组从 git 历史反向核对登记表。
+    GATE-MERGE-CHECK-01；2026-10-05 认领表拆 docs/claims/ 后入参随之改为读目录。
     """
     ok, merged, detail = lister(repo_root)
     result.chk(
@@ -788,7 +931,7 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
     # 只对已完成卡强制证据：未完成的已在上一条列出，避免一条问题刷两次红灯。
     no_evidence = sorted(
-        task_id for task_id, branch in merged_tasks.items()
+        task_id for task_id in merged_tasks
         if task_id in cards
         and is_finished(cards[task_id]["fields"].get("当前状态", ""))
         and (not cards[task_id]["fields"].get("commit")
@@ -814,9 +957,10 @@ def run(repo_root="."):
         raise FileNotFoundError(tasks_path)
 
     tasks_text = read(tasks_path)
-    tasks, claims = check_registry(result, tasks_text)
+    tasks, claims = check_registry(result, tasks_text, repo_root)
     cards = check_cards(result, tasks_text, claims)
     check_counts(result, repo_root)
+    check_shared_file_ownership(result, repo_root, tasks, claims, tasks_text)
     check_dependencies(result, repo_root, tasks)
     check_traceability(result, repo_root, tasks)
     check_merge(result, repo_root, tasks, claims, cards)
