@@ -28,6 +28,7 @@
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -73,6 +74,7 @@
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
+| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -118,6 +120,23 @@ Codex 认领后）才补上本登记**。原始状态下：
 
 **根因**：验收被放在合并之后，Gate 没有卡住"未验收"的合入。**合并的前置条件
 必须是验收通过（含机械对拍），不能用"先合、验收问题再追 amend"替代。**
+
+### 违规记录：R10-fix-10 标记 done 但缺任务卡（1b51e2c）
+
+**事实**：WorkBuddy 在 `1b51e2c` 把 R10-fix-10 状态从 doing 改为 done
+（交付实为 `32f4e45`），但**没有补该任务的任务卡**。自 `1b51e2c` 起
+discipline `check_cards` 持续 1 项失败：
+「已认领且非在途的任务都有任务卡；缺卡=['R10-fix-10']」，
+即 main 在该任务完成期间门禁非全绿。
+
+**已采取的纠正**：TRAE 以独立任务 R10-fix-10-card
+（`agent/local/trae/r10-fix-10-card/a1`）按"登记先于开工"补录任务卡，
+事实全部取自 `32f4e45` 提交说明与 R10 §38.8，未改动该任务的任何交付内容；
+补卡后 discipline 恢复 0 失败。
+
+**根因**：关闭任务（doing → done）时只改了任务表/认领表状态，
+没把"done 卡必须含 commit 与验证证据"当作关闭动作的一部分。
+**标 done 的同一个提交里就应当包含完整任务卡；事后补卡是补救，不是流程。**
 
 ## 任务卡
 
@@ -196,6 +215,72 @@ commit：91e350e（登记先于开工）、b9f140e（修复 + 对拍测试 + 投
   - MVP-03 代码先合入 main（db9bc19）后完成验收，本任务整改也以 amend 形式追入，
     流程偏差已在验收记录中说明。
   - 本分支同样先改后合：合入 main 前对其他 AI 不可见，需 Gate/用户尽快合入。
+~~~
+
+### R10-fix-10：task_claims 权威键检查盲区修复（✅ done，任务卡事后补录）
+
+~~~text
+任务编号：R10-fix-10
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 09:35
+完成时间：2026-10-05 09:39（交付 32f4e45）；09:57 任务状态关闭（1b51e2c）
+依赖任务：MVP-02-amend（R10-fix-09 的载体；本修复是其同类镜像问题）
+真相源引用：R10 §8（canonical schema，补 task_claims 最小定义行）、
+            §11（Claim per-task 幂等 unique(claim_request_id, task_id)）、
+            §37.6（schema 补充清单，拆 task_claims/task_attempts 合并写法）、
+            §38.8（本修复的完整缺陷/修复/验证记录）
+允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**
+禁止修改目录：backend/**、docs/spec/mvp-task-checklist.md
+交付分支：agent/workbuddy/R10-fix-10-task-claims
+背景：Qoder 在 MVP-08 prep 交接提出 Q-6：R10-fix-09 把 per-task 唯一键
+      声明由 task_claims 承担，但 task_claims 不在 §8 表内，docstate
+      schema-keys 断言遍历不到，权威键落在检查器盲区。
+完成内容：
+  1. §8 补 task_claims 最小定义行（紧邻 claim_requests）；
+  2. §37.6 拆开 task_claims/task_attempts 合并写法；
+  3. docstate schema-keys 断言 1 条扩为 3 条（88 → 90 项），
+     消除「删 §8 字段仍能靠 §37.6 兜底通过」的注入漏洞。
+test_id：DOC-SCHEMA-001、DOC-STATE-001
+测试命令：./scripts.sh check
+当前状态：done
+commit：32f4e45（修复交付）、1b51e2c（任务状态关闭）
+验证结果：
+  - docstate 90 项检查 0 失败（修前 88 项）；
+  - 注入验证：删 task_claims.claim_request_id 后旧检查 88/88 放过，
+    新检查 90 项中 2 项失败（R10 §38.8 验证表）；
+  - 交付时 pytest 26 passed、ruff check + format 全绿（据 §38.8 与 32f4e45）。
+补录说明：
+  - 本卡由 TRAE 于 2026-10-05 10:12 依 32f4e45 提交说明与 R10 §38.8 事后补录：
+    WorkBuddy 在 1b51e2c 把任务标为 done 时遗漏了任务卡，导致 discipline
+    check_cards 自 main 1b51e2c 起持续 1 项失败，见本文件违规记录区。
+~~~
+
+### R10-fix-10-card：补录 R10-fix-10 任务卡（✅ done）
+
+~~~text
+任务编号：R10-fix-10-card
+负责人 Harness：TRAE
+开始时间：2026-10-05 10:12
+依赖任务：R10-fix-10（仅补登记，不改其交付内容）
+工作区：.worktrees/trae/
+真相源引用：tools/discipline/discipline.py 的 check_cards（缺卡判定）、
+            R10 §38.8 与提交 32f4e45/1b51e2c（补录事实来源）
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/r10-fix-10-card/a1
+完成标准：
+  1. R10-fix-10 任务卡字段完整（真相源引用、test_id、commit、验证证据）；
+  2. discipline 24 项检查 0 失败；
+  3. 缺卡违规在违规记录区留档。
+test_id：MVP-PROCESS-001
+测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：done
+完成时间：2026-10-05 10:15
+commit：ef07537（登记先于开工）、5e052d2（补卡 + 违规留档）
+验证结果：
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，无 backend 改动，pytest/ruff 不受影响。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
