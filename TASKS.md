@@ -57,7 +57,7 @@
 | MVP-07 | Qoder | MVP-06 | ✅ done | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
-| MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
+| MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -1594,6 +1594,82 @@ commit：c41282a
   - 集成健康状态机的完整形态（merge_failure_detected / reverting / retesting / escalated
     四个中间态与各自出边）MVP 只实现到能跑通 revert recovery 的程度，其余状态留待 MVP-11
     的集成测试覆盖。
+~~~
+
+### MVP-10a：Fake Harness 与统一 Adapter 接口（✅ done）
+
+~~~text
+任务编号：MVP-10a
+负责人 Harness：Qoder
+开始时间：2026-10-06 01:44
+依赖任务：MVP-08（✅ 已验收）、MVP-05/06/07（均已合入 main）
+工作区：.worktrees/qoder/
+真相源引用：R10 §7（Adapter 接口的 16 个动词与拉取模型）、§6（Harness 注册、能力与
+            registration_version）、§11（Claim 与幂等）、§13（Lease 与 fencing 在
+            Adapter 侧的表现：续期被拒即失联）、§16（submit 与 receipt）、
+            §26（MVP-ADAPTER-001）
+允许修改目录：backend/app/adapter/**、backend/app/api/**、backend/tests/**、
+            docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            backend/app/git/**、backend/app/verify/**、backend/app/merge/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-10a/a1
+完成标准：
+  1. 统一 Adapter 接口：§7 的 16 个动词各有一个方法，签名与 R10 原文一致
+  2. Fake Harness 走**真实 HTTP API** 跑完 claim → heartbeat → 在 worktree 里提交 →
+     publish → submit → verify → review → merge → merged，全程不直接读写数据库
+     （这正是 MVP-08 卡里"只通过 API"那条链路的补齐）
+  3. 能力探测与注册版本：probe 结果写入 capability_probes，注册版本在 Claim 时固定
+  4. 超时/放弃/重新接手：Fake Harness 能表现心跳停止（Lease 过期 → stale → reclaim → take_over）
+     与 abandon 两条路径
+  5. 提交失败结果的能力：Fake Harness 能提交一个 verify 必然失败的 commit，
+     并断言任务进 changes_requested 而不是 awaiting_review
+test_id：MVP-ADAPTER-001
+测试命令：./scripts.sh check
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-06 02:20
+commit：f396557
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  ruff        : All checks passed，67 files already formatted
+  pytest      : 194 passed（MVP-10a 新增 12）
+  关键断言     : `test_adapter.py` 先从 **R10 §7 正文解析出 16 个动词**，再断言接口与实现
+                 对得上 —— 假 Harness 若自造接口，其余测试全绿也证明不了 10b 要满足什么；
+                 Fake Harness 走**真实 HTTP** 跑完 claim→heartbeat→commit→publish→submit
+                 →verify→review→merge→merged；失败结果进 changes_requested；
+                 abandon；Lease 过期→stale→reclaim→take_over；旧 epoch 心跳被拒；
+                 未注册 Harness 的 probe 判 degraded 且不产生有效能力
+已知问题：
+  - **Fake Harness 第一次完整跑通就逼出一个真缺陷**：通过 API 创建的 project 没有
+    `integration_health` 行，而 Merge Gate 要求该行存在且为 green —— 于是**任何 API 建的项目
+    永远无法合并**。已改为 `create_project` 在同一事务里插一行 green。上一层的测试看不到它，
+    因为那些测试用 `seed_project` 直接种了这行。
+  - **补了 §7 的头两个动词**：`POST /adapter/probe` 与 `GET /adapter/capabilities`。MVP-08
+    没实现它们（不在它那 5 条完成标准里），但 §7 的动词表以 probe 开头 —— Adapter 一接入就
+    会撞上。probe 的语义按 §6：自报每次都记录，但**不单独构成有效能力**，未注册的 Harness
+    回 degraded 且有效能力为空。
+  - **需要一次迁移**：`capability_probes` 与 `harness_registrations` 在 §8 的 canonical 清单里，
+    但 001 没建。已加 `006_adapter_registration.sql`（只建表，不改既有表），按先例在本卡允许
+    目录里声明为跨任务改动。没有它，probe 结果无处落、Claim 固定的 registration_version
+    无法回溯 —— 「注册信息变更必须保留历史」就成了空话。
+  - **Claim 的能力门控未实现**：R10 §11 检查 5 要求 Claim 校验 Harness 能力，但那在
+    `backend/app/claim/**`，不在本任务允许目录内。本任务只做到「能力探测与注册版本」，
+    门控留给 MVP-04 的后续或 MVP-11。
+  - `accept_help` / `reject_help` / `split_task` / `ask_human` 四个 §7 动词**尚无路由**：
+    Adapter 里方法存在但在调用时抛 `UnsupportedVerb`（明确失败，不是静默 NotImplemented）。
+    它们对应的状态机边多数已存在，缺的是 API 层与部分业务动作。
+  - `capabilities()` 的身份是**显式查询参数**：v1 还没有认证层，调用方自己声明 harness_id。
+    这是临时形态，不是身份校验；MVP-11 的安全审查应当把它列进去。
+  - 10b（真实 Adapter）不在本任务范围。清单已确认它在关键路径上（MVP-11 需要
+    `MVP-ADAPTER-002`），不能砍。
+  - R10 §7 没有 `start` 与 verify 动词（MVP-05/06 已分别记录）。Fake Harness 走 HTTP 的部分
+    是 16 个动词，`start` 与 verify 由调度器侧驱动并在测试中显式标注 —— 不新增 §7 未定义的
+    动词，也不假装它们走了 HTTP。
+  - 10b（真实 Adapter）不在本任务范围；清单已确认它在关键路径上（MVP-11 需要
+    MVP-ADAPTER-002），由后续任务完成。
 ~~~
 
 ## 关键路径

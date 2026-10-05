@@ -11,12 +11,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.adapter.registry import HarnessRegistry, capabilities_from
 from app.api import schemas
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
 from app.git.publish import PublishProxy
 from app.lease.service import renew_lease
-from app.tasks.service import SchedulerService
+from app.tasks.service import NotFound, SchedulerService
 
 
 def _database(request: Request) -> Database:
@@ -82,6 +83,61 @@ def reject_plan(plan_id: str, body: schemas.PlanDecision, service: SchedulerDep)
 
 
 # ----------------------------------------------------------------- adapter
+
+
+@adapter.post("/probe")
+def probe(body: schemas.ProbeRequest, database: DatabaseDep) -> dict[str, Any]:
+    """R10 §7 ``probe()`` / §6 capability source.
+
+    The self-report is recorded every time, but it does not become the effective
+    capability set on its own. R10 §6: runtime self-report is for alarms and
+    degradation, and may not by itself authorise a high-risk claim -- so a harness
+    the human-maintained registry does not know comes back degraded with no
+    effective capabilities, rather than being trusted because it said so.
+    """
+    registry = HarnessRegistry(database)
+    registered = registry.current(body.harness_id)
+    warnings: list[str] = []
+    degraded = False
+    if registered is None:
+        degraded = True
+        effective: list[str] = []
+        warnings.append("harness is not in the human-maintained registry; self-report only")
+    else:
+        effective = list(capabilities_from(registered))
+        missing = sorted(set(body.self_reported_capabilities) - set(effective))
+        if missing:
+            degraded = True
+            warnings.append(f"self-reported capabilities not in the registry: {missing}")
+    return registry.record_probe(
+        harness_id=body.harness_id,
+        reported_capabilities=list(body.self_reported_capabilities),
+        effective_capabilities=effective,
+        adapter_version=body.adapter_version,
+        host_mode=body.host_mode,
+        degraded=degraded,
+        warnings=warnings,
+    )
+
+
+@adapter.get("/capabilities")
+def capabilities(database: DatabaseDep, harness_id: Annotated[str, Query()]) -> dict[str, Any]:
+    """R10 §7 ``capabilities()``.
+
+    Identity is an explicit parameter because v1 has no authentication layer yet;
+    the card records that rather than pretending the caller is authenticated.
+    """
+    row = HarnessRegistry(database).current(harness_id)
+    if row is None:
+        raise NotFound(f"unknown harness: {harness_id}")
+    return {
+        "harness_id": harness_id,
+        "provider": row["provider"],
+        "adapter": row["adapter"],
+        "status": row["status"],
+        "registration_version": row["registration_version"],
+        "capabilities": list(capabilities_from(row)),
+    }
 
 
 @adapter.post("/claim")

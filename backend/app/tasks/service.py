@@ -114,6 +114,15 @@ class SchedulerService:
                 "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
                 (project_id, name, now),
             )
+            # R10 §21 makes integration_health the merge queue's stop-the-line
+            # signal. Without a row, every merge on an API-created project is
+            # refused as "no integration_health row" -- the fake harness found
+            # this on its first full run.
+            conn.execute(
+                "INSERT OR IGNORE INTO integration_health(project_id, status,"
+                " integration_commit, updated_seq) VALUES (?, 'green', NULL, NULL)",
+                (project_id,),
+            )
         return {"project_id": project_id, "name": name, "created_at": now}
 
     def create_group(self, *, group_id: str, project_id: str, name: str) -> dict[str, object]:
