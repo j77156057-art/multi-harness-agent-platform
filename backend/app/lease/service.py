@@ -115,6 +115,25 @@ def grant_lease(
     )
 
 
+def reissue_lease_token(conn: sqlite3.Connection, *, lease_id: str) -> str:
+    """Mint a fresh token for an active lease and return it once (R10 §13).
+
+    The recovery path for a harness that lost its token: only the hash is
+    stored, so the original plaintext cannot be handed back -- instead the
+    hash is replaced and the previous token stops working. Callers must have
+    checked that the lease is active and not expired; a dead lease has nothing
+    to reissue.
+    """
+    token = secrets.token_urlsafe(32)
+    cursor = conn.execute(
+        "UPDATE leases SET token_hash = ? WHERE lease_id = ? AND released_at IS NULL",
+        (_hash_token(token), lease_id),
+    )
+    if cursor.rowcount != 1:
+        raise LeaseNotFound(f"lease {lease_id} is not active")
+    return token
+
+
 def renew_lease(
     conn: sqlite3.Connection,
     *,
