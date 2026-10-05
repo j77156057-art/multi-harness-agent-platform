@@ -29,6 +29,7 @@
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
+| fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -72,6 +73,7 @@
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
+| 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
 | 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
@@ -545,29 +547,38 @@ PermissionError: [Errno 13] Permission denied:
 
 改动文件：`backend/app/db/connection.py`
 
-### ⚠️ 已知 flaky：并发初始化测试（09:55 观察）
+### ⚠️ 更正：flaky 未能复现，撤回登记（10:10）
 
-`test_concurrent_initialization_and_events_have_one_order` 在**连续两次全量跑**时
-偶发失败（本次 1/9），单独跑 6/6 通过，全量单跑 8/8 通过。
+**原登记（09:55）**：称 `test_concurrent_initialization_and_events_have_one_order`
+"连续两次全量跑时偶发失败（1/9）"，并给出两个猜测原因（句柄释放延迟、Defender）。
 
-**观察到的特征**：失败发生在"门禁三道里 pytest 紧接着又跑一次"的场景，
-即上一次 pytest 进程刚退出、`.lock` 文件与 SQLite 句柄尚未完全释放时立刻重跑。
-单独跑或间隔重跑不复现。
+**撤回理由**：按 `fix-flaky-init` 任务做定向复现，**无法复现**：
 
-**与今早已修缺陷的区别**：
-
-| | 症状 | 状态 |
+| 复现方式 | 次数 | 结果 |
 |---|---|---|
-| 早上（`403e3a5` 前） | 0/5 确定性失败，`PermissionError` | ✅ 已修 |
-| 现在 | 连续重跑偶发，1/9 | ⚠️ 未定位，疑似句柄释放延迟 |
+| 单测连跑（退出码判定） | 20 | 20/20 通过 |
+| 全量连跑（退出码判定） | 15 | 15/15 通过 |
+| 复刻原场景（连续两次全量跑） | 16 | 16/16 通过 |
+| 模拟门禁三道（docstate + pytest ×2） | 12 | 12/12 通过 |
 
-**处理**：登记为已知 flaky，不掩盖。归属 MVP-02（`backend/app/db/**`）。
-建议排查方向：`_lock_file` 的 `LK_UNLCK` 与 `conn.close()` 的顺序、
-以及 pytest tmp_path 目录在 Windows 上被 Defender 扫描导致的释放延迟。
+**原判断的错误**：09:55 那次的"1/9"来自
+`pytest -q ... | tail -2` 的输出，而 `pytest -q` 成功时**只输出进度行**
+（`.... [100%]`），没有 `N passed` 汇总行。我当时把另一次命令的 `FAILED` 行
+误归因到这一轮，且**没抓到 `^E` 错误行**就下了根因判断。
+更早一次用 `grep -q "1 passed"` 判成功也不可靠 —— 单测通过时输出是 `.` 而非 `1 passed`。
 
-**门禁影响**：`./scripts.sh check` 一次跑通常通过（8/8），
-但**不保证 100%**。CI 若遇偶发红，应先复跑确认是否为该 flaky，
-不要直接当新缺陷排查。
+**结论**：当时**没有可归因的失败证据**。可能是：
+- 上一轮 docstate 注入缺陷实验改过 R10 文件、pytest 有测试读它（我确实做过
+  注入验证，还原后立即跑的那次）；
+- 或其他一次性环境因素。
+
+**给后续的纪律**：判 pytest 结果**一律用退出码**（`$?`），不要用 `tail`/`grep` 解析输出；
+失败时必须同时抓 `^E` 行与 `FAILED` 行，两者缺一不可归因。`scripts.sh check`
+本身用退出码，不受影响。
+
+**与今早已修缺陷的区分仍有效**：`403e3a5` 修的 `PermissionError` 是
+**确定性**失败（有明确 `^E` 行、0/5 复现），已闭环；本条是**无法复现**的
+一次性现象，两者不是同一问题。
 
 ## 关键路径
 
