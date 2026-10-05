@@ -2942,7 +2942,7 @@ test_id：VERIFY-DIFF-001、VERIFY-RECEIPT-001
           全量 ..\.venv\Scripts\python.exe -m pytest -q
 当前状态：✅ done（通过附遗留清单 6 项，无 P1）
 完成时间：2026-10-06 00:47
-commit：（验收证据提交；本行为随附回填提交）
+commit：0eed6c9（验收证据提交；本行为随附回填提交）
 验证结果：
   结论：✅ 通过。VERIFY-DIFF-001/002 逐条双证据全部成立，证据套件
   tests/test_verify.py 17/17 退出 0；另以一次性探针补得两条套件外证据
