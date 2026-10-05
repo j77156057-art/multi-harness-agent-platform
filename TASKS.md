@@ -36,7 +36,8 @@
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
-| MVP-04 | Qoder | MVP-02 MVP-03 | 🔍 review（阻塞项已裁定） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 2026-10-05，附遗留清单） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -79,8 +80,9 @@
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
-| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
+| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
 | 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
+| 17 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -161,6 +163,24 @@ discipline `check_cards` 持续 1 项失败：
 MVP-04 合并进入 main，合并时无人核对待合入分支上 done 任务的卡片完整性。
 **已连续两次同类违规：建议把「合并前检查分支内所有标 done 任务均有完整卡」
 并入合并者检查清单，不能只依赖事后 discipline 红灯补救。**
+
+### 违规记录：MVP-04 第二次「先合 main 后验收」（e656058）
+
+**事实**：Qoder 的 MVP-04（★瓶颈任务，8c0233a）在任务表/卡片状态仍为
+🔍 review 时，由 `e656058` 合入 main（2026-10-05 10:25 卡成、随后合入），
+验收结论于当日 19:55 才由 MVP-04-verify 补出。这是继 MVP-03（db9bc19）
+之后**第二次同模式违规**，且发生在第一条违规已留档之后。
+
+**已采取的纠正**：TRAE 以 MVP-04-verify（`agent/local/trae/MVP-04-verify/a1`）
+按四条 test_id 逐条机械核查，结论为「通过（附遗留清单）」，并把瓶颈任务
+解锁；本记录为第二条留档。
+
+**根因**：MVP-03 的纠正只停留在文档告诫（"合并前置条件必须是验收通过"），
+没有机械执行点——现有 CI（gate.yml）在 push main 之后才跑，不是闸；
+Merge Gate 本身要等 MVP-07。**文档规矩在并行压力下不可靠，必须把验收状态
+变成合并前可机械判定的条件。** 已确定的纠正方向：给 discipline 增加
+git 感知检查（已合入 main 的任务分支必须为 ✅ 状态且证据完整），
+任务 GATE-MERGE-CHECK-01 排期在本验收之后，防止第三次发生。
 
 ## 任务卡
 
@@ -1030,7 +1050,7 @@ commit：403e3a5
   - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
 ~~~
 
-### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（review ★瓶颈）
+### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（✅ 已验收，TRAE 2026-10-05 19:55）
 
 ~~~text
 任务编号：MVP-04
@@ -1066,7 +1086,7 @@ commit：403e3a5
   5. 资源预占失败只进 queued，不写 owner/attempt/Lease，且不是错误（R10 §11）
 test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
 测试命令：./scripts.sh check
-当前状态：review
+当前状态：✅ 已验收（TRAE，2026-10-05 19:55，见卡末验收结论）
 完成时间：2026-10-05 10:25
 commit：8c0233a
 验证结果：
@@ -1102,6 +1122,66 @@ commit：8c0233a
   - 首次合入 main 时被别的 AI 在根工作区执行 `git reset` 打断（reflog
     `3d8e87d HEAD@{0}: reset: moving to HEAD`），进行中的合并被清空、重做一次。
     已提交的任务分支未受影响。根工作区是共用的合并区，建议合并时避免并发操作。
+
+验收结论（TRAE，2026-10-05 19:55，基线 main d5769e2，含 R10-fix-11）：
+  总评：✅ 通过（附遗留清单）。四条 test_id 逐条机械核查，全部有代码行与测试
+  断言双证据，无 P1/P2；pytest 85 passed，并发用例实测 10/10。
+
+  CORE-CLAIM-001（原子 Claim）✅：
+  - transaction() 默认 BEGIN IMMEDIATE（db/connection.py:165-172）；
+  - 条件 UPDATE（claim/service.py:625-657）与 R10 §11 R8 SQL 逐字对齐：
+    status='ready' AND current_attempt_id IS NULL AND
+    (attempt_no < max_attempts OR budget_override_by IS NOT NULL)，
+    rowcount != 1 即 ConcurrentStateChange；预算预检 + 条件更新双保险；
+  - owner/attempt/epoch+1/Lease/task_claims/claim 事件同一事务。
+
+  CORE-CLAIM-002（两层幂等）✅：
+  - 请求级：claim_requests PK + payload_hash 校验，冲突在独立事务写
+    idempotency_conflict 并整请求拒绝（service.py:199-212, 231-243）；
+  - per-task：UNIQUE(claim_request_id, task_id)；失败项留行带 release_reason，
+    R10-fix-11 后 attempt_id/owner 为 NULL（测试断言 is None，非空串）；
+  - 回放 SELECT task_claims；test_replay_reads_per_item_results_from_task_claims
+    抹掉 first_result_json 后回放结果不变，机械证明不从 JSON 反解；
+  - 资源预占失败 → queued，条件 UPDATE 仅改状态不写 owner/attempt（_defer）；
+  - 真双连接 + Barrier（test_claim_concurrency.py）：唯一
+    owner/attempt/lease/event，epoch 恰好 +1；同 request_id 竞态一写一放。
+  - 解释性备注（非缺陷）：不同 request_id 的竞争败者整批回滚、不留
+    claim_requests/task_claims 行——属 §11「默认 all-or-nothing」语义，
+    已有测试锁定；「每项留行」针对被受理的批量请求。
+
+  CORE-LEASE-001 ✅：
+  - grant/renew/release/expire 全路径；token 仅存 sha256、明文只返回一次；
+  - 巡检总释放 lease+资源，仅 6 个 OWNER_STATES 迁 stale（对齐 R10-04 折行边
+    修复后的 lease_expire 边），二次巡检 no-op；预算耗尽 stale/reclaiming
+    → escalated（§10 attempt_budget_exhausted 出口）；
+  - reclaim 强制 grace 窗口；take_over 复用冻结 base_commit，不重算 merge-base。
+  - 小偏差（不阻塞）：grant_wall/grant_mono/boot_id 已落库，但过期/续期判定
+    仍只用墙钟 lease_until，跨 boot 单调时钟豁免未实现；单进程 MVP 可接受。
+
+  CORE-FENCE-001 ✅：
+  - guarded_write 统一入口：epoch 严格相等 + attempt 匹配 + 状态白名单 +
+    强制事务内；renew 与非 lease 路径、take_over 均有旧 epoch 拒绝测试；
+  - apply_transition 的条件 UPDATE 带 expected_epoch，并发改动 → rowcount 0
+    → ConcurrentStateChange（claim/transitions.py:76-86）。
+  - 边界（非本任务）：API 层旧 epoch publish 拒绝属 MVP-08（§26 退出条件原文
+    「在 API 层被拒绝」）；Push Proxy/pre-receive 执行点属阶段 2（MVP-05/07）。
+
+  R10-fix-11 复核 ✅：NO_ATTEMPT 已由 "" 改为 None；migration 002 重建表并
+  NULLIF 回填历史空串；无哨兵残留矛盾。可读性建议（不阻塞）：常量名
+  NO_ATTEMPT 现值为 None，名字略误导，可在后续触碰时改名。
+
+  遗留清单（不阻塞验收，需追踪归属）：
+  1. §11 Claim 检查 5（Harness 能力/质量门控）→ 归属 MVP-10a（checklist §MVP-10）；
+  2. §11 检查 9（secret_refs/最小权限）→ 归属 MVP-11（checklist:422）；
+  3. §11 检查 2 运行期 task_outputs hash/schema_version 校验 → 待 MVP-06
+     Verify 设施；检查 4 的 base_commit 显式祖先校验 → 待 MVP-05/07 Git 设施
+     （当前 integration_health 无行时 base_commit 落 NULL，该边界无测试，建议
+     Git 设施落地时补）；
+  4. §11 检查 7（并发窗口）与 path_conflicts 巡检、dependencies_not_merged
+     未见明确任务归属——建议协调者在排期时指派（§26 阶段 1 实现列表含
+     blocked 巡检器，可并入后续巡检器任务）；
+  5. review/merge 独立 Lease、Heartbeat 巡检（3 次 grace、stuck 3/5 次）
+     未实现，属 §26 阶段 1 后续退出条件，不在本卡 5 条完成标准内。
 ~~~
 
 ## 提交前自检
@@ -1111,3 +1191,53 @@ commit：8c0233a
 git log --oneline -1   # 确认 commit 在任务分支上而非 main
 git branch --show-current
 ```
+
+### MVP-04-verify：MVP-04 验收（✅ done）
+
+~~~text
+任务编号：MVP-04-verify
+负责人 Harness：TRAE
+开始时间：2026-10-05 19:47
+依赖任务：MVP-04（8c0233a，已随 e656058 合入 main）、claim-nullable（d5769e2，
+          R10-fix-11 对 MVP-04 自陈阻塞项的裁定修复，验收基线须包含）
+工作区：.worktrees/trae/
+真相源引用：R10 §7 §8 §10 §11 §12 §13 §26 §28；MVP-04 任务卡（本文件）；
+            提交 8c0233a（MVP-04 交付）、d5769e2（R10-fix-11）
+允许修改目录：TASKS.md（验收结论、违规登记）；其余目录只读核查
+禁止修改目录：docs/spec/**、backend/**、tools/**（验收者不改被验代码）
+交付分支：agent/local/trae/MVP-04-verify/a1
+验收方法：不信测试数，逐条对照规范机械核查：
+  1. CORE-CLAIM-001：双连接并发 Claim 同任务仅一个成功；BEGIN IMMEDIATE 事务顺序、
+     条件 UPDATE RowsAffected==1、guard（attempt_no < max_attempts OR
+     budget_override_by IS NOT NULL）与 R10 §11 逐字一致；
+  2. CORE-CLAIM-002：两层幂等——claim_request_id 整体回放 +
+     UNIQUE(claim_request_id, task_id) per-task；含失败项每个任务项都有 task_claims
+     行；资源预占失败只进 queued、不写 owner/attempt/Lease；
+  3. CORE-LEASE-001：Lease 创建/续期/过期回收路径；
+  4. CORE-FENCE-001：fencing epoch 单调，旧 epoch heartbeat/写入被拒；
+  5. R10-fix-11 后复核：attempt_id/owner 已改 nullable，Qoder 卡中的 NO_ATTEMPT
+     空串哨兵是否仍残留、是否与新 schema 矛盾；
+  6. 核对 Qoder 卡「未实现」三项（能力/质量门控、path_conflicts、
+     dependencies_not_merged）确属后续 MVP 而非 §26 验收项。
+完成标准：
+  1. 四条 test_id 逐条给「通过 / 缺陷（开 amend）」结论并附代码行证据；
+  2. 验收基线为当前 main（含 d5769e2），四道门禁结论写清；
+  3. 「review 状态合入 main」按违规记录区三段式留档（第二次同模式）；
+  4. 通过则 MVP-04 卡转 ✅ 已验收，不通过则列明 amend 清单。
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：done
+完成时间：2026-10-05 19:55
+commit：6bb4271（登记先于开工）、关卡提交随本提交闭合（见 git log）
+验证结果：
+  - 验收结论：✅ 通过（附遗留清单），四条 test_id 逐条证据见 MVP-04 卡末；
+  - docstate：90 项 0 失败；ruff check/format：全过；
+  - pytest：85 passed；test_claim_concurrency.py 连跑 10/10；
+  - discipline：24 项中 1 项失败为既有红灯（缺卡=['claim-nullable']），
+    非本任务引入，未越权代修。
+后续事项（交用户/协调者）：
+  1. claim-nullable（R10-fix-11）缺任务卡——第三次同类缺卡；另认领序号
+     与 R10-fix-10-card 撞号 14，需补卡任务一并更正；
+  2. GATE-MERGE-CHECK-01（discipline git 感知检查）按既定顺序开工；
+  3. 遗留清单第 4 项（并发窗口/path_conflicts 排期归属）需协调者指派。
+~~~
