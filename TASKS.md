@@ -59,7 +59,8 @@
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
-| MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ done | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
+| MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ done（待外部验收，04:23 经 ae07649 先合 main） | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
+| MVP-10b-verify | TRAE | MVP-10b | 🟢 doing | `agent/local/trae/MVP-10b-verify/a1` | `MVP-ADAPTER-002` |
 | dup-incident | Claude Code | — | ✅ done | `agent/local/claude/dup-incident/a1` | `MVP-PROCESS-001` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -122,6 +123,7 @@
      （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
+<!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1745,6 +1747,60 @@ commit：622b1f2
   - claude 的默认 permission-mode 取 acceptEdits（不是 bypassPermissions）：unattended
     下 Bash/git 类工具可能因无审批失败超时，这是有意的保守默认，deployment 需要时
     由调用方显式覆盖（R10 §17 的安全审查可在 MVP-11 复核这一默认）。
+~~~
+
+### MVP-10b-verify：MVP-10b 外部验收（🟢 doing）
+
+~~~text
+任务编号：MVP-10b-verify
+负责人 Harness：TRAE
+开始时间：2026-10-06 05:45
+依赖任务：MVP-10b（Qoder，作者完成提交 622b1f2，分支 tip 8d50fb5；
+          2026-10-06 04:23 经 ae07649 以 --no-ff 合入 main，先合后验）
+工作区：.worktrees/trae/
+真相源引用：R10 §7（Adapter 16 个动词；未实现动词显式 UnsupportedVerb）、
+            §6（注册四元组 harness_id/provider/adapter_version/
+            registration_version 可追踪；能力探测）、§13（Lease 与 fencing；
+            丢 token 后的恢复：复放 Claim 对活跃未过期 Lease 轮换 token）、
+            §14（worktree 与分支命名；危险分支拒绝）、§16（submit 与 receipt）、
+            §25 阶段 5（退出条件：probe / Claim / Heartbeat / Submit / Verify /
+            Push Proxy / 超时 / 恢复 / 危险操作拒绝，逐 Adapter 参数化）、
+            §26（MVP-ADAPTER-002）、docs/spec/mvp-task-checklist.md MVP-10b
+允许修改目录：TASKS.md、docs/claims/46-trae--MVP-10b-verify.md（验收者不改被验代码）
+禁止修改目录：docs/spec/**、backend/**、tools/**、docs/adr/**、docs/prep/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/trae/MVP-10b-verify/a1
+背景：MVP-10b 已由 Qoder 标记 done（作者自陈门禁全绿、新增 29 个测试），
+      但在外部验收前即被合入 main（ae07649，第五次先合后验，待验收结论
+      出来后按惯例在违规记录区留档）。本任务沿用 MVP-04/05/06/08-verify
+      形式：不采信卡片自陈，逐条找代码行 + 机械测试断言双证据，决定
+      MVP-11 能否以它为基线。
+核查计划（逐条双证据）：
+  1. 三 Adapter（codex/claude/opencode）注册四元组与能力探测，argv 单点
+     构造且有逐字断言；CLI 无头契约来源（--help 实测/文档）是否如实标注；
+  2. §7 全部 16 动词路由齐（含 10a 遗留的 list_ready_tasks/read_context
+     隐性 404 是否真补），未实现动词显式 UnsupportedVerb，不允许静默 404；
+  3. 真实全链路 claim→heartbeat→publish(Push Proxy)→submit→verify→
+     review→merge→merged：真实 HTTP + 真实 worktree，模型进程替身边界
+     是否如实声明；
+  4. §25 阶段 5 退出条件 9 条逐 Adapter 参数化；超时杀进程 abandon、
+     kill-on-deadline 对真实子进程有独立验证；
+  5. 恢复：复放 Claim 对活跃未过期 Lease 轮换 token 且库中只存哈希、
+     attempt_no 不增；已过期/已释放不轮换；
+  6. 危险操作拒绝：main 分支/不可达 commit/旧 epoch/无路由动词；
+     visibility=redacted 显式 422 是否站得住（§17 未定义语义）；
+  7. 越界核查：diff 不得碰禁止目录（db/events/state/plan/lease/verify/
+     merge/git、R10、docstate、discipline）；
+  8. 独立重跑门禁（PYTHONUTF8=1 与不带各一次，核实作者卡 GBK 已知问题
+     是否只影响 mergeguard 且确属基线既有）。
+test_id：MVP-ADAPTER-002
+测试命令：.venv\Scripts\python.exe tools\docstate\docstate.py；
+          .venv\Scripts\python.exe tools\discipline\discipline.py；
+          cd backend; ..\.venv\Scripts\python.exe -m pytest -q -p no:warnings
+当前状态：🟢 doing（登记先于开工）
+完成时间：（完工回填）
+commit：（完工回填）
+验证结果：（完工回填）
 ~~~
 
 ### ❌ chain-template 优化：已做、已测、已否决（WorkBuddy，05:15-05:35）
