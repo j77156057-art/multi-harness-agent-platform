@@ -34,7 +34,7 @@
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
-| MVP-04 | Qoder | MVP-02 MVP-03 | 🟢 doing ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
+| MVP-04 | Qoder | MVP-02 MVP-03 | 🔍 review ★瓶颈 | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -74,9 +74,9 @@
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
-| 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
+| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -946,7 +946,7 @@ commit：403e3a5
   - Windows 锁行为仍需在实际目标环境持续复测；本卡记录的是当前工作区的验证证据。
 ~~~
 
-### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（doing ★瓶颈）
+### MVP-04：原子 Claim、Attempt、Lease、Heartbeat（review ★瓶颈）
 
 ~~~text
 任务编号：MVP-04
@@ -982,11 +982,33 @@ commit：403e3a5
   5. 资源预占失败只进 queued，不写 owner/attempt/Lease，且不是错误（R10 §11）
 test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-LEASE-001、CORE-FENCE-001
 测试命令：./scripts.sh check
-当前状态：doing
-完成时间：
-commit：
+当前状态：review
+完成时间：2026-10-05 10:25
+commit：8c0233a
 验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 24 项，1 项失败（缺卡=['R10-fix-10']，WorkBuddy 的任务，非本任务）
+  ruff check  : All checks passed
+  ruff format : 28 files already formatted
+  pytest      : 57 passed（MVP-04 新增 31）
+  并发复跑    : test_claim_concurrency.py 连跑 10 次，10/10 通过
+  ⚠️ ./scripts.sh check 当前会在 discipline 处短路（set -e），dirty main 上 ruff 与
+     pytest 不会执行；上表后两行是用 ./scripts.sh lint 与 ./scripts.sh test 单独跑的。
 已知问题：
+  - **规范冲突，需要裁定**：task_claims.attempt_id 与 .owner 在 001_initial.sql 里是
+    NOT NULL，但 R10 §11 既要求「每个任务项（含失败项）都留一行」，又要求延迟资源时
+    「不写 owner/attempt/Lease」。两条规则按现有 schema 无法同时满足。当前实现用显式
+    命名的空串哨兵（NO_ATTEMPT）保留行、同时让值不可能被当成真实 attempt。正解是要么
+    把两列改可空（属 MVP-02 的 backend/migrations/**，不在本任务允许目录内），
+    要么改 R10。
+  - 跨任务改动（已在此登记）：docs/traceability.md 的 CORE-CLAIM-001/002、
+    CORE-LEASE-001、CORE-FENCE-001 四行从「未实现（MVP-04）」改为「有断言」并写上
+    承接文件。该文件属 graph-traceability；其「强制状态」列明确不被断言，留着不改会
+    让同一提交里的代码与文档相互矛盾。
+  - 复放的 claim 不重新发放 lease_token（库中只存哈希）。Adapter 若在重放后丢失了
+    首次拿到的 token，只能等 Lease 过期后走 reclaim/take_over。
+  - 未实现（不属本卡 5 条完成标准）：Harness 能力/质量门控（R10 §11 检查 5/9）、
+    exclusive_paths 的 path_conflicts 巡检、dependencies_not_merged 检查。
   - ★ TASKS.md 建议本任务配 2 个 AI（一人 Claim/幂等、一人 Lease/fencing/巡检器）。
     本人先做 Claim/幂等；若第二个 AI 加入，本卡更新后让出 backend/app/lease/** 与
     对应测试，两边路径互不重叠。
