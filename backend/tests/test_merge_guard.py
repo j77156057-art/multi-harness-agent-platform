@@ -11,6 +11,18 @@
   4. 持有者进程已死 + 超过 TTL -> 判定 stale；只死但没超时 -> 不 stale
   5. 真实并发：N 个线程同时抢锁，有且只有一个成功
   6. owner.json 损坏时不崩溃，报「残留」而不是假装空闲
+
+CLI 端到端（把 cli.py 当子进程跑在临时仓库里）额外覆盖：
+  7. 门禁全过 -> commit -> HEAD 前进 -> 锁与 MERGE_HEAD 都清干净。**唯一生产
+     成功路径**；首版把 `test_cli_merges_and_releases_lock` 删掉且无替代，
+     等于这条承诺零覆盖。
+  8. 门禁红 -> 不提交 -> **重跑本命令自动续跑到提交**（不再是需要人肉的死路）
+  9. 续跑时出现未暂存改动 -> 拒绝，不把别人的东西卷进 merge commit
+  10. MERGE_HEAD 与归属记录不符 -> 拒绝接管（fail-closed）
+  11. 退避重试时只回退自己的合并，绝不回退他人的
+
+12~14 用注入点做**确定性**测试：竞态没法靠真实计时稳定复现，而一个靠 sleep
+撞概率的测试只会偶尔绿、偶尔把别人的合并 abort 掉。
 """
 
 from __future__ import annotations
@@ -24,7 +36,7 @@ import time
 from pathlib import Path
 
 import pytest
-from mergeguard import guard
+from mergeguard import cli, guard
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -35,6 +47,83 @@ def _git(repo: Path, *args: str) -> None:
         encoding="utf-8",
         errors="replace",
     )
+
+
+def _git_out(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
+
+
+#: 临时仓库里的假门禁。真实项目里它们是 docstate / discipline 两个脚本；
+#: 夹具必须提供**可执行**的替身，否则「门禁全过 -> 提交」这条唯一生产成功
+#: 路径在结构上就够不到——首版正是因此零覆盖。
+#:
+#: 失败开关放在 `.git/` 下而不是工作区里：放在工作区会被
+#: 「拒绝脏工作区」那条守卫挡掉（`git status --porcelain` 看得见），
+#: 就没法构造「先红后绿」的续跑场景。
+_GATE_OK = 'print("{name}: 结果: 1 项检查，0 项失败")\n'
+#: discipline 的替身必须真的打印 [skip] 行 —— 「豁免是显式的、不静默」是
+#: mergeguard 的一条承诺，断言得在**成功路径**上就成立，而不是等某天门禁
+#: 真的豁免时才第一次被看到。
+_GATE_DISCIPLINE_OK = 'print("[skip] rootworktree（测试夹具）")\n' + _GATE_OK.format(
+    name="discipline"
+)
+_GATE_TOGGLING = """
+import pathlib
+import sys
+
+_flag = pathlib.Path(".git/gate-fails.flag")
+print("[skip] rootworktree（测试夹具）")
+if _flag.exists():
+    print("discipline: 结果: 1 项检查，1 项失败")
+    sys.exit(1)
+print("discipline: 结果: 1 项检查，0 项失败")
+"""
+
+
+def _install_gates(repo: Path, discipline_body: str | None = None) -> None:
+    (repo / "tools" / "docstate").mkdir(parents=True, exist_ok=True)
+    (repo / "tools" / "discipline").mkdir(parents=True, exist_ok=True)
+    (repo / "tools" / "docstate" / "docstate.py").write_text(
+        _GATE_OK.format(name="docstate"), encoding="utf-8"
+    )
+    (repo / "tools" / "discipline" / "discipline.py").write_text(
+        _GATE_DISCIPLINE_OK if discipline_body is None else discipline_body,
+        encoding="utf-8",
+    )
+    _git(repo, "add", "-A", "tools")
+    # 允许空提交：同一测试可能换一次门禁内容再装一次，内容相同时不该失败。
+    _git(repo, "commit", "--allow-empty", "-m", "install gate stubs")
+
+
+def _commit_feature(repo: Path, branch: str = "feature", fname: str = "g.txt") -> None:
+    """在临时仓库里造一个待合并的分支。"""
+    _git(repo, "checkout", "-b", branch)
+    (repo / fname).write_text("y", encoding="utf-8")
+    _git(repo, "add", fname)
+    _git(repo, "commit", "-m", "feature work")
+    _git(repo, "checkout", "main")
+
+
+def _pending_file(repo: Path) -> Path:
+    return guard.git_common_dir(repo) / cli.PENDING_FILENAME
+
+
+def _merge_head_file(repo: Path) -> Path:
+    return guard.git_common_dir(repo) / "MERGE_HEAD"
+
+
+@pytest.fixture
+def repo_with_gates(repo: Path) -> Path:
+    """带真门禁替身脚本的临时仓库（脚本已提交，不会被脏工作区守卫挡下）。"""
+    _install_gates(repo)
+    return repo
 
 
 @pytest.fixture
@@ -386,3 +475,327 @@ def test_cli_does_not_commit_before_gates(repo: Path):
     ).stdout.strip()
     assert before == after, "--skip-gate 也不该提交：门禁没跑，merge commit 不能落地"
     assert (repo / ".git" / "MERGE_HEAD").exists(), "应停在待提交的合并状态"
+
+
+# ---------------------------------------------------------------------------
+# 问题 1（高）：门禁红之后不是死路
+# ---------------------------------------------------------------------------
+
+
+def test_cli_merges_commits_and_releases_lock(repo_with_gates: Path):
+    """**唯一生产成功路径**：门禁全过 -> commit -> HEAD 前进 -> 现场清干净。
+
+    这条曾被删掉且无替代（TRAE 评审问题 3）：临时仓库夹具里没有门禁脚本，
+    门禁那段分支结构上就够不到，于是「门禁跑在 merge commit 落地之前」这个
+    核心承诺——也是整个工具存在的理由——零覆盖。
+    """
+    _commit_feature(repo_with_gates)
+    before = _git_out(repo_with_gates, "rev-parse", "HEAD")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "[skip] rootworktree（测试夹具）" in r.stdout, "豁免必须可见，不静默"
+
+    after = _git_out(repo_with_gates, "rev-parse", "HEAD")
+    assert after != before, "门禁通过后必须真的提交 merge commit"
+
+    parents = _git_out(repo_with_gates, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    assert len(parents) == 3, f"应是 merge commit（有 2 个父）：{parents}"
+    assert before in parents, "第一个父必须是合并前的 main"
+    assert _git_out(repo_with_gates, "rev-parse", "feature") in parents
+
+    assert not _merge_head_file(repo_with_gates).exists(), "提交后必须清掉 MERGE_HEAD"
+    assert not _pending_file(repo_with_gates).exists(), "提交后必须清掉待提交记录"
+    assert not guard.lock_path(repo_with_gates).exists(), "任何退出路径都必须释放锁"
+    assert "空闲" in _cli(repo_with_gates, "status").stdout
+
+
+def test_cli_gate_failure_does_not_commit_and_rerun_resumes(repo_with_gates: Path):
+    """门禁红 -> 不提交 -> **重跑同一条命令**自动续跑到提交。
+
+    早先版本的恢复指引是「修好门禁后重跑本命令」，而入口预检见 MERGE_HEAD
+    一律 exit 7，还误报「另一个 agent 正在跑 git」并诱导删锁 —— 一条指向自己
+    走不通的死路。现在靠 merge-pending.json 记录归属，重跑直接续跑。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates)
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+    before = _git_out(repo_with_gates, "rev-parse", "HEAD")
+
+    first = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert first.returncode == 5, first.stdout + first.stderr
+    assert "门禁未通过" in first.stderr
+    assert "重跑本命令即可" in first.stderr, "恢复指引必须可执行"
+    assert _git_out(repo_with_gates, "rev-parse", "HEAD") == before, "门禁红不得提交"
+    assert _merge_head_file(repo_with_gates).exists(), "应停在待提交状态"
+    assert _pending_file(repo_with_gates).exists(), "必须记下归属，否则无法区分他人合并"
+    assert not guard.lock_path(repo_with_gates).exists(), "退出前必须释放锁"
+
+    # 门禁修好了，重跑同一条命令。
+    flag.unlink()
+    second = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "跳过合并步骤，直接续跑" in second.stdout, "续跑必须是显式的"
+    assert _git_out(repo_with_gates, "rev-parse", "HEAD") != before, "续跑后必须提交"
+    assert not _pending_file(repo_with_gates).exists()
+    assert not _merge_head_file(repo_with_gates).exists()
+
+
+def test_cli_resume_refuses_to_sweep_foreign_staged_work(repo_with_gates: Path):
+    """续跑时若有人往暂存区塞了自己的东西，必须拒绝而不是提交进 main。
+
+    判据是**暂存区树哈希**与上次 merge 记录的指纹是否一致，而不是「工作区
+    脏不脏」。第一版这里用的是 `git diff --name-only`（未暂存），被本测试
+    抓出是假严格：未暂存与未跟踪的内容 `git commit` 本来就不会带进提交，
+    拒了只是白拒；反过来真正的危险（手敲 `git add`）它却完全看不见。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates)
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+    assert _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1").returncode == 5
+    flag.unlink()
+
+    # 别人的活儿被塞进暂存区
+    (repo_with_gates / "theirs.txt").write_text("别人的活儿", encoding="utf-8")
+    _git(repo_with_gates, "add", "theirs.txt")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "暂存区内容已改变" in r.stderr
+    assert "不允许续跑提交" in r.stderr
+    assert _merge_head_file(repo_with_gates).exists(), "拒绝时必须保留待提交合并现场"
+    assert not guard.lock_path(repo_with_gates).exists(), "退出前必须释放锁"
+
+
+def test_cli_resume_tolerates_unstaged_and_untracked_changes(repo_with_gates: Path):
+    """续跑时**未暂存**的改动不该被拒——`git commit` 本来就不会提交它们。
+
+    这是对上一条的镜像：守卫要精确，不能因为「看起来不安全」就一拒了之。
+    断言提交后这些内容仍原样留在工作区，即没有被顺手带进 merge commit。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates)
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+    assert _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1").returncode == 5
+    flag.unlink()
+
+    (repo_with_gates / "theirs.txt").write_text("别人的活儿", encoding="utf-8")
+    (repo_with_gates / "f.txt").write_text("工作区里的未暂存改动", encoding="utf-8")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (repo_with_gates / "theirs.txt").exists(), "未跟踪文件必须仍留在工作区"
+    assert (repo_with_gates / "f.txt").read_text(encoding="utf-8") == "工作区里的未暂存改动"
+    tracked = _git_out(repo_with_gates, "ls-tree", "--name-only", "HEAD")
+    assert "theirs.txt" not in tracked, "未跟踪文件绝不能被带进 merge commit"
+    assert (repo_with_gates / "f.txt").read_text(
+        encoding="utf-8"
+    ) != "x", "未暂存改动绝不能被带进 merge commit"
+
+
+def test_cli_refuses_foreign_merge_head_even_with_our_record(repo_with_gates: Path):
+    """归属记录在、但 MERGE_HEAD 指向别处 -> 拒绝接管（fail-closed）。
+
+    这种情况意味着合并已被他人接手或替换。此时「有记录」不构成「是我的」
+    的证据 —— 宁可拒绝，不能猜。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates)
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+    assert _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1").returncode == 5
+    flag.unlink()
+
+    # 模拟他人的合并替换了 MERGE_HEAD。
+    _merge_head_file(repo_with_gates).write_text("b" * 40 + "\n", encoding="utf-8")
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 7, r.stdout + r.stderr
+    assert "不符" in r.stderr
+
+
+def test_cli_clears_stale_record_when_merge_head_is_gone(repo_with_gates: Path):
+    """记录还在但 MERGE_HEAD 没了 = 合并已被提交或回退，清陈迹后正常继续。
+
+    不清理的话记录会一直卡住下一次合并，而它已经不对应任何现场。
+    """
+    _install_gates(repo_with_gates)
+    _commit_feature(repo_with_gates)
+    _pending_file(repo_with_gates).write_text(
+        json.dumps({"branch": "feature", "task_id": "T-9", "merge_head": "c" * 40}),
+        encoding="utf-8",
+    )
+    before = _git_out(repo_with_gates, "rev-parse", "HEAD")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "清理上次遗留的待提交合并记录" in r.stdout
+    assert _git_out(repo_with_gates, "rev-parse", "HEAD") != before
+    assert not _pending_file(repo_with_gates).exists()
+
+
+# ---------------------------------------------------------------------------
+# 问题 4（中）：退避重试绝不 abort 他人的合并
+#
+# 用注入点做确定性测试。这些分支的行为**只在毫秒级的 ref 锁竞态里出现**，
+# 真去撞那个窗口只会偶尔绿；而一个偶尔绿的测试在这里等于「偶尔 abort 掉
+# 别人的合并」，比没有测试更糟。
+# ---------------------------------------------------------------------------
+
+
+def _proc(returncode: int, stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["git"], returncode=returncode, stdout="", stderr=stderr
+    )
+
+
+_CONTENTION = "fatal: update_ref failed for ref 'ORIG_HEAD': couldn't set 'ORIG_HEAD'"
+_OK_PROC = _proc(0)
+_LOCKED_PROC = _proc(128, _CONTENTION)
+
+
+def test_retry_aborts_merge_it_started_itself():
+    """MERGE_HEAD 等于本次 merge 预期的那个 commit -> 是我们的，可以回退。"""
+    aborted: list[bool] = []
+    did = cli._abort_only_our_merge(
+        "a" * 40,
+        read_merge_head=lambda: "a" * 40,
+        abort=lambda: aborted.append(True),
+    )
+    assert did is True
+    assert aborted == [True]
+
+
+def test_retry_does_not_abort_when_no_merge_head():
+    """MERGE_HEAD 不存在 -> 本次 merge 根本没留下合并，无可回退。
+
+    实测 git 先落 ORIG_HEAD、再落 MERGE_HEAD，ref 锁失败时现场没有
+    「我的合并」标记。此时无条件 abort 只会误伤恰好在这时裸跑合并的别人。
+    """
+    aborted: list[bool] = []
+    did = cli._abort_only_our_merge(
+        "a" * 40,
+        read_merge_head=lambda: None,
+        abort=lambda: aborted.append(True),
+    )
+    assert did is False
+    assert aborted == [], "没有 MERGE_HEAD 时绝不能 abort"
+
+
+def test_retry_refuses_to_abort_someone_elses_merge():
+    """MERGE_HEAD 存在但指向别的 commit -> 他人的合并，抛 _ForeignMerge。
+
+    这正是退避窗口（3~9 秒）里会发生的事，而早先版本在这里无条件 abort，
+    会静默杀掉别人的合并 —— 与本工具存在的理由直接冲突。
+    """
+    aborted: list[bool] = []
+    with pytest.raises(cli._ForeignMerge):
+        cli._abort_only_our_merge(
+            "a" * 40,
+            read_merge_head=lambda: "b" * 40,
+            abort=lambda: aborted.append(True),
+        )
+    assert aborted == [], "他人的合并绝不能被 abort"
+
+
+def test_merge_retries_on_transient_ref_lock():
+    """瞬时 ref 锁：退避递增重试，重试预算有界。"""
+    waits: list[float] = []
+    calls: list[str] = []
+
+    def merge(_branch: str):
+        calls.append("merge")
+        return _LOCKED_PROC if len(calls) < 3 else _OK_PROC
+
+    proc, expected = cli._merge_with_retry(
+        "feature",
+        sleep=waits.append,
+        merge=merge,
+        read_merge_head=lambda: None,
+        abort=lambda: None,
+        rev_parse=lambda _b: "a" * 40,
+    )
+    assert proc.returncode == 0
+    assert expected == "a" * 40
+    assert len(calls) == 3, calls
+    assert waits == [3.0, 6.0], f"退避必须递增有界：{waits}"
+
+
+def test_merge_gives_up_after_retry_budget():
+    """预算用尽仍撞锁 -> 如实返回失败，不无限重试。"""
+    calls: list[str] = []
+
+    proc, _ = cli._merge_with_retry(
+        "feature",
+        sleep=lambda _s: None,
+        merge=lambda _b: (calls.append("m"), _LOCKED_PROC)[1],
+        read_merge_head=lambda: None,
+        abort=lambda: None,
+        rev_parse=lambda _b: "a" * 40,
+    )
+    assert proc.returncode != 0
+    assert len(calls) == cli.MERGE_RETRY_ATTEMPTS, calls
+
+
+def test_merge_does_not_retry_real_conflict():
+    """真冲突不能重试：冲突现场必须留着给人解，重试只会把它盖掉。"""
+    calls: list[str] = []
+    conflict = _proc(1, "CONFLICT (content): Merge conflict in c.txt")
+
+    proc, _ = cli._merge_with_retry(
+        "feature",
+        sleep=lambda _s: None,
+        merge=lambda _b: (calls.append("m"), conflict)[1],
+        read_merge_head=lambda: None,
+        abort=lambda: None,
+        rev_parse=lambda _b: "a" * 40,
+    )
+    assert proc.returncode != 0
+    assert len(calls) == 1, "非 ref 锁失败必须立刻停，不重试"
+
+
+# ---------------------------------------------------------------------------
+# 问题 2（中）：最终 commit 也必须有界重试
+# ---------------------------------------------------------------------------
+
+
+def test_commit_retries_on_transient_ref_lock():
+    """commit 撞的是 refs/heads/main，最容易撞锁；必须有退避重试。
+
+    早先版本只给 merge 加了退避，这一步裸奔 —— exit 6 之后 MERGE_HEAD 还在、
+    合并结果已暂存，人只能自己猜该怎么办。
+    """
+    waits: list[float] = []
+    calls: list[int] = []
+
+    def commit():
+        calls.append(1)
+        return _LOCKED_PROC if len(calls) < 2 else _OK_PROC
+
+    proc = cli._commit_with_retry(sleep=waits.append, commit=commit)
+    assert proc.returncode == 0
+    assert len(calls) == 2, calls
+    assert waits == [3.0], waits
+
+
+def test_commit_retry_does_not_re_merge_or_abort():
+    """重试 commit 只需重跑 commit：MERGE_HEAD 还在，重来一遍就是同一笔。"""
+    calls: list[int] = []
+    proc = cli._commit_with_retry(
+        sleep=lambda _s: None,
+        commit=lambda: (calls.append(1), _LOCKED_PROC if len(calls) < 2 else _OK_PROC)[1],
+    )
+    assert proc.returncode == 0
+    assert len(calls) == 2, "只该重试 commit 本身"
+
+
+def test_commit_gives_up_after_retry_budget():
+    calls: list[int] = []
+    proc = cli._commit_with_retry(
+        sleep=lambda _s: None,
+        commit=lambda: (calls.append(1), _LOCKED_PROC)[1],
+    )
+    assert proc.returncode != 0
+    assert len(calls) == cli.MERGE_RETRY_ATTEMPTS, calls

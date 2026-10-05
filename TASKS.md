@@ -581,12 +581,14 @@ commit：9b4b663
 任务编号：root-worktree-clean
 负责人 Harness：OpenCode
 开始时间：2026-10-06 00:35
-依赖任务：merge-interlock（⏸️ 待合入）
+依赖任务：merge-interlock（⏸️ 待合入；已被 TRAE `merge-interlock-review` 退回，
+            本任务已按其问题 1-4 修复完成，见下方「评审退回修复」章节）
 工作区：.worktrees/opencode/
 真相源引用：AGENTS.md §0与 H-7（仓库根目录只用于合并与跑门禁，不要在那里编辑）、
             dev-convention.md「会被门禁红掉的」清单
-允许修改目录：tools/discipline/**、backend/tests/**、docs/dev-convention.md、
-            docs/traceability.md、TASKS.md
+            TASKS.md `merge-interlock-review` 任务卡（TRAE 的 6 条问题清单）
+允许修改目录：tools/discipline/**、tools/mergeguard/**、backend/tests/**、
+            docs/dev-convention.md、docs/traceability.md、TASKS.md
 禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
 交付分支：agent/local/opencode/root-worktree-clean/a1
 背景：今天合并反复被挡，根因不是工具而是**有人在合并区里做开发**。AGENTS.md 规定
@@ -624,6 +626,85 @@ commit：（完成后回填）
   - 过程中我自己写错一次：`test_root_worktree_allows_merge_in_progress`
     把 `MERGE_HEAD` 写在仓库根而非 `.git/`，得到假阴性。已修。
     这也说明断言的判据位置必须写对，否则「放行」会变成「误报」。
+
+评审退回修复（TRAE `merge-interlock-review`，2026-10-06 02:34，commit 611707a）
+--------------------------------------------------------------------------
+
+TRAE 对 merge-interlock 分支做了独立评审（逐行读 diff + 临时 worktree 实跑
++ 两个独立子 agent 双路复核，6 条 2/2 确认），结论「方向正确、核心机制本机
+实证可用，但问题 1-4 修复并补测试后再合」。本任务已完成 1-4：
+
+问题 1 [高] 门禁红之后是确定性死路
+  症状：门禁红 return 5 时留下本工具自己的 MERGE_HEAD，提示「修好门禁后重跑
+  本命令」；而入口预检见 MERGE_HEAD 一律 exit 7，还误报「另一个 agent 正在
+  跑 git」并诱导删锁，删完又被脏工作区检查挡回 exit 2。`--skip-gate` 路径
+  同样被挡。
+  根因：预检只有「MERGE_HEAD 存在与否」这一个信号，分不清「自己的」和
+  「别人的」。
+  修法：合并进入待提交状态时写 `merge-pending.json`，记录 **MERGE_HEAD 内容
+  + index 树哈希**。入口据此分流：内容相符 → 跳过合并步骤，直接续跑门禁并
+  提交；不符或无记录 → 仍然 exit 7，绝不接管。**fail-closed**。
+  附带修掉的死循环：`--skip-gate` 重跑若仍只 return 0 不提交，会永远停在
+  待提交态。现改为「续跑 + --skip-gate = 跳过门禁直接提交」，与恢复指引一致。
+
+问题 2 [中] 最终 commit 无重试
+  症状：有界退避只包住 merge，不包更新 `refs/heads/main` 的那笔 commit；
+  撞锁 exit 6 后叠加问题 1，恢复全靠人肉。
+  修法：新增 `_commit_with_retry`，同一退避策略包住 commit。重试**不需要**
+  重新 merge 或 abort —— MERGE_HEAD 还在，重跑 commit 就是同一笔提交。
+
+问题 3 [中] 两条核心新行为零测试
+  症状：`test_cli_merges_and_releases_lock` 被删且无替代，「门禁全过 → commit
+  → HEAD 前进」这条**唯一生产成功路径**零覆盖；重试/退避/abort 27 行零断言。
+  根因：临时仓库夹具里没有门禁脚本，门禁那段分支结构上就够不到。
+  修法：新增 `_install_gates` 在临时仓库里装**可提交的真门禁替身脚本**，
+  并用 `.git/gate-fails.flag` 作失败开关（放在 `.git/` 下而非工作区 ——
+  放工作区会被「拒绝脏工作区」守卫挡掉，就构造不出「先红后绿」的续跑场景）。
+  新增 17 条用例，覆盖成功路径、门禁红不提交、重跑续跑、续跑拒绝他人暂存
+  内容、续跑容忍未暂存/未跟踪、归属不符拒绝接管、陈迹清理、abort 归属
+  三分支、merge 与 commit 的重试预算、冲突不重试。
+
+问题 4 [中] 重试前无条件 abort 他人的合并
+  症状：`_git("merge", "--abort")` 无条件执行。3/6/9s 退避窗口内若另一 agent
+  裸跑发起合并，会被静默 abort —— 正是本文件第 4 次事故记录与本工具自身
+  docstring 第 3 条所禁止的形态。预检是入口一次性快照，关不住这个窗口。
+  修法：`_abort_only_our_merge` 按 MERGE_HEAD **内容**判定归属：
+    - 等于本次 merge 预期的 commit → 是我们的，回退；
+    - 不存在 → 本次 merge 连标记都没落盘（实测 git 先写 ORIG_HEAD），无可
+      回退，直接重试（不误伤）；
+    - 存在但指向别的 commit → 他人的，抛 `_ForeignMerge`，**不 abort 并
+      exit 7**。
+
+本轮测试抓出的一个真实漏洞（值得单记）
+  续跑守卫的第一版用 `git diff --name-only`（未暂存改动），被新增用例抓出是
+  **假严格**：未暂存与未跟踪的内容 `git commit` 本来就不会带进提交，拒了
+  只是白拒；反过来真正的危险（别人手敲 `git add` 塞进暂存区）它却完全
+  看不见。改为比对 **index 树哈希**与记录指纹 —— 那才是「要提交的内容是否
+  恰为本次 merge 产物」的精确判据。同时补一条镜像用例，确认未暂存/未跟踪
+  改动**不会**被拒也不会被卷进 commit。
+  这条与 Claude 在 claim-seq 卡里记的教训同形：判据选错时，严格只是自我
+  安慰，既漏真问题又添假问题。
+
+验证结果（修复后）
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 42 项检查，2 项失败 —— 均为认领序号（合并 main 后必然撞号，
+    见下方「序号」说明），非本轮改动引入
+  - ruff check : All checks passed!
+  - ruff format: 67 files already formatted
+  - pytest tools : 37 passed
+  - pytest backend: **212 passed**
+  - test_merge_guard.py: **32 passed**（修复前 15，新增 17），连跑 3 次 0 flake
+  - **负向测试**：退回修复前的 cli.py 后跑新用例 → **15 failed / 17 passed**，
+    即新增用例确实能抓住这 4 个问题，不是空断言
+  - **未修**（TRAE 问题 5、6，属另一范围，用户指示只修 1-4）：
+    5 [中] 本机 pytest 硬崩（TRAE 机器整会话跑必崩），建议做会话隔离或 xfail
+    6 [低] 预检信号不全：漏 `refs/heads/main.lock`、`packed-refs.lock`、
+           `HEAD.lock`
+
+序号说明：本分支认领序号 40 已被 main 上 Qoder 的 `40-qoder--MVP-10a.md`
+占用，合并时需改号。合并顺序必须为 **先 claim-denum（42）后本分支**，否则
+main 会出现缺号变红。
+
 已知问题：
   - **这条断言会让所有人的 `./scripts.sh check` 在别人占用根工作区时变红**，
     包括正在自己 worktree 干净干活的人。这是刻意的强制函数——占用合并区不该
