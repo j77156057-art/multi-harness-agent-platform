@@ -20,7 +20,7 @@ import json
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.claim.guarded_write import guarded_write
 from app.claim.transitions import apply_transition
@@ -30,7 +30,7 @@ from app.db.sequence import next_global_seq
 from app.events.store import EventRecord, EventStore
 from app.git.repo import CanonicalRepo
 from app.git.worktree import WorktreeManager
-from app.lease.service import release_lease
+from app.lease.service import iso, parse_iso, release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
 from app.spec import EventKind, TaskStatus
 
@@ -376,7 +376,11 @@ class SchedulerService:
                 current=guard.status,
                 event=EventKind.SUBMIT_RESULT,
                 expected_epoch=fencing_epoch,
-                extra_sets={"owner": None, "current_attempt_id": None},
+                # R10 §13 releases only the *lease* on submit. The attempt stays
+                # current: verify, review and the Merge Gate all key off it
+                # (`receipt.attempt_id`), so clearing it would orphan the very
+                # artefacts the rest of the chain is about.
+                extra_sets={"owner": None},
                 state_seq=record.seq,
             )
             release_lease(conn, task_id=task_id, attempt_id=attempt_id, reason="submit_result")
@@ -488,6 +492,99 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- review
 
+    def review_claim(
+        self,
+        *,
+        task_id: str,
+        attempt_id: str,
+        reviewer_harness_id: str,
+        review_id: str | None = None,
+        lease_seconds: int | None = None,
+    ) -> dict[str, object]:
+        """R10 §21 ``review.claim``: take the review lease for one attempt.
+
+        The review lease is independent of the development lease (R10 §13): the
+        developer's lease is released at submit, and the reviewer holds its own
+        for 20 minutes by default. Claiming twice for the same reviewer returns
+        the existing lease instead of minting a second one, so a retried claim
+        cannot leave two reviewers believing they own the same review.
+        """
+        with self.database.transaction() as conn:
+            task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+            if task is None:
+                raise NotFound(f"unknown task: {task_id}")
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.AWAITING_REVIEW:
+                raise Conflict(
+                    f"{task_id} is {status.value}; review needs awaiting_review",
+                    code="review.requires_verify_receipt",
+                )
+            attempt = conn.execute(
+                "SELECT owner FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
+            ).fetchone()
+            if attempt is None:
+                raise NotFound(f"unknown attempt: {attempt_id}")
+            owner = str(attempt["owner"])
+            # In MVP the development owner *is* the harness id (MVP-04 sets
+            # tasks.owner to harness_id), so this one comparison covers both
+            # "the owner reviews itself" and "the same harness reviews itself".
+            if reviewer_harness_id == owner:
+                raise Conflict(
+                    "a reviewer must not review its own attempt",
+                    code="review.self_review_forbidden",
+                )
+
+            existing = conn.execute(
+                "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
+                " AND reviewer_harness_id = ? AND status = 'claimed'",
+                (task_id, attempt_id, reviewer_harness_id),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "review_id": str(existing["review_id"]),
+                    "reviewed_commit": existing["reviewed_commit"],
+                    "lease_until": existing["lease_until"],
+                    "reused": True,
+                }
+
+            receipt = conn.execute(
+                'SELECT "commit" FROM verification_receipts WHERE task_id = ? AND attempt_id = ?'
+                " AND failure_reason IS NULL ORDER BY rowid DESC LIMIT 1",
+                (task_id, attempt_id),
+            ).fetchone()
+            if receipt is None:
+                raise Conflict(
+                    "no passing receipt to review",
+                    code="review.requires_verify_receipt",
+                )
+            moment = datetime.now(UTC)
+            reviewed_commit = str(receipt["commit"])
+            new_id = review_id or f"rv-{uuid.uuid4().hex}"
+            lease_until = iso(
+                moment + timedelta(seconds=lease_seconds or settings.review_lease_seconds)
+            )
+            conn.execute(
+                "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
+                " reviewer_provider, status, lease_until, fencing_epoch, reviewed_commit,"
+                " verdict, findings_hash, review_revision, created_seq)"
+                " VALUES (?, ?, ?, ?, 'unknown', 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
+                (
+                    new_id,
+                    task_id,
+                    attempt_id,
+                    reviewer_harness_id,
+                    lease_until,
+                    int(task["current_epoch"]),
+                    reviewed_commit,
+                ),
+            )
+            return {
+                "review_id": new_id,
+                "reviewed_commit": reviewed_commit,
+                "lease_until": lease_until,
+                "reused": False,
+            }
+
     def submit_review(
         self,
         *,
@@ -498,12 +595,20 @@ class SchedulerService:
         reviewed_commit: str,
         review_revision: int,
         findings: list[dict[str, object]],
+        review_id: str | None = None,
     ) -> dict[str, object]:
         """Record a reviewer verdict.
 
         Self-review is refused here as well as in the API layer (R10 §21): the
         reviewer must not be the attempt owner and must not share its harness.
-        Receipt cross-checks belong to MVP-06/07 and are not performed yet.
+        An expired review lease is refused rather than silently accepted.
+        ``review_id`` is optional: when given, the caller must hold a live
+        lease from ``review_claim``; when omitted the verdict is recorded
+        unleased. R10 §21's flow is claim-then-submit, so the unleased path is
+        an MVP simplification rather than the intended one.
+
+        The full Merge Gate cross-assertions live in ``app.merge.gate``; this
+        method records the verdict and applies its two R10 §10 edges.
         """
         if verdict not in {"approve", "request_changes"}:
             raise InvalidInput("verdict must be approve or request_changes")
@@ -520,41 +625,84 @@ class SchedulerService:
             attempt = conn.execute(
                 "SELECT owner FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
             ).fetchone()
-            if attempt is not None and str(attempt["owner"]) == reviewer_harness_id:
+            if attempt is None:
+                raise NotFound(f"unknown attempt: {attempt_id}")
+            if str(attempt["owner"]) == reviewer_harness_id:
                 raise Conflict(
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
+            held = (
+                conn.execute(
+                    "SELECT * FROM reviews WHERE review_id = ? AND reviewer_harness_id = ?",
+                    (review_id, reviewer_harness_id),
+                ).fetchone()
+                if review_id is not None
+                else None
+            )
+            if held is not None and held["status"] == "claimed":
+                deadline = held["lease_until"]
+                if deadline is not None and parse_iso(str(deadline)) <= datetime.now(UTC):
+                    raise Conflict("the review lease has expired", code="review.lease_expired")
 
+            # R10 §21's flow is claim-then-submit. ``review_claim`` already
+            # created the row in status 'claimed', so submitting the verdict
+            # completes that row rather than inserting a second one -- the
+            # unique key (task, attempt, reviewer, revision) cannot tell a
+            # claimed row awaiting its verdict from a finished review, so a
+            # second insert would look like a duplicate revision.
             existing = conn.execute(
-                "SELECT 1 FROM reviews WHERE task_id = ? AND attempt_id = ?"
+                "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
                 " AND reviewer_harness_id = ? AND review_revision = ?",
                 (task_id, attempt_id, reviewer_harness_id, review_revision),
             ).fetchone()
-            if existing is not None:
-                raise Conflict(
-                    "this review revision is already recorded", code="review.round_exhausted"
-                )
+            if existing is not None and str(existing["status"]) == "completed":
+                return {
+                    "review_id": str(existing["review_id"]),
+                    "task_id": task_id,
+                    "verdict": str(existing["verdict"]),
+                    "event": (
+                        EventKind.APPROVE.value
+                        if str(existing["verdict"]) == "approve"
+                        else EventKind.REQUEST_CHANGES.value
+                    ),
+                    "seq": existing["completed_seq"],
+                    "replayed": True,
+                }
 
-            review_id = f"rv-{uuid.uuid4().hex}"
-            conn.execute(
-                "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
-                " reviewer_provider, status, fencing_epoch, reviewed_commit, verdict,"
-                " findings_hash, review_revision, created_seq)"
-                " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, NULL)",
-                (
-                    review_id,
-                    task_id,
-                    attempt_id,
-                    reviewer_harness_id,
-                    "unknown",
-                    int(task["current_epoch"]),
-                    reviewed_commit,
-                    verdict,
-                    _hash(findings),
-                    review_revision,
-                ),
-            )
+            if existing is not None:
+                review_id = str(existing["review_id"])
+                conn.execute(
+                    "UPDATE reviews SET status = 'completed', verdict = ?, findings_hash = ?,"
+                    " reviewed_commit = ?, fencing_epoch = ? WHERE review_id = ?",
+                    (
+                        verdict,
+                        _hash(findings),
+                        reviewed_commit,
+                        int(task["current_epoch"]),
+                        review_id,
+                    ),
+                )
+            else:
+                review_id = review_id or f"rv-{uuid.uuid4().hex}"
+                conn.execute(
+                    "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
+                    " reviewer_provider, status, fencing_epoch, reviewed_commit, verdict,"
+                    " findings_hash, review_revision, created_seq)"
+                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, NULL)",
+                    (
+                        review_id,
+                        task_id,
+                        attempt_id,
+                        reviewer_harness_id,
+                        "unknown",
+                        int(task["current_epoch"]),
+                        reviewed_commit,
+                        verdict,
+                        _hash(findings),
+                        review_revision,
+                    ),
+                )
             event = EventKind.APPROVE if verdict == "approve" else EventKind.REQUEST_CHANGES
             if event is EventKind.REQUEST_CHANGES:
                 round_no = int(task["review_round"]) + 1

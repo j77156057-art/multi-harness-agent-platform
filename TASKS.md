@@ -55,7 +55,7 @@
 | MVP-05-verify | TRAE | MVP-05 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-05-verify/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-06-verify | TRAE | MVP-06 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-06-verify/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
-| MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
+| MVP-07 | Qoder | MVP-06 | ✅ done | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
@@ -63,6 +63,7 @@
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
+| claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -1588,6 +1589,78 @@ commit：1ab608d
      下次改策略时修正路径。
 ~~~
 
+### MVP-07：Review、Merge Gate 与集成分支（✅ done）
+
+~~~text
+任务编号：MVP-07
+负责人 Harness：Qoder
+开始时间：2026-10-06 00:10
+依赖任务：MVP-06（已合入 main `e742882`，✅ done）、MVP-04（✅ 已验收）、
+          MVP-05（✅ done）
+工作区：.worktrees/qoder/
+真相源引用：R10 §21（Review 与 Merge Gate：交叉断言、集成健康状态机、revert recovery、
+            Merge Queue 背压）、§10（awaiting_review / approved / merging / changes_requested
+            的单值迁移边）、§13（分支冻结与 Push Proxy）、§16（receipt 唯一键与精确 commit）、
+            §28（不变量）、§26（MERGE-EXACT-001、MERGE-REVERT-001/002）
+允许修改目录：backend/app/merge/**、backend/app/tasks/**、backend/app/api/**、
+            backend/tests/**、docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            backend/app/git/**、backend/app/verify/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-07/a1
+完成标准：
+  1. Reviewer Claim 拿到独立于开发 Lease 的 review Lease；同一 attempt 的重复 claim 不产生第二条
+  2. 自审被拒：owner 不能审自己的 attempt，同 harness 也不能
+  3. Merge Gate 做三条交叉断言：receipt.commit == review.reviewed_commit == 待合并分支 head、
+     receipt.fencing_epoch == task.current_epoch、receipt.base_commit == task.base_commit；
+     任一条不成立则拒绝，且**不写集成分支**
+  4. 未经 Verify 或未经 Review 的代码进不了集成分支（有断言，不是靠调用方自觉）
+  5. 合并失败区分三类：merge_conflict / merge_conflict_needs_owner / merge_post_commit_failure，
+     且三条边各自的 next 与 R10 §10 单值一致（不出现「approved 或 changes_requested」）
+  6. revert recovery 机械断言 tree(revert_commit) == tree(first_parent(failed_merge_commit))，
+     断言失败即 escalated
+test_id：MERGE-EXACT-001、MERGE-REVERT-001、MERGE-REVERT-002
+测试命令：./scripts.sh check
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-06 01:05
+commit：c41282a
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  ruff        : All checks passed，61 files already formatted
+  pytest      : 182 passed（MVP-07 新增 16）
+  关键断言     : 三条交叉断言各有独立拒绝用例（无 receipt / 无 review / review 的 commit 不符 /
+                 epoch 不再当前 / base 不符 / 分支 head 不符 / health 红）；
+                 **每一次拒绝都同时断言集成分支 ref 未移动、且没有新增 merge intent**；
+                 合并成功后断言 merge commit 的 ^1 / ^2 与内容；
+                 revert 断言 tree(revert)==tree(merge^1)、revert 是 merge 的直接子提交、
+                 merge..revert 只含 1 个提交
+已知问题：
+  - **在 MVP-08 的代码里发现一个真 bug**：`submit_result` 把 `tasks.current_attempt_id` 也清空了。
+    R10 §13 只说提交后释放 **Lease**，attempt 仍是被验证/审查的那一个（`receipt.attempt_id`
+    以它为准）。清掉它会让 Merge Gate 查不到当前 attempt。已改为只清 owner，保留 attempt。
+    这条是 MVP-07 的门禁逼出来的 —— 上一层的测试覆盖不到它。
+  - **`commit` 又是 SQL 保留字**：新写的 `review_claim` 里 `SELECT commit FROM
+    verification_receipts` 报 `near "commit": syntax error`。这是本任务第二次踩，说明
+    001 建表时给该列加引号这件事没有被任何东西提醒 —— 值得在 dev-convention 里写一句。
+  - **receipt 不可变导致交叉断言只能从任务侧构造**：`verification_receipts` 是 append-only
+    （有 UPDATE/DELETE 触发器），所以"receipt 与任务不符"的用例只能通过推进
+    `tasks.current_epoch` / 改 `tasks.base_commit` 来造。这反而更真实（reclaim 推进 epoch
+    正是让旧 receipt 失效的场景），但它意味着**没有任何测试能构造"被篡改的 receipt"** ——
+    因为那在实现上不可能发生，这是好事，只是不要误以为测试覆盖了篡改场景。
+  - review Lease 的**过期回收巡检器未实现**：Lease 到期后任务会卡在 awaiting_review，
+    只能靠 `review_lease_expire` 的巡检器回收（属 MVP-04 的巡检器扩展）。当前只有
+    submit 时的到期拒绝。
+  - §21「相同 Provider 的两个 Reviewer 需额外人类确认」未实现：harnesses 表还没有
+    provider 数据，无法判定同 provider；`reviews.reviewer_provider` 恒为 'unknown'。
+  - Merge Queue 的容量与背压（§21：并发上限、最大队列长度、磁盘水位、hotfix 配额）在 MVP
+    只实现「队列满则 queued」这一条，其余限流属于阶段 2；不静默跳过，写在这里。
+  - 集成健康状态机的完整形态（merge_failure_detected / reverting / retesting / escalated
+    四个中间态与各自出边）MVP 只实现到能跑通 revert recovery 的程度，其余状态留待 MVP-11
+    的集成测试覆盖。
+~~~
+
 ## 关键路径
 
 ~~~text
@@ -2510,6 +2583,65 @@ test_id：MVP-PROCESS-001
   合并时由 registry 组的序号唯一断言抓 whoever 后合。根治需要全局序号分配器
   （TRAE 的 `message-global-seq` 似乎是同一问题的另一处修补）
 - 本组只看「有没有认领文件」，不看认领内容是否与分支名一致
+~~~
+
+### claim-seq：序号连续断言在并发下不可满足（提案，不实施）
+
+~~~text
+任务编号：claim-seq
+负责人 Harness：Claude Code
+开始时间：2026-10-06 00:16
+工作区：.worktrees/claude/
+依赖任务：branch-visibility（✅ 已合入 main）
+真相源引用：tools/discipline/discipline.py registry 组；GATE-MERGE-CHECK-01 交付记录；
+            TASKS.md claim-nullable 违规记录；Qoder claims-split-review 发现 ②
+允许修改目录：docs/proposals/**（本任务只产出提案，不改代码）
+禁止修改目录：tools/**、backend/**、docs/spec/0.3-R10.md（只读）
+            —— 撤回实现后本任务不动任何既有断言
+交付分支：agent/local/claude/claim-seq/a1
+test_id：MVP-PROCESS-001
+当前状态：🔍 review —— 提案待 TRAE（断言交付方）或协调者裁决
+
+### 提案内容
+
+见 `docs/proposals/claim-seq-contiguity.md`。一句话：**「认领文件序号连续 1..N」
+在并发分支下结构上不可满足** —— 两条分支各自合规，合并结果却取决于合并顺序。
+
+  设 main 最大为 30：A 取 31、B 取 32。B 先合并 → main 变成 1..30 + 32，缺 31 → 红。
+  加锁解决不了：锁能让取号串行，改变不了合并顺序。
+
+建议：保留序号唯一性与 task_id 唯一性，把连续性换成「文件名里的 task_id 与文件内容
+一致」—— 同样能抓真实错漏，且两个 agent 独立操作也能同时满足。
+
+### 为什么是提案而不是实现
+
+我**曾实现并测过**（负向测试：文件名 `wrong-name` 而内容 `task_id=claim-seq`
+→ 断言转红）。随后在 TASKS.md 查到连续性断言是 **TRAE 的 `GATE-MERGE-CHECK-01`
+刚交付、带单测、已验收**的功能（该卡写明「本任务补连续」、验证「序号不连续被拦 ✅」）。
+
+撤销同事刚验收的功能不该由单方面完成 —— `dev-convention.md` H-5「跨边界改动需
+owner 同意」。故撤回实现，只留提案，交回归裁决。
+
+撤回前还发现并撤销了一处**我自己的无理由改动**：给 `parse_claim_table` 的 `branch`
+字段加了 `.strip("`")`（原文没有，反引号本由 `branch_tokens` 处理）。这一行导致
+merge 组误报 5 个 Qoder 的分支「已合入但未登记」。**顺手改无关代码**是本次最该记的
+教训 —— 它让一个局部改动产生了跨组的假失败。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败（撤回实现后与 main 完全一致，
+                连续性断言仍在原位、未被削弱）
+  git diff    : tools/** 零改动 —— 本任务没有动任何人的交付物
+  负向测试    : 已随实现一并撤回（此处记录它的结果，不保留代码）
+
+已撤回的实现留在本机 `D:\Temp\my_discipline_proposal.py`（**非仓库内**），
+若裁决为「采纳」，可直接取用。
+
+已知问题：
+- 在裁决之前，认领取号的 churn 会继续发生（本次为让文件序号合规改了三次 31→33→34）
+- 本提案不解决取号竞争本身，只主张**换一条可满足的不变量**；若要根治竞争，
+  需在 main 上串行取号或引入全局序号分配器，那超出本提案范围
 ~~~
 
 ## 提交前自检
