@@ -31,9 +31,10 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
 | 代码风格 | `ruff check` / `ruff format --check` |
-| **登记表自身不自洽** | `tools/discipline` 39 项（CI + `scripts.sh check`） |
+| **登记表自身不自洽** | `tools/discipline` 42 项（CI + `scripts.sh check`） |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
 | **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一且连续（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
+| **未合入 main 但已开工的分支，其认领是否已登记** | `tools/discipline` branches 组。**只对「分支有提交、main 仍写 waiting、且该分支自己也没有认领文件」变红**；已在自己分支登记只是待合并的**不报** —— 那是正确流程的中间态，报红等于惩罚正确行为。**只在多分支的本地克隆下有牙齿**，CI 只检出当前分支时近乎空跑 |
 
 ### 靠自觉的（写了也没人会拦）
 

@@ -950,6 +950,102 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
     )
 
 
+def git_local_branches(repo_root):
+    """枚举本地分支名。fail-closed：git 不可用或不在工作区时返回 (False, [], 原因)。"""
+    def git(*args):
+        try:
+            return subprocess.run(
+                ("git",) + args, cwd=repo_root, capture_output=True,
+                text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return None, "git 调用失败：%s" % error
+
+    probe = git("rev-parse", "--is-inside-work-tree")
+    if isinstance(probe, tuple):
+        return False, [], probe[1]
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        return False, [], "当前目录不是 git 工作区"
+    listed = git("for-each-ref", "--format=%(refname:short)", "refs/heads/")
+    if listed.returncode != 0:
+        return False, [], "无法列出本地分支"
+    return True, [line.strip() for line in listed.stdout.splitlines() if line.strip()], ""
+
+
+def git_out(repo_root, *args):
+    """跑一条只读 git 命令并返回 stdout；不可用或失败时返回 None。"""
+    try:
+        proc = subprocess.run(
+            ("git",) + args, cwd=repo_root, capture_output=True,
+            text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches, out=git_out):
+    """组 N：未合入 main 但已有提交的任务分支，其认领是否已登记。
+
+    与 merge 组互补：merge 组只看**已合入**的分支是否登记过；本组看**还没合入**
+    的分支。discipline 其余断言只读 main 快照，所以「有人在分支上已经开工，而
+    main 的任务表仍写 waiting」从 main 看过去像是没人做 —— 这正是登记规则第 8 条
+    的执行缺口（登记必须到 main 上可读才算登记）。
+
+    只对一种情形变红：分支有提交、main 说 waiting、而**该分支自己也没有认领文件**
+    —— 即开工前后都无处登记。其余（已在自己分支登记、只是还没合并）不报，
+    因为那是正确流程的中间态，变红等于惩罚正确行为。
+
+    `lister` 与 `out` 都可注入，单测因此不需要 monkeypatch `subprocess`
+    （早先的写法污染了同目录另一个测试文件）。
+
+    **只在多分支的本地克隆下有牙齿**：CI 只检出当前分支，本组近乎空跑。
+    """
+    ok, branches, detail = lister(repo_root)
+    result.chk(
+        ok,
+        "git 环境可枚举本地分支（fail-closed；浅克隆下本组近乎空跑）%s"
+        % ("" if ok else "：" + detail),
+        "branches",
+    )
+    if not ok:
+        return
+
+    status = {t["task_id"]: t["status"] for t in tasks}
+    unregistered = []
+    pending = []
+    for branch in branches:
+        if branch.startswith("agent/workspace/"):
+            continue  # 驻留分支不是任务分支
+        # 分支命名实际有两套：`agent/<group>/<harness>/<task-id>/<attempt>`（5 段）
+        # 与早期的 `agent/<harness>/<task-id>`（3 段）。所以不按固定下标取 task_id，
+        # 而是在路径段里找**已知**的 task_id；找不到就当作非任务分支静默跳过。
+        # （曾按固定下标解析，对 40 个分支误报，整条检查因此不可用。）
+        segments = branch.split("/")
+        matched = next((s for s in segments[1:] if s in status), None)
+        if matched is None or not is_waiting(status[matched]):
+            continue
+        count = (out(repo_root, "rev-list", "--count", "main..%s" % branch) or "").strip()
+        if count in {"", "0"}:
+            continue  # 没有 main 之外的提交，不是在途工作
+        # 尾斜杠表示「列出目录内容」；不带则只返回目录条目本身，查不到文件
+        listing = out(repo_root, "ls-tree", "--name-only", branch, "--", CLAIMS_DIR + "/") or ""
+        entry = "%s（领先 main %s 提交）" % (branch, count)
+        (pending if matched in listing else unregistered).append(entry)
+
+    result.chk(
+        not unregistered,
+        "开工中的任务分支均已登记（已在自己分支登记、仅未合入 main 的不算）；未登记=%s"
+        % (unregistered or "无"),
+        "branches",
+    )
+    result.chk(
+        True,
+        "已在自己分支登记、待合入 main 的在途任务：%s" % (pending or "无"),
+        "branches",
+    )
+
+
 def run(repo_root="."):
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
@@ -964,6 +1060,7 @@ def run(repo_root="."):
     check_dependencies(result, repo_root, tasks)
     check_traceability(result, repo_root, tasks)
     check_merge(result, repo_root, tasks, claims, cards)
+    check_branch_visibility(result, repo_root, tasks)
     return result
 
 
