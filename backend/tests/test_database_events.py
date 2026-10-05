@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
 
@@ -14,8 +15,15 @@ from app.spec import EventKind, TaskStatus
 
 def test_migrations_are_idempotent_and_enable_wal(tmp_path):
     database = Database(tmp_path / "state.db")
-    assert database.initialize() == 1
-    assert database.initialize() == 0
+    # 不断言固定数字：新增迁移时本测试不应需要改。首次 initialize 应应用
+    # 目录里的**全部**迁移，第二次应为 0（幂等）。
+    applied = database.initialize()
+    assert applied > 0, "首次 initialize 应至少应用一个迁移"
+    assert database.initialize() == 0, "重复 initialize 必须幂等"
+
+    migration_dir = Path(__file__).resolve().parents[1] / "migrations"
+    expected = len(list(migration_dir.glob("*.sql")))
+    assert applied == expected, f"首次应用了 {applied} 个迁移，但目录里有 {expected} 个 .sql 文件"
 
     with database.connect() as connection:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
@@ -109,7 +117,10 @@ def test_concurrent_initialization_and_events_have_one_order(tmp_path):
     database = Database(tmp_path / "state.db")
     with ThreadPoolExecutor(max_workers=2) as pool:
         counts = list(pool.map(lambda _: database.initialize(), range(2)))
-    assert sorted(counts) == [0, 1]
+    # 并发初始化的语义是「恰好一个线程做完全部工作，另一个拿到 0」——
+    # 具体数字随迁移数量变化，故只断言相对关系，不写死。
+    assert min(counts) == 0, f"应恰好有一个线程无事可做，实际 {counts}"
+    assert max(counts) > 0, f"应恰好有一个线程应用了迁移，实际 {counts}"
     store = EventStore(database)
 
     def append(index):

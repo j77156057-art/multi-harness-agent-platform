@@ -41,11 +41,15 @@ QUEUE_REASON_RESOURCE = "resource"
 #: ``task_claims.attempt_id`` and ``task_claims.owner`` are NOT NULL in
 #: ``001_initial.sql``, but R10 §11 requires a row for items that never reached
 #: an attempt, and R10 §11 also forbids writing owner/attempt for a deferred
-#: item. The two rules cannot both be satisfied as written; this sentinel keeps
-#: the row (so per-item replay works) while making it impossible to mistake the
-#: value for a real attempt. Resolving it properly needs either nullable columns
-#: (a migration owned by MVP-02) or an R10 ruling. Recorded in TASKS.md.
-NO_ATTEMPT = ""
+#: item.
+#:
+#: R10-fix-11 已裁定：``task_claims.attempt_id`` 与 ``owner`` 改为**可空**
+#: （migration 002）。R10 §11 要求「延迟资源时不写 owner/attempt/Lease」，
+#: 同时要求「每个任务项（含失败项）都必须留一行 task_claims」—— 两者只有在
+#: 列可空时才能同时满足，不再需要哨兵值。
+#:
+#: 留行时用 ``None``，让「未领取」与「已领取」在数据层即可区分。
+NO_ATTEMPT = None
 
 
 class RejectCode(StrEnum):
