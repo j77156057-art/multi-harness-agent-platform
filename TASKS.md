@@ -51,6 +51,7 @@
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
+| MVP-05-verify | TRAE | MVP-05 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-05-verify/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
@@ -111,6 +112,9 @@
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
 <!-- message-refs-persist → docs/claims/30-trae--message-refs-persist.md
      （原拟用 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延为 30） -->
+<!-- MVP-05-verify → docs/claims/36-trae--MVP-05-verify.md
+     （切出自 719fca6 时拟用 34，与并行合入 main 的 34-claude-code--branch-visibility
+     撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1247,6 +1251,94 @@ commit：7e94166
     docs/adr/ADR-DEV-002-single-account-acl.md，含阶段 2 前的三账户补齐清单。
   - GIT-PACK-001（Defender 开启时的跨账户 pack/bundle 传输与 intent 对账）在单账户
     模式下无法真实复现跨账户行为，只覆盖传输与对账路径本身，跨账户部分留待阶段 2。
+
+验收意见（TRAE，2026-10-06 00:05，基线 719fca6；不采信卡片自陈，逐条找代码行+机械断言）：
+  总评：✅ 通过（附遗留清单；无指向 MVP-05 交付物的 P1）。两条 test_id 的每个
+  不变量均取得「代码行 + 真 git 机械断言」双证据；19 个证据用例在基线工作区
+  实跑 19/19 退出 0。作者卡 6 条已知问题逐条核实属实，无隐瞒。
+
+  GIT-ACL-001（两个任务不共享可写 worktree）✅：
+  - 分支命名唯一实现：backend/app/git/branch.py 是全 app 唯一构造 "agent/"
+    前缀处（grep 穷举）；expected_branch / is_integration_ref 同时被
+    repo.pre_receive_hook（服务端拒绝）与 publish（发布白名单）调用，
+    R10-09「白名单与 Proxy 同一函数」三处口径一致；
+  - worktree.provision 按 attempt 幂等复用；assert_isolated 对活动 path
+    分组 COUNT>1 即抛 WorktreeIsolationError；短 ID 取 sha256 4 位前缀、
+    碰撞递增到 12 位；容量默认 settings.concurrent_worktree=8；
+  - alternates 只写 canonical objects_dir，agent gitdir 位于 canonical 之外；
+  - archive_and_recycle 先 git bundle create + bundle verify（失败抛错并
+    保留目录），patch=base..head，artifacts 落 git_bundle/patch 两条后才
+    _force_rmtree（先清 Windows 只读位）；
+  - 机械断言：tests/test_git_worktree.py 8 例真跑通过。
+
+  GIT-ACL-002（直接写集成分支失败；旧 epoch 发布失败）✅：
+  - repo.pre_receive_hook 拒绝一切客户端 push（integration/main 给专属
+    消息，其余 "client pushes are not accepted"），测试真跑 git push；
+    scheduler 侧 import_objects（fetch）+ update_ref 不经接收端口；
+  - publish 校验顺序实测：integration 目标 → 幂等重放 → epoch（guarded_write）
+    → workspace 存在 → 分支必须等于库存分支（403 publish.branch_not_allowed）
+    → alternates 必须等于 canonical objects_dir（403）→ commit 在 agent
+    gitdir 可达；旧 epoch 拒绝且不写 intent、不动 ref
+    （test_old_fencing_epoch_is_rejected）；
+  - 成功路径：side_effect_intents(type=push) pending→done、回写
+    task_attempts.head_commit、command_idempotency 存 first_result_json，
+    重放返回首发结果；
+  - 机械断言：tests/test_publish.py 11 例真跑通过。
+
+  ADR-DEV-002 单账户降级 ✅：AP_INSECURE_SINGLE_ACCOUNT 默认 True
+  （backend/app/config.py），三账户 ACL 与 GIT-PACK-001 跨账户部分明示
+  留阶段 2，与 checklist「单账户降级要求写明」一致。MVP-05 未新增迁移：
+  workspaces/artifacts/side_effect_intents/command_idempotency/
+  task_attempts 五张表均在 migrations/001_initial.sql，合理。
+
+  门禁实测（2026-10-06 00:05，719fca6 worktree；共享 .venv 原解释器被
+  WorkBuddy 原地升级 3.13.12→3.13.14 后 subprocess 崩溃，已用系统
+  Python 3.13.3 按 backend/requirements(-dev).txt 锁定版本重建，旧目录
+  改名 .venv.bak 留存，各 worktree 的 .venv junction 未动；依赖版本未变）：
+  - docstate 90/0；discipline 39/0；pytest tools 14 passed；
+  - backend：证据套件 test_publish.py + test_git_worktree.py 19/19
+    退出 0（真 git，约 50s）；除 tests/test_merge_guard.py 外全量
+    135 项退出 0；ruff check All checks passed、ruff format
+    50 files already formatted。
+
+  遗留/观察（不阻塞本验收）：
+  1. P2 契约漂移：openapi PublishRequest 的 host_mode / agent_gitdir_uri /
+     patch_uri / patch_hash 与 PublishResponse.required 的 created_seq 在
+     app/api/schemas.py 无对应字段，patch_apply 模式完全未实现。checklist
+     MVP-05 交付清单未列 patch_apply、ADR-DEV-002 明示跨账户留阶段 2，
+     故不判违约；但 MVP-06 及 Fake Harness 对接前须裁定「裁剪 openapi 或
+     补实现」，否则契约先行字段持续说谎（与 MVP-08 refs 旧案同类）。
+  2. P3 错误码一码两义：publish.commit_unreachable 同时承担 404
+     （workspace 不存在）与默认 409（commit 不可达）两种语义，建议拆码。
+  3. P3 观察：checklist「可提前做」提到的 Windows Git longpaths 预案无
+     对应代码（grep 无 longpaths），实测深路径未触发，登记备忘。
+  4. 跨任务确认：MVP-08 遗留第 4 项未关闭——test_api_flow.py 的
+     start_task 仍由服务层驱动（相对旧版仅新增临时 worktree manager
+     注入），MVP-API-001 维持 🟡，待真实 HTTP publish 路径接通后再转。
+  5. 环境/测试基建事件（非 MVP-05 交付物，另案跟）：随 main 719fca6
+     合入的 backend/tests/test_merge_guard.py（OpenCode merge-interlock）
+     在本机 pytest 会话中确定性硬崩——第 1 例后第二个 fixture 建子进程时
+     reader 线程 access violation（3.13.14 与重建后的 3.13.3 均复现，
+     junction/非 junction 路径均同）；单例可通过、裸解释器复刻同序列
+     21 次 git 调用稳定；该文件自身注释（L92-94）也记录过 pytest fd
+     捕获下 git 随机 0xC000013A。归属 OpenCode，建议其在本机复跑并修
+     测试隔离。本验收以 --ignore 取得 135 项全绿 + merge_guard 单例
+     通过为旁证，GIT-ACL 判定不受影响。
+  6. P3 文档损伤：TASKS.md 任务表存在并行合并导致的行粘连，docstate/
+     discipline 均不报，下次表格整理时一并修。
+
+  合并期间补充证据（2026-10-06 00:30，合并树 main 170e56e + 本分支）：
+  7. P3 alternates 换行：实测 worktree 写出的 objects/info/alternates 以
+     CRLF（0D 0A）结尾（文本模式 \n 被 Windows 翻译），git 本地传输报
+     `object directory .../objects? does not exist`。当前非致命——新对象
+     写在 agent gitdir 本地库、测试 19/19 仍过；但阶段 2 严格 pack 传输下
+     可能致命，建议写文件改用 newline=""（二进制）或写入前去尾 CR。属
+     MVP-05 代码（worktree.py），留待后续任务修，验收者不改。
+  8. 环境竞态（与第 5 项同类，非代码缺陷）：合并树后端全量首跑时
+     test_api_flow.py::test_approve_then_review_approval 曾 1 次失败于
+     `/mingw64/bin/git-upload-pack: Permission denied`（Defender 实时扫描/
+     句柄争用特征，与 GIT-PACK-001 预案场景吻合）；同用例单跑 3/3、全量
+     复跑 152/152 退出 0。
 ~~~
 
 ### MVP-06：Verify Worker 与完成证据（✅ done）
@@ -2631,4 +2723,62 @@ commit：cf2b46c（实现与证据提交；本行为随附回填提交）
   backend pytest 135 项退出 0（116 + MVP-05 的 19）、ruff 49 files、
   docstate 90/0、discipline 39/0、tools 14 passed、prep FAILURES 0、
   mutation 10/10。
+~~~
+
+### MVP-05-verify：MVP-05 独立验收（✅ done，通过附遗留清单）
+
+~~~text
+任务编号：MVP-05-verify
+负责人 Harness：TRAE
+开始时间：2026-10-05 23:34
+依赖任务：MVP-05（代码已合 main；2883302 合入，验收基线取最新 main 719fca6）
+工作区：.worktrees/trae/
+真相源引用：R10 §13（canonical 拓扑 / Push Proxy / fencing 执行点）、
+            §14（worktree 与分支命名、归档、容量）、§17（权限矩阵）、
+            §15（side_effect_intents 字段与状态）、§12（命令幂等键）、
+            docs/spec/mvp-task-checklist.md MVP-05（交付/完成标准/test_id、
+            单账户降级要求）、docs/adr/ADR-DEV-002-single-account-acl.md、
+            docs/prep/MVP-08/openapi.yaml（/adapter/publish_task_branch 契约）
+允许修改目录：TASKS.md、docs/claims/36-trae--MVP-05-verify.md（验收者不改被验代码）
+禁止修改目录：docs/spec/**、backend/**、tools/**、docs/adr/**、docs/prep/**、
+            docs/claims/ 下非本任务的文件
+交付分支：agent/local/trae/MVP-05-verify/a1
+背景：MVP-05 由 Qoder 先合 main 后补卡（1d83799 为满足 merge 门禁的补登记），
+      claims/29-qoder 仍停在 doing、无独立验收结论。本任务补机械核查，
+      决定 MVP-06 能否以它为基线。
+核查计划（逐条双证据：代码行 + 机械断言，不采信卡片自陈）：
+  GIT-ACL-001（两个任务不共享可写 worktree）：
+    1. 分支命名唯一实现 agent/<group-short>/<harness>/<task-id>/<attempt-id>，
+       §14 白名单与 Push Proxy 共用同一函数（R10-09）；
+    2. provision 按 attempt 幂等、活动路径互斥、短 ID 目录、容量上限；
+    3. alternates 只读指向 canonical objects，gitdir 在 canonical 之外；
+    4. 归档 bundle verify 通过才回收（真目录消失），patch + artifacts 落库。
+  GIT-ACL-002（直接写集成分支失败；旧 epoch 发布失败）：
+    1. canonical pre-receive 真拒绝客户端 push（真跑 git push，含 agent 分支）；
+    2. publish 校验顺序：epoch / 分支白名单 / alternates / commit 可达 /
+       幂等键；旧 epoch 拒绝且不写 intent、不移动 ref；
+    3. 对象导入走 scheduler 侧 fetch + update-ref，不经接收端口；
+    4. 幂等重放返回首发结果；head_commit 回写 attempt。
+  契约对齐：HTTP 路由 /adapter/publish_task_branch 与 openapi 字段/状态码；
+  ADR-DEV-002：insecure_single_account 默认与开关、阶段 2 清单是否写明。
+test_id：GIT-ACL-001、GIT-ACL-002
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest tests/test_publish.py
+          tests/test_git_worktree.py -v；全量 ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done（通过附遗留清单；无指向 MVP-05 交付物的 P1）
+完成时间：2026-10-06 00:05
+commit：f8f2483（验收证据提交；本行为随附回填提交）
+验证结果：
+  结论：✅ 通过。GIT-ACL-001/002 逐条双证据全部成立，证据套件 19/19
+  退出 0。完整逐条结论、门禁数字与 6 项遗留/观察已回填于本文件 MVP-05
+  卡末「验收意见（TRAE，2026-10-06 00:05，基线 719fca6）」，此处只摘门禁：
+  - docstate 90/0、discipline 39/0、pytest tools 14 passed；
+  - backend：证据套件 test_publish.py + test_git_worktree.py 19/19
+    退出 0；除 tests/test_merge_guard.py 外全量 135 项退出 0
+    （该文件在本机 pytest 会话确定性硬崩，属 OpenCode merge-interlock，
+    详见 MVP-05 卡遗留 5；不影响 GIT-ACL 判定）；
+  - ruff check All checks passed、ruff format 50 files already formatted；
+  - 环境处置：共享 .venv 原解释器被原地升级 3.13.12→3.13.14 致
+    subprocess reader 线程崩溃，已按 backend/requirements(-dev).txt
+    锁定版本用系统 Python 3.13.3 重建（旧目录改名 .venv.bak，junction
+    与依赖版本均未变）。
 ~~~
