@@ -719,6 +719,51 @@ test_id：MVP-PROCESS-001
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
+### R10-fix-10：给 task_claims 补 §8 行 + 关掉 schema-keys 盲区（done）
+
+> ⚠️ **本卡为事后追认**，由 `gate-baseline-repair` 补写，提交于 `1b51e2c` 之后。
+> 撰写者未参与本任务，内容依据 `32f4e45` 的 commit 正文、diff 与 §38 记载回填。
+> **本任务作者（WorkBuddy）如需修正，以其版本为准。**
+> 补写原因：`discipline` 的 cards 断言要求「已认领且非在途的任务都有任务卡」，
+> 本任务已在任务表与认领登记中标 ✅ done 却无卡，导致 main 的 `./scripts.sh check`
+> 对所有 AI 失败。
+
+~~~text
+任务编号：R10-fix-10
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 09:35
+完成时间：2026-10-05（合入 main `32f4e45`）
+依赖任务：MVP-02-amend（✅ done）
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §8（canonical schema 最小定义表）、§11（两层幂等职责划分）、
+            §37.6（schema 补充清单）、§26（DOC-SCHEMA-001）
+允许修改目录：docs/spec/0.3-R10.md、tools/docstate/**、TASKS.md
+交付分支：agent/workbuddy/R10-fix-10-task-claims
+缺陷来源：Qoder 在 MVP-08 prep 交接时提出 Q-6，核实后成立。
+test_id：DOC-SCHEMA-001、DOC-STATE-001
+测试命令：./scripts.sh check
+当前状态：done
+commit：32f4e45
+
+背景：R10-fix-09 把 claim_requests 的 per-task 唯一键声明为「由 task_claims 的
+unique(claim_request_id, task_id) 承担」（§8 写入方列 + §11），但 task_claims
+整张表不在 §8 最小定义表里，只在 §37.6 出现且写成 task_claims/task_attempts 的
+合并形式。docstate 的 schema-keys 断言只遍历 §8 的表定义行，因此承载权威唯一键
+的表本身落在检查范围外 —— 与 R10-fix-09 修复的 claim_requests 问题是同类镜像。
+
+完成标准与验证结果：
+
+| # | 完成标准 | 结果 | 证据 |
+|---|---|---|---|
+| 1 | §8 补 task_claims 最小定义行 | ✅ | 紧邻 claim_requests；显式列出 claim_id / claim_request_id / task_id / attempt_id / owner / claimed_at / released_at / release_reason |
+| 2 | §37.6 拆开合并写法 | ✅ | `task_claims` 与 `task_attempts` 分行，消除 `/` 导致该表落入 schema-keys 跳过名单 |
+| 3 | schema-keys 断言从 1 条扩为 3 条 | ✅ | 88 → 90 项：拆为「§8 必须声明」「§8/§37.6 至少一处声明」「无 §37.6 兜底的隐式依赖」 |
+| 4 | 注入验证能抓住回归 | ✅ | 删 `task_claims.claim_request_id` 后：修前 88/88 放过，修后 90 项中 2 项失败 |
+| 5 | 门禁全绿 | ✅ | `docstate 90 项检查，0 项失败`；`ruff check + format --check` clean；`pytest 26 passed` |
+
+遗留（不在本任务范围）：TASKS.md 的缺卡问题由 `gate-baseline-repair` 补齐。
+~~~
+
 ### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（doing）
 
 ~~~text
