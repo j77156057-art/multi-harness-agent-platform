@@ -30,6 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
+| fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -77,6 +78,7 @@
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🔍 review ★瓶颈 |
+| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -139,6 +141,24 @@ discipline `check_cards` 持续 1 项失败：
 **根因**：关闭任务（doing → done）时只改了任务表/认领表状态，
 没把"done 卡必须含 commit 与验证证据"当作关闭动作的一部分。
 **标 done 的同一个提交里就应当包含完整任务卡；事后补卡是补救，不是流程。**
+
+### 违规记录：fix-flaky-init 撤回登记时缺任务卡（9d3d3ef / e656058）
+
+**事实**：WorkBuddy 的 fix-flaky-init 在认领表（10:06）与任务表均标为 done
+（结论：63 次复现无法复现、撤回 flaky 登记，交付提交 `9d3d3ef`，
+随 MVP-04 合并 `e656058` 入 main），但**同样没有任务卡**。
+自 `e656058` 起 discipline `check_cards` 又回到 1 项失败：
+「已认领且非在途的任务都有任务卡；缺卡=['fix-flaky-init']」。
+这是继 R10-fix-10 之后**同类缺卡第二次发生**。
+
+**已采取的纠正**：TRAE 以独立任务 fix-flaky-init-card
+（`agent/local/trae/fix-flaky-init-card/a1`）登记先行、依 `9d3d3ef`
+与本文件 flaky 撤回小节补录任务卡，未改动调查结论；补卡后 discipline 恢复 0 失败。
+
+**根因**：与 R10-fix-10 相同——关闭动作只改状态不补卡；且该提交搭乘
+MVP-04 合并进入 main，合并时无人核对待合入分支上 done 任务的卡片完整性。
+**已连续两次同类违规：建议把「合并前检查分支内所有标 done 任务均有完整卡」
+并入合并者检查清单，不能只依赖事后 discipline 红灯补救。**
 
 ## 任务卡
 
@@ -283,6 +303,68 @@ commit：ef07537（登记先于开工）、5e052d2（补卡 + 违规留档）
   - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
   - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
   - 仅改 TASKS.md，无 backend 改动，pytest/ruff 不受影响。
+~~~
+
+### fix-flaky-init：并发初始化 flaky 定向复现（✅ done，结论：无法复现，撤回登记；任务卡事后补录）
+
+~~~text
+任务编号：fix-flaky-init
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 10:06
+完成时间：2026-10-05 10:17（9d3d3ef）
+依赖任务：MVP-02（并发初始化与 WAL 锁修复 7531592 的后续排查）
+真相源引用：本文件「⚠️ 更正：flaky 未能复现，撤回登记（10:10）」小节
+            （63 次复现的完整数据表与误判根因）、提交 9d3d3ef
+允许修改目录：TASKS.md（纯调查任务，无代码改动）
+交付分支：agent/workbuddy/fix-flaky-init（实际提交 9d3d3ef 随 MVP-04 合并 e656058 入 main）
+背景：09:55 在「已知 flaky」中登记
+      test_concurrent_initialization_and_events_have_one_order 偶发失败（1/9），
+      并猜测了句柄释放/Defender 两个原因，但未抓到 ^E 错误行。
+完成内容：
+  1. 定向复现 63 次：单测连跑 20/20、全量连跑 15/15、
+     复刻原场景 16/16、模拟门禁三道 12/12，全部通过；
+  2. 定位原「1/9」为判读错误：pytest -q 成功只输出进度行无 N passed，
+     把另一轮的 FAILED 行误归因到该轮；
+  3. 撤回 09:55 的 flaky 登记，不掩盖误报。
+test_id：CORE-RECOVER-001
+测试命令：cd backend; python -m pytest -q（复现统计以退出码判定）
+当前状态：done（结论：无法复现，撤回登记）
+commit：9d3d3ef（仅 TASKS.md，经 e656058 合入 main）
+验证结果：
+  - 63 次定向复现 0 失败（数据表见本文件撤回小节与 9d3d3ef）；
+  - 合入后 main 全量 pytest 85 passed（e656058 基线，TRAE 复验）。
+补录说明：
+  - 本卡由 TRAE 于 2026-10-05 19:25 依 9d3d3ef 与本文件撤回小节事后补录：
+    WorkBuddy 完成撤回登记时遗漏任务卡，导致 discipline check_cards
+    自 e656058 起 1 项失败，见本文件违规记录区。
+~~~
+
+### fix-flaky-init-card：补录 fix-flaky-init 任务卡（✅ done）
+
+~~~text
+任务编号：fix-flaky-init-card
+负责人 Harness：TRAE
+开始时间：2026-10-05 19:25
+依赖任务：fix-flaky-init（仅补登记，不改其交付内容）
+工作区：.worktrees/trae/
+真相源引用：tools/discipline/discipline.py 的 check_cards（缺卡判定）、
+            提交 9d3d3ef 与本文件 flaky 撤回小节（补录事实来源）
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/fix-flaky-init-card/a1
+完成标准：
+  1. fix-flaky-init 任务卡字段完整（真相源引用、test_id、commit、验证证据）；
+  2. discipline 24 项检查 0 失败；
+  3. 缺卡违规在违规记录区留档。
+test_id：MVP-PROCESS-001
+测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：done
+完成时间：2026-10-05 19:29
+commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
+验证结果：
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，无 backend 改动，pytest 85 项/ruff 结论不变。
 ~~~
 
 ### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
