@@ -28,7 +28,7 @@
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
-| MVP-03 | Codex | MVP-02 | doing | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
@@ -63,7 +63,7 @@
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
 | 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
-| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | doing |
+| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
 
@@ -124,12 +124,13 @@ commit：810d88d
   - 仓库尚无 remote，未推送
 ~~~
 
-### MVP-03：状态机与 Plan 校验（doing）
+### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
 
 ~~~text
 任务编号：MVP-03
 负责人 Harness：Codex
 开始时间：2026-10-05 09:07
+完成时间：2026-10-05 09:21
 依赖任务：MVP-02（✅ 已验收）
 工作区：.worktrees/codex/
 真相源引用：R10 §10（状态机与迁移表）、§37.7（事件 allowlist）、
@@ -138,17 +139,23 @@ commit：810d88d
 禁止修改目录：docs/spec/**、tools/docstate/**、backend/app/db/**、backend/app/events/**
 交付分支：agent/local/codex/MVP-03/a1
 完成标准：
-  1. 已实现状态只能通过 R10 allowlist 中的迁移事件变更；非法迁移被拒绝
-  2. 任务依赖 DAG 拒绝环、孤立引用和重复边
-  3. Plan 校验拒绝未注册能力、非法依赖、不可满足产出契约和超规模输入
-  4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段
+  1. 已实现状态只能通过 R10 allowlist 中的迁移事件变更；非法迁移被拒绝 ✅
+  2. 任务依赖 DAG 拒绝环、孤立引用和重复边 ✅
+  3. Plan 校验拒绝未注册能力、非法依赖、不可满足产出契约和超规模输入 ✅
+  4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段 ✅
 test_id：DOC-STATE-001、DOC-PLAN-001
 测试命令：./scripts.sh check
-当前状态：doing
-完成时间：
-commit：
+当前状态：claimed 已认领待验收
+commit：9b4b663
 验证结果：
+  docstate   : 88 项检查，0 项失败
+  discipline : 17 项检查，0 项失败
+  ruff check : All checks passed
+  ruff format: 18 files already formatted
+  pytest     : 26 passed in 1.53s
 已知问题：
+  - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
+  - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
 ~~~
 
 ### MVP-02：SQLite schema 与事件事实源（✅ 已验收）
