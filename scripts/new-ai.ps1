@@ -8,7 +8,14 @@
     and uncommitted edits vanish while git status still reports clean.
 
     This creates .worktrees/<harness> on branch agent/workspace/<harness> and
-    junctions the main .venv into it so ./scripts.sh check runs unchanged.
+    gives it an INDEPENDENT virtualenv (installed from
+    backend/requirements-dev.txt) so ./scripts.sh check runs unchanged.
+
+    Why independent instead of a junction to the main .venv: on 2026-10-05 the
+    main .venv was wiped and rebuilt while all 8 worktrees were junctions to it.
+    Every agent broke at once and each one's gate run failed for a reason that
+    had nothing to do with their own code. Cost is 106 MB per worktree.
+    Pass -SharedVenv to restore the old junction behaviour.
 
     Idempotent: if the worktree already exists this exits without touching anything.
 
@@ -26,8 +33,14 @@
 .PARAMETER From
     Base ref for the resident branch. Defaults to main.
 
+.PARAMETER SharedVenv
+    Junction the main .venv into the worktree instead of creating an
+    independent one. Faster and smaller, but a broken main .venv then breaks
+    every worktree at once. Off by default since 2026-10-06.
+
 .EXAMPLE
     ./scripts/new-ai.ps1 -Harness qoder
+    ./scripts/new-ai.ps1 -Harness qoder -SharedVenv
 #>
 [CmdletBinding()]
 param(
@@ -35,7 +48,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$Harness,
 
-    [string]$From = 'main'
+    [string]$From = 'main',
+
+    [switch]$SharedVenv
 )
 
 $ErrorActionPreference = 'Stop'
@@ -101,15 +116,49 @@ try {
         throw "git worktree add failed after 3 attempts. Output: $($added.Output -join ' | ')"
     }
 
-    # Junction the main venv so ./scripts.sh check works with no edits.
-    $sourceVenv = Join-Path $repoRoot '.venv'
+    # 每个 worktree 一个**独立** venv，不用 junction 指向根目录。
+    #
+    # 为什么改（2026-10-05 23:48 事故）：根 .venv 被清空重建过（只剩 pip，2 个包），
+    # 而当时 8 个 worktree 的 .venv 全是指向它的 junction —— 根一坏，全部一起坏，
+    # 且所有人的门禁都莫名失败（WorkBuddy 因此误判过一次假信号）。
+    # 代价：106 MB x N（磁盘可用 80 G，可接受）。需要共享时用 -SharedVenv 走 junction。
     $targetVenv = Join-Path $repoRoot ".worktrees/$Harness/.venv"
-    if ((Test-Path $sourceVenv) -and -not (Test-Path $targetVenv)) {
-        New-Item -ItemType Junction -Path $targetVenv -Target (Resolve-Path $sourceVenv).Path | Out-Null
-        Write-Host 'venv   : junctioned to main .venv'
+    $reqFile = Join-Path $repoRoot 'backend/requirements-dev.txt'
+
+    if ($SharedVenv) {
+        $sourceVenv = Join-Path $repoRoot '.venv'
+        if ((Test-Path $sourceVenv) -and -not (Test-Path $targetVenv)) {
+            New-Item -ItemType Junction -Path $targetVenv -Target (Resolve-Path $sourceVenv).Path | Out-Null
+            Write-Host 'venv   : junctioned to main .venv (-SharedVenv)'
+        }
+        elseif (-not (Test-Path $sourceVenv)) {
+            Write-Warning 'main .venv not found; run without -SharedVenv.'
+        }
     }
-    elseif (-not (Test-Path $sourceVenv)) {
-        Write-Warning 'main .venv not found; this worktree needs its own virtualenv.'
+    elseif (Test-Path $targetVenv) {
+        Write-Host 'venv   : already present, kept as is'
+    }
+    else {
+        $basePython = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $basePython) {
+            throw 'python not found on PATH; cannot create an independent venv.'
+        }
+        Write-Host 'venv   : creating an independent virtualenv (~1 min)...'
+        $created = & $basePython.Source -m venv $targetVenv 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "venv creation failed. Output: $($created -join ' | ')"
+        }
+        $venvPy = Join-Path $targetVenv 'Scripts/python.exe'
+        & $venvPy -m pip install --quiet --upgrade pip 2>&1 | Out-Null
+        $installed = & $venvPy -m pip install --quiet -r $reqFile 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "dependency install failed. Output: $($installed -join ' | ')"
+        }
+        $probe = & $venvPy -c 'import pytest, fastapi; print("ok")' 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "venv smoke test failed. Output: $($probe -join ' | ')"
+        }
+        Write-Host 'venv   : independent venv ready (pytest + fastapi importable)'
     }
 
     # Smoke-test the interpreter so the problem surfaces now, not at kickoff.
