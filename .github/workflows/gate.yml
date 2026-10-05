@@ -20,7 +20,11 @@ jobs:
         os: [windows-latest, ubuntu-latest]
 
     steps:
+      # fetch-depth: 0：discipline 的 merge 组要扫全部合并提交；
+      # 浅克隆（默认 depth=1）下 git log 看不到历史，该组会 fail-closed 报红。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,6 +45,10 @@ jobs:
       # 「登记表自身是否自洽」。不新增 git hook —— hook 可 --no-verify 绕过。
       - name: discipline (registry consistency)
         run: python tools/discipline/discipline.py --verbose
+
+      # ---- 门禁 2b：纪律检查器自身的单测（纯标准库，无需 backend 依赖）----
+      - name: pytest tools (discipline unit tests)
+        run: python -m pytest tools -q
 
       # ---- 门禁 3：lint ----
       - name: ruff check

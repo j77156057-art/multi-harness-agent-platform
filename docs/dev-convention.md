@@ -31,14 +31,17 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
 | 代码风格 | `ruff check` / `ruff format --check` |
-| **登记表自身不自洽** | `tools/discipline` 24 项（CI + `scripts.sh check`） |
+| **登记表自身不自洽** | `tools/discipline` 39 项（CI + `scripts.sh check`） |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
+| **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一且连续（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
 
 ### 靠自觉的（写了也没人会拦）
 
 - **禁止在仓库根目录编辑**（H-7）—— 已减到只影响"读了 AGENTS.md 的 AI"，
   对不读任何指令文件的 Harness 仍然无效
-- **禁止在 `main` 上直接提交** —— 没有 hook，纯自觉
+- **禁止在 `main` 上直接提交** —— 没有 hook，纯自觉。**但经合并提交入主线的路径
+  已被 discipline merge 组机械拦截**（已合入的任务必须已登记、已完成、卡证据完整）；
+  残余盲区只剩直提 main：没有合并提交可供映射，要等 GitHub 分支保护（B 方案）
 - **禁止 `force push` / `rebase` 到非任务分支** —— 无强制
 - **只移动自己拥有的分支引用**（H-7 规则 2）—— 跨工作区共享引用，只能靠自觉
 - **R10 正文只读** —— 任何人都能改；本项目自己就改过（合法，走 §38 复审）
@@ -56,6 +59,10 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 ### 已知盲区
 
 - `discipline` 只做**结构**检查，不做**内容**检查。填了 `test_id` 但没真测，拦不住
+- merge 组只认 git 默认的带引号合并标题（`Merge branch 'x'`）；手写标题无法映射，
+  故合并一律保留默认标题（`git merge --no-ff <分支>` 不改 -m）
+- merge 组看不见**直提 main**（无合并提交即无映射锚点）；四次缺卡/先合后验全部
+  出自直提或搭乘合并，在分支保护启用前只能靠 worktree 约定与合并者复核
 - `discipline` 只校验 **docstate** 的声明计数，**不校验它自己的**。
   加断言后必须手工同步 README 里 `discipline` 那一行的数量 —— 本项目已因此写错一次
   （写成 16，实际 17）。没做成自引用检查是刻意的：断言数包含该检查本身，

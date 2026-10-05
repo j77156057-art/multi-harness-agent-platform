@@ -34,7 +34,7 @@
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
-| MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03 | Codex | MVP-02 | ✅ done（初验 Conditional Fail，P1 由 MVP-03-amend 闭环；TRAE 20:47 凭证据关单） | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
@@ -45,6 +45,7 @@
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
+| GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
@@ -102,6 +103,7 @@
 <!-- claims-split → docs/claims/24-workbuddy--claims-split.md -->
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
+<!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -516,7 +518,7 @@ commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
   - 仅改 TASKS.md，无 backend 改动，pytest 85 项/ruff 结论不变。
 ~~~
 
-### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
+### MVP-03：状态机与 Plan 校验（✅ done，凭 amend 证据关单）
 
 ~~~text
 任务编号：MVP-03
@@ -537,7 +539,7 @@ commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
   4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段 ✅
 test_id：DOC-STATE-001、DOC-PLAN-001
 测试命令：./scripts.sh check
-当前状态：claimed 已认领待验收
+当前状态：✅ done（初验 Conditional Fail，P1 由 MVP-03-amend 闭环）
 commit：9b4b663
 验证结果：
   docstate   : 88 项检查，0 项失败
@@ -545,6 +547,13 @@ commit：9b4b663
   ruff check : All checks passed
   ruff format: 18 files already formatted
   pytest     : 26 passed in 1.53s
+  关单复核（TRAE 2026-10-05 20:47，GATE-MERGE-CHECK-01 启用批次）：
+  - 三个 P1（迁移表缺 25 边/多 11 边、重复边导致 Kahn 假环）的修复有
+    test_transition_mirror.py 机械对拍：代码迁移表与 R10 §10 全部 138 个
+    state-event-next 三元组零差异；重复边拒绝有专门用例（见 MVP-03-amend 卡）；
+  - 修复后的代码构成 MVP-04 的构建基线，并通过 MVP-04 正式验收
+    （MVP-04-verify 静态核查 + verify-mvp-04 注入验证 3/3）间接覆盖；
+  - 先合后验流程违规已在本文件「违规记录：MVP-03 先合 main 后验收（db9bc19）」留档。
 已知问题：
   - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
@@ -2041,4 +2050,62 @@ commit：3b35e5f（实现与证据提交；本行为随附回填提交）
   范围说明：R10/prep 均未改（openapi.yaml L1215 本就要求全局空间，
   本次是实现回归契约）；docs/traceability.md 仅追加关闭记录（跨任务
   登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）仍开放。
+~~~
+
+### GATE-MERGE-CHECK-01：已合入 main 的任务必须已登记、已完成、证据完整（✅ done）
+
+~~~text
+任务编号：GATE-MERGE-CHECK-01
+负责人 Harness：TRAE
+开始时间：2026-10-05 20:18
+完成时间：2026-10-05 21:55
+依赖任务：discipline（扩展既有检查器，不另起工具）
+工作区：.worktrees/trae/
+真相源引用：docs/dev-convention.md「约束的强制程度」（discipline 断言表与
+            「靠自觉的：禁止在 main 上直接提交」）、TASKS.md 违规记录区三条
+            （MVP-03 db9bc19、MVP-04 e656058、claim-nullable d5769e2）、
+            tools/discipline/discipline.py、.github/workflows/gate.yml
+允许修改目录：tools/discipline/**、.github/workflows/gate.yml、docs/dev-convention.md、
+            docs/traceability.md、TASKS.md
+禁止修改目录：docs/spec/**、backend/**
+交付分支：agent/local/trae/gate-merge-check-01/a1
+背景：三次「先合 main 后验收/缺卡」证明文档规矩在并行压力下没有机械执行点，
+      discipline 只做 TASKS.md 快照自洽——main 带着红灯照样前进，红灯无阻断后果。
+完成内容：
+  1. discipline 新增 merge 组：`git log --merges` 解析默认标题合并提交里的任务分支，
+     对照 docs/claims/ 认领文件/任务表/任务卡，已合入 main 的任务必须：
+     (a) 分支已登记 (b) 任务表状态已完成 (c) 卡有 commit 与验证证据；
+  2. registry 组新增认领序号 1..N 连续断言（唯一性 main 已有，本任务补连续）；
+  3. git 不可用或浅克隆时 fail-closed（浅克隆会让 merge 列表为空而静默放行）；
+  4. gate.yml checkout 改 fetch-depth: 0；
+  5. dev-convention 把该规则从「靠自觉」移到「会红」，并写明直提 main 仍是盲区。
+合 main 时的形态变化（重要）：
+  实施期间 main 经 claims-split / claims-split-review / H-8 系列提交独立落地了
+  32 项检查（认领拆 docs/claims/ 独占文件、task_id 去重、关键路径比对、
+  共享文件 ownership、H-7 工作区断言）。合 main 解冲突时以 main 版检查器为准，
+  仅移植本任务独有的 merge 组（6 项）与序号连续断言（1 项）；TASKS 清理项
+  （认领重排、verify-mvp-04 命名）已由其他 harness 以不同方式完成，不重复落地；
+  本任务原拟的 MVP-04-inject 改名未被 main 采纳（main 保留 verify-mvp-04），
+  从之。test_discipline.py 同步适配 claims 目录结构。
+完成标准：
+  1. tools/discipline 单测覆盖：已合入未完成/未登记/缺证据各被拦，合规合并放行；
+     浅克隆与无 git 环境 fail-closed；序号重复/不连续被拦；                    ✅
+  2. discipline 在本仓库全绿（含 merge 组对真实 main 历史的核对）；             ✅
+  3. docstate/ruff/pytest 不回归；README/dev-convention 的断言计数同步。         ✅
+test_id：MVP-PROCESS-002
+测试命令：.venv\Scripts\python.exe -m pytest tools -q；.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：✅ done
+commit：1e6141d、724e013（原分支实现）；c244925（合 main 并移植到 claims 目录版）
+验证结果：
+  - discipline：39 项检查 0 失败（registry 13 含序号唯一+连续、cards 6、
+    counts 3、ownership 2、deps 8、traceability 1、merge 6）；
+  - merge 组对完整 main 历史的 fail-closed 核对：共 15 个已合并任务分支，
+    全部已登记/已完成/卡有 commit 与证据；核对中抓出 MVP-08-prep 认领文件
+    漏登实际结卡分支 a2（已补登并留痕），并修掉多分支字段被 strip 反引号
+    误解析的检查器缺陷（新增 test_branch_tokens_multi_branch_cell 守卫）；
+  - tools 测试：14 项全过（序号重复/缺号/合规、merge 组注入假 lister 的
+    未登记/未完成/缺卡/缺证据/fail-closed 各路径、真实临时 git 仓库与
+    浅克隆 fail-closed 集成）；
+  - 不回归：docstate 90/0、backend pytest 113 项退出 0、ruff check+format 全过、
+    MVP-08 prep 契约 FAILURES 0、变异 10/10。
 ~~~
