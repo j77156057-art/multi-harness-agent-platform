@@ -551,6 +551,69 @@ def longest_path_length(edges):
     return max(lengths) if lengths else 0
 
 
+def _shared_file_owners(tasks_text):
+    """从 TASKS.md 的「共享文件改动」声明区解析 task_id 集合。
+
+    声明区格式（每行一条）：
+    | `task-id` | 改了什么 | commit |
+    任务表行里带「🔒」标记的 task 也算（它在动共享文件）。
+    """
+    m = re.search(r"^##\s*共享文件改动声明.*$", tasks_text, re.M)
+    if not m:
+        return set()
+    block = tasks_text[m.end():]
+    nxt = re.search(r"^##\s", block, re.M)
+    if nxt:
+        block = block[: nxt.start()]
+    out = set()
+    for line in block.splitlines():
+        s2 = line.strip()
+        if not s2.startswith("|"):
+            continue
+        cells = [c.strip() for c in s2.strip("|").split("|")]
+        if not cells or cells[0] in ("task_id", "---") or set(cells[0]) <= set("-: "):
+            continue
+        tid = cells[0].strip("`").strip()
+        if tid and tid != "task_id":
+            out.add(tid)
+    return out
+
+
+def check_shared_file_ownership(result, repo_root, tasks, claims, tasks_text):
+    """组5：改了登记结构/门禁本体的 task 必须在任务表里有行且已认领。
+
+    H-8 的可执行部分。2026-10-05 之前有 5 次「改了共享文件却没登记」
+    （MVP-01/810d88d、R10-fix-10/32f4e45、fix-flaky-init/9d3d3ef、
+    claim-nullable/d5769e2、claims-split/847cc69）—— 其中 claims-split 是
+    WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来。
+    """
+    # 动了登记结构/门禁本体的 task 必须在 TASKS.md 的「共享文件改动」区里声明。
+    # 用显式声明而不是硬编码task_id 列表 —— 否则新增这类 task 时检查器不会覆盖。
+    guard_rail = _shared_file_owners(tasks_text)
+    if not guard_rail:
+        result.chk(
+            False,
+            "TASKS.md 缺少「共享文件改动」声明区，无法检查 H-8",
+            "ownership",
+        )
+        return
+    task_ids = {t["task_id"] for t in tasks}
+    missing = sorted(guard_rail - task_ids)
+    result.chk(
+        not missing,
+        "动了登记结构/门禁本体的 task 均已在任务表登记；缺=%s" % (missing or "无"),
+        "ownership",
+    )
+    # 已登记的必须真的有认领文件（H-1 的「登记先于开工」在 claims 目录上的体现）
+    claim_ids = {c["task_id"] for c in claims}
+    no_claim = sorted(guard_rail & task_ids - claim_ids)
+    result.chk(
+        not no_claim,
+        "改了共享结构的 task 都有认领文件；缺=%s" % (no_claim or "无"),
+        "ownership",
+    )
+
+
 def check_dependencies(result, repo_root, tasks):
     """组 4：任务依赖自洽，且与任务清单一致。"""
     registry = {t["task_id"]: expand_dependency_cell(t["deps"]) for t in tasks}
@@ -679,6 +742,7 @@ def run(repo_root="."):
     tasks, claims = check_registry(result, tasks_text, repo_root)
     check_cards(result, tasks_text, claims)
     check_counts(result, repo_root)
+    check_shared_file_ownership(result, repo_root, tasks, claims, tasks_text)
     check_dependencies(result, repo_root, tasks)
     check_traceability(result, repo_root, tasks)
     return result

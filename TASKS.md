@@ -1012,6 +1012,31 @@ commit：见本任务提交
 ~~~
 
 
+## 共享文件改动声明
+
+动了共享文件（`TASKS.md` 登记结构、`docs/traceability.md`、`docs/dev-convention.md`、
+`tools/discipline/**`、`tools/docstate/**`）的 task 必须在下表登记。
+`discipline` 的 `ownership` 组会检查：本表的每个 task_id 都必须在任务表里有行、
+且都有 `docs/claims/` 下的认领文件。
+
+| task_id | 改了什么 | commit |
+|---|---|---|
+| `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
+| `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
+| `fix-flaky-init` | 撤回 flaky 登记（只改 TASKS.md 登记，未动门禁本体） | `9d3d3ef` |
+| `claim-nullable` | 改 `tools/discipline` 无关，改 TASKS.md 登记 + R10 §8 可空标注 | `d5769e2` |
+| `claims-split` | 拆认领登记为 `docs/claims/**`、改 `discipline` 读目录、加唯一性断言 | `847cc69`+`ec7ae01` |
+| `discipline` | 造`tools/discipline` 检查器本体 | `a7adf3c` |
+| `graph-traceability` | 建 `docs/traceability.md`、改 `tools/discipline` 加 traceability 组 | `5100c7f` |
+
+**规则**：新增这类 task 时，同一次提交内必须在本表加一行。
+漏了的话 `discipline` 会报「动了共享结构的 task 都有认领文件；缺=[...]」。
+
+**为什么有这条**：2026-10-05 之前有 5 次「改了共享文件却没登记」
+（`810d88d`、`32f4e45`、`9d3d3ef`、`d5769e2`、`847cc69`），
+其中 `847cc69`（认领登记拆分）是 WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来 ——
+当时 `discipline` 24/24 全绿，缺陷却真实存在于树里。
+
 ## 关键路径
 
 ~~~text
