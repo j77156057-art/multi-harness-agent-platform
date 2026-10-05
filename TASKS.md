@@ -33,7 +33,7 @@
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
-| MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` `MVP-TRANSITION-MIRROR-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | gate-baseline-repair | OpenCode | R10-fix-10 | 🟢 doing | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
 | trace-closure | OpenCode | MVP-03-amend | 🟢 doing | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
@@ -938,10 +938,21 @@ test_id：MVP-PROCESS-001
   5. `docstate` / `discipline` / `ruff` / `pytest` 全绿              ✅
 test_id：MVP-PROCESS-001、MVP-TRANSITION-MIRROR-001
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
-当前状态：doing
-commit：（完成后回填）
+当前状态：done
+commit：412e7f2（登记）、本卡收尾
+完成时间：2026-10-05 10:52
 验证结果：
-  （完成后回填）
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，0 项失败
+    （登记后、登记 `MVP-TRANSITION-MIRROR-001` 之前，traceability 组曾当场报出
+      `未登记=['MVP-TRANSITION-MIRROR-001']` —— 工具对自己生效）
+  - ruff check : All checks passed!
+  - ruff format: 29 files already formatted
+  - pytest     : 85 passed in 4.26s
+  - 目录边界  : docs/traceability.md + TASKS.md
+    （git diff --name-only main...HEAD）
+  - 数字复核  : 29 个 ID / 10 有断言 / 1 部分 / 18 仅声明，
+    按四张表逐行点数得出
 已知问题：
   - 本任务与 `gate-baseline-repair` 共用同一交付分支。原因是 TASKS.md 正在被
     多个 AI 并发编辑（本分支两次 merge main 都产生冲突），合并次数越少，
