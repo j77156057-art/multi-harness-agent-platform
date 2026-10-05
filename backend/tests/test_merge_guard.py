@@ -287,17 +287,24 @@ def test_cli_releases_lock_when_gates_skipped(repo: Path):
     _git(repo, "checkout", "main")
     before = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
 
     r = _cli(repo, "merge", "feature", "--task-id", "T-1", "--skip-gate")
     assert r.returncode == 0, r.stdout + r.stderr
     after = subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
     assert before == after, "跳过门禁就不该提交"
     assert not guard.lock_path(repo).exists(), "任何退出路径都必须释放锁"
     assert "空闲" in _cli(repo, "status").stdout
-
 
 
 def test_cli_keeps_conflict_and_does_not_abort(repo: Path):
@@ -337,14 +344,22 @@ def test_cli_does_not_commit_before_gates(repo: Path):
     _git(repo, "add", "g.txt")
     _git(repo, "commit", "-m", "feature work")
     _git(repo, "checkout", "main")
-    before = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                            capture_output=True, text=True, encoding="utf-8",
-                            errors="replace").stdout.strip()
+    before = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
 
     r = _cli(repo, "merge", "feature", "--task-id", "T-1", "--skip-gate")
     assert r.returncode == 0, r.stdout + r.stderr
-    after = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
-                           capture_output=True, text=True, encoding="utf-8",
-                           errors="replace").stdout.strip()
+    after = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout.strip()
     assert before == after, "--skip-gate 也不该提交：门禁没跑，merge commit 不能落地"
     assert (repo / ".git" / "MERGE_HEAD").exists(), "应停在待提交的合并状态"
