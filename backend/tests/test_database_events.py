@@ -270,7 +270,7 @@ def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
 
     with database.connect() as connection:
         applied = apply_migrations(connection, real_dir)
-    assert applied == 1
+    assert applied == 2
 
     with database.connect() as conn:
         assert int(conn.execute("SELECT seq FROM global_seq WHERE id=1").fetchone()[0]) == 5
@@ -281,6 +281,8 @@ def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
                 "SELECT sql FROM sqlite_master WHERE name='task_events'"
             ).fetchone()[0]
         )
+        # 004 rides along: pre-existing messages backfill to an empty JSON array.
+        assert {row[0] for row in conn.execute("SELECT DISTINCT refs FROM task_messages")} == {"[]"}
 
     store = EventStore(database)
     next_event = store.append(
@@ -303,6 +305,86 @@ def test_global_seq_migration_picks_up_after_legacy_per_group_numbers(tmp_path):
         mentions=[],
     )["seq"]
     assert message_seq == 7
+
+
+def test_message_refs_migration_backfills_and_then_persists(tmp_path):
+    """004 adds task_messages.refs; old rows get '[]' and new writes round-trip."""
+    import shutil
+
+    real_dir = Path(__file__).resolve().parents[1] / "migrations"
+    legacy_dir = tmp_path / "legacy_migrations"
+    legacy_dir.mkdir()
+    # A database one release behind: global_seq already exists (003), but the
+    # messages table has no refs column.
+    for name in (
+        "001_initial.sql",
+        "002_task_claims_nullable.sql",
+        "003_global_seq.sql",
+    ):
+        shutil.copy(real_dir / name, legacy_dir / name)
+
+    database = Database(tmp_path / "state.db")
+    with database.connect() as connection:
+        apply_migrations(connection, legacy_dir)
+
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+            ("p-1", "demo", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO groups(group_id, project_id, name, created_at)" " VALUES (?, ?, ?, ?)",
+            ("g-a", "p-1", "a", "2026-01-01T00:00:00+00:00"),
+        )
+        conn.execute(
+            "INSERT INTO task_messages(message_id, group_id, sender_type,"
+            " sender_id, body, created_seq, created_at)"
+            " VALUES ('msg-old', 'g-a', 'human', 'h', 'legacy', 1,"
+            " '2026-01-01T00:00:00+00:00')"
+        )
+
+    with database.connect() as connection:
+        assert apply_migrations(connection, real_dir) == 1
+
+    with database.connect() as conn:
+        ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name='task_messages'").fetchone()[0]
+        assert "refs TEXT NOT NULL DEFAULT '[]'" in ddl
+        assert (
+            conn.execute("SELECT refs FROM task_messages WHERE message_id='msg-old'").fetchone()[0]
+            == "[]"
+        )
+
+    from app.tasks.service import SchedulerService
+
+    service = SchedulerService(database)
+    result = service.post_message(
+        group_id="g-a",
+        author_kind="harness",
+        author_id="h-1",
+        body="upgraded",
+        mentions=[],
+        refs=["T-1", "decision:7"],
+    )
+    assert result["refs"] == ["T-1", "decision:7"]
+
+    messages = service.list_messages("g-a")
+    assert [message["message_id"] for message in messages] == ["msg-old", result["message_id"]]
+    assert messages[0]["refs"] == [], "the legacy row decodes to an empty array"
+    assert messages[1]["refs"] == ["T-1", "decision:7"], "JSON text decodes back to a list"
+
+    # Service-layer guard for in-process callers (HTTP pydantic never reaches here).
+    from app.tasks.service import InvalidInput
+
+    for bad in ("T-1", ["ok", 3], [None]):
+        with pytest.raises(InvalidInput):
+            service.post_message(
+                group_id="g-a",
+                author_kind="human",
+                author_id="h",
+                body="bad refs",
+                mentions=[],
+                refs=bad,
+            )
 
 
 def test_foreign_keys_and_sql_keyword_columns_are_usable(tmp_path):

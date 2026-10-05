@@ -61,6 +61,23 @@ def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _normalise_refs(refs: list[str] | None) -> list[str]:
+    """Validate the message refs array (openapi post_message / Message schema).
+
+    The HTTP layer enforces ``list[str]`` via pydantic, but the service is also
+    called directly by tests and future in-process writers, so the shape is
+    checked here as well. A reference names something, so blank entries are
+    rejected rather than stored. Order and content are otherwise preserved.
+    """
+    if refs is None:
+        return []
+    if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+        raise InvalidInput("refs must be an array of strings")
+    if any(not ref.strip() for ref in refs):
+        raise InvalidInput("refs entries must not be blank")
+    return list(refs)
+
+
 def _hash(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
@@ -665,6 +682,7 @@ class SchedulerService:
     ) -> dict[str, object]:
         if not body.strip():
             raise InvalidInput("body must not be empty")
+        normalised_refs = _normalise_refs(refs)
         with self.database.transaction() as conn:
             group = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
             if group is None:
@@ -679,9 +697,19 @@ class SchedulerService:
             message_id = f"msg-{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO task_messages(message_id, group_id, task_id, sender_type,"
-                " sender_id, body, created_seq, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (message_id, group_id, task_id, author_kind, author_id, body, seq, _now()),
+                " sender_id, body, created_seq, created_at, refs)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message_id,
+                    group_id,
+                    task_id,
+                    author_kind,
+                    author_id,
+                    body,
+                    seq,
+                    _now(),
+                    _canonical(normalised_refs),
+                ),
             )
             for recipient in mentions:
                 conn.execute(
@@ -695,7 +723,7 @@ class SchedulerService:
             "task_id": task_id,
             "seq": seq,
             "mentions": list(mentions),
-            "refs": list(refs or ()),
+            "refs": normalised_refs,
         }
 
     def list_messages(self, group_id: str, *, since_seq: int = 0, limit: int = 100) -> list[dict]:
@@ -704,7 +732,12 @@ class SchedulerService:
             " ORDER BY created_seq ASC LIMIT ?",
             (group_id, since_seq, limit),
         )
-        return [dict(row) for row in rows]
+        messages = [dict(row) for row in rows]
+        for message in messages:
+            # refs is a JSON TEXT column (004); the wire contract wants an array,
+            # and pre-004 rows default to '[]', never null.
+            message["refs"] = json.loads(str(message["refs"]))
+        return messages
 
     # ----------------------------------------------------------------- reads
 
