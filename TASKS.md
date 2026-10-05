@@ -41,11 +41,11 @@
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
-| MVP-08-verify | TRAE | MVP-08 | 🟢 doing | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
-| MVP-08 | Qoder | MVP-02 MVP-03 | 🔍 review | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
@@ -87,12 +87,12 @@
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
 | 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
-| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
+| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | ✅ done（TRAE 验收通过，附遗留清单） |
 | 18 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
 | 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
 | 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
-| 22 | MVP-08-verify | TRAE | 2026-10-05 20:49 | `agent/local/trae/MVP-08-verify/a1` | 🟢 doing |
+| 22 | MVP-08-verify | TRAE | 2026-10-05 20:49 | `agent/local/trae/MVP-08-verify/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -214,6 +214,32 @@ MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
 **纠正措施**：GATE-MERGE-CHECK-01 除「已合入任务必须 done 且证据完整」外，
 顺带加一条认领序号唯一/连续断言；在该任务上线前，直提 main 的修复同样
 必须先有任务卡——TRAE 补卡只是兜底，不能成为常态依赖。
+
+### 违规记录：MVP-08 第三次「先合 main 后验收」（3de2115）
+
+**事实**：Qoder 的 MVP-08（2440566，任务表/认领表状态 🔍 review）由
+`3de2115`（Merge branch 'agent/local/qoder/MVP-08/a1'）合入 main，
+TRAE 的验收结论于当日 21:00 才由 MVP-08-verify 补出：通过（附遗留
+清单 4 项，无 P1）。这是继 MVP-03（db9bc19）、MVP-04（e656058）之后
+**第三次同模式违规**，且发生时 GATE-MERGE-CHECK-01 正在实施中、闸尚未
+合入 main——红灯仍无阻断后果。
+
+**已采取的纠正**：TRAE 以 MVP-08-verify（`agent/local/trae/MVP-08-verify/a1`）
+按 DOC-TRACE-001 / MVP-API-001 两条 test_id 独立核查（不采信卡片自陈），
+实跑 docstate 90/0、pytest 111 项退出 0、ruff 全过、prep 契约核对
+FAILURES: 0、变异测试 10/10、真实 app.main:app 冒烟（含零 CORS 头与
+Host 头拒绝），结论与 4 项遗留（错误码越表 2 项、HTTP 状态不符 2 处、
+消息全局 seq/refs schema 缺口、脚手架迁移待 MVP-05/06 替换）已回填
+MVP-08 卡；本记录为第三条留档。
+
+**根因与终局措施**：根因与前两次相同——合并前没有可机械判定的验收闸，
+规矩只在文档里。与前两次不同的是，本次违规被 GATE-MERGE-CHECK-01
+的 merge 组在其分支上**当场捕获**：discipline 枚举 git 已合并任务分支，
+对 3de2115 报出「未完成=['MVP-08']」，且该检查 fail-closed（非 git 工作区/
+浅克隆即失败）。本验收关单后该红灯消除，GATE 分支随即 32/32 全绿并合入；
+此后第四次同模式违规将在合并前被本地门禁与 CI（fetch-depth: 0）同时
+拦截。残余盲区：直提 main 不产生合并提交，仍只能靠分支保护（B 方案，
+暂未启用）与事后留档兜底。
 
 ## 任务卡
 
@@ -1408,7 +1434,7 @@ commit：8c0233a
      未实现，属 §26 阶段 1 后续退出条件，不在本卡 5 条完成标准内。
 ~~~
 
-### MVP-08：REST API、群聊与消息事件（review）
+### MVP-08：REST API、群聊与消息事件（✅ 已验收 2026-10-05 21:00，TRAE 代码核查，通过附遗留清单）
 
 ~~~text
 任务编号：MVP-08
@@ -1440,7 +1466,7 @@ commit：8c0233a
   5. 服务只绑定 loopback，且不返回任何 CORS 头
 test_id：DOC-TRACE-001、MVP-API-001
 测试命令：./scripts.sh check
-当前状态：review
+当前状态：✅ 已验收（2026-10-05 21:00，TRAE 独立核查，结论与证据见卡末「验收意见」）
 完成时间：2026-10-05 19:54
 commit：2440566
 验证结果：
@@ -1476,6 +1502,70 @@ commit：2440566
   - 跨任务改动（已在此登记）：`docs/traceability.md` —— 给 `MVP-API-001` 换标记并写明
     缺口，同时在「强制状态列的含义」里新增 🟡 档。该文件属 graph-traceability，其状态
     列不被断言；不改会让同一提交里的代码与文档相互矛盾。
+
+验收意见（TRAE，2026-10-05 21:00，基线 e6b3026；不采信卡片自陈，逐条找代码行+测试断言）：
+  总评：✅ 通过（附遗留清单 4 项，均 P2/P3，无 P1）。核心不变量——fencing、单一迁移
+  表、幂等、loopback——都有机械负向测试；两处脚手架迁移诚实、未伪造 receipt。
+
+  DOC-TRACE-001（契约↔R10 可追溯）✅：
+  - 路径命名与 R10 §7/§21 逐字对齐（app/api/routes.py：claim/heartbeat/
+    submit_result/request_help/report_blocked/release/abandon、review/submit）；
+  - docs/prep/MVP-08/check_contract.py 实跑 FAILURES: 0（openapi/prep 是
+    §7/§8/§10/§11/§21/§37.7 的忠实投影）；mutation_test.py 实跑 10/10，
+    证明契约守卫非空转；
+  - 错误包络 code/message/retryable 形状有 test_api_errors.py 10 例钉死，
+    且验证错误只回字段名不回值（D-8，断言 "42" 不出现在响应体）。
+
+  MVP-API-001（全链路仅经 API）🟡 维持，验收确认口径：
+  - HTTP 面：建群/发方案/批准（含依赖拆分 ready vs ready_waiting_deps）/领取/
+    心跳/提交/审查（approve 与 request_changes 两分支、review_round 推进、
+    last_review_id 落库）全部经 TestClient 机械断言（test_api_flow.py 4 例）；
+  - 两处非 HTTP 迁移（claimed→in_progress、verifying→awaiting_review）由
+    SchedulerService.start_task / record_verify_passed 驱动，走真实迁移表与
+    真实事件，docstring 明示为脚手架且不出现在 HTTP 面，无伪造 receipt——
+    与 R10 §10 worktree guard、§16 receipt 串行要求不冲突，归属 MVP-05/06；
+  - 事件游标：since_seq 排他、分页 next_seq/has_more、seq 连续有序、按任务
+    过滤（test_api_events_messages.py 8 例）；@mention 落 message_deliveries
+    有直接 SQL 断言；
+  - 安全：默认绑 127.0.0.1（config.py:28，AP_HOST 改 0.0.0.0 注释要求重新评审，
+    符合 §5「默认」口径）；Host 头白名单中间件拒非 loopback（400
+    auth.host_header_rejected，有测试）；对真实 app.main:app 冒烟实测响应中
+    零 access-control-* 头；幂等重放带 Idempotency-Replayed、同 request_id
+    不同载荷 409 idempotency.conflict，均有测试。
+
+  门禁实测（2026-10-05 21:00，e6b3026 工作区）：
+  - docstate 90/0；ruff check 全过、ruff format 40 files already formatted；
+  - pytest 全量 111 项（MVP-08 新增 22：flow 4 + errors 10 + events/messages 8）
+    退出码 0；check_contract.py 0 FAILURES；mutation_test.py caught 10/10；
+  - app.main:app 冒烟（临时 AP_DATA_DIR）：health/project/group/plan/approve/
+    claim/events/message 全 200，CORS 头为空，伪造 Host 400。
+
+  遗留清单（不阻塞本验收；1/2 是 Adapter 接口契约问题，须在 MVP-09/10a
+  对接错误码之前处理）：
+  1. 两个错误码不在 error-codes.md 封闭集合内（违反该 prep §0.1）：
+     errors.py 使用的 `claim.concurrent_claim`（ConcurrentStateChange 映射）
+     与 `request.conflict`（通用 Conflict fallback，涵盖资源已存在/状态不符/
+     非 draft 批准等多处）。修法二选一：映射到表内码（并发写竞争语义接近
+     claim.concurrency_full 但需裁定；通用冲突按场景映射 state.transition_undefined
+     或资源专属码），或按 §0.1 走 prep 复审把缺口码补登并附 R10 引用；
+  2. 两处 HTTP 状态码与表不一致：review.self_review_forbidden 表定 403、
+     实现发 409（test_api_errors.py 也钉了 409，修时同步改测试）；
+     request.invalid 表定 400，但服务层 InvalidInput 发 422（plan 语义校验、
+     空消息体）。建议语义校验改用专属码（verdict→review.verdict_not_allowed、
+     plan linter→plan.*），或在表内为 422 补一个通用语义码；
+  3. 消息能力两处 schema 级缺口（卡片已自陈、traceability 已标 🟡，确认属实）：
+     a) 消息 seq 按 group 独立分配（MAX(created_seq)+1），不与 task_events 共享
+        全局 seq——R10 §19 read_context(since_seq) 未来要混合排序消息与事件，
+        需序列表或消息入事件流，均要动 migrations（MVP-02 范畴）；checklist
+        MVP-08 的交付条目原文只要求「消息与 task_events 关联」（task_id 列已做），
+        故不阻塞，但卡内完成标准第 4 条的「共享全局 seq」字样应在本遗留项关闭前
+        视为未达成；
+     b) PostMessage 接受 refs 但 task_messages 无列、service 接收即丢、GET 不回显
+        （仅 POST 响应原样回显），契约静默说谎——修 a 时一并删字段或补列；
+  4. MVP-05/06 落地后，须把 test_api_flow.py 里两处 service.start_task /
+     record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
+     Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
+     验收时检查，或单开收尾任务。
 ~~~
 
 ## 提交前自检
@@ -1606,7 +1696,7 @@ commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违�
   - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
 ~~~
 
-### MVP-08-verify：MVP-08 验收（🟢 doing）
+### MVP-08-verify：MVP-08 验收（✅ done，通过附遗留清单 4 项）
 
 ~~~text
 任务编号：MVP-08-verify
@@ -1632,9 +1722,25 @@ commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违�
   3. 违规留档（三段式）；MVP-08 任务表/认领表/卡片状态据结论更新。
 test_id：DOC-TRACE-001、MVP-API-001
 测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
-当前状态：doing
-完成时间：（完成后回填）
-commit：（完成后回填）
+当前状态：✅ done
+完成时间：2026-10-05 21:00
+commit：（见回填提交）
 验证结果：
-  （完成后回填）
+  结论：✅ 通过（附遗留清单 4 项，无 P1）。逐条双证据（代码行 + 机械断言）
+  与门禁实跑记录已回填于本文件 MVP-08 卡末「验收意见」，此处只摘门禁数字：
+  - docstate 90/0；pytest 全量 111 项退出码 0（MVP-08 新增 22：
+    test_api_flow 4 + test_api_errors 10 + test_api_events_messages 8）；
+  - ruff check 全过、ruff format 40 files already formatted；
+  - docs/prep/MVP-08/check_contract.py：FAILURES 0；
+  - docs/prep/MVP-08/mutation_test.py：caught 10/10（契约守卫非空转）；
+  - 真实 app.main:app 冒烟：建项目/建群/发方案/批准/领取/事件/消息全 200，
+    响应零 access-control-* 头，非 loopback Host 头 400 auth.host_header_rejected。
+  遗留（详见 MVP-08 卡）：
+  1. 错误码越封闭表：claim.concurrent_claim、request.conflict（prep §0.1）；
+  2. HTTP 状态不符：review.self_review_forbidden 实现 409/表定 403，
+     request.invalid 服务层发 422/表定 400；
+  3. 消息 per-group seq 非全局、refs 字段接收即丢（schema 级，需 migration）；
+  4. 两处脚手架迁移待 MVP-05/06 换成真实 HTTP 路径后 MVP-API-001 转 ✅。
+  违规留档：第三次「先合 main 后验收」（3de2115）三段式记录见上文。
+  MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
 ~~~
