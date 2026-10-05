@@ -65,11 +65,20 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-ADAPTER-002` | 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review | ⚠️ 仅声明 | 未实现（MVP-10b） |
 | `MVP-PROCESS-001` | 协作纪律：登记表自洽、任务卡字段完整、依赖图自洽 | ✅ 有断言 | `tools/discipline`（registry / cards / deps / counts 组） |
 | `MVP-PROCESS-002` | 合并纪律：已合入 main 的任务必须已登记、已完成且卡证据完整；认领序号唯一连续 | ✅ 有断言 | `tools/discipline` merge 组 6 项 + registry 序号连续断言（GATE-MERGE-CHECK-01，含 `test_discipline.py` 14 项与 gate.yml `fetch-depth: 0`；2026-10-05 合 main 时移植到 docs/claims/ 认领目录版检查器，共 39 项） |
+| `MVP-TRANSITION-MIRROR-001` | 代码迁移表与 R10 §10 逐三元组零差异（声明层） | ✅ 有断言 | `test_transition_mirror.py`（展开三元组双向零差异、展开计数 = 138、R10 §10 的状态与事件全部在代码注册、表结构诊断为空） |
+| `MVP-MERGE-LOCK-001` | 共享 main 的合并互斥：锁落在 git common dir、跨 worktree 生效、并发有且只有一个赢家、stale 可接管、脏工作区拒绝、门禁红不提交 merge commit | ✅ 有断言 | `test_merge_guard.py`（真 `git init` 仓库 + 真并发线程 + CLI 子进程端到端，不用 mock）+ `tools/mergeguard/cli.py` |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
 ## 现状小结
 
-**21 个已登记的 ID 里，只有 4 个目前有断言**（`DOC-STATE-001`、`DOC-SCHEMA-001`、
+**31 个已登记的 ID 里，15 个有断言，2 个部分有断言，14 个仅是名字。**
+
+| 分组 | ID 数 | 有断言 |
+|---|---|---|
+| 阶段 0 文档级 | 7 | 4 |
+| 阶段 1 调度内核 | 7 | 5 |
+| 阶段 2 Git/Verify/Merge | 8 | 2 |
+| MVP 专有 | 9 | 4 |
 `DOC-TRACE-001`、`CORE-RECOVER-001`，外加 `MVP-PROCESS-001`）。
 
 阶段 1 与阶段 2 的 ID 几乎全部未实现 —— 这与「MVP 才走到 MVP-02」一致，
