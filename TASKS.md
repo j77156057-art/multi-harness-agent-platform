@@ -50,6 +50,7 @@
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
+| tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -960,7 +961,7 @@ commit：见本任务提交
 ## 关键路径
 
 ~~~text
-MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
+MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-10b → MVP-11
                   \→ MVP-08 → MVP-10a → MVP-10b
 ~~~
 
@@ -1538,6 +1539,64 @@ commit：2440566
   - 跨任务改动（已在此登记）：`docs/traceability.md` —— 给 `MVP-API-001` 换标记并写明
     缺口，同时在「强制状态列的含义」里新增 🟡 档。该文件属 graph-traceability，其状态
     列不被断言；不改会让同一提交里的代码与文档相互矛盾。
+~~~
+
+### tasks-critical-path：校验 TASKS.md 自己那份关键路径副本 + 查重复 task_id（done）
+
+~~~text
+任务编号：tasks-critical-path
+负责人 Harness：Claude Code
+开始时间：2026-10-05 10:07
+工作区：.worktrees/claude/
+依赖任务：graph-traceability（✅ 已合入 main）
+真相源引用：docs/spec/mvp-task-checklist.md §0.2；TASKS.md「## 关键路径」
+允许修改目录：tools/discipline/**、TASKS.md、docs/claims/**、docs/traceability.md
+禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）
+交付分支：agent/local/claude/tcp3/a1
+commit：见分支
+test_id：MVP-PROCESS-001、DOC-PLAN-001
+当前状态：done（除 claim-nullable 重复文件外全绿）
+
+### 动机：上一轮我制造的覆盖漏洞
+
+关键路径在两处声明：清单 §0.2 与 TASKS.md 的「## 关键路径」。上一轮我只改了
+两处的**数据**，却把断言只接到清单那一处 —— TASKS.md 里的旧副本（漏了 MVP-03 与
+MVP-10b）无人拦，读 TASKS.md 的人会拿到已被推翻的结论。本次把链长解析复用到两处，
+各自校验长度与每一步是否为真实依赖边。
+
+**另加两条 task_id 唯一性断言**：重复 task_id 会**静默**通过所有基于集合的比较，
+必须单独查。来源是合并时两边各自追加了同一个任务的行。
+
+### 落地时查出的真实缺陷
+
+1. TASKS.md 关键路径仍是 7 节副本 —— 本次断言的直接目标，已修
+2. `docs/claims/` 里 `claim-nullable` 有两个内容完全相同的文件（拆分工具按 TASKS.md
+   的行生成，而该任务在表里出现了两次）。**待授权删除** `18-workbuddy--claim-nullable.md`
+
+### 与 main 上认领登记拆分的冲突（本任务的主要波折）
+
+我第一次合并时带的是**旧版 discipline.py**（读 TASKS.md 的认领表）。而 main 上
+Qoder 已把认领登记拆成 `docs/claims/*.md` 并同步改了 discipline.py，其理由与我在
+本任务卡里 independently 得出的合并教训一致，还量化了：「当天 11.5 小时内 TASKS.md
+被改 40 次、产生 19 个 merge commit，冲突 100% 集中在这张表与任务卡两处」。
+
+**带旧文件覆盖会把这个重构倒退回去。** 处理：中止合并，从最新 main 起新分支，
+只把 4 条新断言移植到他们的新版解析器上，TASKS.md 的小改动针对当时内容重写。
+
+过程中我用脚本整体重写认领登记表，把 TASKS.md 从 1428 行截断成 27 行（已从提交恢复）。
+**这个文件不能整体重写，只能逐行最小改动并立刻校验行数。**
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 28 项检查，1 项失败（唯一失败为 claim-nullable 重复文件，待授权删除）
+  负向测试    : TASKS.md 关键路径改回 7 节 → FAIL；还原转绿
+                任务表插入重复 task_id 行 → FAIL「任务表无重复 task_id」
+
+已知问题：
+- `docs/claims/18-workbuddy--claim-nullable.md` 与 `14-` 内容哈希相同，待授权删除
+- 认领登记表的「序号」前缀仍可能重复（拆分后已无序号列，改用文件名前缀）
+- `traceability.md` 的「强制状态」列由人手写，无断言覆盖
 ~~~
 
 ## 提交前自检

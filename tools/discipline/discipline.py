@@ -250,6 +250,21 @@ def check_registry(result, tasks_text, repo_root=None):
     # 两张表必须互相覆盖 —— 但只有已开始的任务才该有认领记录，
     # 没人认领的 waiting 任务不需要占位。
     task_ids = {t["task_id"] for t in tasks}
+
+    # task_id 重复会**静默**通过下面所有基于集合的比较，所以必须单独查。
+    # 来源多为合并时两边各自追加了同一个任务的行（本次即遇到 claim-nullable
+    # 在认领登记表里出现两次 —— 拆分前的多写表格时代尤其容易发生）。
+    for label, ids in (
+        ("任务表", [t["task_id"] for t in tasks]),
+        ("认领登记", [c["task_id"] for c in claims]),
+    ):
+        counts = collections.Counter(ids)
+        repeated = sorted(name for name, count in counts.items() if count > 1)
+        result.chk(
+            not repeated,
+            "%s无重复 task_id；重复=%s" % (label, repeated or "无"),
+            "registry",
+        )
     claim_ids = {c["task_id"] for c in claims}
     result.chk(
         claim_ids <= task_ids,
@@ -502,6 +517,16 @@ def parse_checklist_dependencies(repo_root):
     return deps
 
 
+def extract_longest_chain(block):
+    """从一个 ``` 区块里取最长的任务 id 链。箭头只是装饰，按出现顺序取。"""
+    best = []
+    for line in block.splitlines():
+        chain = re.findall(r"MVP-\d+[ab]?", line)
+        if len(chain) > len(best):
+            best = chain
+    return best
+
+
 def longest_path_length(edges):
     """依赖图的最长链长度（节点数）。有环时返回 None。
 
@@ -588,6 +613,7 @@ def check_dependencies(result, repo_root, tasks):
         chain = re.findall(r"MVP-\d+[ab]?", line)
         if len(chain) > len(longest_chain):
             longest_chain = chain
+    longest_chain = extract_longest_chain(critical.group(1))
     declared_length = longest_path_length(registry)
     result.chk(
         len(longest_chain) == declared_length,
@@ -621,6 +647,32 @@ def check_dependencies(result, repo_root, tasks):
     result.chk(
         not broken_edges,
         "关键路径的每一步都是真实依赖边；断裂=%s" % (broken_edges or "无"),
+        "deps",
+    )
+
+    # TASKS.md 的「关键路径」是同一份数据的第二个副本，同样必须校验。上一轮只管了
+    # 清单那份，于是 TASKS.md 里的旧副本（漏了 MVP-03 与 MVP-10b）无人拦，下一个读
+    # TASKS.md 的人会拿到已被推翻的结论。
+    tasks_critical = section(read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径")
+    if not tasks_critical:
+        result.chk(False, "TASKS.md 缺少「## 关键路径」章节", "deps")
+        return
+    block = re.search(r"~~~text\n(.*?)\n~~~", tasks_critical, re.S)
+    tasks_chain = extract_longest_chain(block.group(1) if block else "")
+    result.chk(
+        len(tasks_chain) == declared_length,
+        "TASKS.md 关键路径声明的长度 %d 与依赖图最长链 %d 一致"
+        % (len(tasks_chain), declared_length if declared_length is not None else -1),
+        "deps",
+    )
+    tasks_broken = [
+        "%s→%s" % (a, b)
+        for a, b in zip(tasks_chain, tasks_chain[1:])
+        if a not in registry.get(b, set())
+    ]
+    result.chk(
+        not tasks_broken,
+        "TASKS.md 关键路径每一步都是真实依赖边；断裂=%s" % (tasks_broken or "无"),
         "deps",
     )
 
