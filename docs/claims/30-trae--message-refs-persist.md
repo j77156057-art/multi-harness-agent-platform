@@ -9,7 +9,7 @@
 | 认领时间 | 2026-10-05 22:21 |
 | 分支 | `agent/local/trae/message-refs-persist/a1` |
 | 状态 | ✅ done |
-| 登记序号 | 29 |
+| 登记序号 | 30（原拟 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `message-refs-persist`；
 任务卡（含完整证据与门禁数字）：`TASKS.md` 搜同名三级标题。

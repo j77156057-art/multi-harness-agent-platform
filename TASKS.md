@@ -105,7 +105,8 @@
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
-<!-- message-refs-persist → docs/claims/29-trae--message-refs-persist.md -->
+<!-- message-refs-persist → docs/claims/30-trae--message-refs-persist.md
+     （原拟用 29，与已合 main 的 29-qoder--MVP-05.md 撞号，顺延为 30） -->
 
 ### 违规记录：MVP-01 未按规则登记
 
