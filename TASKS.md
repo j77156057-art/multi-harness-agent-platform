@@ -2087,7 +2087,17 @@ commit：3b35e5f（实现与证据提交；本行为随附回填提交）
 test_id：MVP-PROCESS-002
 测试命令：.venv\Scripts\python.exe -m pytest tools -q；.venv\Scripts\python.exe tools\discipline\discipline.py
 当前状态：✅ done
-commit：1e6141d、724e013（原分支实现）；本合并提交（移植到 claims 目录版，见回填）
+commit：1e6141d、724e013（原分支实现）；c244925（合 main 并移植到 claims 目录版）
 验证结果：
-  （见随附回填提交；含 discipline 项数、tools 测试数、真实 main 合并历史核对结果）
+  - discipline：39 项检查 0 失败（registry 13 含序号唯一+连续、cards 6、
+    counts 3、ownership 2、deps 8、traceability 1、merge 6）；
+  - merge 组对完整 main 历史的 fail-closed 核对：共 15 个已合并任务分支，
+    全部已登记/已完成/卡有 commit 与证据；核对中抓出 MVP-08-prep 认领文件
+    漏登实际结卡分支 a2（已补登并留痕），并修掉多分支字段被 strip 反引号
+    误解析的检查器缺陷（新增 test_branch_tokens_multi_branch_cell 守卫）；
+  - tools 测试：14 项全过（序号重复/缺号/合规、merge 组注入假 lister 的
+    未登记/未完成/缺卡/缺证据/fail-closed 各路径、真实临时 git 仓库与
+    浅克隆 fail-closed 集成）；
+  - 不回归：docstate 90/0、backend pytest 113 项退出 0、ruff check+format 全过、
+    MVP-08 prep 契约 FAILURES 0、变异 10/10。
 ~~~
