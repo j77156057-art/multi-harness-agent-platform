@@ -33,12 +33,47 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 代码风格 | `ruff check` / `ruff format --check` |
 | **登记表自身不自洽** | `tools/discipline` 24 项（CI + `scripts.sh check`） |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
+| **两个 agent 同时合并 `main`** | `tools/mergeguard` 互斥锁 —— **但仅在走 `./scripts.sh merge` 时** |
+
+### 合并必须走受控入口
+
+**7 个 worktree 共享同一个 `.git`。** 只有 `HEAD` 与 index 是 per-worktree 的，
+`refs/`、`ORIG_HEAD`、锁文件全部共享。而根目录按 H-7 是「协调者专用合并区」——
+所有合并挤在那里，曾经没有任何互斥。
+
+已实际发生两次，不是理论风险：
+
+1. 一次 `git merge` 解完冲突后 `MERGE_HEAD` 凭空消失、工作区恢复干净——
+   被并发的 git 操作静默 abort，冲突解决成果零提交丢失；
+2. 立即重试则 `fatal: update_ref failed for ref 'ORIG_HEAD'`。
+
+因此**合并 `main` 一律走**：
+
+~~~bash
+./scripts.sh lock                        # 先看锁状态
+./scripts.sh merge <branch> --task-id T-1   # 在根工作区执行
+~~~
+
+它与裸 `git merge` 的差别：先抢互斥锁（拿不到就明确失败并打印持有者，
+**不静默等待**——本项目的事故恰恰是静默的）、脏工作区直接拒绝、
+冲突不自动 abort、门禁红则不提交 merge commit。
+
+**它不能做什么（别误以为已经安全了）：**
+
+- **不阻止裸跑 `git merge`。** git 没有「禁止某命令」的机制，wrapper 只能提供
+  受控入口与协作约定。裸跑仍会撞锁。
+- **不保护 `git commit` 到 `refs/heads/main`。** 那条仍靠分支策略自觉
+  （见下方「靠自觉的」）。
+- **锁只挡合并，不挡 `git checkout` / `git reset`。** 在根工作区跑这两条
+  依然能移动所有人的 HEAD —— H-7 规则 1 的老问题，锁管不到。
 
 ### 靠自觉的（写了也没人会拦）
 
 - **禁止在仓库根目录编辑**（H-7）—— 已减到只影响"读了 AGENTS.md 的 AI"，
   对不读任何指令文件的 Harness 仍然无效
 - **禁止在 `main` 上直接提交** —— 没有 hook，纯自觉
+- **禁止裸 `git merge`** —— 走 `./scripts.sh merge` 才有锁，绕过它等于回到
+  事故前那套纯自觉
 - **禁止 `force push` / `rebase` 到非任务分支** —— 无强制
 - **只移动自己拥有的分支引用**（H-7 规则 2）—— 跨工作区共享引用，只能靠自觉
 - **R10 正文只读** —— 任何人都能改；本项目自己就改过（合法，走 §38 复审）

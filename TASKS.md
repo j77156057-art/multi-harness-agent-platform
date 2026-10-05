@@ -40,7 +40,7 @@
 | gate-baseline-repair | OpenCode | R10-fix-10 | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` |
 | trace-closure | OpenCode | MVP-03-amend | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
-| merge-interlock | OpenCode | discipline | 🟢 doing | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
+| merge-interlock | OpenCode | discipline | ✅ done | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
@@ -96,7 +96,7 @@
 | 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
 | 22 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
 | 23 | trace-closure | OpenCode | 2026-10-05 10:40 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
-| 24 | merge-interlock | OpenCode | 2026-10-05 20:40 | `agent/local/opencode/merge-interlock/a1` | 🟢 doing |
+| 24 | merge-interlock | OpenCode | 2026-10-05 20:40 | `agent/local/opencode/merge-interlock/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -460,7 +460,7 @@ commit：9b4b663
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
 ~~~
 
-### merge-interlock：给共享 main 合并加互斥锁（doing）
+### merge-interlock：给共享 main 合并加互斥锁（✅ done）
 
 ~~~text
 任务编号：merge-interlock
@@ -498,11 +498,50 @@ commit：9b4b663
   8. `docstate` / `discipline` / `ruff` / `pytest` 全绿                 ✅
 test_id：MVP-MERGE-LOCK-001、MVP-PROCESS-001
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
-当前状态：doing
-commit：（完成后回填）
+当前状态：done
+commit：d5fb2fd（登记）+ 本卡收尾
+完成时间：2026-10-05 21:20
 验证结果：
-  （完成后回填）
-已知问题：
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，3 失败 —— **全部继承自 main**
+    （`verify-mvp-04`孤儿 / `MVP-04-inject` 未登记 / 缺 `verify-mvp-04` 卡），
+    本任务未引入任何新失败
+  - ruff check : All checks passed!
+  - ruff format: 41 files already formatted
+  - pytest     : 125 passed（本任务前 111）
+  - `test_merge_guard.py` **连跑 15 次 0 失败**（初版有~55% flake，见下）
+  - 目录边界  : tools/mergeguard/**、backend/tests/test_merge_guard.py、
+                scripts.sh、Makefile、docs/dev-convention.md、
+                docs/traceability.md、TASKS.md
+
+### 工具自身在开发中被抓出的 4 个缺陷（全部已修）
+
+1. **锁的临界路径上 spawn `git rev-parse`**。初版 `git_common_dir()` 每次调用都
+   起一个 git 子进程。并发 8 线程抢锁时随机 `CalledProcessError(0xC000013A)`
+   （STATUS_CONTROL_C_EXIT），实测 **11/20 次失败**。已改为纯文件探测
+   （读 `.git` 是目录还是文件），子进程只作兜底。**互斥原语的热路径上不该有
+   任何子进程**——它必须能在 git 不可用时也能工作。
+2. **线程异常静默吞掉**。并发测试第一版只统计 winners/losers，结果 8 个线程里
+   有 1 个抛了非 `LockError` 的异常后**静默消失**，pytest 默认不会因线程抛异常
+   而失败，于是断言「losers == 7」变成 6，看起来像业务 bug。已改为显式收集
+   `errors` 并先断言它为空。教训：线程里的异常必须显式收集。
+3. **`subprocess(text=True)` 在 Windows 上按 GBK 解码**。本仓库 commit message
+   全是中文，第一次真合并 `git log` 就会抛 `UnicodeDecodeError`。已在
+   `guard.py` / `cli.py` /测试 helper 全部显式指定
+   `encoding="utf-8", errors="replace"`。
+4. **`REPO_ROOT` 硬编码成脚本所在仓库**。合并的语义是「把你脚下这个仓库的 main
+   合进去」，取脚本路径会在跨仓库调用时**静默合错地方**。已改为
+   `git rev-parse --show-toplevel` 取 cwd 所属仓库。
+
+前两个是单测抓到的，后两个是**CLI 端到端演练**抓到的 —— 演练脚本一度被我
+判定为「环境问题」，但它暴露的是自己的真bug，所以最后把演练固化成了
+`test_cli_*` 5 个用例。**只做单测会漏掉 3 和 4**：它们只在真跑 `cli.py` 时
+才发生。
+
+### 对「安静窗口」一词的更正
+
+我在提出本任务时用了「等一个安静窗口」的说法。那是错的表述——它把「机制缺失」
+包装成了「操作方案」。本任务就是那个机制：等待是运气，锁才是控制。
   - 本任务**不阻止**直接在根工作区跑裸 `git merge`。git 没有提供「禁止某命令」
     的机制，wrapper 只能提供受控入口与协作约定。它能保证的是：用受控入口时不会
     互相踩，且踩了会明确失败；裸跑仍然可能撞锁。这一条必须写进 dev-convention，
