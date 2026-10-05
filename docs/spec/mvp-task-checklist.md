@@ -106,6 +106,19 @@ R10 §5 规定后端 Go + React/TS/Vite。MVP 决定用 **Python FastAPI + Vue3*
 每个 MVP 任务的完成标准必须引用 R10 §26 的检查 ID 或新增 `MVP-*` 测试 ID，
 并在 `TASKS.md` 登记。禁止用"功能可用"作为完成标准。
 
+### H-5 每个 AI 一个隔离工作区（2026-10-05 新增）
+
+**禁止在仓库根目录 `new agent/` 编辑文件。** 多个 AI 共享一个工作区会导致提交被
+无声丢弃：任何人的 `git checkout` / `git switch` / `git reset` 都会改变所有人的
+HEAD 与工作树，正在编辑的文件会消失且 `git status` 仍显示干净。
+
+开工前先 `./scripts/new-ai.ps1 -Harness <名字>` 开自己的 `.worktrees/<名字>/`，
+任务分支从 `main` 切出。任务卡的「工作区」字段必须填这个路径，填仓库根目录视为
+任务卡无效。完整规则见 `docs/dev-convention.md` H-7，会话入口见 `AGENTS.md`。
+
+本条是事后补的：0.4 重排版定稿时项目只有单个 AI，没有预料到并发会损坏工作树。
+代价是 MVP-02 验收期间丢了 4 个提交。
+
 ---
 
 ## 2. 任务清单
@@ -472,6 +485,7 @@ R10 §3、§37.4 把 Agent Orchestrator 的三个能力当作 `ao_managed_git` �
 负责人 Harness：
 开始时间：
 依赖任务：
+工作区：.worktrees/<harness>/          ← 禁止填仓库根目录，理由见下
 真相源引用：R10 §__（状态机/事件/schema 必须引用，不得自造）
 允许修改目录：
 禁止修改目录：
@@ -486,7 +500,13 @@ commit：
 已知问题：
 ~~~
 
-新增两个必填字段：
+必填字段：
 
 - **真相源引用**：写明本任务依赖 R10 的哪几节。空白视为任务卡不完整，任务分配无效；
-- **test_id**：没有 test_id 的完成标准视为不可验收。
+- **test_id**：没有 test_id 的完成标准视为不可验收；
+- **工作区**：必须是你自己的 `.worktrees/<harness>/`。**填仓库根目录视为任务卡无效。**
+  多个 AI 共享一个工作区会导致提交被无声丢弃 —— 任何人的 `git checkout` /
+  `git reset` 都会改变所有人的工作树，正在编辑的文件消失而 `git status` 仍干净。
+  本项目已因此丢失提交 4 次，其中一次是别的 AI 的提交。新 AI 用
+  `./scripts/new-ai.ps1 -Harness <名字>` 开工作区。规则见
+  `docs/dev-convention.md` H-7，入口说明见 `AGENTS.md`。

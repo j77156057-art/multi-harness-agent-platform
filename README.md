@@ -8,8 +8,36 @@
 2. 任务状态可恢复（调度器重启、owner 崩溃都能恢复）；
 3. 代码经过验证后才能合并。
 
-**当前状态**：MVP-01（项目骨架与规范绑定）已完成。
-后端只有 `/health` 和 `/spec/status` 两个运维端点，业务端点从 MVP-02 开始。
+**当前状态**：MVP-01（项目骨架与规范绑定）、MVP-02（SQLite schema 与事件事实源）
+已完成并合入 `main`。后端已有 `/health` 与 `/spec/status` 两个运维端点，
+业务端点从 MVP-08 开始。进度以 [`TASKS.md`](TASKS.md) 为准。
+
+---
+
+## ⚠️ 如果你是来干活的 AI Harness
+
+**不要在仓库根目录 `new agent/` 编辑文件。** 每个 AI 在自己的隔离工作区里干活：
+
+~~~powershell
+./scripts/new-ai.ps1 -Harness <你的名字>    # 幂等；已存在则拒绝且不改动
+cd .worktrees/<你的名字>
+git switch -c agent/<group-short>/<harness>/<task-id>/<attempt-id> main
+~~~
+
+理由：多个 AI 共享一个工作区会导致提交被无声丢弃 —— 任何人的 `git checkout` /
+`git reset` 都会改变所有人的工作树，正在编辑的文件会消失而 `git status` 仍显示
+干净。本项目已因此丢失 4 个提交。仓库根目录只用于合并与跑门禁。
+
+然后按顺序：
+
+1. 在 [`TASKS.md`](TASKS.md) 的「认领登记」登记 `task_id` / Harness / 时间 / 分支，
+   **然后**才动手（登记让其他 AI 看得见任务占用）；
+2. 从 [`docs/spec/mvp-task-checklist.md`](docs/spec/mvp-task-checklist.md) 领任务，
+   复制其中的「统一任务卡模板」填写；
+3. 提交前 `./scripts.sh check` 三道门禁全绿，**禁止在 `main` 上直接提交**。
+
+完整规则见 [`AGENTS.md`](AGENTS.md)（会话自动载入）与
+[`docs/dev-convention.md`](docs/dev-convention.md)（H-1～H-7 硬约束）。
 
 ---
 

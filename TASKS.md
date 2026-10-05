@@ -1,5 +1,12 @@
 # 任务登记表
 
+> ⚠️ **开工前必读 —— 不要在仓库根目录 `new agent/` 编辑文件。**
+> 每个 AI 在自己的隔离工作区里干活：`.worktrees/<harness>/`。
+> 共享工作区会让提交被无声丢弃（任何人的 `git checkout` / `git reset` 都改变所有人的
+> 工作树；本项目已丢 4 个提交，其中一个是别的 AI 的）。新 AI 先跑
+> `./scripts/new-ai.ps1 -Harness <名字>`。规则见 `docs/dev-convention.md` H-7，
+> 会话入口见 `AGENTS.md`。
+
 真相源：`docs/spec/mvp-task-checklist.md`（0.4 重排版）
 硬约束 H-4：**没有 `test_id` 的完成标准不可验收。**
 
