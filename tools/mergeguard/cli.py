@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 from functools import lru_cache
 from pathlib import Path
 
@@ -56,6 +57,12 @@ def _repo_root() -> Path:
 
 
 REPO_ROOT = _repo_root()
+
+#: ref 锁争用的重试次数与退避基数。git 的 `maintenance run --auto` 会在写操作
+#: 后自动后台运行并持有 ref 锁，本仓库提交极其频繁（多 agent 并行），撞上的
+#: 概率不低。退避递增，避免和自动维护互相追着抢。
+MERGE_RETRY_ATTEMPTS = 4
+MERGE_RETRY_BACKOFF_SECONDS = 3
 
 
 def _git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -168,6 +175,26 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
     print(f"已取合并锁：{info.task_id}（pid {info.pid}）")
     try:
         proc = _git("merge", "--no-ff", "--no-commit", "--no-edit", branch, check=False)
+        if proc.returncode != 0:
+            # 瞬时 ref 锁争用要重试；真冲突不能重试。
+            # 实测触发者不是别的 agent，而是 git 自己的后台维护：
+            # `git maintenance run --auto --detach` 在写操作后自动运行、持有 ref 锁，
+            # 与随后的 merge 撞出 `update_ref failed for ref 'ORIG_HEAD'`。
+            # 预检抓不到它（锁是瞬时的），只能在撞上之后重试。
+            for attempt in range(1, MERGE_RETRY_ATTEMPTS):
+                text = (proc.stderr or "") + (proc.stdout or "")
+                if "update_ref failed" not in text and "cannot lock ref" not in text:
+                    break
+                wait = MERGE_RETRY_BACKOFF_SECONDS * attempt
+                print(
+                    f"  ref 锁争用（多半是 git 自动维护），{wait}s 后重试"
+                    f"（{attempt}/{MERGE_RETRY_ATTEMPTS}）…"
+                )
+                time.sleep(wait)
+                _git("merge", "--abort", check=False)
+                proc = _git(
+                    "merge", "--no-ff", "--no-commit", "--no-edit", branch, check=False
+                )
         if proc.returncode != 0:
             unmerged = _git("diff", "--name-only", "--diff-filter=U").stdout.split()
             if unmerged:
