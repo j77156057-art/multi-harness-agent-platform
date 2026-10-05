@@ -23,3 +23,7 @@
   discipline 42/42、ruff clean、pytest 224 passed；需 PYTHONUTF8=1，详见任务卡「已知问题」）。
 - 2026-10-06 02:57：序号从 41 改为 42 —— TRAE 的 `41-trae--merge-interlock-review.md`
   已先合入 main（`cf50b68`），按「后合并者重新编号」的既定规则让号。
+- 2026-10-06 04:25：序号从 42 改为 43 —— TRAE 的 `42-trae--root-worktree-clean-review.md`
+  已先合入 main（`c0ee564`），继续按规则让号。合并前等待根工作区清理：
+  WorkBuddy 的 chain 模板 WIP 由 TRAE 代存到
+  `agent/local/workbuddy/root-wip-chain-template`（`fcfd303`）后根目录恢复干净。
