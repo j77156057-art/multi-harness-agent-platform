@@ -274,27 +274,30 @@ def test_cli_refuses_when_not_on_main(repo: Path):
     assert "只允许在 main 上运行" in r.stderr
 
 
-def test_cli_merges_and_releases_lock(repo: Path):
-    """成功路径：留下 merge commit，且锁被释放。"""
+def test_cli_releases_lock_when_gates_skipped(repo: Path):
+    """跳过门禁的路径：不提交，但**必须释放锁**。
+
+    锁泄漏会让整个仓库永久无法合并（除非人工去删目录），所以「任何退出路径都
+    释放锁」比「合并成功」更要紧。
+    """
     _git(repo, "checkout", "-b", "feature")
     (repo / "g.txt").write_text("y", encoding="utf-8")
     _git(repo, "add", "g.txt")
     _git(repo, "commit", "-m", "feature work")
     _git(repo, "checkout", "main")
+    before = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
 
     r = _cli(repo, "merge", "feature", "--task-id", "T-1", "--skip-gate")
     assert r.returncode == 0, r.stdout + r.stderr
-    head = subprocess.run(
-        ["git", "-C", str(repo), "log", "--oneline", "-1"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    ).stdout
-    # `git log --oneline` 会带 short sha 前缀，所以只能断言包含。
-    assert "Merge branch" in head, head
-    assert not guard.lock_path(repo).exists(), "成功后必须释放锁"
+    after = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
+    assert before == after, "跳过门禁就不该提交"
+    assert not guard.lock_path(repo).exists(), "任何退出路径都必须释放锁"
     assert "空闲" in _cli(repo, "status").stdout
+
 
 
 def test_cli_keeps_conflict_and_does_not_abort(repo: Path):
@@ -317,3 +320,31 @@ def test_cli_keeps_conflict_and_does_not_abort(repo: Path):
     assert "不要 git merge --abort" in r.stderr
     assert (repo / ".git" / "MERGE_HEAD").exists(), "冲突现场必须保留"
     assert not guard.lock_path(repo).exists(), "退出前必须释放锁"
+
+
+def test_cli_does_not_commit_before_gates(repo: Path):
+    """核心保证：门禁跑在 merge commit **落地之前**。
+
+    这条是 `--no-commit` 存在的唯一理由。首版漏了它：`git merge` 在无冲突时
+    会自动提交，于是门禁实际跑在 merge commit 之后，「门禁红则不提交」的承诺
+    是假的 —— 实测中工具最后一步 `git commit` 因「nothing to commit」返回 1，
+    报成合并失败，而 main 其实已经带上了 merge commit。
+
+    用 --skip-gate 走一遍：退出码 0，但main 的 HEAD 必须**没动**。
+    """
+    _git(repo, "checkout", "-b", "feature")
+    (repo / "g.txt").write_text("y", encoding="utf-8")
+    _git(repo, "add", "g.txt")
+    _git(repo, "commit", "-m", "feature work")
+    _git(repo, "checkout", "main")
+    before = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                            capture_output=True, text=True, encoding="utf-8",
+                            errors="replace").stdout.strip()
+
+    r = _cli(repo, "merge", "feature", "--task-id", "T-1", "--skip-gate")
+    assert r.returncode == 0, r.stdout + r.stderr
+    after = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                           capture_output=True, text=True, encoding="utf-8",
+                           errors="replace").stdout.strip()
+    assert before == after, "--skip-gate 也不该提交：门禁没跑，merge commit 不能落地"
+    assert (repo / ".git" / "MERGE_HEAD").exists(), "应停在待提交的合并状态"

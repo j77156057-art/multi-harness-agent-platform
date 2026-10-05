@@ -125,7 +125,7 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
 
     print(f"已取合并锁：{info.task_id}（pid {info.pid}）")
     try:
-        proc = _git("merge", "--no-ff", "--no-edit", branch, check=False)
+        proc = _git("merge", "--no-ff", "--no-commit", "--no-edit", branch, check=False)
         if proc.returncode != 0:
             unmerged = _git("diff", "--name-only", "--diff-filter=U").stdout.split()
             if unmerged:
@@ -141,10 +141,11 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
             return 4
 
         if skip_gate:
-            print("已跳过门禁（--skip-gate）。merge commit 已落地，请自行补跑 ./scripts.sh check。")
+            print("已跳过门禁（--skip-gate）。请自行跑 ./scripts.sh check 后再提交 merge commit。")
+            print("当前改动已 staged 但**未提交**（用了 --no-commit）。")
             return 0
 
-        print("\n合并无冲突，开始跑门禁…")
+        print("\n合并无冲突，改动已 staged 但**未提交**（--no-commit）。开始跑门禁…")
         gates = [
             ("docstate", ["tools/docstate/docstate.py"]),
             ("discipline", ["tools/discipline/discipline.py"]),
@@ -158,14 +159,15 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
 
         if failed:
             print(f"\n门禁未通过：{', '.join(failed)}", file=sys.stderr)
-            print("merge commit **未提交**。当前 main 已含该分支的改动但没有 merge commit，",
-                  file=sys.stderr)
-            print("要么修好门禁再 git commit，要么 git reset --hard ORIG_HEAD 回退。",
-                  file=sys.stderr)
+            print("merge commit **未提交**。main 尚未包含该分支的任何 commit。", file=sys.stderr)
+            print("修好门禁后重跑本命令，或 git merge --abort 回退。", file=sys.stderr)
             return 5
 
         print("\n门禁通过，提交 merge commit。")
-        _git("commit", "--no-edit")
+        commit = _git("commit", "--no-edit", check=False)
+        if commit.returncode != 0:
+            print("提交失败：" + (commit.stderr or commit.stdout), file=sys.stderr)
+            return 6
         print("HEAD: " + _git("log", "--oneline", "-1").stdout.strip())
         return 0
     finally:
