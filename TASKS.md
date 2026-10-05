@@ -58,7 +58,7 @@
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
-| MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
+| MVP-10b | Qoder | MVP-10a MVP-05~07 | 🚧 doing | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
@@ -1670,6 +1670,45 @@ commit：f396557
     动词，也不假装它们走了 HTTP。
   - 10b（真实 Adapter）不在本任务范围；清单已确认它在关键路径上（MVP-11 需要
     MVP-ADAPTER-002），由后续任务完成。
+~~~
+
+### MVP-10b：真实 Harness Adapter（🚧 doing）
+
+~~~text
+任务编号：MVP-10b
+负责人 Harness：Qoder
+开始时间：2026-10-06 02:26
+依赖任务：MVP-10a（✅ 已合入 main 937eac7）、MVP-05/06/07（均已合入 main）
+工作区：.worktrees/qoder/
+真相源引用：R10 §7（Adapter 接口的 16 个动词；真实 Harness 接入优先级 1 = CLI/无头模式）、
+            §6（注册、能力探测、registration_version 可追踪）、§13（Lease 与 fencing；
+            Harness 丢 token 后的恢复）、§14（worktree 与分支命名）、§16（submit 与 receipt）、
+            §25 阶段 5（Codex → Claude Code → OpenCode；退出条件：每个 Adapter 通过 probe、
+            Claim、Heartbeat、Submit、Verify、Push Proxy、超时、恢复和危险操作拒绝测试）、
+            §26（MVP-ADAPTER-002）
+允许修改目录：backend/app/adapter/**、backend/app/claim/service.py、backend/app/api/**、
+            backend/tests/**、docs/traceability.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/lease/**、backend/app/verify/**、
+            backend/app/merge/**、backend/app/git/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-10b/a1
+完成标准：
+  1. Codex / Claude Code / OpenCode 三个 Adapter：各自的注册（harness_id、provider、
+     adapter_version、registration_version 可追踪）与各自的 CLI 无头调用契约（argv 单点、
+     有断言），全部实现 §7 接口（继承 HttpAdapter，未实现动词仍显式 UnsupportedVerb）
+  2. 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review：Codex Adapter 走真实
+     HTTP + worktree + Push Proxy 跑完 claim→heartbeat→提交→publish→submit→verify→
+     review→merge→merged（MVP-ADAPTER-002）
+  3. §25 阶段 5 退出条件逐条有测试：probe、Claim、Heartbeat、Submit、Verify、Push Proxy、
+     超时（子进程被杀 → abandon）、恢复（Adapter 重启丢 token → 复放 Claim 重新拿到
+     Lease token → 继续心跳与提交）、危险操作拒绝（integration/main 拒绝发布、旧 epoch
+     拒绝、非本尝试分支拒绝）
+  4. 遗留项落地：复放 Claim 重发可用的 lease_token（库中仍只存哈希，复放时轮换并返回
+     新 token；Lease 已过期/已释放则不轮换）—— verify-mvp-04 登记转 10b 的那条
+test_id：MVP-ADAPTER-002
+测试命令：./scripts.sh check
+当前状态：doing
 ~~~
 
 ## 关键路径
