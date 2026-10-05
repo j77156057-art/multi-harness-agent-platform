@@ -32,7 +32,7 @@
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
-| claim-nullable-card | TRAE | claim-nullable | 🟢 doing | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
+| claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -84,7 +84,7 @@
 | 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
 | 17 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
 | 18 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
-| 19 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | 🟢 doing |
+| 19 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -1309,7 +1309,7 @@ commit：d5769e2（随 main 发布，无独立合并提交）
     与 R10-fix-10-card 撞号 14，见违规记录区。
 ~~~
 
-### claim-nullable-card：补录 claim-nullable 任务卡（🟢 doing）
+### claim-nullable-card：补录 claim-nullable 任务卡（✅ done）
 
 ~~~text
 任务编号：claim-nullable-card
@@ -1328,9 +1328,11 @@ commit：d5769e2（随 main 发布，无独立合并提交）
   3. 第三次缺卡违规在违规记录区留档并给出系统性结论。
 test_id：MVP-PROCESS-001
 测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
-当前状态：doing
-完成时间：（完成后回填）
-commit：（完成后回填）
+当前状态：done
+完成时间：2026-10-05 20:05
+commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违规留档）
 验证结果：
-  （完成后回填）
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
 ~~~
