@@ -46,7 +46,7 @@
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
-| MVP-05 | Qoder | MVP-03 MVP-04 | 🔍 review | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
+| MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
@@ -1078,7 +1078,7 @@ commit：见本任务提交
 其中 `847cc69`（认领登记拆分）是 WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来 ——
 当时 `discipline` 24/24 全绿，缺陷却真实存在于树里。
 
-### MVP-05：Git worktree 与发布代理（review）
+### MVP-05：Git worktree 与发布代理（✅ done）
 
 ~~~text
 任务编号：MVP-05
@@ -1110,7 +1110,7 @@ commit：见本任务提交
      即 MVP-08 卡里标注为「脚手架」的那一步有了真实实现
 test_id：GIT-ACL-001、GIT-ACL-002、GIT-PACK-001
 测试命令：./scripts.sh check
-当前状态：review
+当前状态：done（作者完成并已合入 main；外部验收待认，参照 MVP-04-verify 形式）
 完成时间：2026-10-05 22:20
 commit：7e94166
 验证结果：
