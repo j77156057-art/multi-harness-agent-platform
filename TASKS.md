@@ -32,6 +32,7 @@
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
+| claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -78,12 +79,13 @@
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
-| 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
 | 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
 | 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
 | 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
-| 17 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
-| 18 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
+| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
+| 18 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
+| 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
+| 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -182,6 +184,29 @@ Merge Gate 本身要等 MVP-07。**文档规矩在并行压力下不可靠，必
 变成合并前可机械判定的条件。** 已确定的纠正方向：给 discipline 增加
 git 感知检查（已合入 main 的任务分支必须为 ✅ 状态且证据完整），
 任务 GATE-MERGE-CHECK-01 排期在本验收之后，防止第三次发生。
+
+### 违规记录：claim-nullable 第三次缺任务卡 + 认领序号撞号（d5769e2）
+
+**事实**：WorkBuddy 的 claim-nullable（R10-fix-11 裁定，d5769e2，直提 main
+无合并提交）在任务表与认领表标 done，但**第三次**没有任务卡（前两次：
+R10-fix-10、fix-flaky-init）。此外认领表序号与 R10-fix-10-card **撞号 14**
+——discipline 只查「卡是否存在」，不查序号唯一性，撞号没有被任何门禁发现，
+由 TRAE 在 MVP-04-verify 人工核对时发现。自 d5769e2 起 discipline
+check_cards 持续 1 项失败。
+
+**已采取的纠正**：TRAE 以 claim-nullable-card（本分支）登记先行、依 d5769e2
+与 R10 §38.9 补录任务卡；序号按认领时间重排（MVP-08 17、claim-nullable 18、
+MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
+
+**系统性根因（三次同类，结论升级）**：缺卡三次全部出自同一 Harness 的
+「直提 main 小修复」路径（32f4e45、9d3d3ef 搭乘合并、d5769e2 直提），
+共同特征是**绕过任务分支 + 无合并者复核**。这已不是个人疏忽，而是流程缺口：
+1. 既有门禁只做快照自洽（缺卡会红），但 main 允许带着红灯继续前进，
+   红灯没有阻断后果；
+2. 认领序号无机械唯一性检查，撞号静默存在。
+**纠正措施**：GATE-MERGE-CHECK-01 除「已合入任务必须 done 且证据完整」外，
+顺带加一条认领序号唯一/连续断言；在该任务上线前，直提 main 的修复同样
+必须先有任务卡——TRAE 补卡只是兜底，不能成为常态依赖。
 
 ## 任务卡
 
@@ -1311,4 +1336,74 @@ commit：6bb4271（登记先于开工）、关卡提交随本提交闭合（见 
      与 R10-fix-10-card 撞号 14，需补卡任务一并更正；
   2. GATE-MERGE-CHECK-01（discipline git 感知检查）按既定顺序开工；
   3. 遗留清单第 4 项（并发窗口/path_conflicts 排期归属）需协调者指派。
+~~~
+
+### claim-nullable：R10-fix-11 裁定 task_claims 两列可空（✅ done，任务卡事后补录）
+
+~~~text
+任务编号：claim-nullable
+规范裁定号：R10-fix-11
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 19:30
+完成时间：2026-10-05 19:39（d5769e2）
+依赖任务：MVP-04（裁定其任务卡自陈的 schema 冲突阻塞项）
+真相源引用：R10 §11（claim_deferred_resource 不写 owner/attempt/Lease；批量每项
+            必留 task_claims 行）、§8（task_claims 定义）、§38.9（本裁定完整记录）、
+            提交 d5769e2
+允许修改目录：docs/spec/0.3-R10.md（§38.9 裁定记录）、backend/migrations/**、
+            backend/app/claim/**、backend/tests/**、TASKS.md
+交付分支：agent/workbuddy/fix-claim-nullable（d5769e2 直接进入 main）
+背景：MVP-04 卡「已知问题」提出规范冲突——§11:511、§11:617 与 §8 NOT NULL
+      三处不能同时满足；Qoder 用空串哨兵 NO_ATTEMPT="" 绕过，属设计债。
+裁定结论：改 schema，不改 R10、不继续用哨兵。§11 两条规则都合理，冲突在 schema；
+          列可空后「未领取」与「已领取」由数据层区分，不靠应用层约定。
+完成内容：
+  1. 新增 002_task_claims_nullable.sql：SQLite 不支持 ALTER COLUMN，走建新表 →
+     NULLIF(col,'') 回填历史空串 → 换名 → 重建 UNIQUE(claim_request_id, task_id)
+     与外键；
+  2. NO_ATTEMPT 由 "" 改为 None；
+  3. test_claim 断言 == "" 改 is None 并补 owner is None；
+  4. test_database_events 两处硬编码迁移数量改为按 .sql 文件数断言（防再漂移）；
+  5. 兼容性：回放走 LEFT JOIN task_attempts，本就容忍 NULL。
+test_id：CORE-CLAIM-002、CORE-RECOVER-001
+测试命令：cd backend; python -m pytest -q
+当前状态：done（R10-fix-11 裁定）
+commit：d5769e2（随 main 发布，无独立合并提交）
+验证结果：
+  - pytest 85 passed（MVP-04 新增 31 项），全量连跑 10/10；
+  - docstate 90/90、ruff check + format 全绿；
+  - MVP-04-verify 机械复核：无哨兵残留，回放/失败项路径与 NULL 语义一致。
+  - 证据来源：d5769e2 提交说明，TRAE 在 MVP-04-verify 复验一致。
+补录说明：
+  - 本卡由 TRAE 于 2026-10-05 20:01 依 d5769e2 与 R10 §38.9 事后补录：
+    WorkBuddy 直提 main 时再次遗漏任务卡（第三次同类缺卡），且认领表序号
+    与 R10-fix-10-card 撞号 14，见违规记录区。
+~~~
+
+### claim-nullable-card：补录 claim-nullable 任务卡（✅ done）
+
+~~~text
+任务编号：claim-nullable-card
+负责人 Harness：TRAE
+开始时间：2026-10-05 20:01
+依赖任务：claim-nullable（仅补登记，不改其交付内容）
+工作区：.worktrees/trae/
+真相源引用：tools/discipline/discipline.py 的 check_cards（缺卡判定）、
+            R10 §38.9 与提交 d5769e2（补录事实来源）
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/claim-nullable-card/a1
+完成标准：
+  1. claim-nullable 卡字段完整（真相源引用、test_id、commit、验证证据）；
+  2. 认领序号撞号修正后 discipline 24 项 0 失败；
+  3. 第三次缺卡违规在违规记录区留档并给出系统性结论。
+test_id：MVP-PROCESS-001
+测试命令：.venv\Scripts\python.exe tools\discipline\discipline.py
+当前状态：done
+完成时间：2026-10-05 20:05
+commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违规留档）
+验证结果：
+  - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
+  - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
+  - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
 ~~~
