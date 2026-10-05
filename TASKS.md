@@ -16,6 +16,9 @@
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
 | MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
 | MVP-02-amend | Claude Code | MVP-02 | ✅ done | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| worktree-isolation | Claude Code | — | ✅ done | `agent/local/claude/worktree-isolation/a1` | `MVP-PROCESS-001` |
+| agent-onboarding | Claude Code | worktree-isolation | 🟢 doing | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
+| discipline | Claude Code | agent-onboarding | 🟢 doing | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | MVP-03 | — | MVP-02 | ⏳ waiting | — | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -49,6 +52,8 @@
 | 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
 | 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
+| 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | 🟡 待合入 main |
+| 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -446,6 +451,95 @@ commit：f9fd072（H-7 + 三工作区 + 事故登记）、247ddc7（自服务 pr
   工作（事故 3 即此）。H-7 规则 2 只靠自觉，无机制强制；要根治需加 hook 拦截。
 - ⚠️ `scripts/new-ai.ps1` 仅在 Windows PowerShell 5.1 实测过；bash 等价命令只写在
   H-7 文档里，未提供脚本。
+~~~
+
+### agent-onboarding：让其他 AI 知道要在隔离工作区干活（待合入）
+
+~~~text
+任务编号：agent-onboarding
+负责人 Harness：Claude Code
+开始时间：2026-10-05 07:41
+工作区：.worktrees/claude/
+依赖任务：worktree-isolation（✅ 已合入 main `247ddc7`）
+真相源引用：docs/dev-convention.md H-7；docs/spec/mvp-task-checklist.md H-5
+允许修改目录：AGENTS.md、CLAUDE.md、README.md、TASKS.md、
+            docs/prep/README.md、docs/spec/mvp-task-checklist.md
+禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）、tools/docstate/**
+交付分支：agent/local/claude/agent-onboarding/a1
+test_id：MVP-PROCESS-001
+当前状态：已实现，**合入 main 失败（并发 ref 锁争用），尚未合入**
+commit：a6ec7ae
+已知问题：
+- ⚠️ main 上仍无 `AGENTS.md`，其他 AI 还看不到入口文件
+- ⚠️ 合入曾三次撞上 `couldn't set refs/...` / `ORIG_HEAD` ref 锁争用
+~~~
+
+### discipline：协作纪律检查器（doing）
+
+~~~text
+任务编号：discipline
+负责人 Harness：Claude Code
+开始时间：2026-10-05 08:05
+工作区：.worktrees/claude/
+依赖任务：agent-onboarding（🟡 待合入）
+真相源引用：docs/dev-convention.md「约束的强制程度」（本次新增）；
+            参照 agent-orchestrator-main 的 docs/documentation-map.md 做法
+允许修改目录：tools/discipline/**、TASKS.md、README.md、docs/dev-convention.md、
+            scripts.sh、Makefile、.github/workflows/**
+禁止修改目录：backend/app/**、backend/tests/**、backend/migrations/**、
+            docs/spec/0.3-R10.md（只读）、tools/docstate/discipline.py 以外的逻辑
+交付分支：agent/local/claude/discipline/a1
+test_id：MVP-PROCESS-001
+当前状态：doing
+
+交付：
+1. `tools/discipline/discipline.py`：把纯自觉的登记规则变成会红的断言
+   （registry 8 项 / cards 6 项 / counts 3 项，共 17 项，零外部依赖）
+2. 并入 `scripts.sh check` 与 CI —— 复用已有的绕不过的门禁，不新增 git hook
+3. `docs/dev-convention.md` 增「约束的强制程度」清单：
+   已强制 / 靠自觉 / 根本没实现 / 已知盲区
+
+### 验证结果
+
+  docstate    : 88 项检查，0 项失败
+  discipline  : 17 项检查，0 项失败
+  ruff check  : All checks passed!
+  ruff format : 13 files already formatted
+  pytest      : 20 passed in 1.51s
+  负向测试    : 把 README 两处 docstate 计数中的一处 88→87 → discipline 转红
+                （exit 1，输出 `README.md 声明了错误计数 [87]，实际 88`），
+                还原后转绿。断言有牙齿。
+
+### 工具自身在开发中被查出 5 个缺陷（全部已修）
+
+前 3 个在首次运行就暴露，后 2 个靠负向测试才暴露 —— 后两个如果没测就合入，
+等于交付一条不会红的断言，而那比没有断言更糟：
+
+1. `MVP-04 缺 Harness/分支` —— 规则 bug。状态列用字符串全等判定，
+   `⏳ waiting ★瓶颈` 这种带注记的没被认作 waiting。
+2. `MVP-03~11 未登记` —— 规则 bug且方向错了。没人认领的 waiting 任务本就不该有
+   认领记录，我把要求定反了。改为只对已开工任务强制。
+3. `MVP-02/-amend 缺验证证据` —— 解析 bug。卡片按 `### ` 切分到下一个标题就断，
+   而证据在 `### 验收结果` 这类后续小节里，落在卡外。改为两遍解析：卡片范围延伸到
+   下一张**卡片**的开头，中间的小节并入前一张。
+4. `counts` 静默跳过 dev-convention.md —— 正则 `(\d+)\s*项(?:检查|断言)` 匹配不到
+   「88 项**机械**断言」，而守卫写的是 `if declared and ...`，于是该文件被静默跳过。
+   改为按行匹配（同时含 docstate 与项数的行）。
+5. `counts` 并集判定放过撒谎 —— README 里 docstate 计数出现在**两处**，
+   `actual in declared` 只要有一处对就放过。负向测试时我只改一处，检查仍然全绿，
+   才发现。改为「所有声明的计数都必须等于实际值」。
+
+### 设计取舍
+
+- **工作区字段只对未完成的卡片强制**。该字段后加，不追溯改写历史卡片 —— 改写历史
+  就是篡改，与本项目处理 86→88 计数时同一条原则。
+- **验证证据接受两种形式**（`验证结果：` 多行块，或 `### 验收结果` 表格）。各卡片
+  历史写法不统一，强行统一等于伪造记录。
+- **只做结构检查，不做内容检查**。填了 `test_id` 但没真测，拦不住 —— 这一点写进
+  `dev-convention.md` 的「已知盲区」，不假装覆盖到了。
+
+**本任务自己又违反了登记规则第 0 条**（先加任务表行、后补认领登记），被自己写的
+断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
 ~~~
 
 ## 提交前自检

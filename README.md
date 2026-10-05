@@ -115,8 +115,15 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 | 门禁 | 数量 | 作用 |
 |---|---|---|
 | `docstate` | 88 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
+| `discipline` | 16 项断言 | 协作纪律：`TASKS.md` 两张表互相覆盖、任务卡有 test_id 与真相源引用、已完成卡有 commit 与验证证据、文档声明的断言数与实际相符 |
 | `test_spec_mirror.py` | 11 项 | 代码侧枚举与 R10 正文的交叉验证 |
+| `test_database_events.py` | 9 项 | 事件只追加、并发定序、失败不留孤儿事件、迁移幂等 |
 | `ruff` | check + format | 代码风格 |
+
+**哪些规则其实靠自觉？** 见
+[`docs/dev-convention.md` 的「约束的强制程度」](docs/dev-convention.md) —— 那里
+逐条列明已强制 / 靠自觉 / 根本没实现。纪律层此前几乎全是散文，本表是把它
+变成会红的断言的起点。
 
 **为什么要这么多机械检查？** R10 复审的教训：R9 自评"10 条修订全部闭环"是对的，
 但 R9 自身仍有 6 处机械缺口（事件未登记 allowlist、声明数字与实际不符、

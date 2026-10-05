@@ -11,6 +11,55 @@
 
 ---
 
+## 约束的强制程度
+
+**这一节回答「哪些规则真的会红」。** 做法参照 `agent-orchestrator-main` 的
+`docs/documentation-map.md`，它对本仓库自己的 `AGENTS.md` 有一句诚实的自我描述：
+
+> "**Not machine-checked.** The hard rules it names are enforced by tests… rather than by a doc gate."
+> "**if an artifact in the contract layer disagrees with prose, the contract layer wins**"
+
+R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距巨大。因此纪律层必须有清单，
+否则没人能说清某条规则到底靠不靠得住。
+
+### 会被门禁红掉的
+
+| 约束 | 由谁检查 |
+|---|---|
+| R10 自身不自洽 | `tools/docstate` 88 项（CI + 应用启动） |
+| `app/spec.py` 的状态/事件超出 R10 集合 | `test_spec_mirror.py` 11 项 |
+| 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
+| 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
+| 代码风格 | `ruff check` / `ruff format --check` |
+| **登记表自身不自洽** | `tools/discipline` 16 项（CI + `scripts.sh check`） |
+
+### 靠自觉的（写了也没人会拦）
+
+- **禁止在仓库根目录编辑**（H-7）—— 已减到只影响"读了 AGENTS.md 的 AI"，
+  对不读任何指令文件的 Harness 仍然无效
+- **禁止在 `main` 上直接提交** —— 没有 hook，纯自觉
+- **禁止 `force push` / `rebase` 到非任务分支** —— 无强制
+- **只移动自己拥有的分支引用**（H-7 规则 2）—— 跨工作区共享引用，只能靠自觉
+- **R10 正文只读** —— 任何人都能改；本项目自己就改过（合法，走 §38 复审）
+- **按 test_id 判定实现是否达标** —— ID 存在且无悬空已检查，
+  但"这些 ID 是否真的覆盖了要求的行为"要靠人读
+- **允许/禁止修改目录边界** —— `discipline` 只检查字段非空，不检查是否越界
+
+### 根本没实现
+
+- Merge Gate / Review / Verify（MVP-06、MVP-07）
+- 权限矩阵、分支保护、服务端 required checks
+- 任务依赖的机械校验（清单 §0.1 的依赖图无人验证）
+- secret 扫描先于事件落库（R10 §28 要求）
+
+### 已知盲区
+
+- `discipline` 只做**结构**检查，不做**内容**检查。填了 `test_id` 但没真测，拦不住
+- `docstate` 只读 R10，不读 `TASKS.md`（那是 `discipline` 的事）
+- 前端尚无任何静态检查（无 eslint / prettier），`docs/` 无 markdown lint、
+  无链接检查
+- 没有 remote，所以 GitHub 侧的 branch protection / required checks 全部不存在
+
 ## H-1 状态机唯一真相源
 
 R10 §10 的 23 个状态、R10 §37.7 的 88 项 allowlist（74 M / 13 O / 1 R）是**唯一**定义。
