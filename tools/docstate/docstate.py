@@ -263,15 +263,22 @@ def run(spec_path, verbose=False):
     r.chk("budget_override_by` 是唯一权威列名" in text, "R10-14 命名统一声明存在", "schema")
     r.chk("attempt_no" in text.split("## 11. Claim")[1][:2000], "§11 Claim SQL 引用 attempt_no", "schema")
 
-    # --- 组 7b：§8 主键/唯一键与关键字段一致性（R10-fix-09） ---
+    # --- 组 7b：§8 主键/唯一键与关键字段一致性（R10-fix-09 / R10-fix-10）---
     # 覆盖边界（与 §38 R10-fix-09 一致，勿静默扩大）：本组只对 §37.6 必要字段单元格
     # 可机器解析的表生效——不含 "/"、不含"；"。§37.6 对 task_outputs 等表使用有意的
     # 合并/散文写法（R10-08 记录过），那些行**跳过而非判失败**，属已知覆盖缺口。
     # check 消息带上实际检查表数与跳过表名，复核者据此判断覆盖面，不静默缩小。
+    #
+    # R10-fix-10：原实现把 §8 与 §37.6 两处合并成一个"已声明"集合，导致
+    # **删掉 §8 的字段仍能靠 §37.6 通过**（注入验证：删 task_claims.claim_request_id
+    # 后仍 88/88 通过）。§8 是最小定义的权威位置，唯一键引用的列必须在那里声明；
+    # 现改为分别报告两处来源，任一处缺失都能被抓到。
     definitions = parse_schema_definitions(sec8)
     required = parse_required_fields(text)
 
-    offenders = []
+    sec8_offenders = []
+    union_offenders = []
+    sec376_exempt = []
     checked_tables = 0
     skipped_tables = []
     for name, keys_cell, fields_cell in definitions:
@@ -283,14 +290,33 @@ def run(spec_path, verbose=False):
             skipped_tables.append(name)
             continue
         checked_tables += 1
-        declared = column_tokens(fields_cell, required_cell)
-        missing = sorted(column for column in columns if column not in declared)
-        if missing:
-            offenders.append("%s 引用未声明列 %s" % (name, ",".join(missing)))
+        sec8_declared = column_tokens(fields_cell)
+        sec376_declared = column_tokens(required_cell)
+        miss8 = sorted(c for c in columns if c not in sec8_declared)
+        if miss8:
+            sec8_offenders.append("%s 引用未在 §8 声明列 %s" % (name, ",".join(miss8)))
+            if all(c in sec376_declared for c in miss8):
+                sec376_exempt.append("%s（§37.6 有兜底，需补 §8）" % name)
+        union = sec8_declared | sec376_declared
+        miss_union = sorted(c for c in columns if c not in union)
+        if miss_union and not miss8:
+            union_offenders.append(
+                "%s 引用未在 §8/§37.6 任一处声明列 %s" % (name, ",".join(miss_union))
+            )
     r.chk(
-        not offenders,
-        "§8 唯一键引用的列均已声明；越界=%s（检查 %d 张表，跳过 %d 张：%s）"
-        % (offenders or "无", checked_tables, len(skipped_tables), skipped_tables or "无"),
+        not sec8_offenders,
+        "§8 唯一键引用的列均已在 §8 声明；越界=%s（检查 %d 张表，跳过 %d 张：%s）"
+        % (sec8_offenders or "无", checked_tables, len(skipped_tables), skipped_tables or "无"),
+        "schema-keys",
+    )
+    r.chk(
+        not union_offenders,
+        "§8 唯一键引用的列在 §8/§37.6 至少一处声明；越界=%s" % (union_offenders or "无",),
+        "schema-keys",
+    )
+    r.chk(
+        not sec376_exempt,
+        "无「§8 缺列但 §37.6 兜底」的隐式依赖；例外=%s" % (sec376_exempt or "无",),
         "schema-keys",
     )
 
