@@ -47,7 +47,7 @@
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
-| MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
+| MVP-06 | Qoder | MVP-05 | 🟢 doing | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
@@ -1145,6 +1145,58 @@ commit：7e94166
     docs/adr/ADR-DEV-002-single-account-acl.md，含阶段 2 前的三账户补齐清单。
   - GIT-PACK-001（Defender 开启时的跨账户 pack/bundle 传输与 intent 对账）在单账户
     模式下无法真实复现跨账户行为，只覆盖传输与对账路径本身，跨账户部分留待阶段 2。
+~~~
+
+### MVP-06：Verify Worker 与完成证据（doing）
+
+~~~text
+任务编号：MVP-06
+负责人 Harness：Qoder
+开始时间：2026-10-05 22:26
+依赖任务：MVP-05（已合入 main `e68a8d5`，✅ done）、MVP-04（✅ 已验收，提供 attempt/fencing）
+工作区：.worktrees/qoder/
+真相源引用：R10 §16（完成证据和 Verify：baseline differential、receipt 字段、verify 环境、
+            verify_jobs、Verify Worker Lease 与重试）、§10（verifying 的出入口，含
+            differential_not_applicable 的正反两条边）、§13（Lease/epoch）、
+            §15（事件与 seq）、§28（failure_reason 不变量）、
+            §26（VERIFY-DIFF-001、VERIFY-RECEIPT-001）
+允许修改目录：backend/app/verify/**、backend/app/tasks/**、backend/app/api/**、
+            backend/tests/**、backend/migrations/004_verify_fields.sql、
+            docs/traceability.md
+            ── 跨任务改动（已在此登记，仿 R10-fix-11 加 002_*.sql 的先例）：
+               backend/migrations/004_verify_fields.sql —— 补 verification_receipts 与
+               verify_jobs 在 R10 §16 里要求、而 001_initial.sql 没有的列。
+               只做 ADD COLUMN，不动既有列、不加表。
+禁止修改目录：docs/spec/0.3-R10.md、tools/docstate/**、tools/discipline/**、
+            backend/app/db/**、backend/app/events/**、backend/app/state/**、
+            backend/app/plan/**、backend/app/claim/**、backend/app/lease/**、
+            backend/app/git/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/MVP-06/a1
+完成标准：
+  1. Verify 在**精确 commit** 的全新 detached worktree 上执行，base 与 head 各一个
+  2. receipt append-only，唯一键 (task_id, attempt_id, commit, verify_profile)；
+     同 attempt 重复 verify 返回首次 receipt；不同 commit 生成独立 receipt
+  3. receipt 记录 R10 §16 列出的字段，且 failure_reason 严格区分
+     code_failed / env_failed / timeout / aborted
+  4. differential: not_applicable 的正向（verifying → awaiting_human）与反向
+     （awaiting_human → verifying）两条边都实现
+  5. 测试未通过不能进入 Review：head 退出码非 0 时任务进 changes_requested，
+     且不存在 awaiting_review 的可达路径
+  6. Merge Gate 判据可断言：按待合并 commit 精确查 receipt，不一致即查不到
+test_id：VERIFY-DIFF-001、VERIFY-RECEIPT-001
+测试命令：./scripts.sh check
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - MVP 简化（清单要求写明，不得静默跳过）：baseline differential 的「base 必须失败」
+    一侧在 MVP 不强制，只记录 baseline_exit_code；「baseline 也失败时的 flaky 放行」
+    整体标为阶段 2 交付，因此 receipt 的 flaky_registry_ids 恒为空、
+    diff_intersection 恒为 None（R10 §21 规定该字段缺失即阻断合并，MVP 下正好是
+    「flaky 放行不可用」，行为与未实现一致而不是假装实现）。
+  - Verify 账户隔离（§16 的「低权限隔离 / 网络白名单 / canonical 对 Verify 账户拒绝写入」）
+    随 ADR-DEV-002 的单账户降级一起延后；overlay 本身按新 gitdir + alternates 构造。
 ~~~
 
 ## 关键路径
