@@ -2119,6 +2119,7 @@ commit：`90047d5`（已合入 main）
             docs/dev-convention.md
 禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）
 交付分支：agent/local/claude/branch-visibility/a1
+commit：69a21b8
 test_id：MVP-PROCESS-001
 当前状态：done
 
