@@ -330,6 +330,40 @@ make fmt
 make docstate   # 只跑规范检查
 ~~~
 
+## H-8 改共享文件前，先确认别人没在改同一处
+
+**规则**：任何要改`TASKS.md`、`docs/traceability.md`、`docs/dev-convention.md`、
+`tools/discipline/**`、`tools/docstate/**` 这类共享文件的动手之前，先查其他 AI 的
+在途工作；查不出来就等，不要先做了再说。
+
+查法（一条命令）：
+
+~~~bash
+git worktree list                                  # 各AI 在哪个工作区
+for d in .worktrees/*/; do
+  echo "$(basename $d) | $(git -C $d branch --show-current) | 未提交: $(git -C $d status --short | wc -l)"
+done
+git log --oneline main..<某个分支>                  # 各分支未合入的 commit
+git diff --name-only main..<某个分支>              # 它们改了哪些文件
+~~~
+
+**为什么**：2026-10-05 的认领登记拆分（`847cc69`）踩了这个坑。我把认领表拆成
+per-task 文件时，从表里的「序号」列取号；**Qoder 在我拆分期间往同一张表插了新行**
+（`claims-split-review` 占了 22 号），我按旧快照取号就撞了号 —— 产出里出现序号
+`14`/`15` 各重复一次、`claim-nullable` 两个逐字相同的文件。
+
+Qoder 的独立复核（`claims-split-review`）指出 4 项，**全部成立**：拆分本身未登记、
+序号重复、同task 双文件、`discipline` 缺唯一性断言。后者尤其刺眼：
+**`discipline` 当时 24/24 全绿，而这些缺陷真实存在于树里** ——
+断言没覆盖的地方，绿灯不含信息。
+
+**这条与 H-1 的区别**：H-1 说「真相源在哪」，H-8 说「动之前先看别人」。
+两者都指向同一个毛病：**只看自己，不看全局**。
+
+**推论**：改动共享结构（拆分、重排、批量重编号）之前的那次检查，不是"谨慎"，
+是**必要步骤** —— 就像提交前跑门禁，不是可选的好习惯。
+
+
 ## 提交前自检
 
 ```bash

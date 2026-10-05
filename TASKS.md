@@ -33,7 +33,7 @@
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
-| MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` `MVP-TRANSITION-MIRROR-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -43,15 +43,20 @@
 | merge-interlock | OpenCode | discipline | ✅ done | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
-| MVP-04-inject | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
+| claims-split | WorkBuddy | — | ✅ done | `agent/workbuddy/split-tasks-md` | `MVP-PROCESS-001` |
+| claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
+| MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
 | MVP-06 | — | MVP-05 | ⏳ waiting | — | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
-| MVP-08 | Qoder | MVP-02 MVP-03 | 🔍 review | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
 | MVP-10a | — | MVP-08 | ⏳ waiting | — | `MVP-ADAPTER-001` |
 | MVP-10b | — | MVP-10a MVP-05~07 | ⏳ waiting | — | `MVP-ADAPTER-002` |
 | MVP-11 | — | MVP-04~09 MVP-10b | ⏳ waiting | — | `CORE-STATE-COVERAGE-001` |
+| tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -67,37 +72,39 @@
 
 ## 认领登记（R10 §0 总协调规则第 2 条）
 
+**本表只读**。每个 task 的认领记录在 `docs/claims/<序号>-<harness>--<task-id>.md`，
+各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
+
 **规则：领取任务前必须在任务清单写入 `task_id`、Harness 名称、时间、分支。**
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
-| 1 | MVP-01 | WorkBuddy | 2026-10-05 05:07 | `main`（⚠️ 见违规记录） | ✅ done |
-| 2 | MVP-02 | Codex | 2026-10-05 05:30 | `agent/local/codex/MVP-02/a1` | ✅ 已验收 |
-| 3 | MVP-02-amend | Claude Code | 2026-10-05 06:09 | `agent/local/claude/MVP-02-amend/a1` | ✅ done |
-| 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
-| 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
-| 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
-| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
-| 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
-| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
-| 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
-| 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
-| 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
-| 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
-| 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 15 | verify-mvp-04 | WorkBuddy | 2026-10-05 19:48 | `agent/workbuddy/verify-mvp-04` | ✅ done |
-| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
-| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
-| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
-| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
-| 18 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
-| 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
-| 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
-| 22 | gate-baseline-repair | OpenCode | 2026-10-05 10:22 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
-| 23 | trace-closure | OpenCode | 2026-10-05 10:40 | `agent/local/opencode/gate-baseline-repair/a1` | ✅ done |
-| 24 | merge-interlock | OpenCode | 2026-10-05 20:40 | `agent/local/opencode/merge-interlock/a1` | ✅ done |
-
+<!-- MVP-01 → docs/claims/01-workbuddy--MVP-01.md -->
+<!-- MVP-02 → docs/claims/02-codex--MVP-02.md -->
+<!-- MVP-02-amend → docs/claims/03-claude-code--MVP-02-amend.md -->
+<!-- worktree-isolation → docs/claims/04-claude-code--worktree-isolation.md -->
+<!-- agent-onboarding → docs/claims/05-claude-code--agent-onboarding.md -->
+<!-- discipline → docs/claims/06-claude-code--discipline.md -->
+<!-- MVP-03 → docs/claims/07-codex--MVP-03.md -->
+<!-- fix-wal-lock-retry → docs/claims/09-workbuddy--fix-wal-lock-retry.md -->
+<!-- MVP-08-prep → docs/claims/10-qoder--MVP-08-prep.md -->
+<!-- R10-fix-10 → docs/claims/11-workbuddy--R10-fix-10.md -->
+<!-- graph-traceability → docs/claims/08-claude-code--graph-traceability.md -->
+<!-- fix-flaky-init → docs/claims/14-workbuddy--fix-flaky-init.md -->
+<!-- MVP-03-amend → docs/claims/12-trae--MVP-03-amend.md -->
+<!-- claim-nullable → docs/claims/19-workbuddy--claim-nullable.md -->
+<!-- verify-mvp-04 → docs/claims/21-workbuddy--verify-mvp-04.md -->
+<!-- R10-fix-10-card → docs/claims/15-trae--R10-fix-10-card.md -->
+<!-- MVP-04 → docs/claims/13-qoder--MVP-04.md -->
+<!-- fix-flaky-init-card → docs/claims/18-trae--fix-flaky-init-card.md -->
+<!-- MVP-08 → docs/claims/17-qoder--MVP-08.md -->
+<!-- MVP-04-verify → docs/claims/20-trae--MVP-04-verify.md -->
+<!-- claim-nullable-card → docs/claims/22-trae--claim-nullable-card.md -->
+<!-- plan-evidence-failclosed → docs/claims/16-opencode--plan-evidence-failclosed.md -->
+<!-- claims-split-review → docs/claims/23-qoder--claims-split-review.md -->
+<!-- claims-split → docs/claims/24-workbuddy--claims-split.md -->
+<!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
+<!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 ### 违规记录：MVP-01 未按规则登记
 
 **事实**：MVP-01 由 WorkBuddy 在 05:07 认领并开工，但**直到 05:39（MVP-02 已被
@@ -218,6 +225,91 @@ MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
 **纠正措施**：GATE-MERGE-CHECK-01 除「已合入任务必须 done 且证据完整」外，
 顺带加一条认领序号唯一/连续断言；在该任务上线前，直提 main 的修复同样
 必须先有任务卡——TRAE 补卡只是兜底，不能成为常态依赖。
+
+### 复核记录：认领登记拆分（847cc69，Qoder）
+
+复核对象：`847cc69 refactor(tasks): split claim registry into per-task files under
+docs/claims/` —— WorkBuddy 把认领登记表拆成 `docs/claims/<序号>-<harness>--<task>.md`，
+并改写 `tools/discipline` 去读目录。**方向与诊断都是对的**，先记下来：
+
+> 代码注释里的数据：「当天 11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+> 冲突 100% 集中在这张表与任务卡两处」。
+
+这与本次会话的实测一致 —— Qoder 的两次 main 合并都在进行中被并发操作清空，每次合入
+都要手解 TASKS.md。「每个 task 一个独占文件」直接消除了这个多写点，是对的修法。
+
+但产出里有 4 项问题，其中 1 项使「门禁全绿」在这件事上失去意义：
+
+**① 拆分本身未登记。** `847cc69` 在任务表里没有行、在 `docs/claims/` 里没有文件、
+也没有任务卡。它改的是**登记结构本身与门禁本体**（`tools/discipline/**`），影响所有
+AI，却是又一次「直提 main 且无登记」。门禁不检查「提交是否对应已登记任务」，所以照样
+全绿。这是同类问题的第 5 次，前 4 次是：R10-fix-10（32f4e45）、fix-flaky-init（9d3d3ef）、
+claim-nullable（d5769e2）、以及 MVP-01（810d88d）。
+
+**② 序号重复。** `14` 与 `15` 各出现两次：
+
+~~~text
+14-trae--R10-fix-10-card.md        14-workbuddy--claim-nullable.md
+15-qoder--MVP-04.md                15-workbuddy--verify-mvp-04.md
+~~~
+
+**③ 同一个 task 有两个文件。** `14-workbuddy--claim-nullable.md` 与
+`18-workbuddy--claim-nullable.md` **内容逐字相同**（认领时间都是 19:30）。
+序号在文件名里承担身份，两个文件等于同一份认领有两份真相，
+「一个 task 一个独占文件」的不变量在拆分**当天就被自己破坏了**。
+
+**④ 违规记录里要求的断言没有落地。** `TASKS.md` 第 196 行的违规记录写明纠正措施含
+「顺带加一条认领序号唯一/连续断言」，但新的 `tools/discipline/discipline.py` 里
+`grep 序号|重复|uniq` 无命中。
+
+> 后果：`discipline 24/24 全绿` 与上述 ②③ 并存。**在这件事上，门禁给出的安心是虚假的** ——
+> 这正是本仓库反复记录的同一类失败：断言没覆盖的地方，绿灯不含信息。
+
+**④ 的归属更正（Qoder 自查后修正）**：该断言在第 196 行违规记录里被指派给
+**GATE-MERGE-CHECK-01**（独立任务，第 216 行"纠正措施"、第 1590 行排期），
+**不是本次拆分的交付项**。所以「没有落地」是事实，但把它记成拆分的漏项是错的归属，
+本复核的原措辞如此，现予更正。修正后真正值得指出的只有时序问题：
+**在 GATE-MERGE-CHECK-01 落地之前**，新结构的两条不变量（序号唯一、task_id 唯一与
+一一对应）没有任何守卫，而 ②③ 已经真实存在于树里 —— 这段时间窗内绿灯不可信。
+
+**建议**（不替拆分者决定，序号即身份，取舍应由它定）：
+
+1. 补 `847cc69` 的登记（任务行 + claim 文件 + 卡），或说明它归属哪个已登记任务；
+2. 处理 `claim-nullable` 双文件：保留哪一个由它定，另一个删除并在保留文件里记一次合并，
+   不要两个都留在树里；
+3. 给 `discipline` 加断言：recognized serial 唯一、task_id 唯一、且两者一一对应
+   —— 这条在拆分之后比拆分之前更便宜，因为数据源已经是一文件一 task；
+4. 存根表里的 `<!-- ... -->` 映射注释一并理顺（现在 `R14` 出现两次，
+   且 `R10-fix-10-card` 排在 `verify-mvp-04` 之后与序号顺序不一致）。
+
+**未做**：复核只读不改 —— 上述 1–4 都在 WorkBuddy 的文件与门禁里，本任务只提交这份反馈。
+若需要，Qoder 可以接着做 ②③ 的机械修复，但需要一次明确指派。
+
+### 违规记录：MVP-08 第三次「先合 main 后验收」（3de2115）
+
+**事实**：Qoder 的 MVP-08（2440566，任务表/认领表状态 🔍 review）由
+`3de2115`（Merge branch 'agent/local/qoder/MVP-08/a1'）合入 main，
+TRAE 的验收结论于当日 21:00 才由 MVP-08-verify 补出：通过（附遗留
+清单 4 项，无 P1）。这是继 MVP-03（db9bc19）、MVP-04（e656058）之后
+**第三次同模式违规**，且发生时 GATE-MERGE-CHECK-01 正在实施中、闸尚未
+合入 main——红灯仍无阻断后果。
+
+**已采取的纠正**：TRAE 以 MVP-08-verify（`agent/local/trae/MVP-08-verify/a1`）
+按 DOC-TRACE-001 / MVP-API-001 两条 test_id 独立核查（不采信卡片自陈），
+实跑 docstate 90/0、pytest 111 项退出 0、ruff 全过、prep 契约核对
+FAILURES: 0、变异测试 10/10、真实 app.main:app 冒烟（含零 CORS 头与
+Host 头拒绝），结论与 4 项遗留（错误码越表 2 项、HTTP 状态不符 2 处、
+消息全局 seq/refs schema 缺口、脚手架迁移待 MVP-05/06 替换）已回填
+MVP-08 卡；本记录为第三条留档。
+
+**根因与终局措施**：根因与前两次相同——合并前没有可机械判定的验收闸，
+规矩只在文档里。与前两次不同的是，本次违规被 GATE-MERGE-CHECK-01
+的 merge 组在其分支上**当场捕获**：discipline 枚举 git 已合并任务分支，
+对 3de2115 报出「未完成=['MVP-08']」，且该检查 fail-closed（非 git 工作区/
+浅克隆即失败）。本验收关单后该红灯消除，GATE 分支随即 32/32 全绿并合入；
+此后第四次同模式违规将在合并前被本地门禁与 CI（fetch-depth: 0）同时
+拦截。残余盲区：直提 main 不产生合并提交，仍只能靠分支保护（B 方案，
+暂未启用）与事后留档兜底。
 
 ## 任务卡
 
@@ -692,7 +784,6 @@ R9-03 要求的 `unique(claim_request_id, task_id)` **已由 `task_claims` 满�
 的精神，应由 `MVP-02-amend` 修正 spec 文本，而不是在实现里补表。
 本任务不采用我原先的「拆表」方案，理由与 Claude 一致（见下方冲突说明）。
 
-
 ### 其他说明（不构成缺陷）
 
 - `seq` 取自 `cursor.lastrowid`：当前 schema 未声明 `WITHOUT ROWID`，rowid 即自增
@@ -891,6 +982,60 @@ PermissionError: [Errno 13] Permission denied:
 **确定性**失败（有明确 `^E` 行、0/5 复现），已闭环；本条是**无法复现**的
 一次性现象，两者不是同一问题。
 
+### claims-split：认领登记拆分为per-task 独占文件（✅ done）
+
+~~~text
+任务编号：claims-split
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 20:30
+完成时间：2026-10-05 20:47
+依赖任务：无
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §0 总协调规则第 2 条（领取任务前必须登记）、
+            docs/dev-convention.md H-7（隔离与验证）
+允许修改目录：TASKS.md、docs/claims/**、tools/discipline/discipline.py
+禁止修改目录：docs/spec/**、backend/**
+交付分支：agent/workbuddy/split-tasks-md
+完成标准：
+  1. 量化多写点成本（改动次数 / merge 次数 / 冲突集中点）✅ 11.5h内 40 次改动、19 个 merge
+  2. 认领登记拆成每 task 一个独占文件，TASKS.md 内表标记只读 ✅ 23 个文件
+  3. discipline 改读目录且保持检查能力 ✅ 由 4 项失败 → 24 项 0 失败
+  4. 拆分零丢失（内容计数不变）✅ 50 个 ### 小节与 6 个违规记录全部原位
+  5. 复核并修掉自己引入的缺陷 ✅ 见「Qoder 复核的回应」
+test_id：MVP-PROCESS-001
+测试命令：python tools/discipline/discipline.py
+当前状态：done
+commit：847cc69
+验证结果：
+  discipline: 24 项 0 失败（拆分前 4 项失败）
+  docstate: exit 0；pytest: exit 0；ruff: exit 0
+  TASKS.md: 1605 → 1576 行，50 个 ### 零丢失
+已知问题：
+  - 任务卡未拆（11 个 task 当时缺合规卡，Trae 已陆续补齐；拆分前置条件已满足）
+  - **本任务自身未登记**（Qoder 复核发现①），已于 21:20 补登记
+  - 拆分引入序号重复与同 task 双文件（Qoder 复核发现②③），已修，见下
+  - 当时无序号/task_id 唯一性守卫（④），已补断言
+~~~
+
+### Qoder 复核的回应（claims-split-review，21:20）
+
+Qoder 对 `847cc69` 做了独立复核，指出 4 项。逐条核对后**全部成立**，已修：
+
+| 编号 | Qoder 的发现 | 核对 | 处置 |
+|---|---|---|---|
+| ① | 拆分本身未登记（改登记结构与门禁本体却无登记） | ✅ 成立 | 补任务表行 + `docs/claims/24-workbuddy--claims-split.md` + 本卡 |
+| ② | 序号 `14` / `15` 各重复一次 | ✅ 成立 | 按认领时间重排序号，现 01–23 连续无重复 |
+| ③ | `claim-nullable` 两个文件内容逐字相同 | ✅ 成立 | 去重保留一份（24 → 23 个文件） |
+| ④ | discipline 无序号/task_id 唯一性断言，绿灯不含信息 | ✅ 成立（归属更正后） | 补两条断言，检查项 24 → 26 |
+
+**根因反思**：②③ 的成因是我拆分时从 TASKS.md 表格的「序号」列取号，而**其他 AI 在我
+拆分期间往表里插了新行**（Qoder 的 `claims-split-review` 拿了 22 号），我按旧快照取号
+就撞了号。**我只检查了自己有没有登记，没检查别人是否在改同一处** —— 这正是我上一轮
+拆分想解决的问题，却在拆分时自己犯了一次。
+
+**Qoder 复核的价值**：它在 `847cc69` 合入后立刻做了独立复核，把「discipline 24/24
+全绿」这个看似可信的结论戳破了一处。绿灯不等于正确 —— 断言没覆盖的地方，绿灯不含信息。
+
 ### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
 
 MVP-04 已由 TRAE 完成代码核查并验收（见上）。本节是**方法上的补充**：TRAE 逐行核对了
@@ -928,84 +1073,103 @@ R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表�
 - 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
   建议在 MVP-10b Adapter 实现时解决。
 
-### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
+### verify-mvp-04：MVP-04 验收的注入验证补充（✅ done）
 
-MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
-R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
+~~~text
+任务编号：verify-mvp-04
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 19:48
+完成时间：2026-10-05 20:05
+依赖任务：MVP-04（✅ 已验收）
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §11（Claim 事务与条件 UPDATE）、§13（fencing）、
+            §26（CORE-CLAIM-002 / CORE-FENCE-001 的验证要求）
+允许修改目录：docs/**（仅 TASKS.md 登记）
+禁止修改目录：backend/**（验收对象，只读）、docs/spec/**
+交付分支：agent/workbuddy/verify-mvp-04
+完成标准：
+  1. 四个 test_id 逐条核验，结论可追溯到代码行与测试用例 ✅
+  2. 至少做一次注入验证（故意破坏防护 → 确认测试能抓到）✅ 三次
+  3. 验收结论与 TRAE 的代码核查结论可对照、不重复 ✅
+  4. 验收中发现的问题要么修掉、要么登记为遗留 ✅
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-FENCE-001
+测试命令：python tools/discipline/discipline.py && pytest
+当前状态：done
+commit：9108ca8
+验证结果：
+  门禁: docstate 90/90、pytest exit 0、ruff exit 0
+  注入 1（去掉 rowcount 断言）: 未被抓到，10/10 通过 —— BEGIN IMMEDIATE 写锁已挡双赢家
+  注入 2（去掉 status='ready' 条件）: 抓到，2 个并发测试 + 多个 claim 测试失败
+  注入 3（禁用 guarded_write epoch 检查）: 抓到，5 个测试失败（含 CORE-FENCE-001 两例）
+已知问题：
+  - 三次注入中第1 次未被抓到；非缺陷，但需固化「写锁是第一道防线」的认知
+  - 建议给 CORE-CLAIM-002 补一条显式用例断言「即使去掉 rowcount 仍只有一个 winner」
+  - 复放不重发 lease_token 的问题转 MVP-10b
+  详见下方「MVP-04 验收：注入验证补充」小节
+~~~
 
-R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
+### claims-split-review：复核认领登记拆分（✅ done）
 
-#### 三项注入
+~~~text
+任务编号：claims-split-review
+负责人 Harness：Qoder
+开始时间：2026-10-05 21:08
+依赖任务：verify-mvp-04（复核对象 847cc69 紧随其后合入 main）
+工作区：.worktrees/qoder/
+真相源引用：847cc69（复核对象）、TASKS.md 第 196 行违规记录（其纠正措施含序号断言）、
+            H-4（每个 test_id 必须可追溯）、docs/dev-convention.md「约束的强制程度」
+允许修改目录：TASKS.md、docs/claims/22-qoder--claims-split-review.md
+禁止修改目录：tools/discipline/**、backend/**、docs/spec/**、docs/claims/ 下非本任务的文件
+交付分支：agent/local/qoder/claims-split-review/a1
+完成标准：
+  1. 复核结论可追溯到具体文件与行号，不是印象
+  2. 发现的问题连同「为什么门禁没抓到」一起写清，而不是只列现象
+  3. 不代改拆分者的文件；需要动手的部分明确标出「需指派」
+test_id：MVP-PROCESS-001
+测试命令：python tools/discipline/discipline.py
+当前状态：done
+完成时间：2026-10-05 21:08
+commit：见本任务提交
+验证结果：
+  复核对象实测：discipline 24/24 全绿的同时，序号 14/15 各重复一次、
+  claim-nullable 存在两个逐字相同的认领文件 —— 即「全绿」与「不自洽」并存。
+  四个 claim-less 提交的清单由 git log 逐个核对：32f4e45、9d3d3ef、d5769e2、847cc69。
+已知问题：
+  - 本任务只提交反馈，不修 ②③④。修复需一次明确指派（涉及 tools/discipline/** 与
+    他人独占的 claim 文件）。
+  - 序号 22 的选取依据：当前最大序号为 21（因重复，23 个文件只用到 21 个号）。
+~~~
 
-| 注入 | 实测 | 结论 |
+
+## 共享文件改动声明
+
+动了共享文件（`TASKS.md` 登记结构、`docs/traceability.md`、`docs/dev-convention.md`、
+`tools/discipline/**`、`tools/docstate/**`）的 task 必须在下表登记。
+`discipline` 的 `ownership` 组会检查：本表的每个 task_id 都必须在任务表里有行、
+且都有 `docs/claims/` 下的认领文件。
+
+| task_id | 改了什么 | commit |
 |---|---|---|
-| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
-| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
-| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
+| `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
+| `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
+| `fix-flaky-init` | 撤回 flaky 登记（只改 TASKS.md 登记，未动门禁本体） | `9d3d3ef` |
+| `claim-nullable` | 改 `tools/discipline` 无关，改 TASKS.md 登记 + R10 §8 可空标注 | `d5769e2` |
+| `claims-split` | 拆认领登记为 `docs/claims/**`、改 `discipline` 读目录、加唯一性断言 | `847cc69`+`ec7ae01` |
+| `discipline` | 造`tools/discipline` 检查器本体 | `a7adf3c` |
+| `graph-traceability` | 建 `docs/traceability.md`、改 `tools/discipline` 加 traceability 组 | `5100c7f` |
 
-第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
-互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
+**规则**：新增这类 task 时，同一次提交内必须在本表加一行。
+漏了的话 `discipline` 会报「动了共享结构的 task 都有认领文件；缺=[...]」。
 
-> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
-> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
-> 第二项注入已证明测试能抓到它。
-
-#### 与 TRAE 验收的互补
-
-| | TRAE（代码核查） | WorkBuddy（注入验证） |
-|---|---|---|
-| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
-| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
-| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
-
-#### 补充建议（不阻塞）
-
-- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
-  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
-- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
-  建议在 MVP-10b Adapter 实现时解决。
-
-### MVP-04 验收：注入验证补充（WorkBuddy，2026-10-05 19:48-20:05）
-
-MVP-04 已由 TRAE 完成代码核查并验收。本节是**方法上的补充**：TRAE 逐行核对了实现与
-R10 的对应关系，本节做**注入验证** —— 故意破坏关键防护，看测试是否真能抓到。
-
-R10 复审的核心教训是「声称闭环不等于实际闭环」，登记表的「✅ 有断言」不构成证据。
-
-#### 三项注入
-
-| 注入 | 实测 | 结论 |
-|---|---|---|
-| 去掉条件 UPDATE 的 `rowcount != 1` 断言 | **未抓到**（10/10 通过） | `BEGIN IMMEDIATE` 写锁已挡双赢家，rowcount 是第二道防线 |
-| 去掉条件 UPDATE 的 `status = 'ready'` 条件 | ✅ 抓到：2 个并发测试 + 多个 claim 测试失败 | 测试验的是「条件 UPDATE 整体正确」而非某一行 |
-| 禁用 `guarded_write` 的 epoch 检查 | ✅ 抓到：5 个测试失败，含 `CORE-FENCE-001` 的两个用例 | fencing 防护有真实测试覆盖 |
-
-第一项**不是缺陷**：`BEGIN IMMEDIATE`（`transaction()` 默认 `immediate=True`）本身提供
-互斥，条件 UPDATE 的 rowcount 断言是纵深防御。认知需固化——
-
-> **写锁是第一道防线，条件 UPDATE + rowcount 断言是第二道。**
-> 只有第一道时，「条件 UPDATE 的 WHERE 条件写错」这类缺陷仍会漏过。
-> 第二项注入已证明测试能抓到它。
-
-#### 与 TRAE 验收的互补
-
-| | TRAE（代码核查） | WorkBuddy（注入验证） |
-|---|---|---|
-| 方法 | 逐行比对实现与 R10 条款 | 故意破坏 → 看测试反应 |
-| 独有发现 | `integration_health` 无行时 `base_commit` 落 NULL 的边界无测试；跨 boot 单调时钟豁免未实现 | rowcount 是第二道防线，认知需固化 |
-| 共同结论 | 四条 test_id 全部通过，MVP-04 验收通过 | 同 |
-
-#### 补充建议（不阻塞）
-
-- 给 `CORE-CLAIM-002` 补一条显式用例：断言「即使去掉 rowcount 断言，
-  `BEGIN IMMEDIATE` 仍保证只有一个 winner」，把「写锁是第一道防线」写进测试注释；
-- 复放不重发 lease_token（库中只存哈希，Adapter 丢 token 后只能等 Lease 过期）
-  建议在 MVP-10b Adapter 实现时解决。
+**为什么有这条**：2026-10-05 之前有 5 次「改了共享文件却没登记」
+（`810d88d`、`32f4e45`、`9d3d3ef`、`d5769e2`、`847cc69`），
+其中 `847cc69`（认领登记拆分）是 WorkBuddy 自己漏的，被 Qoder 的独立复核抓出来 ——
+当时 `discipline` 24/24 全绿，缺陷却真实存在于树里。
 
 ## 关键路径
 
 ~~~text
-MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
+MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-10b → MVP-11
                   \→ MVP-08 → MVP-10a → MVP-10b
 ~~~
 
@@ -1020,7 +1184,7 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 | MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-03 前（依赖已满足，**2026-10-05 09:53 放行**） |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`）｜ 🟢 **Qoder 在做**：`.worktrees/qoder/docs/prep/MVP-08/`（状态 doing，按规则 prep 不当结论用） |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`，Qoder，已结卡）—— 已由 MVP-08 实际使用：`openapi.yaml` 的 §7/§21 路径对齐与 `error-codes.md` 的 code 直接落进 `backend/app/api/**`，其中 `payload_hash` 的规范化口径被 `claim/service.py` 的 `canonical_payload_hash` 沿用 |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
@@ -1048,6 +1212,14 @@ commit：
 
 ## 登记规则
 
+0-a. **⚠️ 认领登记写进 `docs/claims/`，不要往 TASKS.md 的表里加行。**
+   2026-10-05 20:47 拆分：那11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
+   冲突 100% 集中在这张表与任务卡两处 —— 它们是仓库里仅有的多写点。
+   认领登记已拆成「每 task 一个独占文件」，新认领请新建
+   `docs/claims/<序号>-<harness>--<task-id>.md`（字段照抄现有文件）。
+   TASKS.md 里的认领表**只读**，任何 AI 都不应再往里加行。
+   任务卡暂未拆分（原始数据里有 11 个 task 从未建过格式合规的卡，先补齐再拆），
+   任务卡仍写进 TASKS.md 的「## 任务卡」章节。
 0. **⚠️ 登记必须发生在开工之前，不是之后。** 顺序是：
    建任务分支 → 在「认领登记」表写入 task_id/Harness/时间/分支 → 开工。
    先干活后补登记会让其他 AI 看不见占用（本项目已因此发生一次，见违规记录）。
@@ -1435,7 +1607,7 @@ test_id：MVP-PROCESS-001、DOC-PLAN-001
 - 本任务只做结构校验：不判断某个 test_id 是否真的覆盖了它声称的行为
 ~~~
 
-### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（doing）
+### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（✅ done）
 
 ~~~text
 任务编号：MVP-08-prep
@@ -1463,10 +1635,15 @@ test_id：MVP-PROCESS-001、DOC-PLAN-001
   5. mutation_test.py 对每条断言做变异，全部被捕获（证明断言非空跑）
 test_id：DOC-TRACE-001、MVP-API-001
 测试命令：python docs/prep/MVP-08/check_contract.py && python docs/prep/MVP-08/mutation_test.py
-当前状态：doing
-完成时间：
-commit：
+当前状态：done
+完成时间：2026-10-05 20:18
+commit：888afb6（初版落地，merge 8fdce1a）+ a6d0350（按 R10-fix-10 复验，merge 33bde2b）
 验证结果：
+  以下两个脚本于 2026-10-05 20:18 对当时 main 的 R10（含 R10-fix-09/10/11 三轮修订）**重新跑过**：
+  check_contract.py : 10 组断言，FAILURES 0（exit 0）
+  mutation_test.py  : caught 10/10（exit 0）
+  结卡时重跑的理由：本卡第 4 条完成标准是「对仓库 R10 跑出 0 失败」，而 R10 在本卡完成
+  之后又被修过 —— 拿当时的绿灯结卡就是在用陈旧证据。
 已知问题：
   - prep 产出不进主分支；MVP-08 真正开工时必须重新验证，不能直接当结论用
   - 与 graph-traceability 的边界：本任务不建 docs/traceability.md，那是 Claude 的交付物
@@ -1638,7 +1815,7 @@ commit：8c0233a
      未实现，属 §26 阶段 1 后续退出条件，不在本卡 5 条完成标准内。
 ~~~
 
-### MVP-08：REST API、群聊与消息事件（review）
+### MVP-08：REST API、群聊与消息事件（✅ 已验收 2026-10-05 21:00，TRAE 代码核查，通过附遗留清单）
 
 ~~~text
 任务编号：MVP-08
@@ -1670,7 +1847,7 @@ commit：8c0233a
   5. 服务只绑定 loopback，且不返回任何 CORS 头
 test_id：DOC-TRACE-001、MVP-API-001
 测试命令：./scripts.sh check
-当前状态：review
+当前状态：✅ 已验收（2026-10-05 21:00，TRAE 独立核查，结论与证据见卡末「验收意见」）
 完成时间：2026-10-05 19:54
 commit：2440566
 验证结果：
@@ -1706,6 +1883,132 @@ commit：2440566
   - 跨任务改动（已在此登记）：`docs/traceability.md` —— 给 `MVP-API-001` 换标记并写明
     缺口，同时在「强制状态列的含义」里新增 🟡 档。该文件属 graph-traceability，其状态
     列不被断言；不改会让同一提交里的代码与文档相互矛盾。
+
+验收意见（TRAE，2026-10-05 21:00，基线 e6b3026；不采信卡片自陈，逐条找代码行+测试断言）：
+  总评：✅ 通过（附遗留清单 4 项，均 P2/P3，无 P1）。核心不变量——fencing、单一迁移
+  表、幂等、loopback——都有机械负向测试；两处脚手架迁移诚实、未伪造 receipt。
+
+  DOC-TRACE-001（契约↔R10 可追溯）✅：
+  - 路径命名与 R10 §7/§21 逐字对齐（app/api/routes.py：claim/heartbeat/
+    submit_result/request_help/report_blocked/release/abandon、review/submit）；
+  - docs/prep/MVP-08/check_contract.py 实跑 FAILURES: 0（openapi/prep 是
+    §7/§8/§10/§11/§21/§37.7 的忠实投影）；mutation_test.py 实跑 10/10，
+    证明契约守卫非空转；
+  - 错误包络 code/message/retryable 形状有 test_api_errors.py 10 例钉死，
+    且验证错误只回字段名不回值（D-8，断言 "42" 不出现在响应体）。
+
+  MVP-API-001（全链路仅经 API）🟡 维持，验收确认口径：
+  - HTTP 面：建群/发方案/批准（含依赖拆分 ready vs ready_waiting_deps）/领取/
+    心跳/提交/审查（approve 与 request_changes 两分支、review_round 推进、
+    last_review_id 落库）全部经 TestClient 机械断言（test_api_flow.py 4 例）；
+  - 两处非 HTTP 迁移（claimed→in_progress、verifying→awaiting_review）由
+    SchedulerService.start_task / record_verify_passed 驱动，走真实迁移表与
+    真实事件，docstring 明示为脚手架且不出现在 HTTP 面，无伪造 receipt——
+    与 R10 §10 worktree guard、§16 receipt 串行要求不冲突，归属 MVP-05/06；
+  - 事件游标：since_seq 排他、分页 next_seq/has_more、seq 连续有序、按任务
+    过滤（test_api_events_messages.py 8 例）；@mention 落 message_deliveries
+    有直接 SQL 断言；
+  - 安全：默认绑 127.0.0.1（config.py:28，AP_HOST 改 0.0.0.0 注释要求重新评审，
+    符合 §5「默认」口径）；Host 头白名单中间件拒非 loopback（400
+    auth.host_header_rejected，有测试）；对真实 app.main:app 冒烟实测响应中
+    零 access-control-* 头；幂等重放带 Idempotency-Replayed、同 request_id
+    不同载荷 409 idempotency.conflict，均有测试。
+
+  门禁实测（2026-10-05 21:00，e6b3026 工作区）：
+  - docstate 90/0；ruff check 全过、ruff format 40 files already formatted；
+  - pytest 全量 111 项（MVP-08 新增 22：flow 4 + errors 10 + events/messages 8）
+    退出码 0；check_contract.py 0 FAILURES；mutation_test.py caught 10/10；
+  - app.main:app 冒烟（临时 AP_DATA_DIR）：health/project/group/plan/approve/
+    claim/events/message 全 200，CORS 头为空，伪造 Host 400。
+
+  遗留清单（不阻塞本验收；1/2 是 Adapter 接口契约问题，须在 MVP-09/10a
+  对接错误码之前处理）：
+  1. 两个错误码不在 error-codes.md 封闭集合内（违反该 prep §0.1）：
+     errors.py 使用的 `claim.concurrent_claim`（ConcurrentStateChange 映射）
+     与 `request.conflict`（通用 Conflict fallback，涵盖资源已存在/状态不符/
+     非 draft 批准等多处）。修法二选一：映射到表内码（并发写竞争语义接近
+     claim.concurrency_full 但需裁定；通用冲突按场景映射 state.transition_undefined
+     或资源专属码），或按 §0.1 走 prep 复审把缺口码补登并附 R10 引用；
+  2. 两处 HTTP 状态码与表不一致：review.self_review_forbidden 表定 403、
+     实现发 409（test_api_errors.py 也钉了 409，修时同步改测试）；
+     request.invalid 表定 400，但服务层 InvalidInput 发 422（plan 语义校验、
+     空消息体）。建议语义校验改用专属码（verdict→review.verdict_not_allowed、
+     plan linter→plan.*），或在表内为 422 补一个通用语义码；
+  3. 消息能力两处 schema 级缺口（卡片已自陈、traceability 已标 🟡，确认属实）：
+     a) ✅ 已关闭（message-global-seq，2026-10-05）：迁移 003 建单行表
+        global_seq 统一发号、task_events 去 AUTOINCREMENT 重建，消息与事件
+        同事务取号；两流交错连续、跨群不重号、存量库续号、回滚不空洞均有
+        机械断言（test_api_events_messages.py、test_database_events.py）。
+        原始问题存档：消息 seq 曾按 group 独立分配（MAX(created_seq)+1），
+        不与 task_events 共享全局 seq——R10 §19 read_context(since_seq)
+        未来要混合排序消息与事件，需序列表或消息入事件流，均要动 migrations
+        （MVP-02 范畴）；checklist MVP-08 的交付条目原文只要求「消息与
+        task_events 关联」（task_id 列已做），故不阻塞；
+     b) PostMessage 接受 refs 但 task_messages 无列、service 接收即丢、GET 不回显
+        （仅 POST 响应原样回显），契约静默说谎——修 a 时一并删字段或补列；
+        【a 已另案关闭，b 仍开放】
+  4. MVP-05/06 落地后，须把 test_api_flow.py 里两处 service.start_task /
+     record_verify_passed 驱动替换为真实 HTTP 路径（publish_task_branch、
+     Verify Worker receipt），届时 MVP-API-001 方可由 🟡 转 ✅。归属：MVP-06
+     验收时检查，或单开收尾任务。
+~~~
+
+### tasks-critical-path：校验 TASKS.md 自己那份关键路径副本 + 查重复 task_id（done）
+
+~~~text
+任务编号：tasks-critical-path
+负责人 Harness：Claude Code
+开始时间：2026-10-05 10:07
+工作区：.worktrees/claude/
+依赖任务：graph-traceability（✅ 已合入 main）
+真相源引用：docs/spec/mvp-task-checklist.md §0.2；TASKS.md「## 关键路径」
+允许修改目录：tools/discipline/**、TASKS.md、docs/claims/**、docs/traceability.md
+禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）
+交付分支：agent/local/claude/tcp3/a1
+commit：见分支
+test_id：MVP-PROCESS-001、DOC-PLAN-001
+当前状态：done（除 claim-nullable 重复文件外全绿）
+
+### 动机：上一轮我制造的覆盖漏洞
+
+关键路径在两处声明：清单 §0.2 与 TASKS.md 的「## 关键路径」。上一轮我只改了
+两处的**数据**，却把断言只接到清单那一处 —— TASKS.md 里的旧副本（漏了 MVP-03 与
+MVP-10b）无人拦，读 TASKS.md 的人会拿到已被推翻的结论。本次把链长解析复用到两处，
+各自校验长度与每一步是否为真实依赖边。
+
+**另加两条 task_id 唯一性断言**：重复 task_id 会**静默**通过所有基于集合的比较，
+必须单独查。来源是合并时两边各自追加了同一个任务的行。
+
+### 落地时查出的真实缺陷
+
+1. TASKS.md 关键路径仍是 7 节副本 —— 本次断言的直接目标，已修
+2. `docs/claims/` 里 `claim-nullable` 有两个内容完全相同的文件（拆分工具按 TASKS.md
+   的行生成，而该任务在表里出现了两次）。**待授权删除** `18-workbuddy--claim-nullable.md`
+
+### 与 main 上认领登记拆分的冲突（本任务的主要波折）
+
+我第一次合并时带的是**旧版 discipline.py**（读 TASKS.md 的认领表）。而 main 上
+Qoder 已把认领登记拆成 `docs/claims/*.md` 并同步改了 discipline.py，其理由与我在
+本任务卡里 independently 得出的合并教训一致，还量化了：「当天 11.5 小时内 TASKS.md
+被改 40 次、产生 19 个 merge commit，冲突 100% 集中在这张表与任务卡两处」。
+
+**带旧文件覆盖会把这个重构倒退回去。** 处理：中止合并，从最新 main 起新分支，
+只把 4 条新断言移植到他们的新版解析器上，TASKS.md 的小改动针对当时内容重写。
+
+过程中我用脚本整体重写认领登记表，把 TASKS.md 从 1428 行截断成 27 行（已从提交恢复）。
+**这个文件不能整体重写，只能逐行最小改动并立刻校验行数。**
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 28 项检查，1 项失败（唯一失败为 claim-nullable 重复文件，待授权删除）
+  负向测试    : TASKS.md 关键路径改回 7 节 → FAIL；还原转绿
+                任务表插入重复 task_id 行 → FAIL「任务表无重复 task_id」
+
+已知问题：
+- `docs/claims/18-workbuddy--claim-nullable.md` 与 `14-` 内容哈希相同，待授权删除
+- 认领登记表的「序号」前缀仍可能重复（拆分后已无序号列，改用文件名前缀）
+- `traceability.md` 的「强制状态」列由人手写，无断言覆盖
 ~~~
 
 ## 提交前自检
@@ -1834,4 +2137,133 @@ commit：5fe1451（登记先于开工+序号修正）、665c8e4（补卡 + 违�
   - discipline：24 项检查 0 失败（修前 23/24，缺卡项已消除）；
   - docstate：90 项检查 0 失败（本任务不改规范与工具，无回归）；
   - 仅改 TASKS.md，pytest 85 项/ruff 结论不变。
+~~~
+
+### MVP-08-verify：MVP-08 验收（✅ done，通过附遗留清单 4 项）
+
+~~~text
+任务编号：MVP-08-verify
+负责人 Harness：TRAE
+开始时间：2026-10-05 20:49
+依赖任务：MVP-08（3de2115 已合入 main，状态 review，先合后验）
+工作区：.worktrees/trae/
+真相源引用：docs/spec/0.3-R10.md（§7/§21 REST API 与错误码、§11 幂等、§26 test_id）、
+            docs/prep/MVP-08/openapi.yaml、error-codes.md、
+            TASKS.md MVP-08 卡、backend/app/api/**、backend/tests/test_api_flow.py
+允许修改目录：TASKS.md
+禁止修改目录：docs/spec/**、backend/**、tools/**
+交付分支：agent/local/trae/MVP-08-verify/a1
+背景：MVP-08 在 TRAE 验收前经 3de2115 合入 main（第三次「先合后验」，
+      验收结论与违规留档是本任务的交付物）。GATE-MERGE-CHECK-01 以本任务
+      结论转 done 为全绿启用前提。
+验收方法（同 MVP-04-verify）：不采信卡片「有断言」，逐条 test_id 找
+      「代码行 + 测试断言」双证据，并实跑门禁。
+完成标准：
+  1. DOC-TRACE-001：API 链路与 R10 §7/§21/§11 逐点对应，错误码与 prep 表一致；
+  2. MVP-API-001：建群→发方案→批准→领取→心跳→提交→审查 全链路可仅经 API 完成，
+     测试有机械断言；卡片自陈缺口（两处迁移用服务层驱动）核实不伪造 receipt；
+  3. 违规留档（三段式）；MVP-08 任务表/认领表/卡片状态据结论更新。
+test_id：DOC-TRACE-001、MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done
+完成时间：2026-10-05 21:00
+commit：087eb93（验收证据提交；本行为随附回填提交）
+验证结果：
+  结论：✅ 通过（附遗留清单 4 项，无 P1）。逐条双证据（代码行 + 机械断言）
+  与门禁实跑记录已回填于本文件 MVP-08 卡末「验收意见」，此处只摘门禁数字：
+  - docstate 90/0；pytest 全量 111 项退出码 0（MVP-08 新增 22：
+    test_api_flow 4 + test_api_errors 10 + test_api_events_messages 8）；
+  - ruff check 全过、ruff format 40 files already formatted；
+  - docs/prep/MVP-08/check_contract.py：FAILURES 0；
+  - docs/prep/MVP-08/mutation_test.py：caught 10/10（契约守卫非空转）；
+  - 真实 app.main:app 冒烟：建项目/建群/发方案/批准/领取/事件/消息全 200，
+    响应零 access-control-* 头，非 loopback Host 头 400 auth.host_header_rejected。
+  遗留（详见 MVP-08 卡）：
+  1. 错误码越封闭表：claim.concurrent_claim、request.conflict（prep §0.1）；
+  2. HTTP 状态不符：review.self_review_forbidden 实现 409/表定 403，
+     request.invalid 服务层发 422/表定 400；
+  3. 消息 per-group seq 非全局、refs 字段接收即丢（schema 级，需 migration）；
+  4. 两处脚手架迁移待 MVP-05/06 换成真实 HTTP 路径后 MVP-API-001 转 ✅。
+  违规留档：第三次「先合 main 后验收」（3de2115）三段式记录见上文。
+  MVP-08 任务表行、认领行 #17、卡片标题/状态已随本验收更新为 done。
+~~~
+
+### message-global-seq：消息与事件共享全局 seq（✅ done，关闭 MVP-08 验收遗留 3a）
+
+~~~text
+任务编号：message-global-seq
+负责人 Harness：TRAE
+开始时间：2026-10-05 21:18
+依赖任务：MVP-08（已验收 087eb93；本任务关闭其验收遗留项 3a）
+工作区：.worktrees/trae/
+真相源引用：docs/spec/0.3-R10.md §15（事件带全局 seq、禁止空洞）、§19（read_context
+            用 since_seq 混合排序消息与事件）；
+            docs/prep/MVP-08/openapi.yaml L1215（消息 seq 取自与 task_events
+            相同的全局空间——契约原本如此要求，是实现偏离）；
+            MVP-08 验收遗留项 3a（TASKS.md）
+背景：task_messages.created_seq 是普通 INTEGER，post_message 按 group 做
+      MAX+1；消息不写 task_events，两流序号互不相干，§19 混合游标无法实现。
+      借号路径被 append-only 触发器与 §37.7 事件封闭集合双重封死（R10 无消息
+      事件名）。采用方案 A：独立全局序列表，事件与消息在各自写事务内同取一个号。
+允许修改目录：backend/migrations/**、backend/app/db/**、backend/app/events/**、
+            backend/app/tasks/**、backend/app/api/**、backend/tests/**、
+            docs/traceability.md（跨任务登记，同 MVP-08 先例）、TASKS.md
+禁止修改目录：docs/spec/0.3-R10.md、tools/**、docs/prep/MVP-08/**（契约本就
+            要求全局 seq，无需改 prep）
+交付分支：agent/local/trae/message-global-seq/a1
+设计：
+  1. 迁移 003：建单行表 global_seq(id=1, seq)，初值=MAX(task_events.seq,
+     task_messages.created_seq)；重建 task_events 去掉 AUTOINCREMENT
+     （SQLite 不能 ALTER 列约束，照 002 先例建新表+拷贝+换名，重建索引与
+     两个 append-only 触发器，清 sqlite_sequence 旧条目）；
+  2. app/db/sequence.py：next_global_seq(conn) 在调用方事务内
+     UPDATE global_seq SET seq=seq+1 取号（BEGIN IMMEDIATE 串行，回滚不空洞）；
+  3. EventStore.append 显式带 seq 插入（两条 connection 分支同事务取号）；
+     post_message 用同一分配器，删除 per-group MAX+1；
+  4. /events 与 /groups/{id}/messages 仍是各自子集，但号同源——交错写入产生
+     的「缺口」是另一流的真实记录，非 §15 禁止的空洞。
+完成标准：
+  1. 交错写事件与消息，两流号严格递增、互不重复、并集在同一连续区间（有测试）；
+  2. 旧库迁移：已有事件/消息号保留，新号从历史最大值 +1 继续（有测试）；
+  3. 失败事务回滚不产生空洞（沿用 test_database_events 既有用例语义）；
+  4. 全门禁：docstate 90/0、discipline、pytest 全量、ruff、check_contract、
+     mutation_test；MVP-08 卡遗留项 3a 标记已关闭（refs 3b 不在本任务范围）。
+test_id：MVP-API-001
+测试命令：cd backend; ..\.venv\Scripts\python.exe -m pytest -q
+当前状态：✅ done
+完成时间：2026-10-05 21:30
+commit：3b35e5f（实现与证据提交；本行为随附回填提交）
+验证结果：
+  方案 A 已落地：
+  - backend/migrations/003_global_seq.sql：单行表 global_seq 发号器，
+    初值取两流历史 MAX；task_events 去 AUTOINCREMENT 重建（照 002 先例，
+    重建索引与两个 append-only 触发器，清 sqlite_sequence 旧条目）；
+  - backend/app/db/sequence.py：next_global_seq(conn) 强制在写事务内
+    UPDATE+SELECT 取号，无事务即 ValueError，回滚随事务不产生空洞；
+  - app/events/store.py：两条 connection 分支同事务显式带 seq 插入，
+    不再用 lastrowid；app/tasks/service.py post_message 删除 per-group
+    MAX+1，改取全局号（BEGIN IMMEDIATE 串行，并发安全）。
+  机械证据：
+  - test_api_events_messages.py：消息号 = 当前事件最大号 +1/+2；交错写
+    消息→claim 事件→消息，断言 m1 < event < m2 且 m2=m1+2；第二个群
+    消息不重新从 1 开始；两流并集 == 1..N 连续区间且互不重号；
+  - test_database_events.py：用 001+002 旧迁移造存量库（旧二进制式裸插：
+    事件 1..5、两个群各有 created_seq=1），应用 003 后 global_seq=5、
+    事件行全保留、DDL 无 AUTOINCREMENT，新事件取 6、新消息取 7；
+  - 既有无空洞语义不变：失败事务连号回滚（test_failed_domain_transaction…）、
+    12 线程并发取号 1..12 不重不漏，均仍通过。
+  门禁实测（2026-10-05 21:30）：
+  - docstate 90/0；pytest 全量 113 项退出码 0（本任务净增 2 项：
+    test_api_events_messages 8→9、test_database_events 9→10）；
+  - ruff check 全过；ruff format 41 files already formatted
+    （新增 sequence.py 计入）；
+  - check_contract.py FAILURES 0；mutation_test.py caught 10/10；
+  - discipline：3 项失败全是 main e6b3026 既有红灯（verify-mvp-04/
+    MVP-04-inject 命名与缺登记），由 GATE-MERGE-CHECK-01 分支清理，
+    本任务零新增红灯；
+  - 真实 app.main:app 冒烟（走 003 全新迁移）：批准事件 seq=1，随后
+    消息 seq=2，同空间连续。
+  范围说明：R10/prep 均未改（openapi.yaml L1215 本就要求全局空间，
+  本次是实现回归契约）；docs/traceability.md 仅追加关闭记录（跨任务
+  登记，同 MVP-08 先例）。遗留 3b（refs 字段接收即丢）仍开放。
 ~~~
