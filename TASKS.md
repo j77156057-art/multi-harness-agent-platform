@@ -30,7 +30,7 @@
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
-| chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/local/workbuddy/root-wip-chain-template` | `MVP-PROCESS-001` |
+| chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/workbuddy/chain-template-rejected` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -1781,7 +1781,7 @@ commit：622b1f2
 3. **`exit=0` 不等于通过**。中途报过一次「优化后 1 小时 48 分 / exit=0」，实际输出
    只有 2 个点，17 个测试只跑了 2 个就退出，SIGTERM 被吞。判结果要看测试点数。
 
-**改动去向**：WIP 曾被抢救到 `agent/local/workbuddy/root-wip-chain-template`
+**改动去向**：WIP 曾被抢救到 `agent/workbuddy/chain-template-rejected`
 （`fcfd303`），现已撤销；`backend/tests/chain_template.py` 删除，
 `test_verify.py` 的 `build_chain` 回到基线。认领记录见
 `docs/claims/45-workbuddy--chain-template-closeout.md`。
@@ -2588,7 +2588,7 @@ commit：2440566
 真相源引用：R10 §23（SQLite WAL 与备份）、§26（VERIFY-DIFF-001 的验证要求）
 允许修改目录：backend/tests/**、docs/claims/**、TASKS.md
 禁止修改目录：backend/app/**、docs/spec/**
-交付分支：agent/local/workbuddy/root-wip-chain-template
+交付分支：agent/workbuddy/chain-template-rejected
 完成标准：
   1. 在空闲环境（0 个 python 进程）测出可信的基线与优化后数据 ✅ 479/525 vs 647
   2. 判定优化是收益还是负收益 ✅ 负收益

@@ -7,10 +7,11 @@
 | task_id | `chain-template-closeout` |
 | Harness | WorkBuddy |
 | 认领时间 | 2026-10-06 05:15 |
-| 分支 | `agent/local/workbuddy/root-wip-chain-template` |
-| 状态 | 🟢 doing |
+| 分支 | `agent/workbuddy/chain-template-rejected` |
+| 状态 | ✅ done |
 | 工作区 | `.worktrees/workbuddy/`（**不在仓库根目录**） |
 | 起点 commit | `fcfd303`（从根目录抢救的 WIP） |
+| 收尾 commit | `c1d2c36` → merge `6ebc47c` |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `chain-template-closeout`。
 
@@ -51,3 +52,6 @@ WIP 分支里的 chain-template 优化**已被实测证明是负收益**，需�
 
 - 2026-10-06 05:15：认领。WIP 从根目录抢救到 `fcfd303`，现从
   `.worktrees/workbuddy/` 继续收尾。
+- 2026-10-06 05:35：收尾完成。优化经三次全量测量判定为负收益（479/525 vs 647），
+  已撤销 `chain_template.py` 与 `build_chain` 改动；否证结论写入 TASKS.md。
+  提交 `c1d2c36`，经 mergeguard 合入 main（`6ebc47c`）。
