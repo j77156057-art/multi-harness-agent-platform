@@ -139,17 +139,23 @@ class PlanValidator:
                 errors.append(
                     f"task {task.task_id} uses unregistered verify profile {task.verify_profile}"
                 )
-            unknown_deps = sorted(set(task.depends_on) - known)
+            # R10 section 9: a dependency edge declared twice is a malformed
+            # plan, not a no-op. De-duplicate before graph construction so the
+            # repeated edge cannot inflate indegree and fake a Kahn cycle.
+            deps = tuple(dict.fromkeys(task.depends_on))
+            if len(deps) != len(task.depends_on):
+                errors.append(f"task {task.task_id} repeats a dependency edge")
+            unknown_deps = sorted(set(deps) - known)
             errors.extend(
                 f"task {task.task_id} depends on unknown task {dep}" for dep in unknown_deps
             )
-            for dep in task.depends_on:
-                if dep in known and dep != task.task_id:
+            for dep in deps:
+                if dep == task.task_id:
+                    errors.append(f"task {task.task_id} has a self dependency")
+                elif dep in known:
                     graph[dep].add(task.task_id)
                     indegree[task.task_id] += 1
-                elif dep == task.task_id:
-                    errors.append(f"task {task.task_id} has a self dependency")
-            self._validate_contract(task, errors, outputs_by_task, plan.evidence_sources)
+            self._validate_contract(task, errors, outputs_by_task, plan.evidence_sources, deps)
         if total_budget > plan.max_budget_tokens:
             errors.append(f"budget {total_budget} exceeds limit {plan.max_budget_tokens}")
         if acceptance_count > plan.max_acceptance:
@@ -173,10 +179,12 @@ class PlanValidator:
         errors: list[str],
         outputs_by_task: dict[str, set[tuple[Any, Any, Any]]],
         evidence_sources: frozenset[str],
+        deps: tuple[str, ...] | None = None,
     ) -> None:
+        dependencies = task.depends_on if deps is None else deps
         upstream_outputs = {
             output
-            for dependency in task.depends_on
+            for dependency in dependencies
             for output in outputs_by_task.get(dependency, set())
         }
         for item in task.consumes:
