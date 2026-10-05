@@ -1901,7 +1901,7 @@ test_id：MVP-ADAPTER-002
           cd backend; ..\.venv\Scripts\python.exe -m pytest -q -p no:warnings
 当前状态：✅ done（通过附遗留清单 5 项，无 P1；验收意见见本文件 MVP-10b 卡前）
 完成时间：2026-10-06 06:10
-commit：见本分支 tip（docs 验收回填提交）
+commit：ea4126d（验收证据回填；登记提交 9dc09b8）
 验证结果：
   结论：✅ 通过，无 P1，遗留 R1-R5 五项（2×P2、1×P3、2×info），不阻塞 MVP-11。
   docstate 90/0；discipline 42/0；tools 27 passed；ruff clean（73 files）；
