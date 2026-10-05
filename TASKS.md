@@ -27,6 +27,7 @@
 | agent-onboarding | Claude Code | worktree-isolation | ✅ done | `agent/local/claude/agent-onboarding/a1` | `MVP-PROCESS-001` |
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
+| MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | doing | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-04 | — | MVP-02 MVP-03 | ⏳ waiting ★瓶颈 | — | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-05 | — | MVP-03 MVP-04 | ⏳ waiting | — | `GIT-ACL-001` `GIT-ACL-002` |
@@ -64,6 +65,7 @@
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | doing |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
+| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -395,7 +397,7 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 | MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-02 前 |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | MVP-02 前 ｜ 🟢 **Qoder 在做**：`agent/local/qoder/MVP-08-prep/a1`（认领 2026-10-05 09:16，产出在 `.worktrees/qoder/docs/prep/MVP-08/`） |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
@@ -608,6 +610,44 @@ test_id：MVP-PROCESS-001
 
 **本任务自己又违反了登记规则第 0 条**（先加任务表行、后补认领登记），被自己写的
 断言当场抓住。工具对自己生效，这是它唯一的可信度来源。
+~~~
+
+### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（doing）
+
+~~~text
+任务编号：MVP-08-prep
+负责人 Harness：Qoder
+开始时间：2026-10-05 09:16
+依赖任务：无（prep 的定义就是不依赖 schema，见清单 prep 表）
+工作区：.worktrees/qoder/
+真相源引用：R10 §7（Adapter 接口）、§21（Planner/Review/Git 动词）、§8（canonical schema，
+            含 R10-fix-09 对 claim_requests / task_claims 的键修正）、§11（Claim 与幂等，
+            含两层幂等职责划分）、§12（命令幂等键）、§13（Lease/fencing）、
+            §15（事件与 seq）、§19（群聊与 read_context）、§26（检查 ID）、
+            §37.7（事件 allowlist，88 项）
+允许修改目录：docs/prep/MVP-08/**（本工作区内；prep 产出不进主分支）
+禁止修改目录：docs/spec/0.3-R10.md、docs/spec/mvp-task-checklist.md、backend/**、
+            tools/docstate/**、docs/traceability.md（属 graph-traceability）
+交付分支：agent/local/qoder/MVP-08-prep/a1
+完成标准：
+  1. OpenAPI 3.1 契约草案覆盖 R10 §7 全部 16 个动词与 §21 全部 6 个动词，
+     /adapter/* 的 path 段拼写与 §7 原文逐字一致（零转换表）
+  2. 统一错误码表：每个 code 标注 HTTP、触发条件、R10 引用、写入事件名、test_id；
+     写入的事件名必须在 §37.7 的 88 项 allowlist 内
+  3. 幂等响应约定：§12 的 7 类幂等键、双层 Claim 幂等（请求级 first_result_json /
+     per-task task_claims，R10-fix-09 口径）、payload_hash 算法、重放响应格式
+  4. check_contract.py 对仓库 docs/spec/0.3-R10.md 跑出 0 失败
+  5. mutation_test.py 对每条断言做变异，全部被捕获（证明断言非空跑）
+test_id：DOC-TRACE-001、MVP-API-001
+测试命令：python docs/prep/MVP-08/check_contract.py && python docs/prep/MVP-08/mutation_test.py
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：
+  - prep 产出不进主分支；MVP-08 真正开工时必须重新验证，不能直接当结论用
+  - 与 graph-traceability 的边界：本任务不建 docs/traceability.md，那是 Claude 的交付物
+  - R10-fix-09 之前写就的版本把 per-task 幂等落点放在 claim_requests，已在本次修正
 ~~~
 
 ## 提交前自检
