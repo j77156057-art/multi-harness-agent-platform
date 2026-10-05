@@ -47,7 +47,7 @@
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | ✅ done（merge 组已移植到 claims 目录版检查器） | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-05 | Qoder | MVP-03 MVP-04 | ✅ done | `agent/local/qoder/MVP-05/a1` | `GIT-ACL-001` `GIT-ACL-002` |
-| MVP-06 | Qoder | MVP-05 | 🟢 doing | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
+| MVP-06 | Qoder | MVP-05 | ✅ done | `agent/local/qoder/MVP-06/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | — | MVP-06 | ⏳ waiting | — | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
@@ -1147,7 +1147,7 @@ commit：7e94166
     模式下无法真实复现跨账户行为，只覆盖传输与对账路径本身，跨账户部分留待阶段 2。
 ~~~
 
-### MVP-06：Verify Worker 与完成证据（doing）
+### MVP-06：Verify Worker 与完成证据（✅ done）
 
 ~~~text
 任务编号：MVP-06
@@ -1185,11 +1185,44 @@ commit：7e94166
   6. Merge Gate 判据可断言：按待合并 commit 精确查 receipt，不一致即查不到
 test_id：VERIFY-DIFF-001、VERIFY-RECEIPT-001
 测试命令：./scripts.sh check
-当前状态：doing
-完成时间：
-commit：
+当前状态：done（作者完成并待合入；外部验收待认，参照 MVP-04-verify 形式）
+完成时间：2026-10-05 22:55
+commit：1ab608d
 验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 39 项检查，0 项失败
+  ruff        : All checks passed，55 files already formatted
+  pytest      : 149 passed（MVP-06 新增 17）
+  关键断言     : head 通过才进 awaiting_review；head 失败进 changes_requested 且事件流里
+                没有 verify_passed；receipt 按精确 commit 查，base commit 查不到即判定不可合并；
+                 重复 verify 返回首次 receipt 且不新增行；超时记为 timeout（进 escalated）
+                 而不是 code_failed；env_failed 是自环、任务留在 verifying；
+                 differential_not_applicable 的正反两条边都跑通
+  真实链路     : 测试夹具走的是 claim→start(建 worktree)→commit→publish→submit→verify，
+                 不手搓 verifying 行 —— 否则「diff 的 base 是不是冻结的那个」根本没被验到
 已知问题：
+  - **需要一次迁移**：`verification_receipts` 只有 11 列、`verify_jobs` 缺 7 列，而 R10 §16
+    列出的 receipt 字段约 19 项。已加 `004_verify_fields.sql`（只 ADD COLUMN，不改既有列、
+    不加表），并在本卡允许目录里声明为跨任务改动。**没有**把 receipt 塞进 artifacts 绕过：
+    §16 要求权威副本在调度器数据库里，而 artifacts 只存 uri+hash，那样仓库侧的
+    verification/receipt.json 会与它地位相同，权威副本就不存在了。
+  - **`commit` 是 SQL 保留字**：001 建表时写作 `\"commit\"`，所以任何引用该列的语句都必须
+    带引号，否则 `near "commit": syntax error`。本次在 receipt 与 verify_job 的读写上各踩了
+    一次，由测试抓到。
+  - **发布路由原先从 settings 取 canonical 仓库**，忽略注入，导致测试的 alternates 与路由
+    期望的仓库不是同一个（`publish.alternates_invalid`）。已改为 `app.state.canonical_repo`，
+    与 database 同样注入。
+  - 跨任务改动（已在此登记）：`tests/test_database_events.py` 里
+    「`applied == 1`」改为「断言 003 已被应用」。该断言硬编码了「待应用迁移恰为 1」，
+    任何新迁移都会打破它 —— 被本次的 004 打破时，被测行为其实仍然正确。
+  - **R10 §7 同样没有 verify 动词**（与 MVP-05 的 `start` 同类）：verify 是 Verify Worker
+    的职责，不是 Harness 调用的接口，所以本任务**不新增 HTTP 路由**，沿用 MVP-08 立下的
+    「路径逐字对齐 §7」。
+  - **R10 §16 说 Verify 账户「尝试写 .git/config、hooks、refs、objects 必须被 ACL 拒绝」，
+    单账户下无 ACL 可依**。overlay 仍按新 gitdir + alternates 构造（结构上隔离），
+    但强制隔离随 ADR-DEV-002 一起延后。
+  - **Verify Worker 崩溃/重排路径未实现**（§16 的 intent 对账、新 job_id、新 overlay）。
+    当前只有单次执行与失败保留 overlay；对账依赖 MVP-04 的 intent 巡检，尚未接入。
   - MVP 简化（清单要求写明，不得静默跳过）：baseline differential 的「base 必须失败」
     一侧在 MVP 不强制，只记录 baseline_exit_code；「baseline 也失败时的 flaky 放行」
     整体标为阶段 2 交付，因此 receipt 的 flaky_registry_ids 恒为空、
