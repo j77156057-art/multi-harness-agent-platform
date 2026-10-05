@@ -190,7 +190,10 @@ def test_every_item_leaves_a_task_claims_row_including_failures(database):
         "SELECT * FROM task_claims WHERE claim_request_id='cr-batch' AND task_id='T-2'"
     )[0]
     assert failed["release_reason"] == f"rejected:{RejectCode.ALREADY_OWNED.value}"
-    assert failed["attempt_id"] == "", "no attempt must be recorded for a failed item"
+    # R10-fix-11：attempt_id / owner 改为可空，失败项用 NULL 表示「未领取」。
+    # 此前用空串哨兵，现由数据层直接区分「未领取」与「已领取」。
+    assert failed["attempt_id"] is None, "no attempt must be recorded for a failed item"
+    assert failed["owner"] is None, "no owner must be recorded for a failed item"
 
 
 def test_replay_reads_per_item_results_from_task_claims(database):

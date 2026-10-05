@@ -10,6 +10,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | 标记 | 含义 |
 |---|---|
 | ✅ 有断言 | 有脚本/测试会因它失败而变红 |
+| 🟡 部分有断言 | 有断言，但该 ID 声称的检查里有一部分**明确未被覆盖**，缺口写在「由谁检查」列。**列为 🟡 的都不是「基本完成」，而是「缺口已知且写下来了」** |
 | ⚠️ 仅声明 | ID 已登记，但没有任何东西检查它是否达成 |
 | ❌ 未实现 | 对应 MVP 任务尚未开工 |
 
@@ -24,8 +25,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `DOC-STATE-001` | 状态机自洽：allowlist 封闭性、迁移表单值 next、自环清单、非终态出边 | ✅ 有断言 | `tools/docstate` structure/allowlist/transitions/r10-events/loops/states 组 |
 | `DOC-SCHEMA-001` | canonical schema 自洽：§8 唯一键引用的列已声明、§11 DDL 列已登记、§37.6 必要字段 | ✅ 有断言 | `tools/docstate` schema/schema-keys/schema-list 组 |
 | `DOC-TRACE-001` | test_id 无悬空：全文出现的 ID 必须落在阶段列表之一 | ✅ 有断言 | `tools/docstate` trace 组 |
-| `DOC-PLAN-001` | 计划 linter：拒绝环 / 非法引用 / 超规模 / 不可满足 evidence | ⚠️ 3/4 有断言 | `test_state_plan.py`（拒绝环、未注册 capability、`limits` 超规模、重复依赖边、glob 重复）。**「不可满足 evidence」已实现但无用例**（`validator.py:198-204`），且 `evidence_sources` 为空时该检查放行（fail-open）。原标注「未实现（MVP-03 交付）」已过期 |
-| `DOC-AUTH-001` | 权限矩阵一致性 | ⚠️ 仅声明 | 未实现（MVP-05 交付） |
+| `DOC-PLAN-001` | 计划 linter：拒绝环 / 非法引用 / 超规模 / 不可满足 evidence | ✅ 有断言 | `test_state_plan.py`（拒绝环、未注册 capability、`limits` 超规模、重复依赖边、glob 重复、`cmd` 判据缺 evidence source、未注册 evidence source、空白 evidence source；`human` 判据免 evidence source）。原实现 fail-open（`if source is not None` + `elif evidence_sources and ...`），由 `plan-evidence-failclosed` 改为 fail-closed || `DOC-AUTH-001` | 权限矩阵一致性 | ⚠️ 仅声明 | 未实现（MVP-05 交付） |
 | `DOC-ADR-001` | ADR 清单完整 | ⚠️ 仅声明 | 未实现 |
 | `DOC-AO-001` | AO 能力对照表 | ⚠️ 仅声明 | 人工产出 `docs/ao-capability-audit.md`，无断言 |
 
@@ -58,7 +58,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 
 | test_id | 检查什么 | 强制状态 | 由谁检查 |
 |---|---|---|---|
-| `MVP-API-001` | 仅通过 API 能跑完「建群 → 发方案 → 领取 → 提交 → 审查」 | ⚠️ 仅声明 | 未实现（MVP-08） |
+| `MVP-API-001` | 仅通过 API 能跑完「建群 → 发方案 → 领取 → 提交 → 审查」 | 🟡 部分有断言 | `test_api_flow.py` 覆盖 HTTP 面上的建群/发方案/批准/领取/心跳/提交/审查；**缺口**：链路上两个迁移不属 MVP-08 —— `claimed → in_progress` 需要 worktree（MVP-05），`verifying → awaiting_review` 需要 verify receipt（MVP-06）。测试里这两步由调度器服务层驱动并在用例注释中标注，**没有伪造 receipt** |
 | `MVP-UI-001` | 人类不直接访问数据库即可完成一条完整任务链路 | ⚠️ 仅声明 | 未实现（MVP-09） |
 | `MVP-ADAPTER-001` | Fake Harness 完整跑通 | ⚠️ 仅声明 | 未实现（MVP-10a） |
 | `MVP-ADAPTER-002` | 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review | ⚠️ 仅声明 | 未实现（MVP-10b） |
@@ -68,11 +68,11 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 
 ## 现状小结
 
-**29 个已登记的 ID里，10 个有断言，1 个部分有断言，18 个仅是名字。**
+**29 个已登记的 ID里，11 个有断言，18 个仅是名字。**
 
 | 分组 | ID 数 | 有断言 |
 |---|---|---|
-| 阶段 0 文档级 | 7 | 3（+ `DOC-PLAN-001` 部分） |
+| 阶段 0 文档级 | 7 | 4 |
 | 阶段 1 调度内核 | 7 | 5 |
 | 阶段 2 Git/Verify/Merge | 8 | 0 |
 | MVP 专有 | 7 | 2 |
@@ -81,11 +81,16 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 也是 R10 §21 那一整套 Merge Gate 语义（commit 三方交叉断言、revert 树断言、
 下游反向闭包）目前**完全靠人读**的原因。
 
-新增本行时同时修正了一处过期记录：`DOC-PLAN-001` 原标注「未实现（MVP-03 交付）」，
-但 MVP-03 已交付；实际状态是 3/4 有断言，缺的那一项已实现却无用例且 fail-open。
-**登记表本身也会过期**——它和被登记的实现之间没有强制同步，只有
-`traceability` 组会检查「任务表里的 test_id 是否在此登记」，不检查
-「本文件声称的强制状态是否仍然成立」。这是本文件第16 行所说的盲界的延伸。
+这里同时修正过一处过期记录，过程值得留着当教训：`DOC-PLAN-001` 原标注
+「未实现（MVP-03 交付）」，而 MVP-03 早已交付 —— 登记表与实现之间没有强制同步。
+`trace-closure` 把它改成「⚠️ 3/4 有断言」（记录当时 fail-open 的真实状态），
+随后 `plan-evidence-failclosed` 把 fail-open 修掉并补上用例，它才变成「✅ 有断言」。
+**同一行改了两次，两次都是对的**：中间态如实反映了当时的代码，不是错误记录。
+
+由此得出一条结构性事实：**登记表本身也会过期**。`traceability` 组只检查
+「任务表里的 test_id 是否在此登记」，不检查「本文件声称的强制状态是否仍然成立」。
+任何人修完实现之后，都必须记得回来改这一行——否则下一个读它的人会被误导，
+而这正是本文件第 16 行所说的盲区的延伸。
 
 这也是把登记处补齐的价值：现在能一眼看出哪些是名字、哪些是真门禁。
 
