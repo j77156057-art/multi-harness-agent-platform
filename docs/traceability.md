@@ -51,9 +51,9 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `GIT-PACK-001` | Defender 开启时跨账户 pack/bundle 传输与 intent 对账 | 🟡 部分有断言 | 传输与 intent 对账已覆盖（`test_publish.py` 断言对象进入 canonical、`side_effect_intents(type=push)` 落库并可重放）；**缺口**：单账户下不存在跨账户传输，`Defender` 开启场景未覆盖，见 `docs/adr/ADR-DEV-002-single-account-acl.md` |
 | `VERIFY-DIFF-001` | baseline differential 语义 | ✅ 有断言 | `test_verify.py`（head 通过才进 awaiting_review；head 失败进 changes_requested 且无 verify_passed 事件；在精确 commit 的全新 detached worktree 上跑；new_test_files 取自 diff）。**MVP 缺口**：`base 必须失败` 一侧只记录不强制，flaky 放行为阶段 2，见 MVP-06 卡 |
 | `VERIFY-RECEIPT-001` | receipt 与待合并 commit 不一致时 Merge Gate 拒绝 | ✅ 有断言 | `test_verify.py` + `app/verify/receipts.py`（`merge_is_verifiable` 按精确 commit 查 passing receipt，base commit 查不到即拒绝；重复 verify 返回首次 receipt；不同 commit 生成独立 receipt；§16 字段齐全）。Merge Gate 本体在 MVP-07 接入 |
-| `MERGE-EXACT-001` | receipt / review / 分支 head 三方 commit 交叉断言 | ⚠️ 仅声明 | 未实现（MVP-07） |
-| `MERGE-REVERT-001` | revert 树断言 | ⚠️ 仅声明 | 未实现（MVP-07） |
-| `MERGE-REVERT-002` | revert 下游反向闭包覆盖全部下游状态 | ⚠️ 仅声明 | 未实现（MVP-07） |
+| `MERGE-EXACT-001` | receipt / review / 分支 head 三方 commit 交叉断言 | ✅ 有断言 | `test_merge.py` + `app/merge/gate.py`（三条交叉断言各有拒绝用例；提交前不写集成分支，拒绝后断言 ref 未移动；无 receipt / 无 review / 别人的 commit 都进不来） |
+| `MERGE-REVERT-001` | revert 树断言 | ✅ 有断言 | `test_merge.py`（断言 tree(revert) == tree(first_parent(merge))、revert 是失败合并的直接子提交、merge..revert 只含 1 个提交；集成分支指向 revert） |
+| `MERGE-REVERT-002` | revert 下游反向闭包覆盖全部下游状态 | 🟡 部分有断言 | `test_merge.py`：revert 失败或无法恢复时的出口已覆盖（revert_red → escalated，health 同步）；**缺口**：下游反向闭包（upstream_invalidated_seq、下游 Claim 冻结、merged 下游进 escalated）未实现，属 MVP-11 的集成级覆盖 |
 
 ## MVP 专有 ID（清单新增，不在 R10 §26 阶段列表内）
 

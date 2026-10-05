@@ -196,6 +196,17 @@ def abandon(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any
 # ------------------------------------------------------------------ review
 
 
+@review.post("/claim")
+def review_claim(body: schemas.ReviewClaimRequest, service: SchedulerDep) -> dict[str, Any]:
+    """R10 §21 ``review.claim``: take the review lease, independent of development."""
+    return service.review_claim(
+        task_id=body.task_id,
+        attempt_id=body.attempt_id,
+        reviewer_harness_id=body.reviewer_harness_id,
+        review_id=body.review_id,
+    )
+
+
 @review.post("/submit")
 def review_submit(body: schemas.ReviewSubmitRequest, service: SchedulerDep) -> dict[str, Any]:
     return service.submit_review(
@@ -206,6 +217,7 @@ def review_submit(body: schemas.ReviewSubmitRequest, service: SchedulerDep) -> d
         reviewed_commit=body.reviewed_commit,
         review_revision=body.review_revision,
         findings=body.findings,
+        review_id=body.review_id,
     )
 
 

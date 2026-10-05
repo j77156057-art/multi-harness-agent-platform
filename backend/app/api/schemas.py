@@ -73,6 +73,7 @@ class ReviewSubmitRequest(BaseModel):
     task_id: str
     attempt_id: str
     reviewer_harness_id: str
+    review_id: str | None = None
     verdict: str
     reviewed_commit: str
     review_revision: int = 1
@@ -95,3 +96,10 @@ class PublishTaskBranchRequest(BaseModel):
     commit: str
     fencing_epoch: int
     idempotency_key: str
+
+
+class ReviewClaimRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    reviewer_harness_id: str
+    review_id: str | None = None
