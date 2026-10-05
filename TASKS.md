@@ -33,7 +33,7 @@
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
-| MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -76,7 +76,7 @@
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
-| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | 🟢 doing |
+| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | ✅ done |
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
@@ -919,7 +919,7 @@ MVP-01 → MVP-02 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP-11
 | MVP-04 | 并发 Claim 测试用例、`BEGIN IMMEDIATE` 事务顺序说明、Lease 巡检器触发表 | MVP-03 前（依赖已满足，**2026-10-05 09:53 放行**） |
 | MVP-05 | worktree 短 ID 方案、Windows longpaths 与 Defender 锁文件踩坑预案、分支命名口径 | MVP-04 前 |
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
-| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`）｜ 🟢 **Qoder 在做**：`.worktrees/qoder/docs/prep/MVP-08/`（状态 doing，按规则 prep 不当结论用） |
+| MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`，Qoder，已结卡）—— 已由 MVP-08 实际使用：`openapi.yaml` 的 §7/§21 路径对齐与 `error-codes.md` 的 code 直接落进 `backend/app/api/**`，其中 `payload_hash` 的规范化口径被 `claim/service.py` 的 `canonical_payload_hash` 沿用 |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
 ## 统一任务卡
@@ -1198,7 +1198,7 @@ test_id：MVP-PROCESS-001、DOC-PLAN-001
 - 本任务只做结构校验：不判断某个 test_id 是否真的覆盖了它声称的行为
 ~~~
 
-### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（doing）
+### MVP-08-prep：REST API 契约草案、错误码表、幂等响应约定（✅ done）
 
 ~~~text
 任务编号：MVP-08-prep
@@ -1226,10 +1226,15 @@ test_id：MVP-PROCESS-001、DOC-PLAN-001
   5. mutation_test.py 对每条断言做变异，全部被捕获（证明断言非空跑）
 test_id：DOC-TRACE-001、MVP-API-001
 测试命令：python docs/prep/MVP-08/check_contract.py && python docs/prep/MVP-08/mutation_test.py
-当前状态：doing
-完成时间：
-commit：
+当前状态：done
+完成时间：2026-10-05 20:18
+commit：888afb6（初版落地，merge 8fdce1a）+ a6d0350（按 R10-fix-10 复验，merge 33bde2b）
 验证结果：
+  以下两个脚本于 2026-10-05 20:18 对当时 main 的 R10（含 R10-fix-09/10/11 三轮修订）**重新跑过**：
+  check_contract.py : 10 组断言，FAILURES 0（exit 0）
+  mutation_test.py  : caught 10/10（exit 0）
+  结卡时重跑的理由：本卡第 4 条完成标准是「对仓库 R10 跑出 0 失败」，而 R10 在本卡完成
+  之后又被修过 —— 拿当时的绿灯结卡就是在用陈旧证据。
 已知问题：
   - prep 产出不进主分支；MVP-08 真正开工时必须重新验证，不能直接当结论用
   - 与 graph-traceability 的边界：本任务不建 docs/traceability.md，那是 Claude 的交付物
