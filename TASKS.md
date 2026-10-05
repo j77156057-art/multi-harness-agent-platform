@@ -35,7 +35,7 @@
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | 🟢 doing | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
 | MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` `agent/local/qoder/MVP-08-prep/a2`（a2 结卡合入 `e6b3026`） | `DOC-TRACE-001` `MVP-API-001` |
-| MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
+| MVP-03 | Codex | MVP-02 | ✅ done（初验 Conditional Fail，P1 由 MVP-03-amend 闭环；TRAE 20:47 凭证据关单） | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
@@ -75,7 +75,7 @@
 | 4 | worktree-isolation | Claude Code | 2026-10-05 06:58 | `agent/local/claude/worktree-isolation/a1` | ✅ done（已合入 main `247ddc7`） |
 | 5 | agent-onboarding | Claude Code | 2026-10-05 07:41 | `agent/local/claude/agent-onboarding/a1` | ✅ done（已合入 main `6643868`） |
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
-| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
+| 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | ✅ done（amend 闭环，TRAE 20:47 关单） |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
 | 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1`、`agent/local/qoder/MVP-08-prep/a2`（a2 合入 `e6b3026`） | ✅ done |
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
@@ -442,7 +442,7 @@ commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
   - 仅改 TASKS.md，无 backend 改动，pytest 85 项/ruff 结论不变。
 ~~~
 
-### MVP-03：状态机与 Plan 校验（claimed 已认领待验收）
+### MVP-03：状态机与 Plan 校验（✅ done：初验 Conditional Fail，经 MVP-03-amend 闭环）
 
 ~~~text
 任务编号：MVP-03
@@ -463,14 +463,21 @@ commit：ec12403（登记先于开工）、ce13448（补卡 + 违规留档）
   4. 投影重建可从 task_events 产生同一状态结果，不直接改数据库状态字段 ✅
 test_id：DOC-STATE-001、DOC-PLAN-001
 测试命令：./scripts.sh check
-当前状态：claimed 已认领待验收
-commit：9b4b663
+当前状态：done（初验 Conditional Fail，3 个 P1 由 MVP-03-amend 修复，TRAE 20:47 凭证据关单）
+commit：9b4b663（初版，db9bc19 先合后验）、b9f140e（P1 修复，经 MVP-03-amend 合入）
 验证结果：
   docstate   : 88 项检查，0 项失败
   discipline : 17 项检查，0 项失败
   ruff check : All checks passed
   ruff format: 18 files already formatted
   pytest     : 26 passed in 1.53s
+  关单复核（TRAE 2026-10-05 20:47，GATE-MERGE-CHECK-01 启用批次）：
+  - 三个 P1（迁移表缺 25 边/多 11 边、重复边导致 Kahn 假环）的修复有
+    test_transition_mirror.py 机械对拍：代码迁移表与 R10 §10 全部 138 个
+    state-event-next 三元组零差异；重复边拒绝有专门用例（见 MVP-03-amend 卡）；
+  - 修复后的代码构成 MVP-04 的构建基线，并通过 MVP-04 正式验收
+    （MVP-04-verify 静态核查 + MVP-04-inject 注入验证 3/3）间接覆盖；
+  - 先合后验流程违规已在本文件「违规记录：MVP-03 先合 main 后验收（db9bc19）」留档。
 已知问题：
   - scripts.sh 在当前工作区按原始 CRLF 直接由 bash 执行会出现 pipefail 换行解析问题；本次使用等价的去 CRLF 管道执行，四道门禁结果全绿。
   - 状态机是纯投影层，尚未接入 REST/API 和数据库写入；由后续 MVP-04/MVP-08 负责。
