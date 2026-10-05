@@ -28,6 +28,7 @@
 | discipline | Claude Code | agent-onboarding | ✅ done | `agent/local/claude/discipline/a1` | `MVP-PROCESS-001` |
 | fix-wal-lock-retry | WorkBuddy | MVP-02 | ✅ done | `agent/workbuddy/fix-wal-lock-retry` | `CORE-RECOVER-001` |
 | R10-fix-10 | WorkBuddy | MVP-02-amend | ✅ done | `agent/workbuddy/R10-fix-10-task-claims` | `DOC-SCHEMA-001` `DOC-STATE-001` |
+| R10-fix-10-card | TRAE | R10-fix-10 | 🟢 doing | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | MVP-08-prep | Qoder | — | 🟢 doing | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
@@ -73,6 +74,7 @@
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | 🟢 doing ★瓶颈 |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
+| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
