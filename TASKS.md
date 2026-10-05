@@ -789,10 +789,18 @@ unique(claim_request_id, task_id) 承担」（§8 写入方列 + §11），但 t
   5. 本任务自身也留下任务卡（dogfood 纪律检查器）              ✅
 test_id：MVP-PROCESS-001
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
-当前状态：doing
-commit：（完成后回填）
+当前状态：done
+commit：df30958（登记）、b4d771c（补 R10-fix-10 卡）+ 本卡收尾
+完成时间：2026-10-05 10:31
 验证结果：
-  （完成后回填）
+  - docstate  : 90 项检查，0 项失败
+  - discipline: 24 项检查，0 项失败（修复前 24 项 1 失败）
+  - ruff check : All checks passed!
+  - ruff format: 19 files already formatted
+  - pytest     : 54 passed in 0.67s
+  - 目录边界  : 仅 TASKS.md（git diff --name-only main...HEAD）
+  - detached  : `git -C .worktrees/workbuddy symbolic-ref --short HEAD`
+                 → agent/workspace/workbuddy（修复前为 detached HEAD 1b51e2c）
 已知问题：
   - 完成标准 1 的卡片内容依据 R10-fix-10 的 commit `32f4e45` 的正文与 §38 记载
     回填；本人未参与该任务，卡片内容为**事后追认**，不是第一手记录。若与
