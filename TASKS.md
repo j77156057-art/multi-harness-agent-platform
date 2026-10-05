@@ -34,7 +34,7 @@
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
 | GATE-MERGE-CHECK-01 | TRAE | discipline | 🟢 doing | `agent/local/trae/gate-merge-check-01/a1` | `MVP-PROCESS-002` |
-| MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` | `DOC-TRACE-001` `MVP-API-001` |
+| MVP-08-prep | Qoder | — | ✅ done | `agent/local/qoder/MVP-08-prep/a1` `agent/local/qoder/MVP-08-prep/a2`（a2 结卡合入 `e6b3026`） | `DOC-TRACE-001` `MVP-API-001` |
 | MVP-03 | Codex | MVP-02 | claimed 已认领待验收 | `agent/local/codex/MVP-03/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | MVP-03-amend | TRAE | MVP-03 | ✅ done | `agent/local/trae/MVP-03-amend/a1` | `DOC-STATE-001` `DOC-PLAN-001` |
 | graph-traceability | Claude Code | discipline | ✅ done | `agent/local/claude/graph-traceability/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
@@ -77,22 +77,21 @@
 | 6 | discipline | Claude Code | 2026-10-05 08:05 | `agent/local/claude/discipline/a1` | ✅ done（已合入 main `6643868`） |
 | 7 | MVP-03 | Codex | 2026-10-05 09:07 | `agent/local/codex/MVP-03/a1` | claimed 已认领待验收 |
 | 8 | fix-wal-lock-retry | WorkBuddy | 2026-10-05 09:12 | `agent/workbuddy/fix-wal-lock-retry` | ✅ done |
-| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1` | ✅ done |
+| 9 | MVP-08-prep | Qoder | 2026-10-05 09:16 | `agent/local/qoder/MVP-08-prep/a1`、`agent/local/qoder/MVP-08-prep/a2`（a2 合入 `e6b3026`） | ✅ done |
 | 10 | R10-fix-10 | WorkBuddy | 2026-10-05 09:35 | `agent/workbuddy/R10-fix-10-task-claims` | ✅ done（已合入 main `32f4e45`） |
 | 11 | graph-traceability | Claude Code | 2026-10-05 09:09 | `agent/local/claude/graph-traceability/a1` | ✅ done |
 | 12 | fix-flaky-init | WorkBuddy | 2026-10-05 10:06 | `agent/workbuddy/fix-flaky-init` | ✅ done（无法复现，撤回） |
 | 13 | MVP-03-amend | TRAE | 2026-10-05 09:48 | `agent/local/trae/MVP-03-amend/a1` | ✅ done |
-| 14 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 15 | verify-mvp-04 | WorkBuddy | 2026-10-05 19:48 | `agent/workbuddy/verify-mvp-04` | ✅ done |
-| 14 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
-| 15 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
-| 16 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
-| 17 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
-| 18 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
-| 19 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
-| 20 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
-| 21 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
-| 22 | GATE-MERGE-CHECK-01 | TRAE | 2026-10-05 20:18 | `agent/local/trae/gate-merge-check-01/a1` | 🟢 doing |
+| 14 | MVP-04-inject | WorkBuddy | 2026-10-05 19:48 | `agent/workbuddy/verify-mvp-04` | ✅ done（注入验证） |
+| 15 | R10-fix-10-card | TRAE | 2026-10-05 10:12 | `agent/local/trae/r10-fix-10-card/a1` | ✅ done |
+| 16 | MVP-04 | Qoder | 2026-10-05 09:49 | `agent/local/qoder/MVP-04/a1` | ✅ 已验收（TRAE 19:55） |
+| 17 | fix-flaky-init-card | TRAE | 2026-10-05 19:25 | `agent/local/trae/fix-flaky-init-card/a1` | ✅ done |
+| 18 | MVP-08 | Qoder | 2026-10-05 19:20 | `agent/local/qoder/MVP-08/a1` | 🔍 review |
+| 19 | claim-nullable | WorkBuddy | 2026-10-05 19:30 | `agent/workbuddy/fix-claim-nullable` | ✅ done（R10-fix-11） |
+| 20 | MVP-04-verify | TRAE | 2026-10-05 19:47 | `agent/local/trae/MVP-04-verify/a1` | ✅ done |
+| 21 | claim-nullable-card | TRAE | 2026-10-05 20:01 | `agent/local/trae/claim-nullable-card/a1` | ✅ done |
+| 22 | plan-evidence-failclosed | OpenCode | 2026-10-05 11:05 | `agent/local/opencode/plan-evidence-failclosed/a1` | ✅ done |
+| 23 | GATE-MERGE-CHECK-01 | TRAE | 2026-10-05 20:18 | `agent/local/trae/gate-merge-check-01/a1` | 🟢 doing |
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -202,8 +201,10 @@ R10-fix-10、fix-flaky-init）。此外认领表序号与 R10-fix-10-card **撞�
 check_cards 持续 1 项失败。
 
 **已采取的纠正**：TRAE 以 claim-nullable-card（本分支）登记先行、依 d5769e2
-与 R10 §38.9 补录任务卡；序号按认领时间重排（MVP-08 17、claim-nullable 18、
-MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
+与 R10 §38.9 补录任务卡；序号经 GATE-MERGE-CHECK-01 最终重排为 1..23 连续
+（MVP-04-inject 14、R10-fix-10-card 15、MVP-04 16、fix-flaky-init-card 17、
+MVP-08 18、claim-nullable 19、MVP-04-verify 20、补卡 21），补卡后 discipline
+恢复 0 失败。
 
 **系统性根因（三次同类，结论升级）**：缺卡三次全部出自同一 Harness 的
 「直提 main 小修复」路径（32f4e45、9d3d3ef 搭乘合并、d5769e2 直提），
@@ -214,6 +215,25 @@ MVP-04-verify 19、补卡 20），补卡后 discipline 恢复 0 失败。
 **纠正措施**：GATE-MERGE-CHECK-01 除「已合入任务必须 done 且证据完整」外，
 顺带加一条认领序号唯一/连续断言；在该任务上线前，直提 main 的修复同样
 必须先有任务卡——TRAE 补卡只是兜底，不能成为常态依赖。
+
+### 违规记录：MVP-04-inject 第四次缺卡 + 认领命名不一致（9108ca8）
+
+**事实**：WorkBuddy 的 MVP-04 注入验证任务以 9108ca8 **直提 main**（无合并提交），
+任务表 id 为 `MVP-04-inject`，认领行却写成 `verify-mvp-04`，且没有任务卡。
+命名不一致直接触发 registry 组两条红灯（孤儿认领、开工未登记）+ cards 组
+缺卡红灯，自 9108ca8 起 main 持续 3 项失败。opencode 旧基线合并（b93815f
+之前的 71ed46e）还带回过一批重复认领行。Qoder 在 e6b3026 的提交说明里
+独立记录了「discipline on main is red from an unrelated pre-existing
+cause (9108ca8)」——红灯被旁观者看见，但没有任何东西阻止 main 继续前进。
+
+**已采取的纠正**：GATE-MERGE-CHECK-01 实施提交中：认领行改名 MVP-04-inject、
+删除重复行、序号重排为 1..23 连续；依 9108ca8 补录任务卡（注入证据完整）。
+注入验证本身质量高（变异测试、不用陈旧证据），违规仅在登记流程。
+
+**结论（第四次同类，终局措施）**：四次缺卡/先合后验全部伴随「直提 main 或
+搭乘合并」。本任务上线的 merge 组把「经合并提交入主线」的路径全部变成
+机械红灯；**直提 main 仍是唯一残余盲区**（没有合并提交可供映射），在
+GitHub 分支保护（B 方案）启用前，只能靠 worktree 权限约定与合并者复核。
 
 ## 任务卡
 
@@ -1648,4 +1668,41 @@ test_id：MVP-PROCESS-002
 commit：（完成后回填）
 验证结果：
   （完成后回填）
+~~~
+
+### MVP-04-inject：MVP-04 注入验证（✅ done，任务卡事后补录）
+
+~~~text
+任务编号：MVP-04-inject
+负责人 Harness：WorkBuddy
+开始时间：2026-10-05 19:48
+完成时间：2026-10-05 19:58（9108ca8，直提 main）
+依赖任务：MVP-04
+工作区：.worktrees/workbuddy/（分支 agent/workbuddy/verify-mvp-04）
+真相源引用：提交 9108ca8 完整说明、R10 §11、本文件 MVP-04-verify 卡
+            （TRAE 静态核查结论，注入验证与之独立）
+允许修改目录：TASKS.md（只记录验证，不改 backend 实现）
+交付分支：agent/workbuddy/verify-mvp-04（以 9108ca8 直提 main，无合并提交）
+背景：不采信登记表的「有断言」，用变异测试思路复核 MVP-04——故意破坏实现，
+      看测试是否真的抓得到。
+完成内容（三项注入）：
+  1. 去掉条件 UPDATE 后 rowcount != 1 断言 → 未抓到（10/10 通过）：BEGIN IMMEDIATE
+     写锁已挡双赢家，rowcount 是第二道防线；不是缺陷，认知需固化（建议补显式用例，
+     转 MVP-10b/后续）；
+  2. 去掉条件 UPDATE 的 status='ready' → 抓到：2 个并发测试 + 多个 claim 测试失败，
+     证明测试验的是条件 UPDATE 整体而非单行；
+  3. 禁用 guarded_write 的 epoch 检查 → 抓到：5 个测试失败（含 CORE-FENCE-001
+     两个专门用例）。
+test_id：CORE-CLAIM-001、CORE-CLAIM-002、CORE-FENCE-001
+测试命令：cd backend; python -m pytest -q（注入后观察红/绿，再还原）
+当前状态：done（注入验证）
+commit：9108ca8
+验证结果：
+  - 注入 2/3 被测到、1/3 被写锁前置防线挡掉（见完成内容 1）；
+  - 验证期间门禁：docstate 90/90、pytest exit 0、ruff exit 0（9108ca8 说明末行）；
+  - TRAE 在 MVP-04-verify 的静态核查结论与注入结论一致。
+补录说明：
+  - 本卡由 TRAE 在 GATE-MERGE-CHECK-01 中依 9108ca8 事后补录：第 4 次缺卡，
+    且认领行误写为 verify-mvp-04（与任务表 MVP-04-inject 不一致，致 discipline
+    自 9108ca8 起红灯），已于本次清理改名，见违规记录区。
 ~~~

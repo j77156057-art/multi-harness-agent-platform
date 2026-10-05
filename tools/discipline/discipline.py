@@ -28,6 +28,7 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
 
 DEFAULT_TASKS = os.path.join("TASKS.md")
@@ -252,6 +253,35 @@ def check_registry(result, tasks_text):
     result.chk(
         not incomplete,
         "认领登记均有时间与分支；缺=%s" % (incomplete or "无"),
+        "registry",
+    )
+
+    # 认领序号必须唯一且连续（claim-nullable 与 R10-fix-10-card 曾撞号 14，
+    # 旧基线合并还带回整批重复行；不查就静默存在）。
+    seq_nums = []
+    bad_seq = []
+    for claim in claims:
+        token = claim["seq"].strip()
+        if re.fullmatch(r"\d+", token):
+            seq_nums.append(int(token))
+        else:
+            bad_seq.append(claim["task_id"] or token)
+    duplicated = sorted(
+        num for num, count in collections.Counter(seq_nums).items() if count > 1
+    )
+    result.chk(
+        not duplicated and not bad_seq,
+        "认领序号唯一且为数字；重复序号=%s，非数字行=%s"
+        % (duplicated or "无", bad_seq or "无"),
+        "registry",
+    )
+    expected = set(range(1, len(claims) + 1))
+    gaps = sorted(expected - set(seq_nums))
+    out_of_range = sorted(set(seq_nums) - expected)
+    result.chk(
+        not gaps and not out_of_range,
+        "认领序号连续为 1..%d；缺号=%s，越界=%s"
+        % (len(claims), gaps or "无", out_of_range or "无"),
         "registry",
     )
     return tasks, claims
@@ -629,6 +659,154 @@ def check_traceability(result, repo_root, tasks):
     )
 
 
+def parse_merge_subject(subject):
+    """从合并提交标题提取被合并的分支名。
+
+    只认 git 默认定制的带引号标题（`git merge`/`--no-ff` 生成）：
+      Merge branch 'agent/local/x/a1'                 → ['agent/local/x/a1']
+      Merge remote-tracking branch 'origin/agent/x'   → ['origin/agent/x']
+      Merge branches 'a' and 'b'                      → ['a', 'b']
+      Merge branch 'main' into agent/local/x          → ['main']（上层过滤）
+    手写标题（如 "Merge MVP-02 into main"）无法机械映射，返回 [] —— 这是已知
+    盲区而非放行理由：新规则要求合并保留默认标题（见 dev-convention）。
+    """
+    match = re.match(
+        r"^Merge (?:remote-tracking )?branch(?:es)?\s+(.+)$", (subject or "").strip()
+    )
+    if not match:
+        return []
+    return re.findall(r"'([^']+)'", match.group(1))
+
+
+def normalize_branch(cell):
+    """认领表分支列 → 纯分支名。单元格常带反引号与注记（`main（⚠️…）`）。"""
+    match = re.search(r"`([^`]+)`", cell or "")
+    return (match.group(1) if match else (cell or "")).strip()
+
+
+def branch_tokens(cell):
+    """一个认领单元格里登记的全部分支。
+
+    同一任务允许留下多个尝试分支（如 a1 作废、a2 合入），单元格可写多个
+    反引号片段；无反引号时退回整格文本。
+    """
+    tokens = re.findall(r"`([^`]+)`", cell or "")
+    return [token.strip() for token in tokens if token.strip()] or [normalize_branch(cell)]
+
+
+def git_merged_branches(repo_root):
+    """枚举 main 历史中的合并分支，返回 (ok, branches, detail)。
+
+    fail-closed：不是 git 工作区、git 不可用、**浅克隆**都判失败。浅克隆时
+    `git log --merges` 可能为空，静默放行等于没有这道检查；CI 必须 fetch-depth: 0。
+    """
+    def git(*args):
+        try:
+            return subprocess.run(
+                ("git",) + args, cwd=repo_root, capture_output=True,
+                text=True, timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            return None, "git 调用失败：%s" % error
+
+    probe = git("rev-parse", "--is-inside-work-tree")
+    if isinstance(probe, tuple):
+        return False, [], probe[1]
+    if probe.returncode != 0 or probe.stdout.strip() != "true":
+        return False, [], "当前目录不是 git 工作区"
+    shallow = git("rev-parse", "--is-shallow-repository")
+    if isinstance(shallow, tuple):
+        return False, [], shallow[1]
+    if shallow.stdout.strip() == "true":
+        return False, [], "浅克隆看不到完整合并历史；CI checkout 需 fetch-depth: 0"
+    log = git("log", "--merges", "--format=%s")
+    if isinstance(log, tuple):
+        return False, [], log[1]
+    if log.returncode != 0:
+        return False, [], "git log --merges 失败：%s" % log.stderr.strip()
+    branches = set()
+    for line in log.stdout.splitlines():
+        for name in parse_merge_subject(line):
+            # `Merge branch 'main' into <任务分支>` 是任务分支同步主线，跳过；
+            # 真正的入主线合并标题没有 "into"。
+            if name != "main":
+                branches.add(name)
+    return True, sorted(branches), ""
+
+
+def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branches):
+    """组 6：已合入 main 的任务分支必须已登记、任务已完成、卡证据完整。
+
+    这是「先合 main 后验收 / 缺卡」三次违规的机械执行点：discipline 其余各组只看
+    TASKS.md 快照，任务不合规照样能合；本组从 git 历史反向核对登记表。
+    """
+    ok, merged, detail = lister(repo_root)
+    result.chk(
+        ok,
+        "git 环境可枚举合并提交（fail-closed）" + ("" if ok else "；%s" % detail),
+        "merge",
+    )
+    if not ok:
+        return
+
+    branch_to_task = {}
+    for claim in claims:
+        for token in branch_tokens(claim["branch"]):
+            branch_to_task.setdefault(token, claim["task_id"])
+    status = {task["task_id"]: task["status"] for task in tasks}
+
+    unregistered = sorted(branch for branch in merged if branch not in branch_to_task)
+    result.chk(
+        not unregistered,
+        "已合入 main 的分支均在认领表登记（登记先于合并）；未登记=%s"
+        % (unregistered or "无"),
+        "merge",
+    )
+
+    merged_tasks = {
+        branch_to_task[branch]: branch
+        for branch in merged if branch in branch_to_task
+    }
+    unfinished = sorted(
+        task_id for task_id in merged_tasks
+        if not is_finished(status.get(task_id, ""))
+    )
+    result.chk(
+        not unfinished,
+        "已合入 main 的任务在任务表均已完成；未完成=%s（含分支 %s）"
+        % (unfinished or "无",
+           {t: merged_tasks[t] for t in unfinished} or "无"),
+        "merge",
+    )
+
+    missing_card = sorted(task_id for task_id in merged_tasks if task_id not in cards)
+    result.chk(
+        not missing_card,
+        "已合入 main 的任务均有任务卡；缺卡=%s" % (missing_card or "无"),
+        "merge",
+    )
+
+    # 只对已完成卡强制证据：未完成的已在上一条列出，避免一条问题刷两次红灯。
+    no_evidence = sorted(
+        task_id for task_id, branch in merged_tasks.items()
+        if task_id in cards
+        and is_finished(cards[task_id]["fields"].get("当前状态", ""))
+        and (not cards[task_id]["fields"].get("commit")
+             or not has_verification_evidence(cards[task_id]))
+    )
+    result.chk(
+        not no_evidence,
+        "已合入 main 的完成任务卡均填 commit 与验证证据；缺=%s"
+        % (no_evidence or "无"),
+        "merge",
+    )
+    result.chk(
+        True,
+        "共核对 %d 个已合并任务分支" % len(merged),
+        "merge",
+    )
+
+
 def run(repo_root="."):
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
@@ -637,10 +815,11 @@ def run(repo_root="."):
 
     tasks_text = read(tasks_path)
     tasks, claims = check_registry(result, tasks_text)
-    check_cards(result, tasks_text, claims)
+    cards = check_cards(result, tasks_text, claims)
     check_counts(result, repo_root)
     check_dependencies(result, repo_root, tasks)
     check_traceability(result, repo_root, tasks)
+    check_merge(result, repo_root, tasks, claims, cards)
     return result
 
 
