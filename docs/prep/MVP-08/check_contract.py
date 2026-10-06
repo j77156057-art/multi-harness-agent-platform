@@ -80,7 +80,7 @@ def section_bounds(text: str, heading: str) -> tuple[int, int]:
     m = re.search(rf"^{re.escape(heading)}\s*$", text, flags=re.M)
     if not m:
         raise SystemExit(f"heading not found: {heading}")
-    rest = text[m.end() :]
+    rest = text[m.end():]
     level = len(heading) - len(heading.lstrip("#"))
     nxt = re.search(rf"^#{{1,{level}}}\s", rest, flags=re.M)
     end = m.end() + (nxt.start() if nxt else len(rest))
@@ -158,10 +158,7 @@ def main() -> int:
     allow = m_set + o_set + r_set
 
     print("== A. R10 truth source, counted from the actual elements ==")
-    check(
-        len(states) == len(set(states)),
-        f"section 10 state block has no duplicates ({len(states)} entries)",
-    )
+    check(len(states) == len(set(states)), f"section 10 state block has no duplicates ({len(states)} entries)")
     check(len(m_set) == len(set(m_set)), f"M set has no duplicates ({len(m_set)})")
     check(len(o_set) == len(set(o_set)), f"O set has no duplicates ({len(o_set)})")
     check(len(r_set) == len(set(r_set)), f"R set has no duplicates ({len(r_set)})")
@@ -169,20 +166,14 @@ def main() -> int:
     check(not (set(m_set) & set(r_set)), "M and R are disjoint")
     check(not (set(o_set) & set(r_set)), "O and R are disjoint")
     union = set(allow)
-    check(
-        len(union) == len(m_set) + len(o_set) + len(r_set),
-        f"union size equals |M|+|O|+|R| = {len(union)}",
-    )
+    check(len(union) == len(m_set) + len(o_set) + len(r_set),
+          f"union size equals |M|+|O|+|R| = {len(union)}")
     print()
-    print(
-        f"  counted: states={len(states)}  M={len(m_set)}  O={len(o_set)}  R={len(r_set)}  union={len(union)}"
-    )
+    print(f"  counted: states={len(states)}  M={len(m_set)}  O={len(o_set)}  R={len(r_set)}  union={len(union)}")
     if len(states) != 24:
-        note(
-            f"R10 section 10 lists {len(states)} states, but checklist H-1 claims 24. "
-            "See README Q-1 -- this is exactly the hand-written-number problem "
-            "R10 section 37.7 warns about."
-        )
+        note(f"R10 section 10 lists {len(states)} states, but checklist H-1 claims 24. "
+             "See README Q-1 -- this is exactly the hand-written-number problem "
+             "R10 section 37.7 warns about.")
     print()
 
     doc = yaml.safe_load(oapi_path.read_text(encoding="utf-8"))
@@ -190,13 +181,8 @@ def main() -> int:
 
     print("== B. openapi.yaml is loadable and structurally sane ==")
     check(isinstance(doc, dict), "YAML parses to a mapping")
-    check(
-        doc.get("openapi", "").startswith("3.1"),
-        f"openapi version is 3.1.x (got {doc.get('openapi')})",
-    )
-    check(
-        bool(doc.get("paths")), f"paths present ({len(doc.get('paths', {}))} entries)"
-    )
+    check(doc.get("openapi", "").startswith("3.1"), f"openapi version is 3.1.x (got {doc.get('openapi')})")
+    check(bool(doc.get("paths")), f"paths present ({len(doc.get('paths', {}))} entries)")
     check(bool(schemas), f"component schemas present ({len(schemas)} entries)")
 
     refs: set[str] = set()
@@ -210,50 +196,35 @@ def main() -> int:
         parts = r.lstrip("#/").split("/")
         if parts[1] not in root or parts[2] not in root[parts[1]]:
             broken.append(r)
-    check(
-        not broken,
-        f"all $ref targets resolve ({len(refs)} distinct refs)"
-        + (f" -- broken: {broken}" if broken else ""),
-    )
+    check(not broken,
+          f"all $ref targets resolve ({len(refs)} distinct refs)"
+          + (f" -- broken: {broken}" if broken else ""))
 
     servers = doc.get("servers", [])
-    check(
-        all(
-            "127.0.0.1" in s.get("url", "") or "localhost" in s.get("url", "")
-            for s in servers
-        ),
-        "every declared server URL is loopback-only (R10 section 5)",
-    )
+    check(all("127.0.0.1" in s.get("url", "") or "localhost" in s.get("url", "")
+              for s in servers), "every declared server URL is loopback-only (R10 section 5)")
     print()
 
     print("== C. TaskStatus enum == R10 section 10 ==")
     ts = schemas.get("TaskStatus", {}).get("enum", [])
     check(len(ts) == len(set(ts)), "TaskStatus enum has no duplicates")
-    check(
-        set(ts) == set(states),
-        f"TaskStatus enum set equals the section 10 state set ({len(ts)} vs {len(states)})",
-    )
+    check(set(ts) == set(states),
+          f"TaskStatus enum set equals the section 10 state set ({len(ts)} vs {len(states)})")
     missing = sorted(set(states) - set(ts))
     extra = sorted(set(ts) - set(states))
     if missing:
         print(f"        missing from contract: {missing}")
     if extra:
         print(f"        invented by contract : {extra}")
-    check(
-        "child_created" not in ts,
-        "child_created is NOT in TaskStatus (R10 37.7 rule 4 calls it a split-only pseudo-state)",
-    )
+    check("child_created" not in ts,
+          "child_created is NOT in TaskStatus (R10 37.7 rule 4 calls it a split-only pseudo-state)")
     print()
 
     print("== D. EventName enum == R10 section 37.7 M/O/R ==")
     ev = schemas.get("EventName", {}).get("enum", [])
-    check(
-        len(ev) == len(set(ev)), f"EventName enum has no duplicates ({len(ev)} entries)"
-    )
-    check(
-        set(ev) == union,
-        f"EventName enum set equals the 37.7 union ({len(set(ev))} vs {len(union)})",
-    )
+    check(len(ev) == len(set(ev)), f"EventName enum has no duplicates ({len(ev)} entries)")
+    check(set(ev) == union,
+          f"EventName enum set equals the 37.7 union ({len(set(ev))} vs {len(union)})")
     ev_missing = sorted(union - set(ev))
     ev_extra = sorted(set(ev) - union)
     if ev_missing:
@@ -280,11 +251,9 @@ def main() -> int:
             if isinstance(op, dict) and "operationId" in op:
                 ops[op["operationId"]] = f"{method.upper()} {p}"
     absent = [v for v in pull_verbs if v not in ops]
-    check(
-        not absent,
-        "every section 7 verb has an operationId"
-        + (f" -- missing: {absent}" if absent else ""),
-    )
+    check(not absent,
+          "every section 7 verb has an operationId"
+          + (f" -- missing: {absent}" if absent else ""))
     for p in paths:
         if not p.startswith("/adapter/"):
             continue
@@ -312,32 +281,22 @@ def main() -> int:
     }
     for verb in v21:
         op = expected_ops.get(verb)
-        check(
-            op is not None and op in ops,
-            f"section 21 verb '{verb}' is mapped"
-            + ("" if op in ops else f" (expected operationId {op})"),
-        )
+        check(op is not None and op in ops,
+              f"section 21 verb '{verb}' is mapped" + ("" if op in ops else f" (expected operationId {op})"))
     print()
 
     print("== G. error codes: contract enumerates only defined codes ==")
     err_text = err_path.read_text(encoding="utf-8")
-    defined = set(
-        re.findall(r"^\|\s*`([a-z_]+\.[a-z_0-9]+)`\s*\|", err_text, flags=re.M)
-    )
+    defined = set(re.findall(r"^\|\s*`([a-z_]+\.[a-z_0-9]+)`\s*\|", err_text, flags=re.M))
     print(f"  error-codes.md defines {len(defined)} codes")
     cited: set[str] = set()
     walk_code_enums(doc, "", cited)
     print(f"  openapi.yaml enumerates {len(cited)} codes under a `code` property")
     undefined = sorted(c for c in cited if c not in defined)
-    check(
-        bool(cited),
-        "the contract does enumerate error codes somewhere (guard against a vacuous pass)",
-    )
-    check(
-        not undefined,
-        "every enumerated error code is defined in error-codes.md"
-        + (f" -- undefined: {undefined}" if undefined else ""),
-    )
+    check(bool(cited), "the contract does enumerate error codes somewhere (guard against a vacuous pass)")
+    check(not undefined,
+          "every enumerated error code is defined in error-codes.md"
+          + (f" -- undefined: {undefined}" if undefined else ""))
     print()
 
     print("== H. error-codes.md cites only allowlisted event names ==")
@@ -347,21 +306,17 @@ def main() -> int:
         pool = {"M": m_set, "O": o_set, "R": r_set}[kind]
         if name not in pool:
             bad.append(f"{name}(claimed {kind})")
-    check(
-        not bad,
-        f"all {len(cited_events)} event citations carry the correct M/O/R tag"
-        + (f" -- wrong: {bad}" if bad else ""),
-    )
+    check(not bad,
+          f"all {len(cited_events)} event citations carry the correct M/O/R tag"
+          + (f" -- wrong: {bad}" if bad else ""))
     print()
 
     print("== I. no hand-written allowlist counts anywhere in the contract ==")
     contract_text = oapi_path.read_text(encoding="utf-8") + err_text
     hardcoded = re.findall(r"\b(?:88|74|13)\s*(?:项|items|entries)", contract_text)
     if hardcoded:
-        note(
-            f"found prose mentions of counts {sorted(set(hardcoded))}; acceptable in "
-            "descriptions but must never be an assertion constant (R10 37.7 methodology)"
-        )
+        note(f"found prose mentions of counts {sorted(set(hardcoded))}; acceptable in "
+             "descriptions but must never be an assertion constant (R10 37.7 methodology)")
     else:
         check(True, "no count strings used as assertions")
     print()
@@ -372,25 +327,19 @@ def main() -> int:
     # the artifact itself. They do NOT police R10 itself; README Q-6 (now closed
     # by R10-fix-10) documents the spec-side gap they were written alongside.
     s8, e8 = section_bounds(r10_text, "## 8. Canonical 数据模型")
-    check(
-        "## 9." not in r10_text[s8:e8] and "## 11." not in r10_text[s8:e8],
-        "section 8 bounds stop before section 9 (section_bounds regression guard)",
-    )
+    check("## 9." not in r10_text[s8:e8] and "## 11." not in r10_text[s8:e8],
+          "section 8 bounds stop before section 9 (section_bounds regression guard)")
     s8_rows = {
         m.group(1): m.group(0)
         for m in re.finditer(r"^\|\s*([a-z_]+)\s*\|.*$", r10_text[s8:e8], flags=re.M)
     }
     cr_row = s8_rows.get("claim_requests", "")
     check(bool(cr_row), "section 8 has a claim_requests row to inspect")
-    check(
-        cr_row.count("unique(") == 0 or "task_id" not in cr_row.split("|")[2],
-        "claim_requests row declares no composite key involving task_id",
-    )
+    check(cr_row.count("unique(") == 0 or "task_id" not in cr_row.split("|")[2],
+          "claim_requests row declares no composite key involving task_id")
     cr_fields = cr_row.split("|")[3] if cr_row.count("|") >= 3 else ""
-    check(
-        not re.search(r"\btask_id\b", cr_fields),
-        "claim_requests key-column cell does not declare a task_id column",
-    )
+    check(not re.search(r"\btask_id\b", cr_fields),
+          "claim_requests key-column cell does not declare a task_id column")
     # R10-fix-10 (2026-10-05) closed the Q-6 gap: task_claims now has a section 8
     # minimum-definition row, and the §37.6 merged cell was split so the
     # schema-keys assertion group covers it. This was previously a sentinel that
@@ -398,44 +347,28 @@ def main() -> int:
     tc_row = s8_rows.get("task_claims", "")
     check(bool(tc_row), "section 8 now has a task_claims row (R10-fix-10 closed Q-6)")
     if tc_row:
-        check(
-            "unique(claim_request_id, task_id)" in tc_row,
-            "task_claims row declares unique(claim_request_id, task_id)",
-        )
+        check("unique(claim_request_id, task_id)" in tc_row,
+              "task_claims row declares unique(claim_request_id, task_id)")
         tc_key_cell = tc_row.split("|")[2]
         tc_field_cell = tc_row.split("|")[3]
-        check(
-            re.search(r"\btask_id\b", tc_key_cell) is not None
-            and re.search(r"\btask_id\b", tc_field_cell) is not None,
-            "task_claims row declares task_id in both the key and field cells "
-            "(the exact cross-cell defect schema-keys was added to catch)",
-        )
-        check(
-            "失败项" in tc_row,
-            "task_claims row keeps the failed-item-still-writes-a-row rule",
-        )
+        check(re.search(r"\btask_id\b", tc_key_cell) is not None
+              and re.search(r"\btask_id\b", tc_field_cell) is not None,
+              "task_claims row declares task_id in both the key and field cells "
+              "(the exact cross-cell defect schema-keys was added to catch)")
+        check("失败项" in tc_row,
+              "task_claims row keeps the failed-item-still-writes-a-row rule")
     s11, e11 = section_bounds(r10_text, "## 11. Claim、批量 Claim 和幂等")
     s11_text = r10_text[s11:e11]
-    check(
-        "不从 JSON 里反解" in s11_text,
-        "section 11 forbids decoding per-task results from first_result_json",
-    )
-    check(
-        "失败项同样留行" in s11_text,
-        "section 11 requires a task_claims row even for failed items",
-    )
+    check("不从 JSON 里反解" in s11_text,
+          "section 11 forbids decoding per-task results from first_result_json")
+    check("失败项同样留行" in s11_text,
+          "section 11 requires a task_claims row even for failed items")
     idem_text = (args.here / "idempotency.md").read_text(encoding="utf-8")
-    check(
-        "task_claims" in idem_text and "claim_requests" in idem_text,
-        "idempotency.md names both claim_requests and task_claims",
-    )
-    bad_placement = re.findall(
-        r"`claim_requests`\s*\|\s*`unique\(claim_request_id", idem_text
-    )
-    check(
-        not bad_placement,
-        "idempotency.md never places the composite claim key on claim_requests",
-    )
+    check("task_claims" in idem_text and "claim_requests" in idem_text,
+          "idempotency.md names both claim_requests and task_claims")
+    bad_placement = re.findall(r"`claim_requests`\s*\|\s*`unique\(claim_request_id", idem_text)
+    check(not bad_placement,
+          "idempotency.md never places the composite claim key on claim_requests")
     print()
 
     print("=" * 62)
@@ -449,9 +382,7 @@ def main() -> int:
             print(f"  - {f}")
         return 1
     print("FAILURES : 0")
-    print(
-        "contract is a faithful projection of R10 sections 7 / 8 / 10 / 11 / 21 / 37.7"
-    )
+    print("contract is a faithful projection of R10 sections 7 / 8 / 10 / 11 / 21 / 37.7")
     return 0
 
 

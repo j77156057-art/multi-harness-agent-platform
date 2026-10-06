@@ -16,7 +16,6 @@
 
 退出码：0 = 全部通过；1 = 存在失败项
 """
-
 import argparse
 import collections
 import io
@@ -32,15 +31,10 @@ PSEUDO_STATES = {"child_created"}
 
 TERMINAL_STATES = {"merged", "cancelled"}
 
-ALLOWED_STATE_NAMES = (
-    set(
-        """draft draft_rejected ready_waiting_deps ready queued verifying
+ALLOWED_STATE_NAMES = set("""draft draft_rejected ready_waiting_deps ready queued verifying
 claimed in_progress needs_help blocked changes_requested plan_drift impl_drift
 awaiting_review approved merging stale reclaiming abandoned escalated awaiting_human
-merged cancelled""".split()
-    )
-    | PSEUDO_STATES
-)
+merged cancelled""".split()) | PSEUDO_STATES
 
 ALLOWLIST_HEADINGS = [
     ("M", "迁移事件（M，74 项）："),
@@ -50,16 +44,8 @@ ALLOWLIST_HEADINGS = [
 
 EXPECTED_COUNTS = {"M": 74, "O": 13, "R": 1, "UNION": 88, "LOOPS": 10}
 
-SKIP_CURRENT = {
-    "正式状态",
-    "正常流程",
-    "关键迁移表",
-    "硬规则",
-    "边",
-    "迁移表补充说明",
-    "current",
-    "迁移表补充说明（R10：原 R9 把副作用写在 next 括号内，导致 next 不可机械判定；R10 全部移入本表，next 列只留单一状态）",
-}
+SKIP_CURRENT = {"正式状态", "正常流程", "关键迁移表", "硬规则", "边", "迁移表补充说明",
+                "current", "迁移表补充说明（R10：原 R9 把副作用写在 next 括号内，导致 next 不可机械判定；R10 全部移入本表，next 列只留单一状态）"}
 
 
 class Result:
@@ -182,44 +168,19 @@ def run(spec_path, verbose=False):
 
     # --- 组 1：文件与章节结构 ---
     r.chk("## 10. 状态机" in text, "规范含 §10 状态机章节", "structure")
-    r.chk(
-        "### 37.7 事件 allowlist" in text,
-        "规范含 §37.7 事件 allowlist 章节",
-        "structure",
-    )
-    r.chk(
-        "## 8. Canonical 数据模型" in text,
-        "规范含 §8 canonical schema 章节",
-        "structure",
-    )
+    r.chk("### 37.7 事件 allowlist" in text, "规范含 §37.7 事件 allowlist 章节", "structure")
+    r.chk("## 8. Canonical 数据模型" in text, "规范含 §8 canonical schema 章节", "structure")
 
     # --- 组 2：allowlist 集合 ---
     al = extract_allowlist(text)
     M, O, R = al.get("M", set()), al.get("O", set()), al.get("R", set())
     union = M | O | R
-    r.chk(
-        len(M) == EXPECTED_COUNTS["M"],
-        "M 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["M"], len(M)),
-        "allowlist",
-    )
-    r.chk(
-        len(O) == EXPECTED_COUNTS["O"],
-        "O 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["O"], len(O)),
-        "allowlist",
-    )
-    r.chk(
-        len(R) == EXPECTED_COUNTS["R"],
-        "R 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["R"], len(R)),
-        "allowlist",
-    )
-    r.chk(
-        len(union) == EXPECTED_COUNTS["UNION"],
-        "并集 = %d（实际 %d）" % (EXPECTED_COUNTS["UNION"], len(union)),
-        "allowlist",
-    )
-    r.chk(
-        not (M & O) and not (M & R) and not (O & R), "M/O/R 两两交集为空", "allowlist"
-    )
+    r.chk(len(M) == EXPECTED_COUNTS["M"], "M 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["M"], len(M)), "allowlist")
+    r.chk(len(O) == EXPECTED_COUNTS["O"], "O 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["O"], len(O)), "allowlist")
+    r.chk(len(R) == EXPECTED_COUNTS["R"], "R 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["R"], len(R)), "allowlist")
+    r.chk(len(union) == EXPECTED_COUNTS["UNION"],
+          "并集 = %d（实际 %d）" % (EXPECTED_COUNTS["UNION"], len(union)), "allowlist")
+    r.chk(not (M & O) and not (M & R) and not (O & R), "M/O/R 两两交集为空", "allowlist")
     for key in ("M", "O", "R"):
         raw = al.get(key + "_raw", [])
         r.chk(len(raw) == len(set(raw)), "%s 集合内部无重复" % key, "allowlist")
@@ -238,11 +199,8 @@ def run(spec_path, verbose=False):
     r.chk(not multi, "next 单值（无'或'）；多值=%s" % multi, "transitions")
     paren = [(c, e, n) for c, e, _, n in rows if "（" in n]
     r.chk(not paren, "next 无括号补充；带括号 %d 条" % len(paren), "transitions")
-    r.chk(
-        "\n       | lease_expire" not in text.split("## 11. Claim")[0],
-        "迁移表无被折行拆断的边",
-        "transitions",
-    )
+    r.chk("\n       | lease_expire" not in text.split("## 11. Claim")[0],
+          "迁移表无被折行拆断的边", "transitions")
 
     # --- 组 4：R10 关键事件必须存在 ---
     for ev, note in [
@@ -253,33 +211,20 @@ def run(spec_path, verbose=False):
         ("differential_not_applicable", "R10-fix-03 not_applicable 正向边"),
         ("human.reopen_no_owner", "R10-fix-05 human.reopen 双边拆分"),
         ("merge_conflict_needs_owner", "R10-06 merge_conflict 双 next 拆分"),
-        (
-            "merge_post_commit_failure_escalated",
-            "R10-06 post_commit_failure 双 next 拆分",
-        ),
+        ("merge_post_commit_failure_escalated", "R10-06 post_commit_failure 双 next 拆分"),
     ]:
         r.chk(ev in M, "M 集合含 %s（%s）" % (ev, note), "r10-events")
         r.chk(ev in used, "§10 有 %s 对应边" % ev, "r10-events")
 
     # --- 组 5：自环边 ---
-    loops = [(c, e) for c, e, _, n in rows if n in [x.strip() for x in c.split("/")]]
-    r.chk(
-        len(loops) == EXPECTED_COUNTS["LOOPS"],
-        "自环 = %d 条（实际 %d）" % (EXPECTED_COUNTS["LOOPS"], len(loops)),
-        "loops",
-    )
-    for ev in [
-        "verify_env_failed",
-        "verify_lease_expire",
-        "human_wait_timeout",
-        "escalation_reminder",
-        "submit_rejected_verify_capacity",
-        "review_lease_expire",
-        "merge_lease_expire",
-        "help_requested",
-        "help_accepted",
-        "help_rejected",
-    ]:
+    loops = [(c, e) for c, e, _, n in rows
+             if n in [x.strip() for x in c.split("/")]]
+    r.chk(len(loops) == EXPECTED_COUNTS["LOOPS"],
+          "自环 = %d 条（实际 %d）" % (EXPECTED_COUNTS["LOOPS"], len(loops)), "loops")
+    for ev in ["verify_env_failed", "verify_lease_expire", "human_wait_timeout",
+               "escalation_reminder", "submit_rejected_verify_capacity",
+               "review_lease_expire", "merge_lease_expire",
+               "help_requested", "help_accepted", "help_rejected"]:
         r.chk(ev in dict((e, c) for c, e in loops), "自环清单含 %s" % ev, "loops")
 
     # --- 组 6：状态覆盖 ---
@@ -289,32 +234,17 @@ def run(spec_path, verbose=False):
             out_count[s.strip()] += 1
     # 注意：伪状态（child_created）只出现在 next 位置，从不作为 current，
     # 按R10 §10 补充说明表不参与可达性检查，必须排除
-    no_out = sorted(
-        s
-        for s in ALLOWED_STATE_NAMES
-        if s not in TERMINAL_STATES
-        and s not in PSEUDO_STATES
-        and out_count.get(s, 0) == 0
-    )
+    no_out = sorted(s for s in ALLOWED_STATE_NAMES
+                    if s not in TERMINAL_STATES
+                    and s not in PSEUDO_STATES
+                    and out_count.get(s, 0) == 0)
     r.chk(not no_out, "全部非终态有出边；无出边=%s" % no_out, "states")
     for t in TERMINAL_STATES:
-        r.chk(
-            out_count.get(t, 0) == 0,
-            "终态 %s 无出边（实际 %d）" % (t, out_count.get(t, 0)),
-            "states",
-        )
+        r.chk(out_count.get(t, 0) == 0, "终态 %s 无出边（实际 %d）" % (t, out_count.get(t, 0)), "states")
     rwd = [(e, n) for c, e, _, n in rows if "ready_waiting_deps" in c]
     r.chk(len(rwd) == 3, "ready_waiting_deps 3 条出边（实际 %d）" % len(rwd), "states")
-    r.chk(
-        any(e == "block_timeout" for e, _ in rwd),
-        "含 block_timeout 出口（R10-05）",
-        "states",
-    )
-    r.chk(
-        any(e == "orphan_detected" for e, _ in rwd),
-        "含 orphan_detected 出口（R10-05）",
-        "states",
-    )
+    r.chk(any(e == "block_timeout" for e, _ in rwd), "含 block_timeout 出口（R10-05）", "states")
+    r.chk(any(e == "orphan_detected" for e, _ in rwd), "含 orphan_detected 出口（R10-05）", "states")
 
     # --- 组 7：schema 关键字段 ---
     sec8 = text.split("## 8. Canonical 数据模型")[1].split("## 9.")[0]
@@ -324,35 +254,14 @@ def run(spec_path, verbose=False):
             tasks_row = line
             break
     r.chk(bool(tasks_row), "§8 存在 tasks 最小定义行", "schema")
-    for f in [
-        "attempt_no",
-        "hotfix",
-        "budget_override_by",
-        "upstream_invalidated_seq",
-        "base_locked_seq",
-        "max_attempts",
-        "review_policy",
-    ]:
+    for f in ["attempt_no", "hotfix", "budget_override_by", "upstream_invalidated_seq",
+              "base_locked_seq", "max_attempts", "review_policy"]:
         r.chk(f in tasks_row, "tasks.%s 在 §8 tasks 行" % f, "schema")
-    for f in [
-        "patch_hash",
-        "applied_by",
-        "generated_commit",
-        "fencing_epoch",
-        "patch_uri",
-    ]:
+    for f in ["patch_hash", "applied_by", "generated_commit", "fencing_epoch", "patch_uri"]:
         r.chk(f in sec8, "side_effect_intents 补 %s" % f, "schema")
     r.chk("patch_base_commit" in sec8, "artifacts 补 patch_base_commit", "schema")
-    r.chk(
-        "budget_override_by` 是唯一权威列名" in text,
-        "R10-14 命名统一声明存在",
-        "schema",
-    )
-    r.chk(
-        "attempt_no" in text.split("## 11. Claim")[1][:2000],
-        "§11 Claim SQL 引用 attempt_no",
-        "schema",
-    )
+    r.chk("budget_override_by` 是唯一权威列名" in text, "R10-14 命名统一声明存在", "schema")
+    r.chk("attempt_no" in text.split("## 11. Claim")[1][:2000], "§11 Claim SQL 引用 attempt_no", "schema")
 
     # --- 组 7b：§8 主键/唯一键与关键字段一致性（R10-fix-09 / R10-fix-10）---
     # 覆盖边界（与 §38 R10-fix-09 一致，勿静默扩大）：本组只对 §37.6 必要字段单元格
@@ -397,18 +306,12 @@ def run(spec_path, verbose=False):
     r.chk(
         not sec8_offenders,
         "§8 唯一键引用的列均已在 §8 声明；越界=%s（检查 %d 张表，跳过 %d 张：%s）"
-        % (
-            sec8_offenders or "无",
-            checked_tables,
-            len(skipped_tables),
-            skipped_tables or "无",
-        ),
+        % (sec8_offenders or "无", checked_tables, len(skipped_tables), skipped_tables or "无"),
         "schema-keys",
     )
     r.chk(
         not union_offenders,
-        "§8 唯一键引用的列在 §8/§37.6 至少一处声明；越界=%s"
-        % (union_offenders or "无",),
+        "§8 唯一键引用的列在 §8/§37.6 至少一处声明；越界=%s" % (union_offenders or "无",),
         "schema-keys",
     )
     r.chk(
@@ -458,45 +361,27 @@ def run(spec_path, verbose=False):
     # --- 组 8：§37.6 schema 补充清单 ---
     if "### 37.6" in text:
         sec376 = text.split("### 37.6")[1].split("### 37.7")[0]
-        for t in [
-            "command_idempotency",
-            "verification_receipts",
-            "side_effect_intents",
-            "task_dependencies",
-            "claim_requests",
-        ]:
+        for t in ["command_idempotency", "verification_receipts", "side_effect_intents",
+                  "task_dependencies", "claim_requests"]:
             r.chk(t in sec376, "§37.6 含 %s" % t, "schema-list")
 
     # --- 组 9：test_id 阶段落点 ---
     declared = set()
     for m in re.finditer(r"阶段 (\d(?:[ab])?) [^\n]*检查 ID[：:]\s*([^\n]+)", text):
         declared |= set(re.findall(r"[A-Z][A-Z0-9]+(?:-[A-Z0-9]+)+", m.group(2)))
-    allids = set(
-        re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text)
-    )
+    allids = set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text))
     dangling = sorted(allids - declared)
     r.chk(not dangling, "无悬空 test_id；悬空=%s" % dangling, "trace")
-    for must in [
-        "DOC-STATE-001",
-        "DOC-SCHEMA-001",
-        "DOC-TRACE-001",
-        "DOC-PLAN-001",
-        "CORE-CLAIM-002",
-        "CORE-FENCE-001",
-        "GIT-ACL-002",
-        "GIT-PACK-001",
-        "MERGE-REVERT-002",
-    ]:
+    for must in ["DOC-STATE-001", "DOC-SCHEMA-001", "DOC-TRACE-001", "DOC-PLAN-001",
+                 "CORE-CLAIM-002", "CORE-FENCE-001", "GIT-ACL-002", "GIT-PACK-001",
+                 "MERGE-REVERT-002"]:
         r.chk(must in declared, "检查 ID 已登记：%s" % must, "trace")
 
     # --- 组 10：阶段边界与通过条件 ---
     if "### 29.3 终审通过条件" in text:
         sec293 = text.split("### 29.3 终审通过条件")[1].split("### 29.4")[0]
-        r.chk(
-            "88" in sec293 and "allowlist" in sec293,
-            "§29.3 含 allowlist 封闭性断言（88 项）",
-            "gates",
-        )
+        r.chk("88" in sec293 and "allowlist" in sec293,
+              "§29.3 含 allowlist 封闭性断言（88 项）", "gates")
     r.chk("### 29.6 R11 复审请求" in text, "含 §29.6 R11 复审请求", "gates")
     r.chk("## 38. R10 终审修订映射与增量规范" in text, "含 §38 R10 增量规范", "gates")
     r.chk("版本：0.3-R10" in text, "版本行为 0.3-R10", "gates")
@@ -519,19 +404,13 @@ def main():
     result = run(args.spec, verbose=args.verbose)
 
     if args.json:
-        print(
-            json.dumps(
-                {
-                    "spec": args.spec,
-                    "total": len(result.checks),
-                    "passed": len(result.passed),
-                    "failed": len(result.failed),
-                    "checks": result.checks,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps({
+            "spec": args.spec,
+            "total": len(result.checks),
+            "passed": len(result.passed),
+            "failed": len(result.failed),
+            "checks": result.checks,
+        }, ensure_ascii=False, indent=2))
     else:
         print("=== docstate: %s ===" % args.spec)
         groups = collections.OrderedDict()
