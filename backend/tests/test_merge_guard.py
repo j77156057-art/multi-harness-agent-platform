@@ -971,6 +971,143 @@ def test_cli_reports_failure_when_commit_really_failed(repo_with_gates: Path):
 
 
 # ---------------------------------------------------------------------------
+# 续跑必须证明「记录与请求是同一次合并」
+#
+# 2026-10-07 03:05 实测事故：Qoder 合并 sweeper-deps-resources 后进程退出，
+# 现场悬着（MERGE_HEAD == merge-pending.json 的 merge_head == eb7d8d36）。
+# 随后有人请求合并**另一条分支**，只凭「内容相符」就判成自己的遗留合并，
+# **跳过了 merge 步骤**，直接在别人的工作树上跑门禁 —— 自己的分支根本没被合并。
+# 最坏情况：门禁若恰好是绿的，工具会报成功并提交，即**把别人的合并当成自己的
+# 合并提交掉** —— 正是本工具存在的目的所防的事故。
+# ---------------------------------------------------------------------------
+
+
+def _write_pending(repo: Path, branch: str, task_id: str, merge_head: str):
+    (guard.git_common_dir(repo) / cli.PENDING_FILENAME).write_text(
+        json.dumps(
+            {
+                "branch": branch,
+                "task_id": task_id,
+                "merge_head": merge_head,
+                "index_tree": _git_out(repo, "write-tree"),
+                "pid": 999999,
+                "created_at": time.time(),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_pending_record_of_another_branch_is_not_resumed(repo_with_gates: Path):
+    """**回归**：pending 记录属于**别的分支**时必须拒绝，而不是续跑。
+
+    这道缺口的正例：`MERGE_HEAD` 与记录内容相符，只说明「**有一次**合并悬着」，
+    不说明「是**我请求的那次**合并」。只凭前者就续跑，等于把别人的现场当成
+    自己的 —— 而本工具的全部价值就是绝不接管别人的合并。
+    """
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    _git(repo_with_gates, "branch", "someone-elses")
+    their_head = _git_out(repo_with_gates, "rev-parse", "someone-elses")
+    _merge_head_file(repo_with_gates).write_text(their_head + "\n", encoding="utf-8")
+    _write_pending(repo_with_gates, "someone-elses", "T-theirs", their_head)
+    before = _git_out(repo_with_gates, "rev-parse", "HEAD")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-mine")
+    assert r.returncode == 7, r.stdout + r.stderr
+    assert "他人遗留" in r.stderr, r.stderr
+    assert (
+        "someone-elses" in r.stderr and "feature" in r.stderr
+    ), "必须同时点名「那次是谁的」与「本次要谁」"
+    assert _git_out(repo_with_gates, "rev-parse", "HEAD") == before, "不许提交"
+    assert _merge_head_file(repo_with_gates).exists(), "他人的现场必须原样保留"
+    assert _pending_file(repo_with_gates).exists(), "他人的归属记录必须原样保留"
+
+
+def test_pending_record_of_another_task_same_branch_is_resumed(repo_with_gates: Path):
+    """同一分支、task_id 不同 -> **仍然续跑**，因为那确实是同一笔合并。
+
+    这条是判据选型的对照。曾经的写法是「记录的 branch 或 task_id 与请求相符」
+    —— 用**标签**当身份。那样会多拒一次本该接受的续跑，而且拒得毫无理由：
+    悬着的合并就是 `MERGE_HEAD == 该分支的 tip`，提交它就是完成我的请求，
+    与它上一次挂在哪个 task_id 下无关。
+
+    现在的判据是事实：`MERGE_HEAD == rev-parse(请求的分支)`。标签只用于
+    报错文案，不参与判定。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+    assert _cli(repo_with_gates, "merge", "feature", "--task-id", "T-theirs").returncode == 5
+
+    flag.unlink()
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-mine")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "跳过合并步骤，直接续跑" in r.stdout
+    parents = _git_out(repo_with_gates, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    assert len(parents) == 3, parents
+
+
+def test_pending_record_is_refused_when_branch_tip_moved(repo_with_gates: Path):
+    """请求的分支在悬着的那次合并之后又前进了 -> 必须拒绝续跑。
+
+    `MERGE_HEAD` 是悬着那次合并的 commit。若这期间该分支被推进了，
+    续跑就会提交一个**已经不是最新**的合并 —— 而调用方请求的是新的那个。
+    这条把「事实比对」的价值讲清楚：它同时挡住了「别人的现场」与
+    「过期的现场」。
+
+    构造顺序有讲究：必须**先推进分支、再造 MERGE_HEAD**。反过来做不到 ——
+    `git checkout` 会顺手清掉 MERGE_HEAD，悬置现场也就没了。
+    （真实世界要让这个场景发生，得是别人从别处用 fetch 或 `update-ref` 强推了
+    那个 ref；本仓库里被 checkout 占用的分支是拒绝普通更新的，所以罕见但
+    并非不可能——而罕见不等于不设防。）
+    """
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    old_tip = _git_out(repo_with_gates, "rev-parse", "feature")
+
+    # 先把分支推进（此刻没有 MERGE_HEAD，checkout 不会被它拦）
+    _git(repo_with_gates, "checkout", "feature")
+    (repo_with_gates / "g.txt").write_text("moved", encoding="utf-8")
+    _git(repo_with_gates, "add", "g.txt")
+    _git(repo_with_gates, "commit", "-m", "feature moves on")
+    _git(repo_with_gates, "checkout", "main")
+    new_tip = _git_out(repo_with_gates, "rev-parse", "feature")
+    assert new_tip != old_tip
+
+    # 再造那个悬置现场：MERGE_HEAD 指向的是**旧** tip
+    _merge_head_file(repo_with_gates).write_text(old_tip + "\n", encoding="utf-8")
+    _write_pending(repo_with_gates, "feature", "T-theirs", old_tip)
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-mine")
+    assert r.returncode == 7, r.stdout + r.stderr
+    assert "他人遗留" in r.stderr
+    assert (
+        old_tip[:8] in r.stderr and new_tip[:8] in r.stderr
+    ), "必须同时给出悬着的 MERGE_HEAD 与当前 tip，便于人判断"
+    assert _merge_head_file(repo_with_gates).exists(), "现场必须原样保留"
+
+
+def test_pending_record_matching_branch_and_task_is_resumed(repo_with_gates: Path):
+    """对照：分支与 task_id 都对得上时，续跑仍然正常（别把功能改坏）。"""
+    _install_gates(repo_with_gates, discipline_body=_GATE_TOGGLING)
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    flag = repo_with_gates / ".git" / "gate-fails.flag"
+    flag.write_text("", encoding="utf-8")
+
+    first = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert first.returncode == 5, first.stdout + first.stderr
+    assert _merge_head_file(repo_with_gates).exists()
+
+    flag.unlink()
+    second = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert "跳过合并步骤，直接续跑" in second.stdout
+    parents = _git_out(repo_with_gates, "rev-list", "--parents", "-n", "1", "HEAD").split()
+    assert len(parents) == 3, parents
+
+
+# ---------------------------------------------------------------------------
 # 问题 2（中）：最终 commit 也必须有界重试
 # ---------------------------------------------------------------------------
 

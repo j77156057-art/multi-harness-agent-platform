@@ -469,11 +469,32 @@ def _detect_foreign_git_activity(repo: Path) -> str | None:
     return None
 
 
-def _classify_pending_merge() -> tuple[bool, str | None]:
-    """判断当前 MERGE_HEAD 是不是本工具留下的待提交合并。
+def _classify_pending_merge(
+    requested_branch: str, requested_task: str = ""
+) -> tuple[bool, str | None]:
+    """判断当前 MERGE_HEAD 是不是**本次请求**那次合并留下的待提交现场。
 
     返回 (是否可续跑, 拒绝理由)。**fail-closed**：任何无法证明归属的情形
     一律按「别人的合并」处理。
+
+    **必须有两条独立证据，缺一不可：**
+
+    1. `MERGE_HEAD` 的内容 == 记录里的 `merge_head`（同一个 commit）。
+    2. 记录里的 `branch`（或 `task_id`）== 本次请求的分支（或任务）。
+
+    为什么第 2 条不能省 —— 这是 2026-10-07 03:05 的实测事故：
+    Qoder 合并 `sweeper-deps-resources` 后进程退出，现场悬着
+    （`MERGE_HEAD` == `merge-pending.json` 的 `merge_head` == `eb7d8d36`）。
+    随后我请求合并**另一条分支**，只凭第 1 条就判成「自己的遗留合并」，
+    **跳过了 merge 步骤**，直接在别人的工作树上跑门禁 —— 我的分支根本没被
+    合并，而门禁验的是他的树。
+
+    最坏情况不是这一次：门禁若恰好是绿的，工具会报成功并提交，
+    **把别人的合并当成我的合并提交掉** —— 正是本工具存在的目的所防的
+    「接管别人的合并」。
+
+    也就是说：第 1 条证明的是「**有一次**合并悬着」，第 2 条才证明
+    「是**我请求的那次**合并」。只有前者就续跑，等于把别人的现场当成自己的。
     """
     pending = _read_pending()
     merge_head = _read_merge_head()
@@ -500,6 +521,33 @@ def _classify_pending_merge() -> tuple[bool, str | None]:
             f"说明合并已被他人接手或替换，不接管。"
         )
 
+    # 第 2 条证据：**MERGE_HEAD 必须就是本次请求要合的那个分支的 tip**。
+    #
+    # 这里刻意**不**去比对记录里的 `branch` / `task_id` 标签 —— 那是上一次运行
+    # 写下的字符串，是标签不是事实；标签可以被改、被抄错、被手工编辑。
+    # 而 `MERGE_HEAD == rev-parse(请求的分支)` 是 git 自己的事实：它精确地
+    # 证明「现在悬着的这次合并，合并的正是我要求合的那个分支的那个 commit」。
+    # 那就等于「我请求的这次合并」，与它上一次是谁跑的无关。
+    #
+    # 顺带说明为什么「分支相同、task_id 不同」不该拒绝：那种情况下悬着的合并
+    # 确实就是我要求的那一笔（MERGE_HEAD 就是那个分支的 tip），提交它就是
+    # 完成我的请求。task_id 只是锁信息里的标签，不构成合并的身份。
+    expected_tip = _rev_parse(requested_branch)
+    if not expected_tip:
+        return False, (
+            f"无法解析要合并的分支 {requested_branch!r}（它还存在吗？），"
+            f"不予接管任何现场。"
+        )
+    if merge_head != expected_tip:
+        return False, (
+            f"存在**他人遗留**的待提交合并（MERGE_HEAD={merge_head!r}，"
+            f"记录分支 {pending.get('branch')!r}，记录任务 {pending.get('task_id')!r}），"
+            f"而本次请求的 {requested_branch!r} 当前 tip 是 {expected_tip!r} —— "
+            f"不是同一次合并，不接管。\n"
+            f"  那次合并的现场仍在：{_merge_head_path()}\n"
+            f"  请先让它的主人收尾，或确认无人操作后手工清理，**不要由本次请求代劳**。"
+        )
+
     return True, None
 
 
@@ -516,7 +564,7 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
         )
         return 2
 
-    resuming, refusal = _classify_pending_merge()
+    resuming, refusal = _classify_pending_merge(branch, task_id)
     if refusal is not None:
         print(f"拒绝：{refusal}", file=sys.stderr)
         print(
