@@ -4,16 +4,19 @@
 任务编号：tasks-split
 负责人 Harness：WorkBuddy
 开始时间：2026-10-06 11:05
+完成时间：2026-10-06 12:05
 工作区：.worktrees/wbsplit
 依赖任务：claims-split
 真相源引用：docs/claims/53-workbuddy--tasks-split.md
-            TASKS.md `## 任务卡` 节（拆分后的位置说明与索引）
+            TASKS.md 「任务卡」节（拆分后的位置说明与索引）
             tools/discipline/discipline.py check_cards（改为读两处）
 允许修改目录：TASKS.md、docs/tasks/notes/**、tools/discipline/**、docs/claims/53-*.md
 禁止修改目录：tools/docstate/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/tasks-split/a1
 test_id：MVP-PROCESS-001
-当前状态：✅ done
+commit：a7eca25（拆分主体）；本字段的回填随下一次提交
+当前状态：done
+验证结果：见下方「验证结果」小节
 ~~~
 
 ### 动机：上一轮拆分只解决了一半
@@ -136,5 +139,5 @@ prep、统一任务卡、提交前自检、共享文件改动声明区、任务�
 
 ### 完成时间与 commit
 
-- 完成时间：2026-10-06 11:48
-- commit：见 `git log --oneline -- docs/tasks/notes/tasks-split.md`（本文件随拆分提交）
+完成时间：2026-10-06 12:05
+commit：a7eca25
