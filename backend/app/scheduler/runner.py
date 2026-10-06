@@ -23,8 +23,12 @@ from app.scheduler.sweeps import (
     sweep_blocked_sla,
     sweep_dependencies,
     sweep_expired_leases,
+    sweep_merge_recovery,
     sweep_resources,
+    sweep_review_lease,
     sweep_stuck,
+    sweep_verify_lease,
+    sweep_verify_queue,
 )
 
 Sweep = Callable[[Database, datetime], SweepReport]
@@ -42,6 +46,10 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("aging", sweep_aging),
     ("blocked_sla", sweep_blocked_sla),
     ("stuck", sweep_stuck),
+    ("verify_lease", sweep_verify_lease),
+    ("verify_queue", sweep_verify_queue),
+    ("review_lease", sweep_review_lease),
+    ("merge_recovery", sweep_merge_recovery),
 )
 
 

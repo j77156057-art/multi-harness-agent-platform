@@ -164,6 +164,10 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "aging",
         "blocked_sla",
         "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
     ]
 
     run_all_sweeps(database, now=NOW + timedelta(hours=1))
@@ -179,4 +183,8 @@ def test_the_runner_order_includes_the_new_sweeps():
         "aging",
         "blocked_sla",
         "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
     ]
