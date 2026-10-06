@@ -31,7 +31,7 @@ ignore = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers --durations=15"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: 耗时较长的测试",
