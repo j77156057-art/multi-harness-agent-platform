@@ -7,10 +7,10 @@
 完成时间：2026-10-06 12:05
 工作区：.worktrees/wbsplit
 依赖任务：claims-split
-真相源引用：docs/claims/53-workbuddy--tasks-split.md
+真相源引用：docs/claims/54-workbuddy--tasks-split.md
             TASKS.md 「任务卡」节（拆分后的位置说明与索引）
             tools/discipline/discipline.py check_cards（改为读两处）
-允许修改目录：TASKS.md、docs/tasks/notes/**、tools/discipline/**、docs/claims/53-*.md
+允许修改目录：TASKS.md、docs/tasks/notes/**、tools/discipline/**、docs/claims/54-*.md
 禁止修改目录：tools/docstate/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/tasks-split/a1
 test_id：MVP-PROCESS-001

@@ -118,7 +118,7 @@
 | 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
 |---|---|---|---|---|---|
 | — | （当前无占用） | — | — | — | — |
-| 53 | WorkBuddy | `tasks-split` | 2026-10-06 11:05 | `agent/workbuddy/tasks-split/a1` | `docs/claims/53-workbuddy--tasks-split.md` |
+| 54 | WorkBuddy | `tasks-split` | 2026-10-06 11:05 | `agent/workbuddy/tasks-split/a1` | `docs/claims/54-workbuddy--tasks-split.md` |
 
 **合入后请把该行删掉。** 例：2026-10-06 09:05 这张表里是 Qoder 的 48；
 10:30 它合入后，48 换成 Claude 的 MVP-09、49 是 OpenCode、50 是 Claude、

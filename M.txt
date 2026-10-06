@@ -1,0 +1,11 @@
+fix(claims): renumber tasks-split53 -> 54 (qoder took 53 in parallel)
+
+Merged main into this branch after a7eca25 and found Qoder had already
+landed docs/claims/53-qoder--sweeper-family.md. Both branches picked 53
+from the same stale max. Renumber to 54 per H-8: re-read main before
+committing, and update every self-reference (claim file, TASKS.md reserved
+slot row, task card).
+
+All 45 discipline checks green after the renumber.
+
+task_id: tasks-split
