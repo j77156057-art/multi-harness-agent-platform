@@ -19,7 +19,7 @@ test_id：pytest tools/discipline/test_rootworktree_deadlock.py
   1. discipline 新增 _ensure_repo_root_on_path()：按 __file__ 上溯两级推出仓库根，
      幂等插入 sys.path 最前面；导入 mergeguard 之前调用。
   2. 新增 tools/discipline/test_rootworktree_deadlock.py，5 条回归测试。
-  3. 补 docs/claims/56-workbuddy--deadlock-fix.md 认领登记（我自己的违规补登）。
+  3. 补 docs/claims/workbuddy--deadlock-fix.md 认领登记（我自己的违规补登）。
 验证证据：
   - discipline 46 项 0 失败；docstate 90 项 0 失败
   - pytest tools/discipline：48 passed
@@ -69,7 +69,7 @@ subprocess.run([sys.executable, str(SCRIPT)], cwd=str(REPO_ROOT), ...)
 | # | 违规 | 门禁怎么抓到的 | 处置 |
 |---|---|---|---|
 | 1 | 在根工作区改了 `discipline.py` + 新增测试文件 | `[rootworktree]` 组报「根工作区有未提交改动…根目录只用于合并与跑门禁，开发请在 `.worktrees/<harness>/` 里做」 | 改动搬进 `.worktrees/wbdx`，根目录 `git checkout --` 恢复干净 |
-| 2 | 分支合并前未登记认领 | `registry` 组报「已合入 main 的分支均在认领表登记；未登记=['agent/workbuddy/deadlock-fix/a1']」 | 补 `docs/claims/56-workbuddy--deadlock-fix.md` |
+| 2 | 分支合并前未登记认领 | `registry` 组报「已合入 main 的分支均在认领表登记；未登记=['agent/workbuddy/deadlock-fix/a1']」 | 补 `docs/claims/workbuddy--deadlock-fix.md`（原 `56-` 前缀，方案 C 迁移后去掉） |
 
 第2 条的**顺序错了**：正确顺序是「先占号登记 → 再合并」。门禁是在合并
 **之后**才抓到的，说明它只能事后追认、不能事前阻断——这是
