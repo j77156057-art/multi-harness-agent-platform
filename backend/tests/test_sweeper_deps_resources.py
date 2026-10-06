@@ -168,6 +168,7 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "verify_queue",
         "review_lease",
         "merge_recovery",
+        "drift",
     ]
 
     run_all_sweeps(database, now=NOW + timedelta(hours=1))
@@ -187,4 +188,5 @@ def test_the_runner_order_includes_the_new_sweeps():
         "verify_queue",
         "review_lease",
         "merge_recovery",
+        "drift",
     ]
