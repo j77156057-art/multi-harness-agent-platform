@@ -80,7 +80,7 @@
 | sweeper-deps-resources | Qoder | sweeper-runner | ✅ done | `agent/local/qoder/sweeper-deps-resources/a1` | `SCHED-SWEEP-002` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
-| mergeguard-fix | OpenCode | root-worktree-clean | 🟢 doing（修续跑路径的「认错人」缺陷：会把别人的遗留合并当成自己的） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |
+| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 回填状态与任务卡） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -380,6 +380,106 @@ commit：a1 = `27a21be` + `cf2748f`（含同步 main）；合入 main = `6aa788e
   opencode 6 / codex 2）。各 owner 只改自己的文件，H-5 天然满足。
   本任务已经把机械守卫备好了：文件名↔内容一致（已有）+ task_id 唯一（已有）
   + 注释行指向的文件存在（新增），所以重命名有校验、不靠人眼。
+~~~
+
+### mergeguard-fix：续跑必须证明「记录与请求是同一次合并」（✅ done）
+
+~~~text
+任务编号：mergeguard-fix
+负责人 Harness：OpenCode
+开始时间：2026-10-07 03:10
+工作区：.worktrees/opencode/
+依赖任务：root-worktree-clean（mergeguard 的续跑功能由本任务的父任务交付）
+真相源引用：docs/claims/59-opencode--mergeguard-fix.md（事故经过）、
+            tools/mergeguard/cli.py `_classify_pending_merge`
+允许修改目录：tools/mergeguard/**、backend/tests/**、TASKS.md
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/opencode/mergeguard-fix/a1
+test_id：MVP-MERGE-LOCK-001
+当前状态：✅ done
+commit：a1 = `a80c5ad` + `2f55459`（解冲突）；合入 main = `2c85a9c`
+
+### 事故经过（2026-10-07 03:05，实测，不是设想）
+
+1. Qoder 用 mergeguard 合并 `agent/local/qoder/sweeper-deps-resources/a1`，
+   写下 `merge-pending.json`（`merge_head=eb7d8d36`）+ `MERGE_HEAD`。
+2. 他的进程退出（pid 38616 已死），合并悬在「已合并、未提交」。
+3. 随后有人请求合并**另一条分支**。`_classify_pending_merge()` 只比
+   「pending 的 `merge_head` == 当前 `MERGE_HEAD`」，两者都是 `eb7d8d36`
+   → 判定「本工具自己的遗留合并」→ **跳过 merge 步骤**，直接在
+   **别人的工作树**上跑门禁。
+4. `git merge-base --is-ancestor` 确认：**那个分支根本没被合并**。
+
+**最坏情况不是这一次**：门禁若恰好是绿的，工具会报成功并提交 ——
+**把别人的合并当成自己的合并提交掉**。这正是本工具存在的目的所防的事故
+（docstring 第 3 条「绝不接管别人的合并」），而我在续跑这条路径上漏掉了。
+
+### 修法
+
+续跑需要**两条独立证据**，缺一不可：
+1. `MERGE_HEAD` 内容 == 记录里的 `merge_head`（是同一次合并）
+2. **`MERGE_HEAD` == `rev-parse(本次请求的分支)`**
+
+第 2 条刻意**不**比对记录里的 `branch` / `task_id` 标签 —— 那是上次运行写下的
+字符串，是标签不是事实，会被改、被抄错、被手工编辑。而
+`MERGE_HEAD == rev-parse(请求的分支)` 是 git 自己的事实：它精确证明
+「现在悬着的这次合并，合并的正是我要求合的那个分支的那个 commit」。
+
+### 判据选型是被一条测试推翻的（值得记）
+
+第一版写成「记录的 branch 或 task_id 与请求相符」。结果
+`test_pending_record_of_another_task_same_branch_is_refused` 直接红 ——
+分支相同、task_id 不同时，悬着的合并**确实就是**请求的那一笔
+（MERGE_HEAD 就是那个分支的 tip），提交它就是完成请求。task_id 只是锁信息里
+的标签，不构成合并的身份。
+
+于是那条测试被我改成「仍然续跑」，并成为判据选型的对照。**用标签当身份，
+会多拒一次本该接受的续跑，而且拒得毫无理由。**
+
+### 顺带挡住的第二类现场
+
+请求的分支在悬着那次合并之后又前进了（别人从别处 fetch 或强推了那个 ref）
+→ 也拒绝续跑。所以「事实比对」同时挡住了「别人的现场」与「过期的现场」。
+
+构造顺序有讲究：必须**先推进分支再造 MERGE_HEAD**，反过来做不到 ——
+`git checkout` 会顺手清掉 MERGE_HEAD，悬置现场也就没了。
+
+### 验证结果
+
+  - docstate   : 90 项检查，0 项失败
+  - discipline : 44 项检查，0 项失败
+  - ruff check : All checks passed!  ruff format: 87 files already formatted
+  - pytest tools : 52 passed
+  - pytest backend : 284 passed（新增 4）
+  - test_merge_guard : 39 -> **43 passed**，连跑 3 次 0 flake
+  - **负向验证**：换回 main 上的旧 cli.py 跑这批用例 → 两条「拒绝接管」用例
+    **都红**（2 failed / 2 passed），确认用例真能抓住这个 bug，不是空断言
+
+新增 3 条用例：
+  - 别人的 pending 记录不得被当成自己的续跑（并断言现场与归属记录都原样保留）
+  - 同一分支不同 task_id **仍然续跑**（判据选型的对照）
+  - 分支 tip 已前进则拒绝（并同时给出悬着的 MERGE_HEAD 与当前 tip）
+
+### 这次 bug 的教训（比代码本身更值得记）
+
+我给续跑机制写的第一条用例
+（`test_cli_gate_failure_does_not_commit_and_rerun_resumes`）只测了
+「**自己的**记录能续跑」，**没测「别人的记录不能被当成自己的」**。
+
+续跑机制的风险全在「认错人」这一侧，而我的用例全在「认对人」这一侧 ——
+整整一天的测试都建在另一半上。它也不在任何人的评审清单上：TRAE 评的是
+merge-interlock（早于续跑功能），WorkBuddy 报的是 commit 误报（另一半问题）。
+
+**新功能的风险不在「能不能用」，而在「会不会认错人」；而我给新功能写的第一
+批用例，全都在验证前者。**
+
+### 尚未修（不在本任务范围）
+
+`_run_gate` 取门禁输出的最后一行做摘要，对「门禁自己在结果之后还打印别的东西」
+没有防护。实测吃过：discipline 打印的 SyntaxWarning 出现在结果之后，摘要变成
+那条警告，**真正的检查结果被吃掉**，而退出码仍是 0 —— 门禁是绿的，绿的证据是
+错的。正确做法是让门禁把摘要写进机器可读位置（`--json` 已有），或让 `_run_gate`
+识别 `结果: ` 前缀。
 ~~~
 
 ## 提交前自检
