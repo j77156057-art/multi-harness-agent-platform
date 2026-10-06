@@ -126,7 +126,7 @@
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
 <!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
-<!-- claim-denum → docs/claims/48-opencode--claim-denum.md -->
+<!-- claim-denum → docs/claims/49-opencode--claim-denum.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -3280,7 +3280,7 @@ Claude 的「已知问题」把根治列为两条路：main 上串行取号，�
 
 本提案状态原为 `🔍 review`，用它自带的 `mergeguard/cli.py merge` 合入时
 连续撞两堵墙，最终以一次真实的「门禁红了但 merge commit 已落地」收场。
-两堵墙的细节记在 `docs/claims/48-opencode--claim-denum.md` 的
+两堵墙的细节记在 `docs/claims/49-opencode--claim-denum.md` 的
 「合并受阻记录」，此处只记**结论与影响**：
 
 1. **main 上跑的是 mergeguard 首版，没有 `--no-commit`。** 门禁在 merge
@@ -3306,7 +3306,7 @@ Claude 的「已知问题」把根治列为两条路：main 上串行取号，�
   discipline  : 42 项检查，0 项失败（根工作区空闲时）
   git diff    : tools/** 零改动 —— 本任务没有动任何人的交付物
   提案自洽    : 迁移清单逐项核对到具体文件与行号（见提案文末）
-  序号自检    : 1..48 唯一且无缺号（第 11 次撞号后重编）
+  序号自检    : 1..49 唯一且无缺号（第 12 次撞号后重编）
   pytest      : tools 27 passed / backend 224 passed（合并前在本分支实测）
 
 未实施任何代码改动。若裁决为「采纳」，迁移应另开任务并按分片方案分配。
