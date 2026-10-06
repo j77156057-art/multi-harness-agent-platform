@@ -28,12 +28,24 @@ from app.claim.transitions import apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
+from app.git.repo import CanonicalRepo, run_git
 from app.lease.service import expire_stale_leases, parse_iso
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
 from app.verify.worker import STATUS_ABORTED, STATUS_QUEUED, STATUS_RUNNING
 
 _AGING_STATES = (TaskStatus.READY.value, TaskStatus.QUEUED.value)
+
+#: R10 §10: the seven mid-flight states the drift detectors watch.
+_DRIFT_STATES = (
+    TaskStatus.CLAIMED.value,
+    TaskStatus.IN_PROGRESS.value,
+    TaskStatus.CHANGES_REQUESTED.value,
+    TaskStatus.AWAITING_REVIEW.value,
+    TaskStatus.VERIFYING.value,
+    TaskStatus.APPROVED.value,
+    TaskStatus.MERGING.value,
+)
 
 #: R10 §10: the states the stuck fingerprint watches.
 _STUCK_STATES = (
@@ -54,7 +66,9 @@ _DEAD_UPSTREAM_STATES = frozenset(
 )
 
 
-def sweep_expired_leases(database: Database, now: datetime) -> SweepReport:
+def sweep_expired_leases(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Owner leases past their deadline: lease freed, owners' tasks → ``stale``.
 
     R10 §10's ``lease_expire`` edge and R10 §13's "renewal rejection means out
@@ -69,7 +83,9 @@ def sweep_expired_leases(database: Database, now: datetime) -> SweepReport:
     )
 
 
-def sweep_dependencies(database: Database, now: datetime) -> SweepReport:
+def sweep_dependencies(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Exit ``ready_waiting_deps`` (design §2.1, guards quoted from R10 §10).
 
     Order of judgement per task: all upstreams merged → ``dependencies_satisfied``;
@@ -149,7 +165,9 @@ def sweep_dependencies(database: Database, now: datetime) -> SweepReport:
     )
 
 
-def sweep_resources(database: Database, now: datetime) -> SweepReport:
+def sweep_resources(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Complete resource-deferred claims once capacity allows (design §2.2).
 
     The recovery half of ``claim_deferred_resource``: for every ``queued``
@@ -179,7 +197,9 @@ def sweep_resources(database: Database, now: datetime) -> SweepReport:
     )
 
 
-def sweep_aging(database: Database, now: datetime) -> SweepReport:
+def sweep_aging(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Starvation for ``ready``/``queued`` (design §2.3, R10 §20).
 
     Waiting longer than ``expected_duration_min × aging_multiplier`` (the
@@ -213,7 +233,9 @@ def sweep_aging(database: Database, now: datetime) -> SweepReport:
     return SweepReport("aging", len(escalated), {"escalated": escalated})
 
 
-def sweep_blocked_sla(database: Database, now: datetime) -> SweepReport:
+def sweep_blocked_sla(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """``blocked`` past its SLA (design §2.4, R10 §10 ``block_timeout``).
 
     Distinct from the dependency sweep's ``block_timeout``: that one fires out
@@ -239,7 +261,9 @@ def sweep_blocked_sla(database: Database, now: datetime) -> SweepReport:
     return SweepReport("blocked_sla", len(escalated), {"escalated": escalated})
 
 
-def sweep_stuck(database: Database, now: datetime) -> SweepReport:
+def sweep_stuck(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """No-progress detection by fingerprint (design §2.5, R10 §13 3/5 sweeps).
 
     Fingerprint = hash(latest task event seq, attempt head_commit, heartbeat
@@ -270,7 +294,9 @@ def sweep_stuck(database: Database, now: datetime) -> SweepReport:
     )
 
 
-def sweep_verify_lease(database: Database, now: datetime) -> SweepReport:
+def sweep_verify_lease(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Re-queue verify runs whose worker died (design §2.6, O2 ruling).
 
     **Approximation, stated plainly (O2 ruling, 2026-10-07)**: the literal
@@ -297,7 +323,9 @@ def sweep_verify_lease(database: Database, now: datetime) -> SweepReport:
     return SweepReport("verify_lease", len(re_queued), {"re_queued": re_queued})
 
 
-def sweep_verify_queue(database: Database, now: datetime) -> SweepReport:
+def sweep_verify_queue(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Queued verify jobs past their SLA (design §2.6).
 
     Producer note: the MVP never leaves a job ``queued`` (the ADR-030 queue is
@@ -317,7 +345,9 @@ def sweep_verify_queue(database: Database, now: datetime) -> SweepReport:
     return SweepReport("verify_queue", len(escalated), {"escalated": escalated})
 
 
-def sweep_review_lease(database: Database, now: datetime) -> SweepReport:
+def sweep_review_lease(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """Expired review claims go back on the shelf (design §2.7).
 
     The guard's "no in-flight review intent" clause is trivially true in the
@@ -340,7 +370,9 @@ def sweep_review_lease(database: Database, now: datetime) -> SweepReport:
     return SweepReport("review_lease", len(expired), {"expired": expired})
 
 
-def sweep_merge_recovery(database: Database, now: datetime) -> SweepReport:
+def sweep_merge_recovery(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
     """A merge that stopped mid-flight either retries or escalates (design §2.7).
 
     First match wins, retry before escalation (design's order): past
@@ -373,6 +405,49 @@ def sweep_merge_recovery(database: Database, now: datetime) -> SweepReport:
         "merge_recovery",
         len(retried) + len(escalated),
         {"retried": retried, "escalated": escalated},
+    )
+
+
+def sweep_drift(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """Drift detectors for the seven mid-flight states (design §2.10, O3 ruling).
+
+    Two independent checks, first match wins:
+
+    * **plan drift**: the task's bound snapshot's ``snapshot_hash`` differs from
+      the plan's current ``plan_hash``. Current producers never update
+      ``plans.plan_hash`` after creation, so this detector guards the day a
+      revision flow lands -- tested by seeding the divergence.
+    * **impl drift**: the task's ``base_commit`` is no longer an ancestor of
+      the integration HEAD. Forward merges keep the base an ancestor and stay
+      silent; a revert or invalidation breaks ancestry and fires -- which is
+      R10 §21's revert-impact story, not normal collaboration noise.
+
+    Both only *mark* (the task enters ``plan_drift``/``impl_drift`` for a human
+    decision); nothing is auto-corrected. Runs every cycle: the ancestry check
+    is one cheap git call per mid-flight task.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status IN (?, ?, ?, ?, ?, ?, ?)",
+        _DRIFT_STATES,
+    )
+    to_plan: list[str] = []
+    to_impl: list[str] = []
+    undecided: list[str] = []
+    for row in rows:
+        outcome = _drift_round(database, store, task_id=str(row["task_id"]), repo=repo)
+        if outcome == "plan":
+            to_plan.append(str(row["task_id"]))
+        elif outcome == "impl":
+            to_impl.append(str(row["task_id"]))
+        elif outcome == "undecided":
+            undecided.append(str(row["task_id"]))
+    return SweepReport(
+        "drift",
+        len(to_plan) + len(to_impl),
+        {"plan_drift": to_plan, "impl_drift": to_impl, "undecided": undecided},
     )
 
 
@@ -421,6 +496,102 @@ def _apply(
             state_seq=record.seq,
         )
         return True
+
+
+def _drift_round(
+    database: Database,
+    store: EventStore,
+    *,
+    task_id: str,
+    repo: CanonicalRepo | None,
+) -> str | None:
+    """One drift round for one task; returns \"plan\" / \"impl\" / \"undecided\" / None."""
+    with database.transaction() as conn:
+        task = conn.execute(
+            "SELECT status, current_epoch, plan_snapshot_id, base_commit"
+            "  FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if task is None or str(task["status"]) not in _DRIFT_STATES:
+            return None
+        if task["plan_snapshot_id"] is not None:
+            snapshot = conn.execute(
+                "SELECT snapshot_hash, plan_id FROM plan_snapshots WHERE snapshot_id = ?",
+                (str(task["plan_snapshot_id"]),),
+            ).fetchone()
+            if snapshot is not None:
+                plan = conn.execute(
+                    "SELECT plan_hash FROM plans WHERE plan_id = ?",
+                    (str(snapshot["plan_id"]),),
+                ).fetchone()
+                if plan is not None and str(snapshot["snapshot_hash"]) != str(plan["plan_hash"]):
+                    _drift_transition(
+                        conn,
+                        store,
+                        task,
+                        task_id=task_id,
+                        event=EventKind.PLAN_HASH_CHANGED,
+                        payload={
+                            "snapshot_hash": str(snapshot["snapshot_hash"]),
+                            "plan_hash": str(plan["plan_hash"]),
+                        },
+                    )
+                    return "plan"
+        if repo is None:
+            # No repository injected: the plan half still ran; the ancestry
+            # half is declared undecided rather than guessed.
+            return "undecided" if task["base_commit"] is not None else None
+        base = task["base_commit"]
+        if base is None:
+            return None
+        head = repo.ref_commit(repo.integration_ref)
+        if head is None:
+            return None
+        proc = run_git(
+            "merge-base", "--is-ancestor", str(base), str(head), cwd=repo.path, check=False
+        )
+        if proc.returncode == 0:
+            return None
+        if proc.returncode != 1:
+            return "undecided"
+        _drift_transition(
+            conn,
+            store,
+            task,
+            task_id=task_id,
+            event=EventKind.IMPL_HASH_CHANGED,
+            payload={"base_commit": str(base), "integration_head": str(head)},
+        )
+        return "impl"
+
+
+def _drift_transition(
+    conn: Any,
+    store: EventStore,
+    task_row: Any,
+    *,
+    task_id: str,
+    event: EventKind,
+    payload: dict[str, Any],
+) -> None:
+    record = store.append(
+        event_name=event.value,
+        aggregate_type="task",
+        aggregate_id=task_id,
+        actor_type="scheduler",
+        actor_id="sweeper",
+        payload=payload,
+        connection=conn,
+    )
+    apply_transition(
+        conn,
+        task_id=task_id,
+        current=TaskStatus(str(task_row["status"])),
+        event=event,
+        expected_epoch=int(task_row["current_epoch"]),
+        extra_sets={},
+        state_seq=record.seq,
+    )
 
 
 def _latest_event_iso(conn: Any, task_id: str) -> datetime | None:

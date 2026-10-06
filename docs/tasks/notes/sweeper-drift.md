@@ -1,4 +1,4 @@
-### sweeper-drift：漂移巡检（收官项）（🚧 doing）
+### sweeper-drift：漂移巡检（收官项）（✅ done）
 
 ~~~text
 任务编号：sweeper-drift
@@ -36,5 +36,22 @@ O3 裁定（协调者 2026-10-07，按建议）：
   5. PYTHONUTF8=1 ./scripts.sh check 全绿
 test_id：SCHED-SWEEP-005
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 09:2x
+commit：`PENDING`
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 314 passed（本任务净增 7 项：test_sweeper_drift.py），exit 0
+  关键断言     : plan 分歧触发/一致不动；impl 在 integration 被改写为非祖先时触发、
+                 正常前进不触发（对照组）；drift 态经既有 lease 巡检出口→stale
+                 （不是死胡同）；repo 缺失时 impl 检查声明 undecided 不猜测；幂等。
+  覆盖收官     : WAIVERS_UNREACHABLE 清空并重钉；21 态豁免 7 → 3（全部人类面出口）。
+已知问题：
+  - **夹具与真实流程的不一致被新探测器抓出并已修**：claim_support.seed_task 曾在
+    plans.plan_hash 与 plan_snapshots.snapshot_hash 写两个不同假哈希，而真实
+    create_plan 两处同哈希——夹具已镜像真实不变量。
+  - plan 探测守着"修订流落地"的那天（现行生产者不动 plans.plan_hash）；impl 探测
+    即 §21 revert 影响链的读侧信号，写侧（下游闭包）仍属 MERGE-REVERT-002 缺口。
 ~~~

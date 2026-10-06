@@ -232,6 +232,20 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "tests.test_verify::test_a_human_can_resume_verification_after_the_declaration",
         ),
     ],
+    "plan_drift": [
+        (
+            "lease_expire",
+            "stale",
+            "tests.test_sweeper_drift::test_drift_states_have_a_recovery_exit",
+        ),
+    ],
+    "impl_drift": [
+        (
+            "lease_expire",
+            "stale",
+            "tests.test_sweeper_drift::test_drift_states_have_a_recovery_exit",
+        ),
+    ],
 }
 
 #: States whose exits exist in the table but have no trigger anywhere in the
@@ -243,12 +257,11 @@ WAIVERS_NO_EXIT: dict[str, str] = {
     "escalated": "human.release / human.adjudicate are §18 human actions, not implemented",
 }
 
-#: States with exits but no reachable entry: the detector that enters them is
-#: not implemented, so an integration test cannot legitimately arrive.
-WAIVERS_UNREACHABLE: dict[str, str] = {
-    "plan_drift": "no plan-hash drift detector; plan_hash_changed has no trigger",
-    "impl_drift": "no impl-hash drift detector; impl_hash_changed has no trigger",
-}
+#: States with exits but no reachable entry -- now empty: sweeper-drift landed
+#: the detectors, and both states moved into RECOVERY above. Kept as a set so
+#: the reverse guard still fails loudly if a state is ever put back here
+#: without its mechanism.
+WAIVERS_UNREACHABLE: dict[str, str] = {}
 
 
 # ------------------------------------------------------------ the proofs
@@ -370,7 +383,7 @@ def test_every_non_terminal_state_is_mapped_or_explicitly_waived():
 def test_the_waiver_sets_are_pinned():
     """Implementing a mechanism must consciously move a state into the map."""
     assert sorted(WAIVERS_NO_EXIT) == ["abandoned", "draft_rejected", "escalated"]
-    assert sorted(WAIVERS_UNREACHABLE) == ["impl_drift", "plan_drift"]
+    assert sorted(WAIVERS_UNREACHABLE) == [], "drift detectors landed; nothing unreachable"
 
 
 def test_each_mapped_exit_is_legal_has_a_trigger_and_points_at_a_live_test():

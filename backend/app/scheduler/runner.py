@@ -17,11 +17,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 
 from app.db.connection import Database
+from app.git.repo import CanonicalRepo
 from app.scheduler.report import SweepReport
 from app.scheduler.sweeps import (
     sweep_aging,
     sweep_blocked_sla,
     sweep_dependencies,
+    sweep_drift,
     sweep_expired_leases,
     sweep_merge_recovery,
     sweep_resources,
@@ -31,7 +33,7 @@ from app.scheduler.sweeps import (
     sweep_verify_queue,
 )
 
-Sweep = Callable[[Database, datetime], SweepReport]
+Sweep = Callable[[Database, datetime, "CanonicalRepo | None"], SweepReport]
 
 #: Fixed execution order. New sweeps append themselves here (and to the test
 #: that pins this list) in the task that implements them. The lease sweep runs
@@ -50,10 +52,20 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("verify_queue", sweep_verify_queue),
     ("review_lease", sweep_review_lease),
     ("merge_recovery", sweep_merge_recovery),
+    ("drift", sweep_drift),
 )
 
 
-def run_all_sweeps(database: Database, *, now: datetime | None = None) -> list[SweepReport]:
-    """Run every sweep once, in order, and return their reports."""
+def run_all_sweeps(
+    database: Database,
+    *,
+    now: datetime | None = None,
+    repo: CanonicalRepo | None = None,
+) -> list[SweepReport]:
+    """Run every sweep once, in order, and return their reports.
+
+    ``repo`` reaches the drift sweep's ancestry check; the other sweeps take it
+    and ignore it (one uniform signature beats a special case).
+    """
     moment = now or datetime.now(UTC)
-    return [sweep(database, moment) for _name, sweep in SWEEPS]
+    return [sweep(database, moment, repo) for _name, sweep in SWEEPS]
