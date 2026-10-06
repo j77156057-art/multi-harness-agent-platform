@@ -78,9 +78,10 @@
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | sweeper-deps-resources | Qoder | sweeper-runner | ✅ done | `agent/local/qoder/sweeper-deps-resources/a1` | `SCHED-SWEEP-002` |
+| sweeper-aging-stuck | Qoder | sweeper-deps-resources | ✅ done | `agent/local/qoder/sweeper-aging-stuck/a1` | `SCHED-SWEEP-003` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
-| mergeguard-fix | OpenCode | root-worktree-clean | 🟢 doing（修续跑路径的「认错人」缺陷：会把别人的遗留合并当成自己的） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |
+| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；卡由 Qoder 按协调者授权代笔，见卡注） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -191,7 +192,8 @@
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
-| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | | |
+| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | sweeper-aging-stuck | [卡](docs/tasks/notes/sweeper-aging-stuck.md) |
+| mergeguard-fix | [卡](docs/tasks/notes/mergeguard-fix.md) | | |
 
 ## 共享文件改动声明
 

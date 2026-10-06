@@ -17,6 +17,7 @@ Implemented so far, in the runner's fixed order:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta
 from typing import Any
@@ -29,6 +30,16 @@ from app.events.store import EventStore
 from app.lease.service import expire_stale_leases, parse_iso
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
+
+_AGING_STATES = (TaskStatus.READY.value, TaskStatus.QUEUED.value)
+
+#: R10 §10: the states the stuck fingerprint watches.
+_STUCK_STATES = (
+    TaskStatus.IN_PROGRESS.value,
+    TaskStatus.NEEDS_HELP.value,
+    TaskStatus.BLOCKED.value,
+    TaskStatus.VERIFYING.value,
+)
 
 #: Upstream states that will never produce a merged output (R10 §10's
 #: ``orphan_detected`` parenthetical, verbatim).
@@ -166,6 +177,97 @@ def sweep_resources(database: Database, now: datetime) -> SweepReport:
     )
 
 
+def sweep_aging(database: Database, now: datetime) -> SweepReport:
+    """Starvation for ``ready``/``queued`` (design §2.3, R10 §20).
+
+    Waiting longer than ``expected_duration_min × aging_multiplier`` (the
+    task's own snapshot entry; missing or 0 counts as the default) escalates.
+    ``queued`` lands here rather than in the resource sweep: the deferral that
+    queued it was that sweep's business, but "waited too long" is aging's.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id, status, waiting_since, plan_snapshot_id FROM tasks"
+        " WHERE status IN (?, ?)",
+        _AGING_STATES,
+    )
+    escalated: list[str] = []
+    for row in rows:
+        expected = _task_expected_minutes(database, row["plan_snapshot_id"], str(row["task_id"]))
+        threshold_seconds = int(expected * settings.aging_multiplier * 60)
+        if _waited_seconds(row["waiting_since"], now) > threshold_seconds and _apply(
+            database,
+            store,
+            task_id=str(row["task_id"]),
+            expected=TaskStatus(str(row["status"])),
+            event=EventKind.AGING_TIMEOUT,
+            payload={
+                "waited_seconds": _waited_seconds(row["waiting_since"], now),
+                "threshold_minutes": expected * settings.aging_multiplier,
+            },
+            extra_sets={"escalated_at": now.isoformat()},
+        ):
+            escalated.append(str(row["task_id"]))
+    return SweepReport("aging", len(escalated), {"escalated": escalated})
+
+
+def sweep_blocked_sla(database: Database, now: datetime) -> SweepReport:
+    """``blocked`` past its SLA (design §2.4, R10 §10 ``block_timeout``).
+
+    Distinct from the dependency sweep's ``block_timeout``: that one fires out
+    of ``ready_waiting_deps`` on upstream durations; this one on the block SLA.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id, waiting_since FROM tasks WHERE status = ?",
+        (TaskStatus.BLOCKED.value,),
+    )
+    escalated: list[str] = []
+    for row in rows:
+        if _waited_seconds(row["waiting_since"], now) > settings.block_sla_minutes * 60 and _apply(
+            database,
+            store,
+            task_id=str(row["task_id"]),
+            expected=TaskStatus.BLOCKED,
+            event=EventKind.BLOCK_TIMEOUT,
+            payload={"waited_seconds": _waited_seconds(row["waiting_since"], now)},
+            extra_sets={"escalated_at": now.isoformat()},
+        ):
+            escalated.append(str(row["task_id"]))
+    return SweepReport("blocked_sla", len(escalated), {"escalated": escalated})
+
+
+def sweep_stuck(database: Database, now: datetime) -> SweepReport:
+    """No-progress detection by fingerprint (design §2.5, R10 §13 3/5 sweeps).
+
+    Fingerprint = hash(latest task event seq, attempt head_commit, heartbeat
+    progress_hash); one row per watched task in ``sweep_progress`` counts
+    consecutive sightings without change. The literal guards are evaluated in
+    order: ``>= stuck_human_sweeps`` (default 5) → ``stuck_human_threshold`` →
+    ``awaiting_human``; else ``>= stuck_sweeps`` (default 3) →
+    ``stuck_threshold_reached`` → ``escalated``. With +1-per-round counting the
+    3-guard normally fires first (the task then leaves the watched set); the
+    5-guard is the spec's literal edge for counts that arrive larger, and both
+    are implemented rather than chosen between.
+    """
+    store = EventStore(database)
+    rows = database.read("SELECT task_id FROM tasks WHERE status IN (?, ?, ?, ?)", _STUCK_STATES)
+    escalated: list[str] = []
+    to_human: list[str] = []
+    for row in rows:
+        task_id = str(row["task_id"])
+        outcome = _stuck_round(database, store, task_id=task_id, now=now)
+        if outcome == "escalated":
+            escalated.append(task_id)
+        elif outcome == "awaiting_human":
+            to_human.append(task_id)
+    return SweepReport(
+        "stuck",
+        len(escalated) + len(to_human),
+        {"escalated": escalated, "awaiting_human": to_human},
+    )
+
+
 # ------------------------------------------------------------------ helpers
 
 
@@ -211,6 +313,89 @@ def _apply(
             state_seq=record.seq,
         )
         return True
+
+
+def _stuck_round(
+    database: Database, store: EventStore, *, task_id: str, now: datetime
+) -> str | None:
+    """One fingerprint round for one task; returns the outcome when one fired."""
+    with database.transaction() as conn:
+        task = conn.execute(
+            "SELECT status, current_epoch, current_attempt_id, progress_hash"
+            "  FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if task is None or str(task["status"]) not in _STUCK_STATES:
+            return None
+        latest_seq = int(
+            conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS s FROM task_events WHERE aggregate_id = ?",
+                (task_id,),
+            ).fetchone()["s"]
+        )
+        head: str | None = None
+        if task["current_attempt_id"] is not None:
+            attempt = conn.execute(
+                "SELECT head_commit FROM task_attempts WHERE attempt_id = ?",
+                (str(task["current_attempt_id"]),),
+            ).fetchone()
+            head = None if attempt is None else attempt["head_commit"]
+        fingerprint = hashlib.sha256(
+            f"{latest_seq}:{head}:{task['progress_hash']}".encode()
+        ).hexdigest()
+        stored = conn.execute(
+            "SELECT fingerprint, unchanged_count FROM sweep_progress WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        unchanged = (
+            0
+            if stored is None or str(stored["fingerprint"]) != fingerprint
+            else int(stored["unchanged_count"]) + 1
+        )
+        conn.execute(
+            "INSERT INTO sweep_progress(task_id, fingerprint, unchanged_count, last_checked_at)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(task_id) DO UPDATE SET fingerprint = excluded.fingerprint,"
+            " unchanged_count = excluded.unchanged_count,"
+            " last_checked_at = excluded.last_checked_at",
+            (task_id, fingerprint, unchanged, now.isoformat()),
+        )
+        if unchanged >= settings.stuck_human_sweeps:
+            event = EventKind.STUCK_HUMAN_THRESHOLD
+            extra: dict[str, object] = {"waiting_since": now.isoformat()}
+            outcome = "awaiting_human"
+        elif unchanged >= settings.stuck_sweeps:
+            event = EventKind.STUCK_THRESHOLD_REACHED
+            extra = {"escalated_at": now.isoformat()}
+            outcome = "escalated"
+        else:
+            return None
+        record = store.append(
+            event_name=event.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={"unchanged_sweeps": unchanged, "fingerprint": fingerprint},
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=TaskStatus(str(task["status"])),
+            event=event,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets=extra,
+            state_seq=record.seq,
+        )
+        return outcome
+
+
+def _task_expected_minutes(database: Database, snapshot_id: object, task_id: str) -> int:
+    """The task's own expected duration, with the shared default as fallback."""
+    entry = _snapshot_tasks(database, snapshot_id).get(task_id) or {}
+    minutes = int(entry.get("expected_duration_min") or 0)
+    return minutes if minutes > 0 else settings.expected_duration_default_minutes
 
 
 def _waited_seconds(waiting_since: object, now: datetime) -> int:

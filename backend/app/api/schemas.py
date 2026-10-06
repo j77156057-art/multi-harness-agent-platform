@@ -46,6 +46,7 @@ class HeartbeatRequest(BaseModel):
     attempt_id: str
     lease_token: str
     fencing_epoch: int
+    progress_hash: str | None = None
 
 
 class AttemptAction(BaseModel):

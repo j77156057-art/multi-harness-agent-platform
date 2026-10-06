@@ -219,6 +219,14 @@ def heartbeat(body: schemas.HeartbeatRequest, database: DatabaseDep) -> dict[str
             lease_token=body.lease_token,
             fencing_epoch=body.fencing_epoch,
         )
+        if body.progress_hash is not None:
+            # The stuck sweep's fingerprint reads this (§7's progress_hash had
+            # no producer before sweeper-aging-stuck); same transaction as the
+            # renewal that authorised the write.
+            conn.execute(
+                "UPDATE tasks SET progress_hash = ? WHERE task_id = ?",
+                (body.progress_hash, body.task_id),
+            )
     return {
         "task_id": body.task_id,
         "attempt_id": body.attempt_id,
