@@ -211,6 +211,45 @@ def has_verification_evidence(card):
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
 
+def _reserved_claim_slots(tasks_text):
+    """解析 TASKS.md 的「占用中的认领序号」小节。
+
+    那些是**已建文件但尚未合入 main** 的序号：claimant 在自己的 worktree 里
+    建了 `docs/claims/NN-*.md`，main 上看不到，于是「序号必须连续 1..N」这条
+    断言会把其他人全部挡住（2026-10-06 09:05 实际卡住过一次）。
+
+    返回 [(序号, 认领文件路径)]。节不存在或为空时返回 []。
+    """
+    m = re.search(
+        r"^###\s*占用中的认领序号\s*$", tasks_text, re.M
+    )
+    if not m:
+        return []
+    block = tasks_text[m.end():]
+    nxt = re.search(r"^#{2,3}\s", block, re.M)
+    if nxt:
+        block = block[: nxt.start()]
+    out = []
+    for line in block.splitlines():
+        row = line.strip()
+        if not row.startswith("|"):
+            continue
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        seq = cells[0]
+        if not re.fullmatch(r"\d+", seq):
+            continue  # 表头或分隔行
+        path = None
+        for c in cells:
+            hit = re.search(r"docs/claims/[\w./-]+\.md", c)
+            if hit:
+                path = hit.group(0)
+                break
+        out.append((int(seq), path))
+    return out
+
+
 def check_registry(result, tasks_text, repo_root=None):
     """组 1：任务表与认领登记表自身的完整性。"""
     tasks = parse_task_table(tasks_text)
@@ -251,6 +290,35 @@ def check_registry(result, tasks_text, repo_root=None):
             sorted(expected - set(seq_nums)) or "无",
             sorted(set(seq_nums) - expected) or "无",
         ),
+        "registry",
+    )
+
+    # 「占用中的认领序号」：登记的号不能和已存在的冲突，登记的文件必须真存在。
+    # 这两条让那张表不只是给人看的说明，而是可执行的约定。
+    reserved = _reserved_claim_slots(tasks_text)
+    existing_seqs = {
+        int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")
+    }
+    collide = sorted(sq for sq, _ in reserved if sq in existing_seqs)
+    result.chk(
+        not collide,
+        "占用序号表不与已存在的认领文件撞号；撞号=%s" % (collide or "无"),
+        "registry",
+    )
+    # 只校验登记本身的形状：文件路径格式、序号与首列一致。
+    # **不**校验文件在本地存在 —— 占号者往往还在自己 worktree 上，文件合入main
+    # 之前本地根本看不到，那种情况下报错会永久卡住所有人（2026-10-06 09:10 实测）。
+    # 「有没有真的建文件」由序号连续性断言兜：那一条本来就要求号无洞。
+    malformed = sorted(
+        "行%s(路径=%s)" % (sq, path)
+        for sq, path in reserved
+        if path is None
+        or not re.fullmatch(r"docs/claims/%d-[\w.-]+\.md" % sq, path)
+    )
+    result.chk(
+        not malformed,
+        "占用序号表登记的路径格式为 docs/claims/<同一序号>-*.md；不合规=%s"
+        % (malformed or "无"),
         "registry",
     )
 

@@ -6,7 +6,7 @@
 | Harness | WorkBuddy |
 | 认领时间 | 2026-10-06 09:05 |
 | 分支 | `agent/workbuddy/report-mergeguard-commit-bug` |
-| 状态 | 🟢 doing |
+| 状态 | 🟢 doing（附带交付：占用序号节 + 2 条断言） |
 | 工作区 | `.worktrees/workbuddy/` |
 | **报告对象** | **@opencode** —— `tools/mergeguard/cli.py` 是你写的 |
 
