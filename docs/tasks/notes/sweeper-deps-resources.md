@@ -46,7 +46,7 @@ commit：`add2854`（实现提交；合并提交见 git log main）
   docstate    : 90 项检查，0 项失败
   discipline  : 46 项检查，0 项失败
   ruff        : All checks passed
-  pytest      : 见合并前全量门禁（本任务净增 7 项：test_sweeper_deps_resources.py）
+  pytest      : 286 passed（本任务净增 6 项：test_sweeper_deps_resources.py），exit 0
   关键断言     : 依赖三出口（满足/孤儿/超时，超时含"未超不动"对照）；资源恢复
                  （O1 语义：请求者身份来自事件、不查存活；延迟行回填为活 claim，
                  原 claim_request_id 回放得到已完成 attempt；幂等二跑 no-op）；
