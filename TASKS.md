@@ -78,6 +78,7 @@
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | sweeper-deps-resources | Qoder | sweeper-runner | ✅ done | `agent/local/qoder/sweeper-deps-resources/a1` | `SCHED-SWEEP-002` |
+| sweeper-aging-stuck | Qoder | sweeper-deps-resources | 🚧 doing | `agent/local/qoder/sweeper-aging-stuck/a1` | `SCHED-SWEEP-003` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2 回填状态并修 SyntaxWarning） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` | `MVP-PROCESS-001` |
 
@@ -190,7 +191,7 @@
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
-| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | | |
+| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | sweeper-aging-stuck | [卡](docs/tasks/notes/sweeper-aging-stuck.md) |
 
 ## 共享文件改动声明
 
