@@ -51,6 +51,7 @@
 | tasks-split | WorkBuddy | claims-split | ✅ done（TASKS.md 279KB→24KB，卡片进 docs/tasks/notes/） | `agent/workbuddy/tasks-split/a1` | `MVP-PROCESS-001` |
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | deadlock-fix | WorkBuddy | — | ✅ done（mergeguard × discipline 合并死锁，`_ensure_repo_root_on_path`） | `agent/workbuddy/deadlock-fix/a1` | `MVP-PROCESS-001` |
+| claim-denum-migrate | WorkBuddy | deadlock-fix | ✅ done（方案 C 文件层迁移，2 个认领文件去序号前缀 + 4 处自指同步） | `agent/workbuddy/claim-denum-migrate/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
@@ -193,7 +194,7 @@
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
 | sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | sweeper-aging-stuck | [卡](docs/tasks/notes/sweeper-aging-stuck.md) |
-| mergeguard-fix | [卡](docs/tasks/notes/mergeguard-fix.md) | | |
+| mergeguard-fix | [卡](docs/tasks/notes/mergeguard-fix.md) | claim-denum-migrate | [卡](docs/tasks/notes/claim-denum-migrate.md) |
 
 ## 共享文件改动声明
 
