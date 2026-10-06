@@ -37,8 +37,12 @@ DEFAULT_TASKS = os.path.join("TASKS.md")
 # 2026-10-05 拆分：认领登记从 TASKS.md 的多写表格迁到「每task 一个独占文件」。
 # 理由：当天 11.5 小时内 TASKS.md 被改 40 次、产生 19 个 merge commit，
 # 冲突 100% 集中在这张表与任务卡两处 —— 它们是仓库里仅有的多写点。
-# 任务卡暂未拆分（原始数据里有 11 个 task 从未建过格式合规的卡，先补齐再拆）。
 CLAIMS_DIR = os.path.join("docs", "claims")
+# 2026-10-06 拆分（`tasks-split`）：任务卡从 TASKS.md 内联迁到「每 task 一个独占
+# 文件」。认领表那次只拆了一半 —— 卡片留在原地，TASKS.md 当天就涨回 275 KB，
+# 超过 git core.bigFileThreshold 默认 128 KB 后不再做 delta 压缩，
+# `unable to write new index file` 从偶发变常见。**只拆一个多写点等于没拆。**
+CARDS_DIR = os.path.join("docs", "tasks", "notes")
 
 # 任务表「状态」列允许包含的关键字。与 TASKS.md「状态图例」保持一致；
 # 允许附加注记（如 "⏳ waiting ★瓶颈"），故用包含判定而非全等。
@@ -203,6 +207,8 @@ def parse_cards(text):
     卡片的证据常在后续 `###` 小节里（`### 验收结果`、`### 完成标准与验证结果`
     表格），所以卡片的范围必须延伸到**下一张卡**的开头，而不是下一个 `###`。
     两遍解析：先按 `### ` 切块，认出哪些块是卡片，再把非卡片小节并入前一张卡片。
+
+    单个 notes 文件里第一块就是卡片本身，故 `cards` 非空。
     """
     blocks = re.split(r"^### ", text, flags=re.M)[1:]
     cards = []
@@ -285,7 +291,14 @@ def _reserved_claim_slots(tasks_text):
             if hit:
                 path = hit.group(0)
                 break
-        out.append((int(seq), path))
+        # task_id **不靠列序猜**：认领文件名本身带 task_id（`NN-harness--task.md`，
+        # 格式由上面那条「文件名与内容一致」断言保证），直接反解。
+        # 先按列序猜会在「序号 | Harness | task_id | ...」这种表里取到 Harness
+        # —— 2026-10-06 实测踩过，症状是撞号断言把 `WorkBuddy` 当成 task_id 报红。
+        task_id = (
+            task_id_from_filename(os.path.basename(path)) if path else None
+        ) or None
+        out.append((int(seq), path, task_id))
     return out
 
 
@@ -352,7 +365,20 @@ def check_registry(result, tasks_text, repo_root=None):
     existing_seqs = {
         int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")
     }
-    collide = sorted(sq for sq, _ in reserved if sq in existing_seqs)
+    by_seq = {
+        int(c["seq"]): c["task_id"]
+        for c in claims
+        if re.fullmatch(r"\d+", c["seq"] or "")
+    }
+    # 同号**同 task** 不是冲突，而是同一件事的两处记录：占号者在自己的分支上
+    # 建了 `docs/claims/NN-*.md`，同时在自己的 TASKS.md 里登记了 NN —— 合并前
+    # 这两者必然并存，把这种情况判红等于惩罚正确流程（H-8：先登记再开工）。
+    # 真正的撞号是「同号不同 task」：两个人各自取到了同一个号。
+    collide = sorted(
+        "%d（占号 %s vs 文件 %s）" % (sq, tid, by_seq[sq])
+        for sq, _path, tid in reserved
+        if sq in existing_seqs and (tid is None or tid != by_seq[sq])
+    )
     result.chk(
         not collide,
         "占用序号表不与已存在的认领文件撞号；撞号=%s" % (collide or "无"),
@@ -361,10 +387,9 @@ def check_registry(result, tasks_text, repo_root=None):
     # 只校验登记本身的形状：文件路径格式、序号与首列一致。
     # **不**校验文件在本地存在 —— 占号者往往还在自己 worktree 上，文件合入main
     # 之前本地根本看不到，那种情况下报错会永久卡住所有人（2026-10-06 09:10 实测）。
-    # 「有没有真的建文件」由序号连续性断言兜：那一条本来就要求号无洞。
     malformed = sorted(
         "行%s(路径=%s)" % (sq, path)
-        for sq, path in reserved
+        for sq, path, _tid in reserved
         if path is None
         or not re.fullmatch(r"docs/claims/%d-[\w.-]+\.md" % sq, path)
     )
@@ -453,9 +478,32 @@ def check_registry(result, tasks_text, repo_root=None):
     return tasks, claims
 
 
-def check_cards(result, tasks_text, claims):
+def check_cards(result, tasks_text, claims, repo_root="."):
     """组 2：任务卡本身的完整性。"""
     cards = {c["fields"]["任务编号"]: c for c in parse_cards(tasks_text)}
+    # 任务卡已在 `docs/tasks/notes/<task-id>.md`（2026-10-06 `tasks-split` 拆分），
+    # 这里把散在 notes 里的收齐。判据不变：卡片身份只认 `任务编号` 字段。
+    card_dupes = []
+    notes_dir = os.path.join(repo_root, CARDS_DIR)
+    if os.path.isdir(notes_dir):
+        for name in sorted(os.listdir(notes_dir)):
+            if not name.endswith(".md"):
+                continue
+            try:
+                with open(os.path.join(notes_dir, name), encoding="utf-8") as handle:
+                    note_text = handle.read()
+            except OSError:
+                continue
+            for card in parse_cards(note_text):
+                if card["task_id"] in cards:
+                    card_dupes.append("%s（%s）" % (card["task_id"], name))
+                cards[card["task_id"]] = card
+    result.chk(
+        not card_dupes,
+        "同一 task 不该有两张卡（TASKS.md 内联的旧卡应已搬进 notes）；重复=%s"
+        % (card_dupes or "无"),
+        "cards",
+    )
     # 任务卡豁免「doing」：登记规则第 0 条要求开工前写的是**认领登记表**
     # （task_id / Harness / 时间 / 分支），而任务卡模板含「完成时间 / commit /
     # 验证结果」，天然是完工时填的。把在途任务也要求填卡是我先前定严了。
@@ -1466,7 +1514,7 @@ def run(repo_root="."):
 
     tasks_text = read(tasks_path)
     tasks, claims = check_registry(result, tasks_text, repo_root)
-    cards = check_cards(result, tasks_text, claims)
+    cards = check_cards(result, tasks_text, claims, repo_root)
     check_counts(result, repo_root)
     check_shared_file_ownership(result, repo_root, tasks, claims, tasks_text)
     check_dependencies(result, repo_root, tasks)
