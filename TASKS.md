@@ -78,7 +78,7 @@
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
-| claim-denum-coordinator | OpenCode | claim-denum | 🟢 doing（实施 C2 的协调者部分：删占号机制 + parser + docstate 校验） | `agent/local/opencode/claim-denum-coordinator/a1` | `MVP-PROCESS-001` |
+| claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2 回填状态并修 SyntaxWarning） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` | `MVP-PROCESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -301,10 +301,12 @@ commit：
 允许修改目录：tools/discipline/**、backend/tests/**、docs/dev-convention.md、TASKS.md
 禁止修改目录：docs/spec/**、backend/app/**、backend/migrations/**、tools/docstate/**
             —— 不动他人 harness 的认领文件（分片迁移由各 owner 自己做）
-交付分支：agent/local/opencode/claim-denum-coordinator/a1
+交付分支：agent/local/opencode/claim-denum-coordinator/a1（合入 `6aa788e`）
+          agent/local/opencode/claim-denum-coordinator/a2（状态回填 + 修 SyntaxWarning）
 test_id：MVP-PROCESS-001
-当前状态：doing
-commit：（完成后回填）
+当前状态：✅ done
+commit：a1 = `27a21be` + `cf2748f`（含同步 main）；合入 main = `6aa788e`；
+        a2 = 本提交（回填 + 修 `task_id_from_filename` docstring 的 SyntaxWarning）
 
 裁决（协调者 2026-10-07，四项全按 WorkBuddy 的建议）
   1. 迁移方式：**C2 分片** —— 本任务只做协调者那部分（parser 与共享文档）
@@ -349,17 +351,26 @@ commit：（完成后回填）
   计数变化：discipline 45 -> 44（删 3 条占号相关、加 1 条注释行校验、
   另把「序号唯一」换成「task_id 唯一」是 1 换 1）。dev-convention 已同步为 44。
 
-验证
+### 验证结果
+
   - docstate   : 90 项检查，0 项失败
-  - discipline : 44 项检查，1 项失败，1 项告警
-      · 唯一失败 = WorkBuddy 的 `claim-denum-review` 分支已合入 main 但未登记
-        认领（merge 组抓到的，属他那边的登记缺失，不是本任务引入）
-      · 唯一告警 = 根工作区被占用（本任务在 worktree 里跑，C 方案下不判红）
+  - discipline : 44 项检查，0 项失败（同步 main 后全绿）
   - ruff check : All checks passed!  ruff format: 81 files already formatted
   - pytest tools/discipline : 52 passed（新增 4 条）
+  - pytest tools 全量 : 52 passed
+  - pytest backend : 280 passed
+  - 序号自检 : 1..58 唯一且无缺号
   - `registry_checks` 夹具改为返回 registry 组**全部**检查项：原先按「序号」
     关键字筛，序号取消后字典会悄悄变空，`next(...)` 只抛 StopIteration ——
     一个看不出意图的失败。空集合本身就该是错误。
+  - a1 合并时踩到 WorkBuddy 报告的那个间歇故障：`fatal: unable to write
+    .git/index`，mergeguard 的退避只覆盖 ref 锁争用（`update_ref failed` /
+    `cannot lock ref`），**不覆盖写 index 失败**，于是没有重试、exit 4。
+    人工 sleep 5 后重试成功。**该补的是重试判据，不是人肉重试**（见下）。
+  - a1 合并后 discipline 的 merge 组变红：`已合入 main 的任务在任务表均已完成；
+    未完成=['claim-denum-coordinator']` —— 我合并后没有回填状态。与 TRAE 评审
+    root-worktree-clean 问题 4 同一个坑，**同一个任务里已经踩过一次，这里又踩
+    一次**。a2 回填。
 
 未做（分片迁移的 owner 部分，不在本任务范围）
   55 个认领文件的重命名（trae 14 / workbuddy 11 / qoder 11 / claude-code 11 /

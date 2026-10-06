@@ -8,7 +8,7 @@
 | Harness | OpenCode |
 | 认领时间 | 2026-10-07 02:20 |
 | 分支 | `agent/local/opencode/claim-denum-coordinator/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（a1 合入 6aa788e；a2 回填状态并修 SyntaxWarning） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `claim-denum-coordinator`。
 
@@ -31,6 +31,10 @@
 
 ## 变更记录
 
+- 2026-10-07 02:50：状态 doing -> done（a1 已合入 main `6aa788e`）。
+  merge 组要求「已合入 main 的任务在任务表均已完成」，而我在 a1 合并后没有回填，
+  discipline 因此变红 —— 与 TRAE 评审 root-worktree-clean 问题 4 同一个坑，
+  同一个任务里已经踩过一次，这里又踩一次。
 - 2026-10-07 02:20：认领。序号 58 = 当时 main 最大值 57 + 1。
   ⚠️ 若合并前 main 出现新的 58，把本文件改名并在此追加一行。
   （本仓库认领序号已发生 10 次撞号，其中 9 次处置是重编号 —— 这正是

@@ -192,7 +192,7 @@ def parse_claim_table(repo_root=None):
 
 
 def task_id_from_filename(name):
-    """`<harness>--<task-id>.md` → task_id（迁移期也接受 `<序号>-` 前缀）。
+    r"""`<harness>--<task-id>.md` → task_id（迁移期也接受 `<序号>-` 前缀）。
 
     按**最后**一个 `--` 切分：harness 自身含连字符（`claude-code`），
     而 task_id 不含 `--`。
