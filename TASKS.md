@@ -77,6 +77,7 @@
 | claim-denum-coordinator-review | WorkBuddy | claim-denum | ✅ done（材料已交付并合入；Qoder 按协调者授权收尾，见卡注） | `agent/workbuddy/claim-denum-review/a1` | `MVP-PROCESS-001` |
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
+| sweeper-deps-resources | Qoder | sweeper-runner | ✅ done | `agent/local/qoder/sweeper-deps-resources/a1` | `SCHED-SWEEP-002` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
 | mergeguard-fix | OpenCode | root-worktree-clean | 🟢 doing（修续跑路径的「认错人」缺陷：会把别人的遗留合并当成自己的） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |
@@ -190,6 +191,7 @@
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
+| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | | |
 
 ## 共享文件改动声明
 

@@ -50,6 +50,30 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "tests.test_api_flow::test_full_path_over_http_with_two_scaffolded_transitions",
         ),
     ],
+    "ready_waiting_deps": [
+        (
+            "dependencies_satisfied",
+            "ready",
+            "tests.test_sweeper_deps_resources::test_dependencies_satisfied_moves_the_task_to_ready",
+        ),
+        (
+            "orphan_detected",
+            "escalated",
+            "tests.test_sweeper_deps_resources::test_orphan_detection_escalates_when_upstreams_died_without_output",
+        ),
+        (
+            "block_timeout",
+            "escalated",
+            "tests.test_sweeper_deps_resources::test_block_timeout_fires_only_past_twice_the_expected_duration",
+        ),
+    ],
+    "queued": [
+        (
+            "resource_available",
+            "claimed",
+            "tests.test_sweeper_deps_resources::test_a_queued_task_resumes_to_claimed_when_the_resource_frees",
+        ),
+    ],
     "ready": [
         ("claim", "claimed", "tests.test_claim::test_claim_grants_owner_attempt_and_lease"),
         (
@@ -211,12 +235,10 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
 }
 
 #: States whose exits exist in the table but have no trigger anywhere in the
-#: MVP: the mechanisms (plan revision, resource sweeper, reopen, human ops)
-#: are later-stage work. Every outgoing event must still lack a trigger.
+#: MVP: the mechanisms (plan revision, reopen, human ops) are later-stage work.
+#: Every outgoing event must still lack a trigger.
 WAIVERS_NO_EXIT: dict[str, str] = {
     "draft_rejected": "plan revision (plan.revise) is not implemented in this MVP",
-    "ready_waiting_deps": "no dependency watcher; dependencies_satisfied has no trigger",
-    "queued": "no resource-availability sweeper; the exit is a manual update (see test_claim)",
     "abandoned": "reopen is a human action; no human-ops surface in this MVP",
     "escalated": "human.release / human.adjudicate are §18 human actions, not implemented",
 }
@@ -347,13 +369,7 @@ def test_every_non_terminal_state_is_mapped_or_explicitly_waived():
 
 def test_the_waiver_sets_are_pinned():
     """Implementing a mechanism must consciously move a state into the map."""
-    assert sorted(WAIVERS_NO_EXIT) == [
-        "abandoned",
-        "draft_rejected",
-        "escalated",
-        "queued",
-        "ready_waiting_deps",
-    ]
+    assert sorted(WAIVERS_NO_EXIT) == ["abandoned", "draft_rejected", "escalated"]
     assert sorted(WAIVERS_UNREACHABLE) == ["impl_drift", "plan_drift"]
 
 
