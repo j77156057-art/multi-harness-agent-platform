@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -30,6 +31,7 @@ from app.events.store import EventStore
 from app.lease.service import expire_stale_leases, parse_iso
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
+from app.verify.worker import STATUS_ABORTED, STATUS_QUEUED, STATUS_RUNNING
 
 _AGING_STATES = (TaskStatus.READY.value, TaskStatus.QUEUED.value)
 
@@ -268,6 +270,112 @@ def sweep_stuck(database: Database, now: datetime) -> SweepReport:
     )
 
 
+def sweep_verify_lease(database: Database, now: datetime) -> SweepReport:
+    """Re-queue verify runs whose worker died (design §2.6, O2 ruling).
+
+    **Approximation, stated plainly (O2 ruling, 2026-10-07)**: the literal
+    guard asks for a ``verify_run`` intent reconciliation confirming the
+    process is dead. The MVP has no process evidence -- the pid/pgid/boot_id
+    columns on ``verify_jobs`` have no producer and the worker runs inline --
+    so the proxy is: a job still in ``running`` whose task's newest event is
+    older than the verify lease. A crashed worker leaves exactly that shape.
+    No fake autopsy is performed; this paragraph is the disclosure.
+
+    On firing: the old job is marked ``aborted``, a fresh job is queued (no new
+    attempt, no epoch change -- R10 §10's note on this edge, verbatim), and the
+    task self-loops back into ``verifying`` for the next runner.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?",
+        (TaskStatus.VERIFYING.value,),
+    )
+    re_queued: list[str] = []
+    for row in rows:
+        if _verify_lease_round(database, store, task_id=str(row["task_id"]), now=now):
+            re_queued.append(str(row["task_id"]))
+    return SweepReport("verify_lease", len(re_queued), {"re_queued": re_queued})
+
+
+def sweep_verify_queue(database: Database, now: datetime) -> SweepReport:
+    """Queued verify jobs past their SLA (design §2.6).
+
+    Producer note: the MVP never leaves a job ``queued`` (the ADR-030 queue is
+    not implemented), so this condition is implemented literally against the
+    state the schema and R10 §10 name, and tests seed it directly -- recorded,
+    not silently skipped.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?",
+        (TaskStatus.VERIFYING.value,),
+    )
+    escalated: list[str] = []
+    for row in rows:
+        if _verify_queue_round(database, store, task_id=str(row["task_id"]), now=now):
+            escalated.append(str(row["task_id"]))
+    return SweepReport("verify_queue", len(escalated), {"escalated": escalated})
+
+
+def sweep_review_lease(database: Database, now: datetime) -> SweepReport:
+    """Expired review claims go back on the shelf (design §2.7).
+
+    The guard's "no in-flight review intent" clause is trivially true in the
+    MVP: intents are recorded after the fact, nothing is ever ``pending``.
+    Recorded here instead of pretending the clause did work.
+
+    The expired claim row is marked ``expired`` so the next reviewer claim
+    starts clean; the task self-loops and keeps its waiting clock (the wait
+    for a verdict has not gotten any shorter because a reviewer vanished).
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?",
+        (TaskStatus.AWAITING_REVIEW.value,),
+    )
+    expired: list[str] = []
+    for row in rows:
+        if _review_lease_round(database, store, task_id=str(row["task_id"]), now=now):
+            expired.append(str(row["task_id"]))
+    return SweepReport("review_lease", len(expired), {"expired": expired})
+
+
+def sweep_merge_recovery(database: Database, now: datetime) -> SweepReport:
+    """A merge that stopped mid-flight either retries or escalates (design §2.7).
+
+    First match wins, retry before escalation (design's order): past
+    ``merge_lease_seconds`` → ``merge_lease_expire`` → back to ``approved``
+    (worker-death recovery); otherwise past
+    ``integration_test_timeout_minutes`` → ``merge_timeout`` → ``escalated``.
+    With the equal defaults both conditions become true at the same moment and
+    the retry wins; an operator who configures the lease longer than the test
+    timeout opens an escalation window in between. The ``approved`` self-loop
+    of ``merge_lease_expire`` is a no-op and is documented, not implemented.
+
+    Approximation note (same family as verify): "no in-flight merge intent" is
+    trivially true in the MVP -- ``side_effect_intents`` rows are written with
+    status ``done`` after the fact, never ``pending``.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?",
+        (TaskStatus.MERGING.value,),
+    )
+    retried: list[str] = []
+    escalated: list[str] = []
+    for row in rows:
+        outcome = _merge_recovery_round(database, store, task_id=str(row["task_id"]), now=now)
+        if outcome == "approved":
+            retried.append(str(row["task_id"]))
+        elif outcome == "escalated":
+            escalated.append(str(row["task_id"]))
+    return SweepReport(
+        "merge_recovery",
+        len(retried) + len(escalated),
+        {"retried": retried, "escalated": escalated},
+    )
+
+
 # ------------------------------------------------------------------ helpers
 
 
@@ -313,6 +421,227 @@ def _apply(
             state_seq=record.seq,
         )
         return True
+
+
+def _latest_event_iso(conn: Any, task_id: str) -> datetime | None:
+    row = conn.execute(
+        "SELECT created_at FROM task_events WHERE aggregate_id = ? ORDER BY seq DESC LIMIT 1",
+        (task_id,),
+    ).fetchone()
+    return None if row is None else parse_iso(str(row["created_at"]))
+
+
+def _current_task(conn: Any, task_id: str, expected: TaskStatus) -> Any:
+    task = conn.execute(
+        "SELECT status, current_epoch, current_attempt_id FROM tasks WHERE task_id = ?",
+        (task_id,),
+    ).fetchone()
+    if task is None or str(task["status"]) != expected.value:
+        return None
+    return task
+
+
+def _verify_lease_round(
+    database: Database, store: EventStore, *, task_id: str, now: datetime
+) -> bool:
+    with database.transaction() as conn:
+        task = _current_task(conn, task_id, TaskStatus.VERIFYING)
+        if task is None or task["current_attempt_id"] is None:
+            return False
+        job = conn.execute(
+            "SELECT * FROM verify_jobs WHERE task_id = ? AND attempt_id = ?"
+            " ORDER BY rowid DESC LIMIT 1",
+            (task_id, str(task["current_attempt_id"])),
+        ).fetchone()
+        if job is None or str(job["status"]) != STATUS_RUNNING:
+            return False
+        anchor = _latest_event_iso(conn, task_id)
+        if anchor is None or now - anchor <= timedelta(seconds=settings.verify_lease_seconds):
+            return False
+        conn.execute(
+            "UPDATE verify_jobs SET status = ? WHERE job_id = ?",
+            (STATUS_ABORTED, str(job["job_id"])),
+        )
+        new_job_id = f"job-{uuid.uuid4().hex}"
+        conn.execute(
+            'INSERT INTO verify_jobs(job_id, task_id, attempt_id, "commit", base_commit,'
+            " status, queue_reason, fencing_epoch, verify_profile, created_seq)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+            (
+                new_job_id,
+                task_id,
+                str(task["current_attempt_id"]),
+                str(job["commit"]),
+                job["base_commit"],
+                STATUS_QUEUED,
+                "verify_lease_expire",
+                job["fencing_epoch"],
+                job["verify_profile"],
+            ),
+        )
+        record = store.append(
+            event_name=EventKind.VERIFY_LEASE_EXPIRE.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={
+                "previous_job_id": str(job["job_id"]),
+                "new_job_id": new_job_id,
+                "anchor": anchor.isoformat(),
+            },
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=TaskStatus.VERIFYING,
+            event=EventKind.VERIFY_LEASE_EXPIRE,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets={},
+            state_seq=record.seq,
+        )
+        return True
+
+
+def _verify_queue_round(
+    database: Database, store: EventStore, *, task_id: str, now: datetime
+) -> bool:
+    with database.transaction() as conn:
+        task = _current_task(conn, task_id, TaskStatus.VERIFYING)
+        if task is None:
+            return False
+        job = conn.execute(
+            "SELECT * FROM verify_jobs WHERE task_id = ? AND status = ?"
+            " ORDER BY rowid DESC LIMIT 1",
+            (task_id, STATUS_QUEUED),
+        ).fetchone()
+        if job is None:
+            return False
+        anchor: datetime | None = None
+        if job["created_seq"] is not None:
+            row = conn.execute(
+                "SELECT created_at FROM task_events WHERE seq = ?", (int(job["created_seq"]),)
+            ).fetchone()
+            if row is not None:
+                anchor = parse_iso(str(row["created_at"]))
+        if anchor is None:
+            anchor = _latest_event_iso(conn, task_id)
+        if anchor is None or now - anchor <= timedelta(minutes=settings.verify_queue_sla_minutes):
+            return False
+        record = store.append(
+            event_name=EventKind.VERIFY_QUEUE_TIMEOUT.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={
+                "job_id": str(job["job_id"]),
+                "waited_seconds": int((now - anchor).total_seconds()),
+            },
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=TaskStatus.VERIFYING,
+            event=EventKind.VERIFY_QUEUE_TIMEOUT,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets={"escalated_at": now.isoformat()},
+            state_seq=record.seq,
+        )
+        return True
+
+
+def _review_lease_round(
+    database: Database, store: EventStore, *, task_id: str, now: datetime
+) -> bool:
+    with database.transaction() as conn:
+        task = _current_task(conn, task_id, TaskStatus.AWAITING_REVIEW)
+        if task is None:
+            return False
+        claimed = conn.execute(
+            "SELECT review_id, reviewer_harness_id, lease_until FROM reviews"
+            " WHERE task_id = ? AND status = 'claimed' ORDER BY rowid DESC",
+            (task_id,),
+        ).fetchall()
+        expired = [
+            row
+            for row in claimed
+            if row["lease_until"] is not None and parse_iso(str(row["lease_until"])) <= now
+        ]
+        if not expired:
+            return False
+        for row in expired:
+            conn.execute(
+                "UPDATE reviews SET status = 'expired' WHERE review_id = ?",
+                (str(row["review_id"]),),
+            )
+        record = store.append(
+            event_name=EventKind.REVIEW_LEASE_EXPIRE.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={"expired_reviews": [str(row["review_id"]) for row in expired]},
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=TaskStatus.AWAITING_REVIEW,
+            event=EventKind.REVIEW_LEASE_EXPIRE,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets={},
+            state_seq=record.seq,
+        )
+        return True
+
+
+def _merge_recovery_round(
+    database: Database, store: EventStore, *, task_id: str, now: datetime
+) -> str | None:
+    with database.transaction() as conn:
+        task = _current_task(conn, task_id, TaskStatus.MERGING)
+        if task is None:
+            return None
+        row = conn.execute(
+            "SELECT created_at FROM task_events WHERE aggregate_id = ? AND event_name = ?"
+            " ORDER BY seq DESC LIMIT 1",
+            (task_id, EventKind.MERGE_START.value),
+        ).fetchone()
+        if row is None:
+            return None
+        age = now - parse_iso(str(row["created_at"]))
+        if age > timedelta(seconds=settings.merge_lease_seconds):
+            event = EventKind.MERGE_LEASE_EXPIRE
+            extra: dict[str, object] = {}
+            outcome = "approved"
+        elif age > timedelta(minutes=settings.integration_test_timeout_minutes):
+            event = EventKind.MERGE_TIMEOUT
+            extra = {"escalated_at": now.isoformat()}
+            outcome = "escalated"
+        else:
+            return None
+        record = store.append(
+            event_name=event.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={"waited_seconds": int(age.total_seconds())},
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=TaskStatus.MERGING,
+            event=event,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets=extra,
+            state_seq=record.seq,
+        )
+        return outcome
 
 
 def _stuck_round(

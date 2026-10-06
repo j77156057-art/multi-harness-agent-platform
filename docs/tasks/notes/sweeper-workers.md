@@ -1,4 +1,4 @@
-### sweeper-workers：verify / review / merge 的等待与租约重排（🚧 doing）
+### sweeper-workers：verify / review / merge 的等待与租约重排（✅ done）
 
 ~~~text
 任务编号：sweeper-workers
@@ -48,5 +48,23 @@ O2 裁定（协调者 2026-10-07）：verify_lease_expire 的「对账确认进�
   7. PYTHONUTF8=1 ./scripts.sh check 全绿。
 test_id：SCHED-SWEEP-004
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 07:4x
+commit：`PENDING`
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（90 files formatted）
+  pytest      : 307 passed（本任务净增 9 项：test_sweeper_workers.py），exit 0
+  关键断言     : verify 重排（旧 job aborted/新 job queued/attempt 与 epoch 不变）；
+                 verify 队列 SLA 与对照组；review 到期置 expired + 自环、未到期不动；
+                 merge 双阈值分窗（默认同值时先重试；monkeypatch lease=2h 时 45 分钟
+                 落在升级窗）；幂等二跑 no-op。
+已知问题：
+  - **O2 近似已按裁定显式声明**（sweep_verify_lease docstring）：无 pid/pgid/boot_id
+    生产者、不做假验尸；锚=任务最新事件时间。verify_queue 的 queued 生产者、
+    review 的 review intent、merge 的 pending intent 同为"列在、无生产者"，逐处注记。
+  - approved 的 merge_lease_expire 自环是 no-op，记录不实现。
+  - 测试期撞出一条既有不变量：task_events 的 append-only 是**触发器强制**的——本来
+    想回拨事件时间做锚点，被数据库拒绝；改用仓库既定模式（推 now 不动时间字段）。
 ~~~

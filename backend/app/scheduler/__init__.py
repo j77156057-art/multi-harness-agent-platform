@@ -11,8 +11,12 @@ from app.scheduler.sweeps import (
     sweep_blocked_sla,
     sweep_dependencies,
     sweep_expired_leases,
+    sweep_merge_recovery,
     sweep_resources,
+    sweep_review_lease,
     sweep_stuck,
+    sweep_verify_lease,
+    sweep_verify_queue,
 )
 
 __all__ = [
@@ -23,6 +27,10 @@ __all__ = [
     "sweep_blocked_sla",
     "sweep_dependencies",
     "sweep_expired_leases",
+    "sweep_merge_recovery",
     "sweep_resources",
+    "sweep_review_lease",
     "sweep_stuck",
+    "sweep_verify_lease",
+    "sweep_verify_queue",
 ]
