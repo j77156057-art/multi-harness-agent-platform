@@ -142,6 +142,13 @@ app/scheduler/
   2. `python -m app.cli sweep --once / --loop`——并入既有操作员 CLI；单测/运维都友好；
   3. FastAPI lifespan 后台任务（`sweeper_interval_seconds` 节拍，默认 60s；测试环境禁用）——
      生产便利，非依赖项。
+
+  > **实施修订（sweeper-runner，2026-10-06）**：第 2 形态与 MVP-09 的 CLI 硬不变量冲突
+  > ——操作员 CLI「只经 HTTP、不 import db/任何 service」（`test_cli_flow` 钉死），而巡检
+  > 必须同进程、同事务触库。落地形态改为**独立模块入口 `python -m app.scheduler
+  > [--once|--loop] [--interval N]`**（含 `--loop` 在 `AP_SWEEPER_ENABLED=0` 时拒绝）；
+  > 第 3 形态（lifespan）未做，留作运维接线。第 1 形态已交付。
+
 - **时钟**：巡检判据用墙钟字段（`waiting_since`/`lease_until`/`next_reminder_at`），
   `now` 一律参数注入；不做 lease 的双锚点（那是「失联判定」的精度需求，巡检是粗粒度
   治理）。重启语义：**无内存状态**——全部判据读 DB、计数读 `sweep_progress` 表。
