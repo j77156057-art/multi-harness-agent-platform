@@ -17,6 +17,9 @@ partial commit must not reach review on its own.
 
 from __future__ import annotations
 
+import contextlib
+import os
+import signal
 import subprocess
 import tempfile
 import time
@@ -126,6 +129,11 @@ class SubprocessRunner:
         tick_interval_seconds: float | None = None,
     ) -> CliRunResult:
         started = time.monotonic()
+        spawn_kwargs: dict[str, Any] = {}
+        if os.name != "nt":
+            # POSIX: children get their own process group so _kill can signal
+            # the whole tree, not just the CLI.
+            spawn_kwargs["start_new_session"] = True
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
             try:
                 process = subprocess.Popen(
@@ -134,6 +142,7 @@ class SubprocessRunner:
                     stdin=subprocess.DEVNULL,
                     stdout=out,
                     stderr=err,
+                    **spawn_kwargs,
                 )
             except FileNotFoundError as exc:
                 raise CliUnavailable(f"{argv[0]}: not found on PATH") from exc
@@ -168,8 +177,23 @@ class SubprocessRunner:
 
 
 def _kill(process: subprocess.Popen) -> None:
+    """Kill the CLI and its children (TRAE's R2 on the MVP-10b verification).
+
+    A harness CLI spawns its own tool processes; killing only the direct child
+    (the 10b behaviour) leaves orphans that keep writing into the worktree. On
+    Windows ``taskkill /T`` walks the tree; on POSIX the child was spawned in
+    its own session and the whole group is signalled.
+    """
     if process.poll() is None:
-        process.kill()
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
     process.wait()
 
 
