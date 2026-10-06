@@ -126,7 +126,7 @@
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
 <!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
-<!-- claim-denum → docs/claims/47-opencode--claim-denum.md -->
+<!-- claim-denum → docs/claims/48-opencode--claim-denum.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 

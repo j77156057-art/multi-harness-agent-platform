@@ -847,6 +847,19 @@ def git_merged_branches(repo_root):
             return subprocess.run(
                 ("git",) + args, cwd=repo_root, capture_output=True,
                 text=True, timeout=30,
+                # encoding 必须显式指定。text=True 在 Windows 上默认按 GBK
+                # 解码，而本仓库的**提交信息全是中文**——只要历史里出现一条
+                # 含中文的 merge subject（今天第一次：我自己的合并
+                # 87c5f41「同步 main，序号改 42 -> 47」），`git log --merges`
+                # 的输出就会在解码时抛 UnicodeDecodeError。
+                #
+                # 而那是个**静默失效**：异常发生在 subprocess 内部的
+                # _readerthread 里，主线程拿到 stdout=None，
+                # 于是 `log.stdout.splitlines()` 变成
+                # AttributeError: 'NoneType' object has no attribute
+                # 'splitlines' —— 报错位置离真正的原因隔了三层，
+                # 且这组断言直接**整组崩掉**而不是判红。
+                encoding="utf-8", errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -957,6 +970,19 @@ def git_local_branches(repo_root):
             return subprocess.run(
                 ("git",) + args, cwd=repo_root, capture_output=True,
                 text=True, timeout=30,
+                # encoding 必须显式指定。text=True 在 Windows 上默认按 GBK
+                # 解码，而本仓库的**提交信息全是中文**——只要历史里出现一条
+                # 含中文的 merge subject（今天第一次：我自己的合并
+                # 87c5f41「同步 main，序号改 42 -> 47」），`git log --merges`
+                # 的输出就会在解码时抛 UnicodeDecodeError。
+                #
+                # 而那是个**静默失效**：异常发生在 subprocess 内部的
+                # _readerthread 里，主线程拿到 stdout=None，
+                # 于是 `log.stdout.splitlines()` 变成
+                # AttributeError: 'NoneType' object has no attribute
+                # 'splitlines' —— 报错位置离真正的原因隔了三层，
+                # 且这组断言直接**整组崩掉**而不是判红。
+                encoding="utf-8", errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -978,6 +1004,8 @@ def git_out(repo_root, *args):
         proc = subprocess.run(
             ("git",) + args, cwd=repo_root, capture_output=True,
             text=True, timeout=30,
+            # 同上：git 输出的提交信息含中文，Windows 上必须显式 utf-8。
+            encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.SubprocessError):
         return None
