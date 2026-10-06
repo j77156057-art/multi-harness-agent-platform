@@ -3217,7 +3217,7 @@ MVP-09 是第一个真把整条链路走完的交付，因此**撞出了两个�
             docs/dev-convention.md、TASKS.md、docs/claims/**
 禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）
 交付分支：agent/local/claude/claim-seq-adopt/a1
-commit：见分支（收尾回填）
+commit：f39fe37
 test_id：MVP-PROCESS-002
 当前状态：done
 
