@@ -7,7 +7,7 @@
 | task_id | `claim-denum-coordinator` |
 | Harness | OpenCode |
 | 认领时间 | 2026-10-07 02:20 |
-| 分支 | `agent/local/opencode/claim-denum-coordinator/a1` |
+| 分支 | `agent/local/opencode/claim-denum-coordinator/a1`<br>`agent/local/opencode/claim-denum-coordinator/a2` |
 | 状态 | ✅ done（a1 合入 6aa788e；a2 回填状态并修 SyntaxWarning） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `claim-denum-coordinator`。
