@@ -31,6 +31,7 @@
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/workbuddy/chain-template-rejected` | `MVP-PROCESS-001` |
+| slow-test-visibility | WorkBuddy | — | ✅ done（慢测试排行 + slow marker 已落地） | `agent/workbuddy/slow-test-visibility` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -2772,6 +2773,44 @@ commit：（本次收尾提交）
     并发污染的数据；空闲环境重测 initialize 只要 0.32s，旧的 30s 来自别处
   - 全量 647s（优化）与 479s（基线）之差仍未解释，怀疑是 git worktree 元数据
     随副本数累积变慢，待后续用 --durations 定位
+~~~
+### slow-test-visibility：让慢测试对所有 AI 可见（✅ done）
+
+~~~text
+任务编号：slow-test-visibility
+负责人 Harness：WorkBuddy
+开始时间：2026-10-06 08:45
+完成时间：2026-10-06 09:00
+依赖任务：无
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §26（VERIFY-DIFF-001 的验证要求）
+允许修改目录：backend/tests/**、backend/pyproject.toml、docs/claims/**、TASKS.md
+禁止修改目录：backend/app/**（不碰实现）、docs/spec/**
+交付分支：agent/workbuddy/slow-test-visibility
+完成标准：
+  1. 每次跑 pytest 都能看到慢测试排行 ✅ addopts 加 --durations=15
+  2. 超过阈值的测试被点名并给出单独跑的命令 ✅ conftest sessionfinish hook
+  3. 阈值可用环境变量覆盖 ✅ SLOW_TEST_SECONDS / SLOW_TEST_TOP_N
+  4. pytest -m "not slow" 能跑出快的一轮 ✅ 6s vs 全量 763s
+test_id：MVP-PROCESS-001
+测试命令：./scripts.sh check
+commit：9f122cd
+当前状态：done
+验证结果：
+  - 慢测试汇总（默认 10s 阈值）实测输出：
+      2 个超过 10s，合计 64.8s（100% 的测试时间）
+        32.86s  tests/test_verify.py::test_the_declaration_refuses_a_stale_epoch
+        31.98s  tests/test_verify.py::test_differential_not_applicable_goes_to_a_human
+      涉及文件：test_verify.py
+      单独跑最慢的一个：pytest "..." -q
+  - -m "not slow"：1 passed, 16 deselected in 0.23s（挂钟 6s）
+  - 门禁四道全绿，ruff format 后 hook 与 marker 回归验证通过
+已知问题：
+  - 阈值需按机器调整。默认 10s 在 6 个 AI 并发时会误报一片，
+    SLOW_TEST_SECONDS=30 可缓解。并发时的绝对值也不可比——
+    同一测试在空闲时和并发时差 3-5 倍是常态。
+  - 只标了 test_verify.py 的 16 个用例。其余文件本轮未标
+    （ durations 一次跑需要十几分钟，不适合在门禁里做）。
 ~~~
 
 ### tasks-critical-path：校验 TASKS.md 自己那份关键路径副本 + 查重复 task_id（done）
