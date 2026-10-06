@@ -100,14 +100,36 @@ def test_claim_serials_must_be_unique(tmp_path):
     assert "重复=['01']" in unique_msg
 
 
-def test_claim_serials_must_be_contiguous(tmp_path):
+def test_gap_in_serials_is_accepted(tmp_path):
+    """跳号不再报错 —— 它是无害的，且并发分支下无法避免。
+
+    原「序号连续 1..N」断言由 `claim-seq-adopt` 按
+    `docs/proposals/claim-seq-contiguity.md` 的裁决撤销：连续性在并发下
+    **结构上不可满足**（各 agent 从 main 最大值往后取号，合并顺序不由取号者决定），
+    而它没有防住任何唯一性没防住的东西。
+    """
     checks = registry_checks(tmp_path, [
         "01-h--t1.md",
         "03-h--t2.md",
     ])
-    cont_msg = next(msg for msg in checks if msg.startswith("认领文件序号连续"))
-    assert checks[cont_msg] is False
-    assert "缺号=[2]" in cont_msg
+    assert all(checks.values()), checks
+
+
+def test_claim_filename_must_match_its_content(tmp_path):
+    """文件名与内容必须指向同一个 task —— 这是替代连续性的那条不变量。
+
+    它能抓真实错漏（文件被改名、放错任务、复制后忘改内容），
+    且不依赖任何跨分支的共享计数器，因此两个 agent 独立操作也能同时满足。
+    """
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    (claims_dir / "01-h--t1.md").write_text(claim_file("t2"), encoding="utf-8")
+
+    result = d.Result()
+    d.check_registry(result, TASKS_HEADER, str(tmp_path))
+    message = next(c["msg"] for c in result.checks if "文件名" in c["msg"])
+    assert "t2" in message and "01-h--t1.md" in message
+    assert next(c for c in result.checks if "文件名" in c["msg"])["ok"] is False
 
 
 def test_claim_serials_happy_path(tmp_path):

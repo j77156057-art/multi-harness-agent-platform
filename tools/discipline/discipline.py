@@ -152,6 +152,7 @@ def parse_claim_table(repo_root=None):
             {
                 "seq": name.split("-", 1)[0],
                 "file": name,
+                "name_task_id": task_id_from_filename(name),
                 "task_id": _md_field(body, "task_id").strip("`"),
                 "harness": _md_field(body, "Harness"),
                 "claimed_at": _md_field(body, "认领时间"),
@@ -160,6 +161,17 @@ def parse_claim_table(repo_root=None):
             }
         )
     return entries
+
+
+def task_id_from_filename(name):
+    """`<序号>-<harness>--<task-id>.md` → task_id。
+
+    按**最后**一个 `--` 切分：harness 自身含连字符（`claude-code`），
+    而 task_id 不含 `--`。
+    """
+    stem = name[:-3] if name.endswith(".md") else name
+    stem = re.sub(r"^\d+-", "", stem)
+    return stem.rsplit("--", 1)[-1] if "--" in stem else ""
 
 
 def parse_cards(text):
@@ -238,19 +250,28 @@ def check_registry(result, tasks_text, repo_root=None):
         "registry",
     )
 
-    # 序号即身份：除唯一外还必须连续为 1..N，否则撞号可以靠「跳号」规避
-    # （claim-nullable 违规记录承诺的纠正措施，GATE-MERGE-CHECK-01 落地）。
-    seq_nums = [int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")]
-    expected = set(range(1, len(claims) + 1))
+    # 文件名里的 task_id 必须与文件内容的 task_id 一致。
+    #
+    # 这条**替代**了原先的「序号连续 1..N」断言（GATE-MERGE-CHECK-01 交付、
+    # 由本任务按 docs/proposals/claim-seq-contiguity.md 的裁决撤销）。
+    # 理由与机械证据见提案文档；一句话：连续性在并发分支下**结构上不可满足** ——
+    # 各 agent 在各自分支上从 main 的最大值往后取号，合并顺序又不由取号者决定，
+    # 于是两条分支各自合规却整体不合规。
+    #
+    # 而连续性没有防住任何唯一性没防住的东西：跳号本身无害；重复号无论是否跳号
+    # 都会撞上上面那条唯一性断言。原注释所说的「靠跳号规避撞号」把「留空隙」与
+    # 「逃避检测」混为一谈。
+    #
+    # 换成的这条同样能抓真实错漏（文件被改名、放错任务、复制后忘改内容），
+    # 且两个 agent 独立操作也能同时满足 —— 它不依赖任何跨分支的共享计数器。
+    mismatched_name = sorted(
+        "%s（文件名 %s）" % (c["task_id"], c["file"])
+        for c in claims
+        if c["name_task_id"] and c["name_task_id"] != c["task_id"]
+    )
     result.chk(
-        len(seq_nums) == len(claims)
-        and set(seq_nums) == expected,
-        "认领文件序号连续为 1..%d；缺号=%s，越界/非数字=%s"
-        % (
-            len(claims),
-            sorted(expected - set(seq_nums)) or "无",
-            sorted(set(seq_nums) - expected) or "无",
-        ),
+        not mismatched_name,
+        "认领文件名里的 task_id 与文件内容一致；不一致=%s" % (mismatched_name or "无"),
         "registry",
     )
 
