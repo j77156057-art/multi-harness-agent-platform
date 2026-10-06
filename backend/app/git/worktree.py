@@ -157,6 +157,11 @@ class WorktreeManager:
             # before the recycle, so this is not silently reused.
             raise WorktreeError(f"{path} already exists and is not a tracked workspace")
         run_git("init", "--separate-git-dir", str(gitdir), str(path))
+        # R10 §14 shortens the physical directory, but refs/heads/<branch>
+        # under the gitdir still carries the full branch name; a long task id
+        # in a deep root exceeds Windows' MAX_PATH when git creates the loose
+        # ref. Extended-length paths are what lets the §14 layout survive it.
+        run_git("config", "core.longpaths", "true", cwd=path)
         alternates = gitdir / "objects" / "info" / "alternates"
         alternates.parent.mkdir(parents=True, exist_ok=True)
         # ADR-059: objects are read through the canonical store, which is what

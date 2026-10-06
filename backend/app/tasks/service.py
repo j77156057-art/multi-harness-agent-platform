@@ -32,6 +32,7 @@ from app.git.repo import CanonicalRepo
 from app.git.worktree import WorktreeManager
 from app.lease.service import iso, parse_iso, release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
+from app.security.scan import MESSAGE_CODE, SECURITY_CODE, SecretScanBlocked, scan_for_block
 from app.spec import EventKind, TaskStatus
 
 
@@ -353,6 +354,45 @@ class SchedulerService:
 
     # ------------------------------------------------------------ work paths
 
+    def _attempt_owner(self, attempt_id: str) -> str:
+        rows = self.database.read(
+            "SELECT owner FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
+        )
+        return str(rows[0]["owner"]) if rows and rows[0]["owner"] else "unknown"
+
+    def _record_secret_scan_blocked(
+        self,
+        *,
+        surface: str,
+        scan_id: str,
+        findings: list,
+        aggregate_type: str,
+        aggregate_id: str,
+        actor_type: str,
+        actor_id: str,
+        task_id: str | None = None,
+        attempt_id: str | None = None,
+    ) -> int:
+        """Record the §17 security event. Never carries the matched value."""
+        payload: dict[str, object] = {
+            "scan_id": scan_id,
+            "surface": surface,
+            "findings": [finding.as_json() for finding in findings],
+        }
+        if task_id is not None:
+            payload["task_id"] = task_id
+        if attempt_id is not None:
+            payload["attempt_id"] = attempt_id
+        record = self.store.append(
+            event_name="secret_scan_blocked",
+            aggregate_type=aggregate_type,
+            aggregate_id=aggregate_id,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            payload=payload,
+        )
+        return record.seq
+
     def submit_result(
         self,
         *,
@@ -362,6 +402,27 @@ class SchedulerService:
         completion: dict[str, object],
     ) -> EventRecord:
         """``in_progress -> verifying`` and release the owner lease (R10 §13)."""
+        blocked = scan_for_block(completion, surface="completion")
+        if blocked is not None:
+            scan_id, findings = blocked
+            seq = self._record_secret_scan_blocked(
+                surface="completion",
+                scan_id=scan_id,
+                findings=findings,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="harness",
+                actor_id=self._attempt_owner(attempt_id),
+                task_id=task_id,
+                attempt_id=attempt_id,
+            )
+            raise SecretScanBlocked(
+                code=SECURITY_CODE,
+                scan_id=scan_id,
+                rule_name=findings[0].rule_name,
+                event_seq=seq,
+                task_id=task_id,
+            )
         with self.database.transaction() as conn:
             guard = self._guard_owner(conn, task_id, attempt_id, fencing_epoch)
             if guard.status is not TaskStatus.IN_PROGRESS:
@@ -476,7 +537,10 @@ class SchedulerService:
                 aggregate_type="task",
                 aggregate_id=task_id,
                 actor_type="harness",
-                actor_id=guard.owner or "",
+                # Ownerless states (changes_requested) have a legal release
+                # edge in R10 §10 but no owner to name; v1 has no auth layer,
+                # so the actor is recorded as unknown rather than empty.
+                actor_id=guard.owner or "unknown",
                 payload=dict(payload, attempt_id=attempt_id),
                 connection=conn,
             )
@@ -621,6 +685,27 @@ class SchedulerService:
         """
         if verdict not in {"approve", "request_changes"}:
             raise InvalidInput("verdict must be approve or request_changes")
+        blocked = scan_for_block(findings, surface="findings")
+        if blocked is not None:
+            scan_id, scan_findings = blocked
+            seq = self._record_secret_scan_blocked(
+                surface="findings",
+                scan_id=scan_id,
+                findings=scan_findings,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="harness",
+                actor_id=reviewer_harness_id or "unknown",
+                task_id=task_id,
+                attempt_id=attempt_id,
+            )
+            raise SecretScanBlocked(
+                code=SECURITY_CODE,
+                scan_id=scan_id,
+                rule_name=scan_findings[0].rule_name,
+                event_seq=seq,
+                task_id=task_id,
+            )
         with self.database.transaction() as conn:
             task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
             if task is None:
@@ -937,6 +1022,25 @@ class SchedulerService:
     ) -> dict[str, object]:
         if not body.strip():
             raise InvalidInput("body must not be empty")
+        blocked = scan_for_block(body, surface="message")
+        if blocked is not None:
+            scan_id, scan_findings = blocked
+            seq = self._record_secret_scan_blocked(
+                surface="message",
+                scan_id=scan_id,
+                findings=scan_findings,
+                aggregate_type="group",
+                aggregate_id=group_id,
+                actor_type=author_kind or "unknown",
+                actor_id=author_id or "unknown",
+                task_id=task_id,
+            )
+            raise SecretScanBlocked(
+                code=MESSAGE_CODE,
+                scan_id=scan_id,
+                rule_name=scan_findings[0].rule_name,
+                event_seq=seq,
+            )
         normalised_refs = _normalise_refs(refs)
         with self.database.transaction() as conn:
             group = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()

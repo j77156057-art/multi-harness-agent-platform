@@ -14,6 +14,7 @@ substitute (R10 §16).
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from app.db.connection import Database
@@ -23,15 +24,19 @@ from app.verify.receipts import passing_receipt_for
 
 INTEGRATION_HEALTH_GREEN = "green"
 
+#: R10 §17: anything a secret scan ever blocked on this task stops the merge.
+SCAN_BLOCKING_CODE = "merge.secret_scan_blocking"
+
 
 @dataclass(frozen=True, slots=True)
 class GateResult:
     ok: bool
     failures: tuple[str, ...]
+    code: str | None = None
 
     def raise_for_failures(self) -> None:
         if not self.ok:
-            raise MergeGateRejected(self.failures)
+            raise MergeGateRejected(self.failures, code=self.code)
 
 
 class MergeGateRejected(RuntimeError):
@@ -39,9 +44,10 @@ class MergeGateRejected(RuntimeError):
 
     code = "merge.gate_rejected"
 
-    def __init__(self, failures: tuple[str, ...]) -> None:
+    def __init__(self, failures: tuple[str, ...], *, code: str | None = None) -> None:
         super().__init__("merge gate refused: " + "; ".join(failures))
         self.failures = failures
+        self.code = code or type(self).code
 
 
 def evaluate_merge_gate(
@@ -98,7 +104,42 @@ def evaluate_merge_gate(
     elif health != INTEGRATION_HEALTH_GREEN:
         failures.append(f"integration_health is {health}; the queue is stopped")
 
-    return GateResult(not failures, tuple(failures))
+    # R10 §17: a secret found at any stage must stop the merge. The event log
+    # is the evidence; fail closed on it rather than trusting the current
+    # payload to be clean.
+    code = None
+    scan_blocks = _blocking_scans(database, task_id=task_id)
+    if scan_blocks:
+        code = SCAN_BLOCKING_CODE
+        for scan in scan_blocks:
+            failures.append(f"secret scan {scan['scan_id']} blocked content ({scan['rule_name']})")
+
+    return GateResult(not failures, tuple(failures), code)
+
+
+def _blocking_scans(database: Database, *, task_id: str) -> list[dict[str, str]]:
+    """``secret_scan_blocked`` events recorded against this task.
+
+    Only the scan id and rule name are surfaced -- never the location or the
+    value hash, and never anything of the match itself.
+    """
+    rows = database.read(
+        "SELECT payload_json FROM task_events"
+        " WHERE event_name = 'secret_scan_blocked' AND aggregate_id = ?"
+        " ORDER BY seq",
+        (task_id,),
+    )
+    scans: list[dict[str, str]] = []
+    for row in rows:
+        payload = json.loads(str(row["payload_json"]))
+        findings = payload.get("findings") or [{}]
+        scans.append(
+            {
+                "scan_id": str(payload.get("scan_id", "scan-unknown")),
+                "rule_name": str(findings[0].get("rule_name", "unknown")),
+            }
+        )
+    return scans
 
 
 def _approving_review(

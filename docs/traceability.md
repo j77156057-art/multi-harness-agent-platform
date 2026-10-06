@@ -40,7 +40,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `CORE-LEASE-001` | Lease 创建 / 续期 / 过期回收 | ✅ 有断言 | `test_lease.py`（续期续期、过期拒绝、巡检转 `stale` 并释放 Lease 与资源、`reclaim`/`take_over`） |
 | `CORE-FENCE-001` | 旧 epoch 的写入被拒 | ✅ 有断言 | `test_lease.py`（`guarded_write` 单一入口；旧 epoch 的 renew / take_over 被拒） |
 | `CORE-SPLIT-001` | 父子任务拆分与 `upstream_invalidated_seq` | ⚠️ 仅声明 | 未实现（MVP-03/04） |
-| `CORE-STATE-COVERAGE-001` | 所有非终态都有恢复出口的集成级覆盖 | ⚠️ 仅声明 | 未实现（MVP-11） |
+| `CORE-STATE-COVERAGE-001` | 所有非终态都有恢复出口的集成级覆盖 | ✅ 有断言（7 态显式豁免+反向守卫） | `test_state_coverage.py`：21 个非终态的完整性、映射边的合法性/触发器存在性/引用测试存在性均为机械断言；14 态映射到活的集成测试（含本任务新增的 blocked、changes_requested 出口补测），5 态无出口机制 + 2 态不可达为显式豁免且带反向守卫（实现即红）。豁免清单与理由见终审报告 §3 |
 
 ## 阶段 2：Git / Verify / Merge 检查
 
@@ -53,7 +53,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `VERIFY-RECEIPT-001` | receipt 与待合并 commit 不一致时 Merge Gate 拒绝 | ✅ 有断言 | `test_verify.py` + `app/verify/receipts.py`（`merge_is_verifiable` 按精确 commit 查 passing receipt，base commit 查不到即拒绝；重复 verify 返回首次 receipt；不同 commit 生成独立 receipt；§16 字段齐全）。Merge Gate 本体在 MVP-07 接入 |
 | `MERGE-EXACT-001` | receipt / review / 分支 head 三方 commit 交叉断言 | ✅ 有断言 | `test_merge.py` + `app/merge/gate.py`（三条交叉断言各有拒绝用例；提交前不写集成分支，拒绝后断言 ref 未移动；无 receipt / 无 review / 别人的 commit 都进不来） |
 | `MERGE-REVERT-001` | revert 树断言 | ✅ 有断言 | `test_merge.py`（断言 tree(revert) == tree(first_parent(merge))、revert 是失败合并的直接子提交、merge..revert 只含 1 个提交；集成分支指向 revert） |
-| `MERGE-REVERT-002` | revert 下游反向闭包覆盖全部下游状态 | 🟡 部分有断言 | `test_merge.py`：revert 失败或无法恢复时的出口已覆盖（revert_red → escalated，health 同步）；**缺口**：下游反向闭包（upstream_invalidated_seq、下游 Claim 冻结、merged 下游进 escalated）未实现，属 MVP-11 的集成级覆盖 |
+| `MERGE-REVERT-002` | revert 下游反向闭包覆盖全部下游状态 | 🟡 部分有断言 | `test_merge.py`：revert 失败或无法恢复时的出口已覆盖（revert_red → escalated，health 同步）；**缺口**：下游反向闭包（upstream_invalidated_seq、下游 Claim 冻结、merged 下游进 escalated）未实现。**MVP-11 复核**：属特性缺口而非测试缺口，已记录于终审报告 §5/§6-P2-2，随 revert 影响分析特性实现 |
 
 ## MVP 专有 ID（清单新增，不在 R10 §26 阶段列表内）
 
