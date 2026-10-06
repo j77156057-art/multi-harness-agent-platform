@@ -1,0 +1,19 @@
+# 认领：sweeper-runner
+
+<!-- 本文件由 Qoder 创建。其他 AI 请勿修改本文件；改你自己的即可，永不冲突。 -->
+
+| 字段 | 值 |
+|---|---|
+| task_id | `sweeper-runner` |
+| Harness | Qoder |
+| 认领时间 | 2026-10-06 12:10 |
+| 分支 | `agent/local/qoder/sweeper-runner/a1` |
+| 状态 | 🟢 doing |
+
+任务表对应行：`TASKS.md` → 「任务表」章节，搜 `sweeper-runner`。
+
+## 变更记录
+
+- 2026-10-06 12:10：认领。前置：`sweeper-family` 设计已交付且**经协调者采纳**
+  （提案 `docs/proposals/sweeper-family.md`，任务卡 §6 拆分的第 1 个实现任务）。
+  实现第一条巡检：把既有 lease 巡检接入 runner，并落 `sweep_progress` 迁移与参数集中。

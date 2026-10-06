@@ -74,6 +74,7 @@
 | root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 | claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
+| sweeper-runner | Qoder | sweeper-family | 🚧 doing | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
@@ -221,7 +222,7 @@
 | claims-split-review | [卡](docs/tasks/notes/claims-split-review.md) | slow-test-visibility | [卡](docs/tasks/notes/slow-test-visibility.md) |
 | report-mergeguard-commit-bug | [卡](docs/tasks/notes/report-mergeguard-commit-bug.md) | tasks-split | [卡](docs/tasks/notes/tasks-split.md) |
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
-| claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | | |
+| claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
 
 ## 共享文件改动声明
 
