@@ -147,8 +147,8 @@ git 对大于 128 KB（`core.bigFileThreshold`）的文件**不做 delta 压缩*
 `agent/local/qoder/MVP-11/a1` 上已创建 `48-qoder--MVP-11.md`（09:02）但尚未
 合入 main，导致 main 上缺 48 号。
 
-本文件取 **49**（48 已被 Qoder 占用），**必须等 Qoder 的 48 合入后**
-1..49 才连续，本分支才能通过门禁并合入。
+本文件原取 49，但 2026-10-06 10:30 Qoder/Claude/OpenCode 连续合入 48-51，
+49 被 OpenCode 的 `claim-denum` 占用，故改为 **52**。
 
 ## 附带发现：序号连续性断言会让所有人卡在同一个点
 
