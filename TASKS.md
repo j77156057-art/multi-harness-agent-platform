@@ -63,7 +63,7 @@
 | MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ 已验收（TRAE 外部核查，通过附遗留清单 5 项，无 P1；04:23 先合 main 已留档） | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
 | MVP-10b-verify | TRAE | MVP-10b | ✅ done（通过附遗留清单 5 项，无 P1） | `agent/local/trae/MVP-10b-verify/a1` | `MVP-ADAPTER-002` |
 | dup-incident | Claude Code | — | ✅ done | `agent/local/claude/dup-incident/a1` | `MVP-PROCESS-001` |
-| MVP-11 | Qoder | MVP-04~09 MVP-10b | 🚧 doing（MVP-09 按清单条款后置，见卡） | `agent/local/qoder/MVP-11/a1` | `CORE-STATE-COVERAGE-001` |
+| MVP-11 | Qoder | MVP-04~09 MVP-10b | ✅ done（MVP-09 按清单条款后置，见卡） | `agent/local/qoder/MVP-11/a1` | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
 | claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
@@ -1952,7 +1952,7 @@ commit：ea4126d（验收证据回填；登记提交 9dc09b8）
 `test_verify.py` 的 `build_chain` 回到基线。认领记录见
 `docs/claims/45-workbuddy--chain-template-closeout.md`。
 
-### MVP-11：集成测试与安全审查（🚧 doing）
+### MVP-11：集成测试与安全审查（✅ done）
 
 ~~~text
 任务编号：MVP-11
@@ -1995,7 +1995,27 @@ commit：ea4126d（验收证据回填；登记提交 9dc09b8）
   6. PYTHONUTF8=1 ./scripts.sh check 全绿。
 test_id：CORE-STATE-COVERAGE-001（汇总 MVP-04~10 既有 test_id 证据链）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-06 10:01
+commit：9a5527c（secret 扫描）、99175b1（状态覆盖+无主 release 修复）、318fa64（进程树+长路径）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  ruff        : All checks passed，77 files already formatted
+  pytest      : 241 passed（净增 17：安全 6 + 覆盖 6 + 进程树/心跳被拒/长路径 5），exit 0
+  终审报告     : docs/reports/mvp-final-report.md（含机械输出、九类交付归属表、21 态覆盖表、
+                 安全审查 10 项、健康状态机盘点、§29.2 格式问题清单）
+  关键发现     : ① 无主状态 release 合法但运行期崩溃（P1，已修：owner 空 → "unknown" 身份）；
+                 ② 深根+长任务名触发 Windows MAX_PATH（P1，已修：canonical 与 worktree 启用
+                 core.longpaths）；③ TRAE 验收 R2 进程树杀灭（已修）、R3 心跳被拒路径（已补测）；
+                 ④ secret 扫描三入口先于落库 + merge 闸门 fail-closed（全新）
+已知问题：
+  - **MVP-09 后置**：按清单「依赖现实」条款暂缓；MVP-UI-001 不在本次机械门内（报告 §0）。
+  - **7 态豁免**（报告 §3.2）：5 态无出口机制（计划修订/依赖巡检/资源巡检/reopen/人类裁决）、
+    2 态不可达（drift 探测器未实现）；反向守卫保证实现即红。
+  - **特性缺口（记录非静默）**：revert 下游反向闭包（MERGE-REVERT-002）、§17 后半段
+    （redact+加密归档）、artifact/mention 扫描面、独立 reverting 健康态——均见报告 §6。
+  - **门禁环境**：证据命令均带 PYTHONUTF8=1（P3-3，详见报告 §1.3）。
 ~~~
 
 ## 关键路径
