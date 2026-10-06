@@ -1,4 +1,4 @@
-### sweeper-runner：巡检器运行器（🚧 doing）
+### sweeper-runner：巡检器运行器（✅ done）
 
 ~~~text
 任务编号：sweeper-runner
@@ -28,5 +28,22 @@
      迁移冒烟、`--once` 入口端到端（临时 AP_DATA_DIR）
 test_id：SCHED-SWEEP-001
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 02:0x（跨零点，登记日 2026-10-06）
+commit：（本卡所在提交）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 46 项检查，0 失败（1 条 rootworktree 警告为他人根目录占用的旁证，非本任务）
+  ruff        : All checks passed
+  pytest      : 280 passed（本任务净增 7 项：test_sweeper_runner.py），exit 0
+  关键断言     : runner 真实驱动 lease 巡检（过期租约→stale，事件恰一条）；顺序列表钉死
+                 （插入中间必须有意为之）；同钟二跑 no-op（不重复转移）；sweep_progress
+                 迁移可用；入口三例（无库拒绝=2、--once 输出 JSON 行、--loop 在
+                 AP_SWEEPER_ENABLED=0 时拒绝=2）
+已知问题：
+  - 实施修订已在提案 §3 记录：不再并入操作员 CLI（MVP-09 的 HTTP-only 不变量），
+    改独立入口 `python -m app.scheduler`
+  - lifespan 后台形态未做（设计的第 3 形态），留运维接线
+  - 后续巡检（deps-resources / aging-stuck / workers / drift）按设计 §6 逐个认领，
+    每加一个都要同步更新 SWEEPS 顺序钉死测试与状态覆盖豁免表
 ~~~
