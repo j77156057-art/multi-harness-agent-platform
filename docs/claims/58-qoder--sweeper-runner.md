@@ -21,3 +21,7 @@
   `007_sweep_progress.sql` + Settings 巡检参数集中（10 项）+ 7 项测试。
   实施修订：入口从「并入操作员 CLI」改为独立 `python -m app.scheduler`（MVP-09
   CLI 的 HTTP-only 不变量），已记录进提案 §3 与任务卡。
+- 2026-10-07 02:3x：序号 56 → 58（第 14 次撞号）：WorkBuddy 对 deadlock-fix **迟登记**
+  拿了 56（其卡自报 late registration），撞上我 12:10 先行登记的 56；57 亦被
+  claim-denum-coordinator-review 的在途合并占用。连续性断言已撤销，唯一性与
+  「文件名 task_id == 内容」两项才是门禁，跳到 58 无害。
