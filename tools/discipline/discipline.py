@@ -22,6 +22,7 @@ dev-convention.md 里声明的 docstate 断言数是否与实际相符。
 
 退出码：0 = 全部通过；1 = 存在失败项；2 = 找不到被检查的文件
 """
+
 import argparse
 import collections
 import io
@@ -30,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 DEFAULT_TASKS = os.path.join("TASKS.md")
 # 2026-10-05 拆分：认领登记从 TASKS.md 的多写表格迁到「每task 一个独占文件」。
@@ -69,13 +71,34 @@ class Result:
         self.checks.append({"ok": bool(ok), "msg": msg, "group": group})
         return ok
 
+    def warn(self, msg, group=""):
+        """记一条**告警**：不判红、不影响退出码，但默认就打印，且进 JSON。
+
+        为什么需要第三个等级：rootworktree 组要在「调用方不是占用者」时
+        给出信息而不是红灯，而另两条路都是错的 ——
+        - `chk(False, ...)`：代价落回所有人身上。这正是 TRAE 评审
+          （root-worktree-clean-review 问题 6）要求改掉的东西：根工作区脏的
+          时候所有人的 `check` 全红，包括正在自己 worktree 干活的人。
+        - `chk(True, ...)`：一条**内容为假**的绿色项。门禁最忌讳这个——
+          绿灯里含假账，等于用「看起来通过」换「不阻塞」。
+
+        告警两条都不是：它明确说「这不是你的问题，但也别当没看见」，而
+        占用者本人在根工作区跑时仍然拿到红灯。
+        """
+        self.checks.append({"ok": True, "warn": True, "msg": msg, "group": group})
+        return True
+
     @property
     def failed(self):
         return [c for c in self.checks if not c["ok"]]
 
     @property
+    def warnings(self):
+        return [c for c in self.checks if c.get("warn")]
+
+    @property
     def passed(self):
-        return [c for c in self.checks if c["ok"]]
+        return [c for c in self.checks if c["ok"] and not c.get("warn")]
 
 
 def read(path):
@@ -197,7 +220,9 @@ def parse_cards(text):
             if cards and task_id is None:
                 cards[-1]["body"] += "\n### " + block
             continue
-        cards.append({"title": title, "fields": fields, "body": block, "task_id": task_id})
+        cards.append(
+            {"title": title, "fields": fields, "body": block, "task_id": task_id}
+        )
     return cards
 
 
@@ -218,7 +243,9 @@ def has_verification_evidence(card):
     因此这里接受两种形式，而不是逼着改写历史记录。
     """
     body = card["body"]
-    if re.search(r"验证结果[：:]\s*\n\s*\S", body) or re.search(r"验证结果[：:]\s*\S", body):
+    if re.search(r"验证结果[：:]\s*\n\s*\S", body) or re.search(
+        r"验证结果[：:]\s*\S", body
+    ):
         return True
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
@@ -278,7 +305,12 @@ def check_registry(result, tasks_text, repo_root=None):
     result.chk(
         not dup_seq,
         "认领文件序号唯一；重复=%s（%d 个文件，序号范围 %s~%s）"
-        % (dup_seq or "无", len(seqs), min(seqs) if seqs else "-", max(seqs) if seqs else "-"),
+        % (
+            dup_seq or "无",
+            len(seqs),
+            min(seqs) if seqs else "-",
+            max(seqs) if seqs else "-",
+        ),
         "registry",
     )
     tids = [c["task_id"] for c in claims]
@@ -343,8 +375,11 @@ def check_registry(result, tasks_text, repo_root=None):
         "registry",
     )
 
-    bad_status = [t["task_id"] for t in tasks if not any(
-        keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)]
+    bad_status = [
+        t["task_id"]
+        for t in tasks
+        if not any(keyword in t["status"] for keyword in LEGAL_STATUS_KEYWORDS)
+    ]
     result.chk(
         not bad_status,
         "任务表状态列取值合法；非法=%s" % (bad_status or "无"),
@@ -433,12 +468,18 @@ def check_cards(result, tasks_text, claims):
     result.chk(
         claim_ids <= set(cards),
         "已认领且非在途的任务都有任务卡；缺卡=%s（豁免在途 %d 个：%s）"
-        % (sorted(claim_ids - set(cards)) or "无", len(in_flight), sorted(in_flight) or "无"),
+        % (
+            sorted(claim_ids - set(cards)) or "无",
+            len(in_flight),
+            sorted(in_flight) or "无",
+        ),
         "cards",
     )
 
     missing_truth = [
-        task_id for task_id, card in cards.items() if not card["fields"].get("真相源引用")
+        task_id
+        for task_id, card in cards.items()
+        if not card["fields"].get("真相源引用")
     ]
     result.chk(
         not missing_truth,
@@ -446,7 +487,9 @@ def check_cards(result, tasks_text, claims):
         "cards",
     )
 
-    missing_test_id = [task_id for task_id, card in cards.items() if not card["fields"].get("test_id")]
+    missing_test_id = [
+        task_id for task_id, card in cards.items() if not card["fields"].get("test_id")
+    ]
     result.chk(
         not missing_test_id,
         "任务卡均有 test_id（H-4：没有 test_id 的完成标准不可验收）；缺=%s"
@@ -456,7 +499,8 @@ def check_cards(result, tasks_text, claims):
 
     # 工作区（H-7）只对未完成的任务强制：字段是后加的，不追溯改写历史卡片
     unfinished = [
-        task_id for task_id, card in cards.items()
+        task_id
+        for task_id, card in cards.items()
         if not is_finished(card["fields"].get("当前状态", ""))
     ]
     without_worktree = [
@@ -471,8 +515,10 @@ def check_cards(result, tasks_text, claims):
 
     # 完成的卡片必须留下可追溯的 commit 与验证证据（登记规则第 3 条）
     bad_commit = [
-        task_id for task_id, card in cards.items()
-        if is_finished(card["fields"].get("当前状态", "")) and not card["fields"].get("commit")
+        task_id
+        for task_id, card in cards.items()
+        if is_finished(card["fields"].get("当前状态", ""))
+        and not card["fields"].get("commit")
     ]
     result.chk(
         not bad_commit,
@@ -481,7 +527,8 @@ def check_cards(result, tasks_text, claims):
     )
 
     no_evidence = [
-        task_id for task_id, card in cards.items()
+        task_id
+        for task_id, card in cards.items()
         if is_finished(card["fields"].get("当前状态", ""))
         and not has_verification_evidence(card)
     ]
@@ -588,7 +635,9 @@ def expand_dependency_cell(cell):
         r"(MVP-)?(\d+)([a-z]?)\s*[~～]\s*(?:MVP-)?(\d+)([a-z]?)", expand_range, cell
     )
 
-    tokens = [t for t in re.split(r"[\s、,，/＋+]+", cell) if t and t not in {"稳定", "个"}]
+    tokens = [
+        t for t in re.split(r"[\s、,，/＋+]+", cell) if t and t not in {"稳定", "个"}
+    ]
     expanded = set()
     for token in tokens:
         bare = re.fullmatch(r"(MVP-)?(\d+)([a-z]?)", token)
@@ -616,7 +665,7 @@ def parse_checklist_dependencies(repo_root):
     deps = {}
     for match in re.finditer(r"^### (MVP-\d+)[：:][^\n]*$", text, re.M):
         task_id = match.group(1)
-        block = text[match.end():match.end() + 400]
+        block = text[match.end() : match.end() + 400]
         found = set()
 
         declared = re.search(r"^依赖：(.+)$", block, re.M)
@@ -692,7 +741,7 @@ def _shared_file_owners(tasks_text):
     m = re.search(r"^##\s*共享文件改动声明.*$", tasks_text, re.M)
     if not m:
         return set()
-    block = tasks_text[m.end():]
+    block = tasks_text[m.end() :]
     nxt = re.search(r"^##\s", block, re.M)
     if nxt:
         block = block[: nxt.start()]
@@ -780,7 +829,8 @@ def check_dependencies(result, repo_root, tasks):
             continue
         if deps != declared[task_id]:
             mismatched.append(
-                "%s 表=%s 清单=%s" % (task_id, sorted(deps) or "无", sorted(declared[task_id]) or "无")
+                "%s 表=%s 清单=%s"
+                % (task_id, sorted(deps) or "无", sorted(declared[task_id]) or "无")
             )
     result.chk(
         not mismatched,
@@ -789,8 +839,11 @@ def check_dependencies(result, repo_root, tasks):
     )
 
     # 清单 §0.2 声明的关键路径必须是依赖图里的一条最长路径
-    critical = re.search(r"### 0\.2.*?~~~text\n(.*?)\n~~~", read(
-        os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")), re.S)
+    critical = re.search(
+        r"### 0\.2.*?~~~text\n(.*?)\n~~~",
+        read(os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")),
+        re.S,
+    )
     if not critical:
         result.chk(False, "清单缺少 §0.2 关键路径区块", "deps")
         return
@@ -813,7 +866,9 @@ def check_dependencies(result, repo_root, tasks):
     # 散文里手写的那个数字才是真正会漂移的地方：原缺陷就出在这句
     # 「关键路径长度 7 个任务」上，而上面的图当时也跟着写错了，两者一起错才没被发现。
     # 只校验图会漏掉「图对了但数字忘了改」这种更常见的情况。
-    checklist_text = read(os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md"))
+    checklist_text = read(
+        os.path.join(repo_root, "docs", "spec", "mvp-task-checklist.md")
+    )
     prose = re.search(r"关键路径长度\s*\*\*(\d+)\s*个任务\*\*", checklist_text)
     if not prose:
         result.chk(False, "清单 §0.2 未声明「关键路径长度 N 个任务」", "deps")
@@ -826,7 +881,7 @@ def check_dependencies(result, repo_root, tasks):
         )
 
     # 关键路径上的每个相邻对必须是真实的依赖边。链里 a → b 表示「b 依赖 a」，
-# 而 registry[task] 存的是 task 自己的依赖，所以要查 a 是否在 registry[b] 里。
+    # 而 registry[task] 存的是 task 自己的依赖，所以要查 a 是否在 registry[b] 里。
     broken_edges = [
         "%s→%s" % (a, b)
         for a, b in zip(longest_chain, longest_chain[1:])
@@ -841,7 +896,9 @@ def check_dependencies(result, repo_root, tasks):
     # TASKS.md 的「关键路径」是同一份数据的第二个副本，同样必须校验。上一轮只管了
     # 清单那份，于是 TASKS.md 里的旧副本（漏了 MVP-03 与 MVP-10b）无人拦，下一个读
     # TASKS.md 的人会拿到已被推翻的结论。
-    tasks_critical = section(read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径")
+    tasks_critical = section(
+        read(os.path.join(repo_root, DEFAULT_TASKS)), "## 关键路径"
+    )
     if not tasks_critical:
         result.chk(False, "TASKS.md 缺少「## 关键路径」章节", "deps")
         return
@@ -873,20 +930,225 @@ def check_traceability(result, repo_root, tasks):
     """
     path = os.path.join(repo_root, "docs", "traceability.md")
     if not os.path.exists(path):
-        result.chk(False, "docs/traceability.md 存在（H-4 要求登记于此）", "traceability")
+        result.chk(
+            False, "docs/traceability.md 存在（H-4 要求登记于此）", "traceability"
+        )
         return
 
     text = read(path)
-    registered = set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text))
+    registered = set(
+        re.findall(
+            r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b", text
+        )
+    )
     used = set()
     for task in tasks:
-        used |= set(re.findall(r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b",
-                               task["test_id"]))
+        used |= set(
+            re.findall(
+                r"\b(?:DOC|CORE|GIT|VERIFY|MERGE|MVP)-[A-Z0-9]+(?:-[A-Z0-9]+)+\b",
+                task["test_id"],
+            )
+        )
     missing = sorted(used - registered)
     result.chk(
         not missing,
-        "任务表用到的 test_id 均已登记到 traceability.md；未登记=%s" % (missing or "无"),
+        "任务表用到的 test_id 均已登记到 traceability.md；未登记=%s"
+        % (missing or "无"),
         "traceability",
+    )
+
+
+def root_worktree_of(repo_root):
+    """定位主工作区（仓库根）目录。
+
+    不能直接用 `repo_root`——本检查器常从任务 worktree 运行，那时
+    `repo_root` 指向 `.worktrees/<harness>`，而要检查的是仓库根。
+    借 `git rev-parse --git-common-dir` 反推：它返回共享 git 目录
+    `<root>/.git`，其父目录即主工作区。
+
+    刻意不用 `git worktree list`：那需要能列出 worktree，在裁剪过的
+    环境里可能不可用，而 common-dir 的反推只需要一个 git 仓库。
+    """
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            repo_root,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return None
+    common = os.path.normpath(proc.stdout.strip())
+    return os.path.dirname(common)
+
+
+#: `git status --porcelain` 前两列里代表「未合并（冲突）」的取值。
+#: 双边冲突 = UU/AA/DD，修改/删除冲突 = AU/UA/DU/UD。
+UNMERGED_STATUS_CODES = ("UU", "AA", "DD", "AU", "UA", "DU", "UD")
+
+
+def _merge_exemption_verdict(root, unmerged):
+    """根工作区有 MERGE_HEAD 时，判断这次合并是否**受控且正在进行**。
+
+    返回 (放行?, 说明)。
+
+    原来的判据是「`.git/MERGE_HEAD` 存在就放行」。TRAE 评审问题 1 打穿了
+    这一点：本组卡里声明的头号场景就是「别人在根工作区写代码、留下未解决
+    冲突」，而那种形态恰好**同时**满足 MERGE_HEAD 存在 —— 于是本组在自己
+    声明要防的场景里判 ok=True，承诺的持续施压为零。更糟的是子 agent 实证：
+    **手工写一个 40 字符的 `.git/MERGE_HEAD` 就能让占用状态静音。**
+
+    判据收紧为两条**必须同时**成立：
+
+    1. **没有未合并条目**（UU/AA/DD/AU/UA/DU/UD 一律不放行）。别人留下的
+       冲突就是这种形态；受控合并走到门禁时冲突早已解完。
+    2. **合并锁有活着的持有者**（`<common>/merge-lock/owner.json` 里的 pid
+       仍存活）。只有 `tools/mergeguard` 会取这把锁，所以这等于「这次合并
+       确实由受控入口发起，且发起者还活着」。
+
+    读不到锁、或 import 失败，都判不放行 —— 无法证明归属就不放行。
+    """
+    if unmerged:
+        return False, "存在 %d 个未合并条目（%s），判定为遗留冲突，不放行" % (
+            len(unmerged),
+            "、".join(p.split()[-1] for p in unmerged[:3]),
+        )
+
+    try:
+        from tools.mergeguard import guard  # 延迟 import：仅本分支需要
+    except Exception as error:  # noqa: BLE001 - 读不到就一律不放行
+        return False, "无法导入 mergeguard 以核对合并锁（%s），不放行" % error
+
+    try:
+        holder = guard.read_lock(Path(root))
+    except Exception as error:  # noqa: BLE001
+        return False, "读取合并锁失败（%s），不放行" % error
+
+    if holder is None:
+        return False, "MERGE_HEAD 存在但没有合并锁持有者记录（非受控合并），不放行"
+    if not guard.is_holder_alive(holder):
+        return False, (
+            "MERGE_HEAD 存在但合并锁持有者 %s（pid %s）已退出，"
+            "属崩溃残留，不放行" % (holder.task_id, holder.pid)
+        )
+    return True, "受控合并进行中（锁持有者 %s，pid %s 存活）" % (holder.task_id, holder.pid)
+
+
+def root_worktree_status(repo_root):
+    """(ok, detail)：根工作区在非合并状态下是否干净。
+
+    fail-closed 与 merge 组一致：定位不到根工作区、或 git 不可用，都判失败。
+    静默放行等于没有这道检查——而这正是本组要防的那类事故。
+
+    合并进行中**不一定**放行：只有「无未合并条目 + 合并锁持有者存活」才算
+    受控合并，否则判红。见 `_merge_exemption_verdict` 的理由。
+    """
+    root = root_worktree_of(repo_root)
+    if root is None or not os.path.isdir(root):
+        return False, "无法定位主工作区（git 不可用或不在 git 仓库内）；fail-closed"
+
+    proc = subprocess.run(
+        ["git", "-C", root, "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        return False, "git status 在主工作区失败：%s" % (proc.stderr or "").strip()
+
+    lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    unmerged = [ln for ln in lines if ln[:2] in UNMERGED_STATUS_CODES]
+
+    if os.path.exists(os.path.join(root, ".git", "MERGE_HEAD")):
+        allowed, why = _merge_exemption_verdict(root, unmerged)
+        if allowed:
+            return True, "根工作区正处于合并中（%s），放行" % why
+        return False, (
+            "根工作区有 MERGE_HEAD 但%s。别人在合并区留下未解决冲突正是本组要防的"
+            "形态，不放行" % why
+        )
+
+    if not lines:
+        return True, "主工作区干净"
+
+    shown = lines[:8]
+    extra = "" if len(lines) <= 8 else "（另有 %d 行）" % (len(lines) - 8)
+    detail = "；".join(s.strip() for s in shown) + extra
+    return (
+        False,
+        "主工作区（%s）有未提交改动：%s。根目录只用于合并与跑门禁，"
+        "开发请在 .worktrees/<harness>/ 里做" % (os.path.basename(root), detail),
+    )
+
+
+def _same_dir(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def check_root_worktree(result, repo_root, reader=root_worktree_status):
+    """断言：根工作区在非合并状态下没有未提交改动。
+
+    **判定对象是「占用者」，不是「所有人」** —— 这是本组在 TRAE 评审
+    （root-worktree-clean-review 问题 6）之后的正式形态。
+
+    早先版本一视同仁：根工作区脏 → 所有人的 `check` 全红，包括正在自己
+    worktree 干活、跟这事毫无关系的人。今天这个代价已经实际发生：它堵了
+    十几次合并，其中几次是我自己的。**代价落在所有人身上，却只有一个人
+    是原因** —— 那是错配。
+
+    现在的规则：
+
+    - 调用方**就在根工作区**（即占用者本人）→ 严格判红。代价落在他身上，
+      这正是这条断言设计时想要的强制函数。
+    - 调用方在**别的 worktree** → 记**告警**：明确点名文件、说明占用者
+      自己会看到红灯，但不判红、不阻塞他干活。
+    - **定位不到主工作区 / git 不可用** → 对任何人都 fail-closed 判红。
+      这条不因为「作用域反转」而放松：无法判断状态时静默放行，等于没有
+      这道检查。
+
+    为什么占用者能被识别出来：他要在根工作区留下改动，就必须**在根工作区
+    里**跑命令。这是这条设计的立足点。
+    """
+    root = root_worktree_of(repo_root)
+    if root is None or not os.path.isdir(root):
+        result.chk(
+            False,
+            "无法定位主工作区（git 不可用或不在 git 仓库内）；fail-closed",
+            "rootworktree",
+        )
+        return
+
+    ok, detail = reader(repo_root)
+    if ok:
+        result.chk(
+            True,
+            "根工作区在非合并状态下无未提交改动（%s）" % detail,
+            "rootworktree",
+        )
+        return
+
+    if _same_dir(repo_root, root):
+        # 占用者本人：红灯。
+        result.chk(False, "根工作区有未提交改动：%s" % detail, "rootworktree")
+        return
+
+    result.warn(
+        "根工作区（%s）被占用，但本次是从 %s 运行的，**不判红**——"
+        "占用者自己跑 check 时会看到红灯。占用内容：%s"
+        % (
+            os.path.basename(root),
+            os.path.basename(os.path.abspath(repo_root)),
+            detail,
+        ),
+        "rootworktree",
     )
 
 
@@ -922,7 +1184,9 @@ def branch_tokens(cell):
     反引号片段；无反引号时退回整格文本。
     """
     tokens = re.findall(r"`([^`]+)`", cell or "")
-    return [token.strip() for token in tokens if token.strip()] or [normalize_branch(cell)]
+    return [token.strip() for token in tokens if token.strip()] or [
+        normalize_branch(cell)
+    ]
 
 
 def git_merged_branches(repo_root):
@@ -931,6 +1195,7 @@ def git_merged_branches(repo_root):
     fail-closed：不是 git 工作区、git 不可用、**浅克隆**都判失败。浅克隆时
     `git log --merges` 可能为空，静默放行等于没有这道检查；CI 必须 fetch-depth: 0。
     """
+
     def git(*args):
         try:
             return subprocess.run(
@@ -1009,18 +1274,15 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
     )
 
     merged_tasks = {
-        branch_to_task[branch]: branch
-        for branch in merged if branch in branch_to_task
+        branch_to_task[branch]: branch for branch in merged if branch in branch_to_task
     }
     unfinished = sorted(
-        task_id for task_id in merged_tasks
-        if not is_finished(status.get(task_id, ""))
+        task_id for task_id in merged_tasks if not is_finished(status.get(task_id, ""))
     )
     result.chk(
         not unfinished,
         "已合入 main 的任务在任务表均已完成；未完成=%s（含分支 %s）"
-        % (unfinished or "无",
-           {t: merged_tasks[t] for t in unfinished} or "无"),
+        % (unfinished or "无", {t: merged_tasks[t] for t in unfinished} or "无"),
         "merge",
     )
 
@@ -1033,16 +1295,18 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
     # 只对已完成卡强制证据：未完成的已在上一条列出，避免一条问题刷两次红灯。
     no_evidence = sorted(
-        task_id for task_id in merged_tasks
+        task_id
+        for task_id in merged_tasks
         if task_id in cards
         and is_finished(cards[task_id]["fields"].get("当前状态", ""))
-        and (not cards[task_id]["fields"].get("commit")
-             or not has_verification_evidence(cards[task_id]))
+        and (
+            not cards[task_id]["fields"].get("commit")
+            or not has_verification_evidence(cards[task_id])
+        )
     )
     result.chk(
         not no_evidence,
-        "已合入 main 的完成任务卡均填 commit 与验证证据；缺=%s"
-        % (no_evidence or "无"),
+        "已合入 main 的完成任务卡均填 commit 与验证证据；缺=%s" % (no_evidence or "无"),
         "merge",
     )
     result.chk(
@@ -1054,6 +1318,7 @@ def check_merge(result, repo_root, tasks, claims, cards, lister=git_merged_branc
 
 def git_local_branches(repo_root):
     """枚举本地分支名。fail-closed：git 不可用或不在工作区时返回 (False, [], 原因)。"""
+
     def git(*args):
         try:
             return subprocess.run(
@@ -1084,7 +1349,11 @@ def git_local_branches(repo_root):
     listed = git("for-each-ref", "--format=%(refname:short)", "refs/heads/")
     if listed.returncode != 0:
         return False, [], "无法列出本地分支"
-    return True, [line.strip() for line in listed.stdout.splitlines() if line.strip()], ""
+    return (
+        True,
+        [line.strip() for line in listed.stdout.splitlines() if line.strip()],
+        "",
+    )
 
 
 def git_out(repo_root, *args):
@@ -1101,7 +1370,9 @@ def git_out(repo_root, *args):
     return proc.stdout if proc.returncode == 0 else None
 
 
-def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches, out=git_out):
+def check_branch_visibility(
+    result, repo_root, tasks, lister=git_local_branches, out=git_out
+):
     """组 N：未合入 main 但已有提交的任务分支，其认领是否已登记。
 
     与 merge 组互补：merge 组只看**已合入**的分支是否登记过；本组看**还没合入**
@@ -1142,11 +1413,16 @@ def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches,
         matched = next((s for s in segments[1:] if s in status), None)
         if matched is None or not is_waiting(status[matched]):
             continue
-        count = (out(repo_root, "rev-list", "--count", "main..%s" % branch) or "").strip()
+        count = (
+            out(repo_root, "rev-list", "--count", "main..%s" % branch) or ""
+        ).strip()
         if count in {"", "0"}:
             continue  # 没有 main 之外的提交，不是在途工作
         # 尾斜杠表示「列出目录内容」；不带则只返回目录条目本身，查不到文件
-        listing = out(repo_root, "ls-tree", "--name-only", branch, "--", CLAIMS_DIR + "/") or ""
+        listing = (
+            out(repo_root, "ls-tree", "--name-only", branch, "--", CLAIMS_DIR + "/")
+            or ""
+        )
         entry = "%s（领先 main %s 提交）" % (branch, count)
         (pending if matched in listing else unregistered).append(entry)
 
@@ -1164,6 +1440,25 @@ def check_branch_visibility(result, repo_root, tasks, lister=git_local_branches,
 
 
 def run(repo_root="."):
+    """跑全部检查。**没有豁免机制**。
+
+    这里曾有过 `--skip-group`（commit cc4e4af），现已整体删除。删除理由是
+    TRAE 评审（root-worktree-clean-review 问题 2/3）给出的三条：
+
+    1. **它不解决任何问题。** mergeguard 合并时那个「根工作区必然是脏的」
+       窗口，父提交里 rootworktree 组自带的豁免已经覆盖 —— 那时我加第二层
+       豁免时**没有先验证它是否必要**，立论与父提交自相矛盾。
+    2. **它是个通用后门。** 无组名白名单、无理由参数、无鉴权；实测对**全部
+       组**重复传参可得 exit 0、0 项检查 0 失败。任何一个 agent 都能让整个
+       门禁静默空转。
+    3. **留痕对机器无效。** `{"skipped": ...}` 只写 stderr，而
+       `.github/workflows/gate.yml` 的 `--json` 重定向**只收 stdout**，
+       消费方看不到少跑了断言；合并 stdout+stderr 的消费方则会拿到
+       「一行 JSON + 一段 pretty JSON」，两种 parse 都坏。
+
+    真正该修的是豁免的**判据**（见 root_worktree_status），不是加一个
+    让人能关掉检查的开关。
+    """
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
     if not os.path.exists(tasks_path):
@@ -1178,6 +1473,7 @@ def run(repo_root="."):
     check_traceability(result, repo_root, tasks)
     check_merge(result, repo_root, tasks, claims, cards)
     check_branch_visibility(result, repo_root, tasks)
+    check_root_worktree(result, repo_root)
     return result
 
 
@@ -1195,12 +1491,22 @@ def main():
         return 2
 
     if args.json:
-        print(json.dumps({
-            "total": len(result.checks),
-            "passed": len(result.passed),
-            "failed": len(result.failed),
-            "checks": result.checks,
-        }, ensure_ascii=False, indent=2))
+        # warnings 放在 **stdout 的 JSON 体里**，不写 stderr。TRAE 评审问题 3
+        # 的教训：`.github/workflows/gate.yml` 用 `--json` 重定向只收 stdout，
+        # 写到 stderr 的留痕消费方根本看不到。
+        print(
+            json.dumps(
+                {
+                    "total": len(result.checks),
+                    "passed": len(result.passed),
+                    "failed": len(result.failed),
+                    "warnings": len(result.warnings),
+                    "checks": result.checks,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print("=== discipline: %s ===" % args.repo)
         groups = collections.OrderedDict()
@@ -1208,14 +1514,26 @@ def main():
             groups.setdefault(check["group"], []).append(check)
         for group, items in groups.items():
             bad = [i for i in items if not i["ok"]]
-            print("[%s] %d 项，%d 失败" % (group, len(items), len(bad)))
+            warned = [i for i in items if i.get("warn")]
+            extra = "，%d 告警" % len(warned) if warned else ""
+            print("[%s] %d 项，%d 失败%s" % (group, len(items), len(bad), extra))
             for item in items:
                 if not item["ok"]:
                     print("   FAIL  " + item["msg"])
+                elif item.get("warn"):
+                    # 告警**默认就打印**，不需要 --verbose：它的全部意义就是
+                    # 「不该被静默」。--verbose 控制的是通过项。
+                    print("   WARN  " + item["msg"])
                 elif args.verbose:
                     print("   ok    " + item["msg"])
         print("")
-        print("结果: %d 项检查，%d 项失败" % (len(result.checks), len(result.failed)))
+        summary = "结果: %d 项检查，%d 项失败" % (
+            len(result.checks),
+            len(result.failed),
+        )
+        if result.warnings:
+            summary += "，%d 项告警" % len(result.warnings)
+        print(summary)
 
     return 1 if result.failed else 0
 

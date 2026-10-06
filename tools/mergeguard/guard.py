@@ -101,7 +101,14 @@ def _git_common_dir_cached(key: str) -> str:
     # encoding 必须显式指定：Windows 上 text=True 默认按 GBK 解码，而 git 输出
     # 的路径/提交信息含 UTF-8 中文，会直接抛 UnicodeDecodeError。
     out = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        [
+            "git",
+            "-C",
+            str(repo),
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        ],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -138,6 +145,20 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def is_holder_alive(info: LockInfo) -> bool:
+    """持有者进程此刻是否还活着。
+
+    与 `is_stale` 里的判据分开命名，因为**两者回答的是不同问题**：
+    `is_stale` 判「该不该接管」（死 且 超 TTL）；这里判「这是不是一次正在
+    进行的合并」（死 或 活）。
+
+    单独暴露而不是让调用方去摸私有的 `_pid_alive`：`discipline` 的
+    rootworktree 组要用它判断「根工作区的 MERGE_HEAD 是不是受控合并留下的」，
+    那是跨模块的公开需求，不该靠约定私有名。
+    """
+    return _pid_alive(info.pid)
 
 
 def read_lock(repo: Path) -> LockInfo | None:

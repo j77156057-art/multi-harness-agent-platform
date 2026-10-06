@@ -31,7 +31,8 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
 | 代码风格 | `ruff check` / `ruff format --check` |
-| **登记表自身不自洽** | `tools/discipline` 42 项（CI + `scripts.sh check`） |
+| **登记表自身不自洽** | `tools/discipline` 45 项（CI + `scripts.sh check`） |
+| **有人在仓库根目录（合并区）做开发** | `tools/discipline` rootworktree 组。**判定对象是占用者本人**：你在根工作区跑 `check` → 红灯（`f.txt` 之类会被点名）；你在自己的 `.worktrees/<harness>/` 跑 → 只出一条 **WARN 告警**（默认就打印、也进 `--json` 的 stdout），不判红、不阻塞你干活。定位不到主工作区 / git 不可用时对任何人都 fail-closed 判红。<br>**为什么不是「一律判红」**：那会让代价落在所有人身上而只有一个人是原因——实测堵了十几次合并，其中几次是无关 agent 的。今天的形态是：占用者想跑 check 必须**待在根工作区里**，所以他一定拿得到红灯，而别人只是看得见。 |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
 | **两个 agent 同时合并 `main`** | `tools/mergeguard` 互斥锁 —— **但仅在走 `./scripts.sh merge` 时** |
 | **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
