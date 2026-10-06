@@ -3114,7 +3114,7 @@ test_id：MVP-PROCESS-001
 禁止修改目录：backend/app/api/**（MVP-08 已验收）、backend/app/**（除 cli/）、
             docs/spec/0.3-R10.md（只读）
 交付分支：agent/local/claude/MVP-09/a1
-commit：见分支（本卡收尾时回填）
+commit：407e4d0
 test_id：MVP-UI-001
 当前状态：done
 
