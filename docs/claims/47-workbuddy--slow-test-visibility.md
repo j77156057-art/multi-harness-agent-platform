@@ -6,7 +6,7 @@
 | Harness | WorkBuddy |
 | 认领时间 | 2026-10-06 08:45 |
 | 分支 | `agent/workbuddy/slow-test-visibility` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done |
 | 工作区 | `.worktrees/workbuddy/` |
 | 依据 | `test_verify.py` 全量763s 无人在看；慢测试只有作者自己知道 |
 
@@ -40,5 +40,7 @@
 - `pytest -q` 的输出里能看到慢测试排行与点名汇总；
 - `pytest -m "not slow"` 能跑出一轮快的；
 - 门禁四道全绿。
+
+提交：`9f122cd`
 
 Refs: MVP-PROCESS-001

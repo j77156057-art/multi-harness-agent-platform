@@ -31,7 +31,7 @@
 | R10-fix-10-card | TRAE | R10-fix-10 | ✅ done | `agent/local/trae/r10-fix-10-card/a1` | `MVP-PROCESS-001` |
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/workbuddy/chain-template-rejected` | `MVP-PROCESS-001` |
-| slow-test-visibility | WorkBuddy | — | 🟢 doing（让慢测试对所有 AI 可见，未提交） | `agent/workbuddy/slow-test-visibility` | `MVP-PROCESS-001` |
+| slow-test-visibility | WorkBuddy | — | ✅ done（慢测试排行 + slow marker 已落地） | `agent/workbuddy/slow-test-visibility` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -2794,7 +2794,8 @@ commit：（本次收尾提交）
   4. pytest -m "not slow" 能跑出快的一轮 ✅ 6s vs 全量 763s
 test_id：MVP-PROCESS-001
 测试命令：./scripts.sh check
-当前状态：doing（待提交后补 commit 号）
+commit：9f122cd
+当前状态：done
 验证结果：
   - 慢测试汇总（默认 10s 阈值）实测输出：
       2 个超过 10s，合计 64.8s（100% 的测试时间）
