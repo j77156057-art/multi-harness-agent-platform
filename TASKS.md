@@ -72,7 +72,7 @@
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
 | root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 | claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
-| sweeper-family | Qoder | — | 🚧 doing（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
+| sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -2098,7 +2098,7 @@ commit：ad25535
   claims 拆分同类——847cc69 只拆了认领表，复核记录和任务卡留在原地。
 ~~~
 
-### sweeper-family：巡检器家族设计（🚧 doing）
+### sweeper-family：巡检器家族设计（✅ done，提案待裁决）
 
 ~~~text
 任务编号：sweeper-family
@@ -2134,7 +2134,19 @@ commit：ad25535
   5. 风险与开放问题：竞态、时钟跳变、verify_run 对账、block SLA 取值等
 test_id：SCHED-SWEEP-001（设计阶段编号；实现类测试 id 由实现任务落地）
 测试命令：PYTHONUTF8=1 ./scripts.sh check（文档门禁）
-当前状态：doing
+当前状态：done（作者完成，待合入；**设计采纳与否待评审裁决**）
+完成时间：2026-10-06 11:40
+commit：（本卡所在提交）
+交付物：docs/proposals/sweeper-family.md（约 230 行）—— 10 组巡检查规格表、
+        运行器架构（单循环/时钟/并发/幂等）、参数清单（现有 vs 新增 10 项）、
+        覆盖对接（豁免 7→3）、实现任务拆分（5+1）、风险与 3 个开放问题（O1/O2/O3）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败（本任务把依赖列写作「—」，避免过程任务
+                拉长声明的关键路径 9 节点——这是门禁的机制约束，已在卡内注明）
+  评审抓手     : R10 守卫列逐条对照（§2 每行引原文）；开放问题 O1（离线请求者的
+                延迟 Claim 归属）、O2（verify 进程对账的近似）、O3（漂移指纹冻结值
+                落点）需要裁决后才能开对应实现任务
 ~~~
 
 ## 关键路径
