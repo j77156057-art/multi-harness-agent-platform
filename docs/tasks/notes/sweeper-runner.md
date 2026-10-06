@@ -30,7 +30,7 @@ test_id：SCHED-SWEEP-001
 测试命令：PYTHONUTF8=1 ./scripts.sh check
 当前状态：done（作者完成，待合入；外部验收待认）
 完成时间：2026-10-07 02:0x（跨零点，登记日 2026-10-06）
-commit：（本卡所在提交）
+commit：`fbc4496`（补记于 sweeper-deps-resources 任务，2026-10-07）
 验证结果：
   docstate    : 90 项检查，0 项失败
   discipline  : 46 项检查，0 失败（1 条 rootworktree 警告为他人根目录占用的旁证，非本任务）

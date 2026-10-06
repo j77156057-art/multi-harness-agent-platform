@@ -6,6 +6,13 @@
 
 from app.scheduler.report import SweepReport
 from app.scheduler.runner import SWEEPS, run_all_sweeps
-from app.scheduler.sweeps import sweep_expired_leases
+from app.scheduler.sweeps import sweep_dependencies, sweep_expired_leases, sweep_resources
 
-__all__ = ["SWEEPS", "SweepReport", "run_all_sweeps", "sweep_expired_leases"]
+__all__ = [
+    "SWEEPS",
+    "SweepReport",
+    "run_all_sweeps",
+    "sweep_dependencies",
+    "sweep_expired_leases",
+    "sweep_resources",
+]

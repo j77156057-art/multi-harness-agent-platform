@@ -18,13 +18,22 @@ from datetime import UTC, datetime
 
 from app.db.connection import Database
 from app.scheduler.report import SweepReport
-from app.scheduler.sweeps import sweep_expired_leases
+from app.scheduler.sweeps import (
+    sweep_dependencies,
+    sweep_expired_leases,
+    sweep_resources,
+)
 
 Sweep = Callable[[Database, datetime], SweepReport]
 
 #: Fixed execution order. New sweeps append themselves here (and to the test
-#: that pins this list) in the task that implements them.
-SWEEPS: tuple[tuple[str, Sweep], ...] = (("expired_leases", sweep_expired_leases),)
+#: that pins this list) in the task that implements them. The lease sweep runs
+#: first so later sweeps observe the states it just produced (design §7.1).
+SWEEPS: tuple[tuple[str, Sweep], ...] = (
+    ("expired_leases", sweep_expired_leases),
+    ("dependencies", sweep_dependencies),
+    ("resources", sweep_resources),
+)
 
 
 def run_all_sweeps(database: Database, *, now: datetime | None = None) -> list[SweepReport]:

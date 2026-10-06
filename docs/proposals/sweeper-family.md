@@ -219,6 +219,15 @@ app/scheduler/
 4. **verify 进程对账近似（O2）**：明示近似，禁止静默。
 5. **O1**（离线请求者的延迟 Claim）与 **O3**（漂移指纹的冻结值落点）需评审裁决后
    对应实现任务才开工。
+
+> **裁定记录（2026-10-07）**：
+> - **O1：照字面授予**（协调者裁定，sweeper-deps-resources 任务落地）——
+>   `resource_available → claimed` 不检查原请求方存活；请求者离线只是让新发的
+>   开发租约到期，之后走既有 stale/reclaim 链（该链的端到端已由
+>   `test_sweeper_deps_resources::test_the_offline_requester_ends_in_the_existing_stale_chain`
+>   钉死）。请求者身份从 `claim_deferred_resource` 事件的 actor 恢复
+>   （R10 §11 禁止在延迟行上写 owner，事件是持久凭据）。
+> - **O2/O3：仍待裁决**（分别在 `sweeper-workers`、`sweeper-drift` 开单前给出即可）。
 6. 本设计的实现全部落在 `backend/app/scheduler/**` + 1 个迁移 + `app/cli` 接线；
    不触碰 claim/lease/verify/merge 的既有事务边界（只读它们的状态与 lease 表）。
 

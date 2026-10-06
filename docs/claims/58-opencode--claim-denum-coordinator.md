@@ -7,7 +7,7 @@
 | task_id | `claim-denum-coordinator` |
 | Harness | OpenCode |
 | 认领时间 | 2026-10-07 02:20 |
-| 分支 | `agent/local/opencode/claim-denum-coordinator/a1`<br>`agent/local/opencode/claim-denum-coordinator/a2` |
+| 分支 | `agent/local/opencode/claim-denum-coordinator/a1`<br>`agent/local/opencode/claim-denum-coordinator/a2`<br>`agent/local/opencode/claim-denum-coordinator/a3`（a3 由 Qoder 于 2026-10-07 04:0x 按实际合入 main 的 ref 补登：merging a3（`074df23`）时 discipline 判「已合入分支未登记」，协调者授权补，且 Qoder 的解冲突现场与 OpenCode 的补登互堵时以本格解双向锁） |
 | 状态 | ✅ done（a1 合入 6aa788e；a2 回填状态并修 SyntaxWarning） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `claim-denum-coordinator`。

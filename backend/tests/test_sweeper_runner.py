@@ -43,7 +43,11 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
 
     reports = run_all_sweeps(database, now=future)
 
-    assert [report.sweep for report in reports] == ["expired_leases"]
+    assert [report.sweep for report in reports] == [
+        "expired_leases",
+        "dependencies",
+        "resources",
+    ]
     assert reports[0].actions == 1
     assert reports[0].detail["tasks"] == ["T-1"]
     assert _status(database) == "stale"
@@ -55,7 +59,7 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
 
 def test_the_runner_order_is_pinned():
     """Inserting a sweep in the middle must be a deliberate edit (design §7.1)."""
-    assert [name for name, _sweep in SWEEPS] == ["expired_leases"]
+    assert [name for name, _sweep in SWEEPS] == ["expired_leases", "dependencies", "resources"]
 
 
 def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
@@ -65,7 +69,7 @@ def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
     run_all_sweeps(database, now=future)
     second = run_all_sweeps(database, now=future)
 
-    assert [report.actions for report in second] == [0]
+    assert [report.actions for report in second] == [0, 0, 0]
     events = database.read(
         "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_expire'"
     )
