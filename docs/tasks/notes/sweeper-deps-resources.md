@@ -41,7 +41,7 @@ test_id：SCHED-SWEEP-002
 测试命令：PYTHONUTF8=1 ./scripts.sh check
 当前状态：done（作者完成，待合入；外部验收待认）
 完成时间：2026-10-07 04:1x
-commit：（本卡所在提交）
+commit：`add2854`（实现提交；合并提交见 git log main）
 验证结果：
   docstate    : 90 项检查，0 项失败
   discipline  : 46 项检查，0 项失败
