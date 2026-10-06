@@ -32,6 +32,7 @@
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/workbuddy/chain-template-rejected` | `MVP-PROCESS-001` |
 | slow-test-visibility | WorkBuddy | — | ✅ done（慢测试排行 + slow marker 已落地） | `agent/workbuddy/slow-test-visibility` | `MVP-PROCESS-001` |
+| report-mergeguard-commit-bug | WorkBuddy | — | 🟢 doing（报给 opencode：commit 成功却判失败） | `agent/workbuddy/report-mergeguard-commit-bug` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -90,6 +91,44 @@
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
 
 **规则：领取任务前必须在任务清单写入 `task_id`、Harness 名称、时间、分支。**
+
+### 占用中的认领序号
+
+`docs/claims/` 的文件名以序号开头，而 `discipline` 的 registry 组要求序号**严格连续** 1..N
+（实现是 `set(实际) == set(1..N)`）。于是出现一个协作陷阱：
+
+> 某人建了 `NN-harness--task.md` 但还没合入 main 时，main 上就缺 `NN`。
+> 此时**任何其他人新建认领都会被同一个断言挡住** —— 不管取 `NN`（会被占）
+> 还是 `NN+1`（会留下新的洞）。
+
+2026-10-06 09:05 实际卡住了：main 有 1..47，Qoder 在
+`agent/local/qoder/MVP-11/a1` 建了 48 但未合入，我连试 50 和 49 都被判失败。
+
+**所以取号之前先查这一节。** 规则：
+
+1. **先查**：本节列出的「已占未合」序号一律跳过；
+2. **后取**：用 `main` 上现有最大序号 +1；
+3. **立刻登记**：在下一节填一行，并**尽早合入 main**（合入后删除该行）；
+4. **认领文件与本行同一次提交** —— 不要先建文件、事后补登记，那样别人查不到你。
+
+格式（表格由 `discipline` 的 registry 组校验，勿改列名）：
+
+| 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
+|---|---|---|---|---|---|
+| — | （当前无占用） | — | — | — | — |
+
+**合入后请把该行删掉。** 例：2026-10-06 09:05 这张表里是 Qoder 的 48；
+10:30 它合入后，48 换成 Claude 的 MVP-09、49 是 OpenCode、50 是 Claude、
+51 是 Qoder，**1..51 重新连续，本行即失效**。
+
+**为什么用表格而不是让人自己查分支**：占号是跨 worktree 的隐式状态—— claimant
+在自己的 worktree 里建了文件，main 上看不到。信息必须落在共享文件里才能被别人看到。
+别人看到。这与 H-8 是同一个道理：**先看别人，再动共享结构**。
+
+**为什么不让断言放宽**（另一种意见，记录在此供讨论）：把「连续」改成
+「不重复 + 不越界」能消除这个阻塞，但会放过「中间漏登记若干个」的情况 ——
+那正是这个断言当初要防的。两害相权，宁可让占号可查，也不放宽校验。
+
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
