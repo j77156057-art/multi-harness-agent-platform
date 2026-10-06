@@ -96,15 +96,56 @@ def test_duplicate_claim_request_returns_first_result_without_new_attempt(databa
     assert count(database, "SELECT COUNT(*) FROM task_events") == 1
 
 
-def test_replay_does_not_reissue_the_lease_token(database):
+def test_replay_reissues_a_live_lease_token(database):
+    """The recovery path for a harness that lost its token (deferred to 10b).
+
+    Only the hash is stored, so replay cannot return the original token -- it
+    rotates: the new token is live, the old one stops working.
+    """
+    from app.lease.service import LeaseTokenMismatch, renew_lease
+
     seed_task(database)
     first = claim_one(database)
     second = claim_one(database)
 
     assert first.items[0].lease_token is not None
-    assert (
-        second.items[0].lease_token is None
-    ), "tokens are stored hashed, a replay cannot hand the plaintext back"
+    recovered = second.items[0].lease_token
+    assert recovered is not None, "a live lease must be recoverable by replay"
+    assert recovered != first.items[0].lease_token
+
+    with database.transaction() as conn:
+        renewed = renew_lease(
+            conn,
+            task_id="T-1",
+            attempt_id="T-1.a1",
+            lease_token=recovered,
+            fencing_epoch=1,
+        )
+    assert renewed, "the reissued token must authorise renewal"
+
+    with pytest.raises(LeaseTokenMismatch), database.transaction() as conn:
+        renew_lease(
+            conn,
+            task_id="T-1",
+            attempt_id="T-1.a1",
+            lease_token=first.items[0].lease_token,
+            fencing_epoch=1,
+        )
+
+
+def test_replay_does_not_reissue_an_expired_lease_token(database):
+    """An unswept-but-expired lease is not reissued: recovery goes via reclaim."""
+    seed_task(database)
+    first = claim_one(database)
+    assert first.items[0].lease_token is not None
+
+    past = (datetime.now(UTC) - timedelta(minutes=1)).isoformat()
+    with database.transaction() as conn:
+        conn.execute("UPDATE leases SET lease_until = ? WHERE task_id = 'T-1'", (past,))
+
+    second = claim_one(database)
+    assert second.replayed is True
+    assert second.items[0].lease_token is None
 
 
 def test_same_request_id_with_different_payload_rejects_the_whole_request(database):

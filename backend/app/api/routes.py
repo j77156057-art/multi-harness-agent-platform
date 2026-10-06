@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.adapter.registry import HarnessRegistry, capabilities_from
 from app.api import schemas
+from app.api.errors import ApiError
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
 from app.git.publish import PublishProxy
 from app.lease.service import renew_lease
+from app.spec import TaskStatus
 from app.tasks.service import NotFound, SchedulerService
 
 
@@ -138,6 +140,55 @@ def capabilities(database: DatabaseDep, harness_id: Annotated[str, Query()]) -> 
         "registration_version": row["registration_version"],
         "capabilities": list(capabilities_from(row)),
     }
+
+
+@adapter.get("/list_ready_tasks")
+def list_ready_tasks(
+    database: DatabaseDep,
+    visibility: Annotated[str, Query(pattern="^(authorized|redacted)$")] = "authorized",
+    group_id: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
+    """R10 §7 ``list_ready_tasks()`` -- the pull model's entry point.
+
+    ``authorized`` answers the same ready-task listing the read API gives.
+    ``redacted`` is refused loudly: R10 names the value once and §17 has not
+    fixed what it hides, so answering as if something were redacted would be a
+    lie. The 10a gap note (no auth layer yet) stays true for both.
+    """
+    if visibility != "authorized":
+        raise ApiError(
+            "request.invalid",
+            422,
+            "visibility=redacted is not implemented; R10 §17 defines redaction",
+        )
+    sql = "SELECT * FROM tasks WHERE status = ?"
+    params: list[Any] = [TaskStatus.READY.value]
+    if group_id is not None:
+        sql += " AND group_id = ?"
+        params.append(group_id)
+    sql += " ORDER BY task_id LIMIT ?"
+    params.append(limit)
+    rows = [dict(row) for row in database.read(sql, tuple(params))]
+    return {"visibility": visibility, "count": len(rows), "tasks": rows}
+
+
+@adapter.get("/context/{task_id}")
+def read_context(
+    task_id: str,
+    database: DatabaseDep,
+    service: SchedulerDep,
+    since_seq: Annotated[int, Query(ge=0)] = 0,
+) -> dict[str, Any]:
+    """R10 §7 ``read_context()``: the task's events from a cursor (§15).
+
+    Context is the event log -- there is no second, private view of task state
+    -- so this is the same page the read API serves, scoped to one task.
+    """
+    if not database.read("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,)):
+        raise NotFound(f"unknown task: {task_id}")
+    page = _event_page(service, since_seq=since_seq, limit=200, task_id=task_id)
+    return {"task_id": task_id, **page}
 
 
 @adapter.post("/claim")
