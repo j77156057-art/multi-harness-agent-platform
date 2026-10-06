@@ -74,6 +74,7 @@
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
 | root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 | claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
+| claim-denum-coordinator-review | WorkBuddy | claim-denum | 🔄 doing（只交付裁决材料，不实施迁移） | `agent/workbuddy/claim-denum-review/a1` | `MVP-PROCESS-001` |
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 
@@ -120,6 +121,7 @@
 | 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
 |---|---|---|---|---|---|
 | — | （当前无占用） | — | — | — | — |
+| 57 | WorkBuddy | `claim-denum-coordinator-review` | 2026-10-07 01:45 | `agent/workbuddy/claim-denum-review/a1` | `docs/claims/57-workbuddy--claim-denum-coordinator-review.md` |
 
 **合入后请把该行删掉。** 例：2026-10-06 09:05 这张表里是 Qoder 的 48；
 10:30 它合入后，48 换成 Claude 的 MVP-09、49 是 OpenCode、50 是 Claude、
@@ -223,6 +225,7 @@
 | report-mergeguard-commit-bug | [卡](docs/tasks/notes/report-mergeguard-commit-bug.md) | tasks-split | [卡](docs/tasks/notes/tasks-split.md) |
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
+| — | — | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) |
 
 ## 共享文件改动声明
 
