@@ -27,4 +27,8 @@
   core.longpaths）。终审报告在 `docs/reports/mvp-final-report.md`。
   过程中发现并修复两个 P1（无主状态 release 运行期崩溃；深根+长任务名触发
   MAX_PATH），关闭 TRAE 验收遗留 R2/R3，R5 边界写入报告。
+- 2026-10-06：序号 48 → 51 —— 与 Claude 的 `48-claude-code--MVP-09.md` 撞号
+  （12 次撞号里的又一次），按「后合并者让号」改 51（main 当前最大 50）。
+  同批：discipline 已撤销「序号连续 1..N」断言（claim-seq-contiguity 提案裁决），
+  现只查唯一性与「文件名 task_id == 内容 task_id」；本条记录并入本卡。
 

@@ -8,7 +8,7 @@
 | 作者 | Qoder（MVP-11） |
 | 分支 / 基线 | `agent/local/qoder/MVP-11/a1`，main 基线 `5dbb597`（含 MVP-04~08、10a、10b、10b-verify 全部合入） |
 | 范围 | MVP-04 ~ MVP-10b 的集成级验证 + 安全审查 + 状态恢复出口覆盖 |
-| 明确排除 | **MVP-09（前端/UI）**：清单自身「依赖现实」条款允许整体后置到 MVP-11 之后（"验证目标是协调语义，不是界面"）。`MVP-UI-001` 不在本报告的机械门内 |
+| 明确排除 | 前端 UI 形体：**MVP-09 已由 Claude Code 以「操作员 CLI」形态完成并合入 main**（`407e4d0`，清单允许的替代："先用一个 CLI 脚本代替人工操作"）；图形界面不在本报告的机械门内 |
 | 方法 | ① 机械校验脚本原始输出（§1）；② 清单九类交付逐类归属（§2）；③ 状态覆盖的可执行契约（§3）；④ 安全审查（§4）；⑤ 集成健康状态机盘点（§5）；⑥ 按 R10 §29.2 格式的问题清单（§6） |
 
 R10 §29.3 要求终审报告必须包含机械校验脚本的输出，不能只写人工核对结论 —— §1 逐字附上。
@@ -21,13 +21,14 @@ R10 §29.3 要求终审报告必须包含机械校验脚本的输出，不能只
 docstate    : 结果: 90 项检查，0 项失败
 discipline  : 结果: 42 项检查，0 项失败
 ruff        : All checks passed! / 77 files already formatted
-pytest      : 241 passed, 1 warning in 383.50s (0:06:23)
+pytest      : 248 passed, 1 warning in 380.22s (0:06:20)
 === 全量门禁通过 ===
 ~~~
 
-与基线（224 passed）相比净增 17 项：`test_security_scan.py` 6、`test_state_coverage.py` 6、
-`test_real_adapters.py` +4（进程树杀灭 1 + 心跳被拒 ×3 参数化）、`test_git_worktree.py` +1
-（深根长任务名）。
+口径：本节为**合并 main 最新（含 MVP-09 操作员 CLI 等并行合入）后**的全量运行；
+其中本任务净增 17 项（`test_security_scan.py` 6、`test_state_coverage.py` 6、
+`test_real_adapters.py` +4（进程树杀灭 1 + 心跳被拒 ×3 参数化）、
+`test_git_worktree.py` +1（深根长任务名））。
 
 ### 1.2 新增套件（MVP-11）
 
@@ -236,6 +237,7 @@ backend/tests/test_state_coverage.py  6 项：21 非终态完整性、豁免集�
 - **失败可复现性**（清单完成标准）：所有管道失败以事件为事实源 —— `aggregate=task_id`、
   `payload.attempt_id`、`seq` 三要素齐备；错误信封携带 `task_id` 与 `event seq`（scan 错误
   另带 `scan_id`）；复现步骤 = 本节引用的测试命令或事件序列；
-- **MVP-09（前端）按清单条款后置**，是唯一剩余的 MVP 面。
+- **MVP-09**：操作员 CLI 形态（Claude Code，`407e4d0`）已合入 main，并独立核实了 §7 的
+  12 有端点 / 4 无端点差额（见 traceability 汇总表）；图形界面不在本报告范围内。
 
 **结论：MVP 内核（MVP-01~08、10a、10b）达成终审条件，可进入下一阶段；剩余面清晰记录、无静默缺口。**

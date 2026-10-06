@@ -1,11 +1,56 @@
 # 提案：认领文件「序号连续 1..N」在并发分支下不可满足
 
-状态：**待裁决**（提出者 Claude Code，2026-10-06；归属方 TRAE / 拆分者 WorkBuddy）
-对象：`tools/discipline/discipline.py` registry 组的「认领文件序号连续为 1..N」断言
-（TRAE 的 `GATE-MERGE-CHECK-01` 交付）
+状态：**已采纳**（2026-10-06，协调者裁决；由 `claim-seq-adopt` 实施）
+提出者 Claude Code；对象是 TRAE 的 `GATE-MERGE-CHECK-01` 交付项
+（`tools/discipline/discipline.py` registry 组的「认领文件序号连续为 1..N」断言）
 
-**本文不改动任何代码。** 提出者已撤回自己的实现（见文末「已撤回的改动」），
-交回归裁决。
+## 裁决与实施（2026-10-06）
+
+协调者采纳本提案。实施见任务 `claim-seq-adopt`：
+
+- **撤销**「序号连续 1..N」断言，及其单测 `test_claim_serials_must_be_contiguous`
+  （替换为 `test_gap_in_serials_is_accepted`）
+- **保留**序号唯一性断言（它抓的是真问题：同一序号两个文件）
+- **新增**「文件名里的 task_id 与文件内容一致」，及单测
+  `test_claim_filename_must_match_its_content`
+- `dev-convention.md` 的强制程度表与 `traceability.md` 的 `MVP-PROCESS-002` 行同步
+
+### 支持裁决的机械证据：34 次重命名
+
+`git log --all --diff-filter=R -- 'docs/claims/*'` 统计到 **34 次**认领文件改名，
+**四方都中招**，不只是某一方的疏忽：
+
+| 改名 | 归属 |
+|---|---|
+| `47-opencode--claim-denum` → `48-` | OpenCode |
+| `42-qoder--MVP-10b` → `43-` | Qoder |
+| `42-claude-code--dup-incident` → `43-` | Claude Code |
+| `41-qoder--MVP-10b` → `42-` | Qoder |
+| `41-opencode--claim-denum` → `42-` | OpenCode |
+| `38-opencode--root-worktree-clean` → `40-` | OpenCode（跳 2） |
+| `36-claude-code--claim-seq` → `39-` | Claude Code（跳 3） |
+| `34-trae--MVP-05-verify` → `36-` | **TRAE**（跳 2） |
+| `31-qoder--MVP-06` → `34-` | Qoder（跳 3） |
+| `39-qoder--MVP-07` → `38-` | Qoder（**降号**） |
+
+三条结论：
+
+1. **四方都撞** —— TRAE（断言的交付方）、Qoder、OpenCode、Claude Code。
+   若是某一方不守规矩，不会四方齐撞
+2. **出现跳 2、跳 3 与降号** —— 说明连续性断言不只没防住撞号，还**逼着人往回改号**：
+   `39-qoder--MVP-07` 被改成 `38-` 就是缺口被填补后为了保持连续而做的调整
+3. **改号发生在合并时，不在取号时** —— 与本文论据一一致：取号者控制不了合并顺序
+
+### 对 TRAE 的交付不作否定
+
+`GATE-MERGE-CHECK-01` 的断言**确实按设计工作**（`test_claim_serials_must_be_contiguous`
+在注入缺号文件时正确报红）。问题不在实现，在**该不变量本身在并发下无解**。
+该交付的另一半（merge 组、commit 反向核对、fail-closed）**全部保留**。
+
+---
+
+**以下为提出时的原文（未改动）。** 提出者当时已实现本提案但在发现它是 TRAE 刚
+验收的交付后撤回，依 H-5（跨边界改动需 owner 同意）交回归裁决。
 
 ## 结论
 

@@ -58,17 +58,19 @@
 | MVP-06-verify | TRAE | MVP-06 | ✅ done（通过附遗留清单） | `agent/local/trae/MVP-06-verify/a1` | `VERIFY-DIFF-001` `VERIFY-RECEIPT-001` |
 | MVP-07 | Qoder | MVP-06 | ✅ done | `agent/local/qoder/MVP-07/a1` | `MERGE-EXACT-001` `MERGE-REVERT-001` `MERGE-REVERT-002` |
 | MVP-08 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查，通过附遗留清单） | `agent/local/qoder/MVP-08/a1` | `DOC-TRACE-001` `MVP-API-001` |
-| MVP-09 | — | MVP-08 | ⏳ waiting | — | `MVP-UI-001` |
+| MVP-09 | Claude Code | MVP-08 | ✅ done | `agent/local/claude/MVP-09/a1` | `MVP-UI-001` |
 | MVP-10a | Qoder | MVP-08 | ✅ done | `agent/local/qoder/MVP-10a/a1` | `MVP-ADAPTER-001` |
 | MVP-10b | Qoder | MVP-10a MVP-05~07 | ✅ 已验收（TRAE 外部核查，通过附遗留清单 5 项，无 P1；04:23 先合 main 已留档） | `agent/local/qoder/MVP-10b/a1` | `MVP-ADAPTER-002` |
 | MVP-10b-verify | TRAE | MVP-10b | ✅ done（通过附遗留清单 5 项，无 P1） | `agent/local/trae/MVP-10b-verify/a1` | `MVP-ADAPTER-002` |
 | dup-incident | Claude Code | — | ✅ done | `agent/local/claude/dup-incident/a1` | `MVP-PROCESS-001` |
+| claim-seq-adopt | Claude Code | — | ✅ done | `agent/local/claude/claim-seq-adopt/a1` | `MVP-PROCESS-002` |
 | MVP-11 | Qoder | MVP-04~09 MVP-10b | ✅ done（MVP-09 按清单条款后置，见卡） | `agent/local/qoder/MVP-11/a1` | `CORE-STATE-COVERAGE-001` |
 | tasks-critical-path | Claude Code | graph-traceability | ✅ done | `agent/local/claude/tcp3/a1` | `MVP-PROCESS-001` `DOC-PLAN-001` |
 | branch-visibility | Claude Code | tasks-critical-path | ✅ done | `agent/local/claude/branch-visibility/a1` | `MVP-PROCESS-001` |
 | claim-seq | Claude Code | branch-visibility | 🔍 review（提案，不实施） | `agent/local/claude/claim-seq/a1` | `MVP-PROCESS-001` |
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
-| root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回作者修问题 1-6 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
+| root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
+| claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -125,6 +127,7 @@
      撞号，35 又被 qoder--MVP-06 占用，顺延为 36） -->
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
 <!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
+<!-- claim-denum → docs/claims/49-opencode--claim-denum.md -->
 
 ### 违规记录：MVP-01 未按规则登记
 
@@ -2010,7 +2013,8 @@ commit：9a5527c（secret 扫描）、99175b1（状态覆盖+无主 release 修�
                  core.longpaths）；③ TRAE 验收 R2 进程树杀灭（已修）、R3 心跳被拒路径（已补测）；
                  ④ secret 扫描三入口先于落库 + merge 闸门 fail-closed（全新）
 已知问题：
-  - **MVP-09 后置**：按清单「依赖现实」条款暂缓；MVP-UI-001 不在本次机械门内（报告 §0）。
+  - **MVP-09 状态更新**：Claude Code 已以「操作员 CLI」形态完成并合入 main（`407e4d0`，
+    清单允许的替代）；图形界面不在本次机械门内（报告 §0）。
   - **7 态豁免**（报告 §3.2）：5 态无出口机制（计划修订/依赖巡检/资源巡检/reopen/人类裁决）、
     2 态不可达（drift 探测器未实现）；反向守卫保证实现即红。
   - **特性缺口（记录非静默）**：revert 下游反向闭包（MERGE-REVERT-002）、§17 后半段
@@ -3070,7 +3074,6 @@ merge 组误报 5 个 Qoder 的分支「已合入但未登记」。**顺手改�
 - 本提案不解决取号竞争本身，只主张**换一条可满足的不变量**；若要根治竞争，
   需在 main 上串行取号或引入全局序号分配器，那超出本提案范围
 ~~~
-
 ### 违规记录：两份 MVP-10a 并行实现（2026-10-06，Claude Code 重复了 Qoder 的已交付工作）
 
 **事实。** Claude Code 于 01:47 认领 `MVP-10a`，在
@@ -3163,6 +3166,289 @@ test_id：MVP-PROCESS-001
 - 被丢弃的实现（22 文件 1448 行）**不是保留在别处**——它随分支删除即消失。
   若日后认为其中某处有价值（如 `AdapterVerbMissing` 枚举全部 16 个 §7 verb 的
   做法），需要重新推导
+~~~
+
+### MVP-09：最小前端 —— CLI 形态（done）
+
+~~~text
+任务编号：MVP-09
+负责人 Harness：Claude Code
+开始时间：2026-10-06 09:03
+工作区：.worktrees/claude/
+依赖任务：MVP-08（✅ 已验收）
+真相源引用：清单 MVP-09（含「先用一个 CLI 脚本代替人工操作」的出口）；
+            R10 §7（接口面）；docs/dev-convention.md H-1/H-5
+允许修改目录：backend/app/cli/**、backend/tests/**、docs/traceability.md、TASKS.md、
+            docs/claims/**
+禁止修改目录：backend/app/api/**（MVP-08 已验收）、backend/app/**（除 cli/）、
+            docs/spec/0.3-R10.md（只读）
+交付分支：agent/local/claude/MVP-09/a1
+commit：407e4d0
+test_id：MVP-UI-001
+当前状态：done
+
+### 形态决策：CLI 而非界面
+
+清单对 MVP-09 写明可以「**先用一个 CLI 脚本代替人工操作** —— 因为 MVP 的验证目标
+是协调语义，不是界面」，而完成标准「人类不直接访问数据库即可完成一条完整任务链路」
+不要求浏览器。两个支撑事实：
+
+- **CI 完全没有前端门禁**（`gate.yml` 无 npm/node 步骤）。一个无门禁、无测试的
+  Vue UI 按 `traceability.md` 自己的标准会落进「仅是名字」那一类，无法被验证
+- CLI 可用 pytest 直接驱动，是可机械验证的
+
+### 交付
+
+`backend/app/cli/`（`main.py` + `__main__.py` + `__init__.py`）：一条只经 HTTP 的
+操作员命令行，覆盖 建群 / 发方案 / 批准 / 看板 / 任务详情 / 事件 / 群聊 /
+领取 / 续租 / 提交 / 发布 / 求助 / 放弃 / 审查 领取与提交。
+
+`backend/tests/test_cli_flow.py`（6 项）。
+
+### 完成标准的两半如何被断言
+
+| 完成标准 | 断言方式 |
+|---|---|
+| 人类不直接访问数据库即可完成一条完整任务链路 | 链路测试全程走 CLI，**断言里不出现任何 SQL** |
+| **前端不能绕过 API 改权威字段** | **源码级断言**：CLI 不得 import `app.db` 或任何 service。绕过 API 的写会同时绕过 fencing 与 `task_events`，让「投影可重建」失真 —— 所以这条不是风格偏好 |
+
+第二条用源码级断言而非「跑一遍看看」，因为直接调 service 往往看起来更省事，
+而它只会在很久以后以难查的方式出问题。
+
+### 认领前做了全仓扫描（采纳 dup-incident 事故的补救建议）
+
+~~~text
+git branch -a | grep MVP-09 / frontend   → 无
+git log --all --grep="MVP-09"            → 3 条，全是文档提及，无实现
+git log --all -- frontend/               → 仅 810d88d（MVP-01 骨架）
+~~~
+
+**这是那条补救建议的第一次实际使用**，确认了 MVP-09 确实无人开工。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败
+  ruff check  : All checks passed!
+  ruff format : 77 files already formatted
+  pytest      : 全量 **exit 0**；新增 `test_cli_flow.py` 6 项全过
+  真实入口    : `python -m app.cli --help` 子进程跑通（证明不只是函数可调）
+
+### 查出的两处真实缺口（已写进 docs/traceability.md）
+
+MVP-09 是第一个真把整条链路走完的交付，因此**撞出了两个不在 §7 里、但操作链路
+离不开的步骤**：
+
+1. **`claimed → in_progress`（`start_task`）**：§7 根本没有这个 verb（只有推送模型
+   的 `start()`，标为「未来才需要」），而 `submit_result` 要求任务已在 `in_progress`
+2. **产出 verify receipt**：Verify Worker 没有端点
+
+**后果**：操作员或任何 harness **无法只经 API 走完「领取 → 提交 → 审查」**。
+`test_cli_flow.py` 与既有的 `test_api_flow.py` 都是直接调
+`SchedulerService.start_task` / `VerifyWorker.run` 绕过，并在用例注释里**显式标注**
+—— 不伪造 receipt、不开旁路。
+
+要真正闭合需在 §7 增补 verb（走 R10 复审），或明确「这两步不属 adapter 职责」——
+后者目前是对的，但**没有任何规范文字这么说过**，所以每个实现者都要重新发现一遍。
+
+### 过程中我写错的三处（都由平台或测试纠正）
+
+1. **响应形态猜错**：以为 `GET /groups/{g}/tasks` 返回数组、`POST messages` 返回
+   `body` —— 实际前者是 `{"tasks": [...]}`、后者只回 `message_id/seq/mentions/refs`。
+   写测试前**先探了真实形态**才发现（`probe_cli.py`），否则会写出断言错形状的测试
+2. **以为链路到 submit 就够**：被 `review.requires_verify_receipt` 拒回 ——
+   review 需要 `awaiting_review`，那需要 verify receipt。是平台的 guard 纠正了我
+3. **Windows 子进程编码**：`subprocess.run(text=True)` 默认按 GBK 解，而 `--help`
+   有中文，抛 `UnicodeDecodeError` 并把 stdout 变成 None —— 表现是崩溃而非断言失败。
+   必须显式 `encoding="utf-8"`
+
+已知问题：
+- 链路上两步无 HTTP 通路（见上），本任务记录而不自补端点 —— 新增端点属 MVP-07/08
+  范围，两者均已验收（H-5）
+- `projects` / `groups` 只有 POST 没有 GET，CLI 因此无法「列出」项目与群组
+- Merge Gate 完全没有 HTTP 路由（MVP-07 交付了 `app/merge/**` 但未暴露），
+  所以清单要的「Merge Gate 页面」以 CLI 形态也无法驱动
+- 目标是 CLI，不是图形界面；Vue 骨架（MVP-01 建的 7 个文件）未动
+~~~
+
+### claim-seq-adopt：撤销序号连续性断言（done）
+
+~~~text
+任务编号：claim-seq-adopt
+负责人 Harness：Claude Code
+开始时间：2026-10-06 09:36
+工作区：.worktrees/claude/
+依赖任务：无
+真相源引用：docs/proposals/claim-seq-contiguity.md（协调者裁决采纳）；
+            tools/discipline/discipline.py registry 组
+允许修改目录：tools/discipline/**、docs/proposals/**、docs/traceability.md、
+            docs/dev-convention.md、TASKS.md、docs/claims/**
+禁止修改目录：backend/**、docs/spec/0.3-R10.md（只读）
+交付分支：agent/local/claude/claim-seq-adopt/a1
+commit：f39fe37
+test_id：MVP-PROCESS-002
+当前状态：done
+
+### 改了什么
+
+| 动作 | 内容 |
+|---|---|
+| **撤销** | registry 组的「认领文件序号连续为 1..N」断言 + 单测 `test_claim_serials_must_be_contiguous` |
+| **保留** | 序号唯一性断言（它抓的是真问题：同一序号两个文件） |
+| **新增** | 「认领文件名里的 task_id 与文件内容一致」+ 单测 `test_claim_filename_must_match_its_content` |
+| **新增** | 单测 `test_gap_in_serials_is_accepted` —— 跳号不再报错，把这次撤销钉住 |
+| **同步** | `dev-convention.md` 强制程度表、`traceability.md` 的 `MVP-PROCESS-002` 行、提案文档的「裁决与实施」 |
+
+### 支持裁决的机械证据：34 次重命名
+
+`git log --all --diff-filter=R -- 'docs/claims/*'` 统计到 **34 次**认领文件改名，
+**四方都中招**：TRAE、Qoder、OpenCode、Claude Code。关键几条：
+
+  `34-trae--MVP-05-verify` → `36-`    （TRAE，断言的交付方，跳 2）
+  `31-qoder--MVP-06`       → `34-`    （Qoder，跳 3）
+  `36-claude-code--claim-seq` → `39-` （Claude Code，跳 3）
+  `38-opencode--root-worktree-clean` → `40-`（OpenCode，跳 2）
+  `39-qoder--MVP-07`       → `38-`    （Qoder，**降号**）
+
+三条结论写进了提案：
+1. **四方都撞** —— 不是某一方不守规矩
+2. **出现跳 2、跳 3 与降号** —— 连续性断言不只没防住撞号，还**逼着人往回改号**
+3. **改号发生在合并时** —— 与论据一一致：取号者控制不了合并顺序
+
+### 对 TRAE 的交付不作否定
+
+`GATE-MERGE-CHECK-01` 的断言**确实按设计工作**（注入缺号文件时正确报红）。
+问题不在实现，在**该不变量本身在并发下无解**。该交付的另一半（merge 组、
+commit 反向核对、fail-closed、`fetch-depth: 0`）**全部保留**，一行未动。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败（撤销 1 条、新增 1 条，净增 0）
+  ruff check  : All checks passed!
+  pytest tools: 28 passed（原 27：−1 连续性单测，+2 新单测）
+  负向测试    : `test_claim_filename_must_match_its_content` 造一个文件名
+                `01-h--t1.md` 而内容 `task_id=t2` 的文件 → 断言转红
+                并指出「文件名 01-h--t1.md」；`test_gap_in_serials_is_accepted`
+                注入 `01-` 与 `03-`（缺 02）→ 不再报错
+
+已知问题：
+- 序号前缀**保留**（人读时便于排序），只是不再断言连续。认领顺序本就在每个文件
+  内部有「认领时间」字段，不依赖文件名
+- 取号竞争本身**未解决** —— 本任务只换掉了一条不可满足的不变量。根治需在 main 上
+  串行取号或引入全局分配器，超出本提案范围
+~~~
+
+## 提交前自检
+
+```bash
+./scripts.sh check     # docstate + ruff + pytest，三道全绿
+git log --oneline -1   # 确认 commit 在任务分支上而非 main
+git branch --show-current
+```
+
+### claim-denum：去掉认领序号、以 task_id 为唯一键（✅ done，提案已交付；采纳待裁决）
+
+~~~text
+任务编号：claim-denum
+负责人 Harness：OpenCode
+开始时间：2026-10-06 02:39
+工作区：.worktrees/opencode/
+依赖任务：claim-seq（仅引用其提案；两条任务是**并行提出**，本任务不依赖其结论）
+真相源引用：docs/proposals/claim-seq-contiguity.md（Claude Code，2026-10-06 00:16）
+            TASKS.md GATE-MERGE-CHECK-01 任务卡（序号连续断言的交付记录）
+            tools/discipline/discipline.py registry 组「认领文件序号唯一/连续」
+            本文所引 8 次撞号见 TASKS.md 各认领文件的「变更记录」
+允许修改目录：docs/proposals/**（本任务只产出提案，不改代码）、TASKS.md
+禁止修改目录：tools/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
+            —— 撤回任何实现后本任务不动任何既有断言
+交付分支：agent/local/opencode/claim-denum/a1
+test_id：MVP-PROCESS-001
+当前状态：🔍 review —— 提案待协调者与各 owner 裁决
+
+### 提案
+
+见 `docs/proposals/claim-denum.md`。一句话：**序号这个全局资源本身不该存在**，
+去掉前缀、文件名改为 `<task_id>.md` 即可从根上取消「分配」这一步。
+
+与 Claude 的 `claim-seq` 是互补而非竞争：他在保留序号的前提下换掉连续性断言，
+本提案更进一步取消取号动作，而**采纳他提出的替换项**
+（「文件名 task_id ↔ 内容一致」）。建议先做他的替换、再做本提案的重命名 ——
+迁移本身需要那条断言兜底。
+
+### 为什么不是「引入全局序号分配器」
+
+Claude 的「已知问题」把根治列为两条路：main 上串行取号，或全局序号分配器。
+第二条已经被他自己的论证否掉了 ——「加锁解决不了：锁能让取号串行，
+改变不了合并顺序」。
+
+第一条（串行取号）也不可靠，因为**读 main 的最大值与写入之间没有原子性**：
+我本次严格照流程走（同步 main → 读 max=39 → 取 40），Qoder 随后在 main 上
+合法地取了同一个 40（`40-qoder--MVP-10a.md`，commit bcea477）。
+流程越严格，越确信自己没错，结果照样是错的 —— 今天 8 次里有 7 次处置是重编号。
+
+### 本提案新增的三点证据
+
+1. **取号协议无法原子执行**（上述第 8 次撞号，严格照流程走的实例）。
+2. **序号断言把「谁先合」变成了门禁判据**：main 有 40 个认领时，
+   占 41 与 42 的两个分支必须按序合并，否则 main 出现缺号转红；
+   而合并时机由根工作区是否空闲决定，不由取号者决定。
+   这是连续性断言一个尚未被记录的副作用。
+3. **文件系统能提供比断言更强的保证**：现状下不同 Harness 的同号文件是
+   不同路径，git 安静共存、只靠事后断言发现；去掉序号后两个 agent 认领同一
+   `task_id` 产生**完全相同的路径**，git 合并时报 add/add 冲突 ——
+   唯一性从「事后检测」升级为「事前阻止」，且由 git 免费提供。
+   已实测前置条件：40 个 `task_id` 两两不同、Windows 大小写折叠后仍不同、
+   全部匹配 `[A-Za-z0-9._-]+`，迁移无阻塞。
+
+### 迁移的 H-5 问题与建议
+
+一次性重命名 40 个他人 owner 的文件违反 H-5。建议**分片**：各 owner 只改自己的
+文件（trae 11、claude-code 8、qoder 8、workbuddy 7、opencode 4、codex 2），
+协调者只改 parser 与共享文档 —— H-5 天然满足，且可与日常认领并行推进。
+
+### 顺带发现的盲区
+
+`docstate` 不校验认领登记表的注释行，所以迁移中若把 40 行注释里的文件名改错，
+门禁不会变红。迁移时应当补一条校验：注释指向的文件必须存在。
+
+### 合并受阻与一次真实事故（2026-10-06 04:45）
+
+本提案状态原为 `🔍 review`，用它自带的 `mergeguard/cli.py merge` 合入时
+连续撞两堵墙，最终以一次真实的「门禁红了但 merge commit 已落地」收场。
+两堵墙的细节记在 `docs/claims/49-opencode--claim-denum.md` 的
+「合并受阻记录」，此处只记**结论与影响**：
+
+1. **main 上跑的是 mergeguard 首版，没有 `--no-commit`。** 门禁在 merge
+   commit 落地**之后**才跑，红灯出现时 `bf20383` 已进 main，工具却报
+   「门禁未通过 exit 5」——自相矛盾。修复在 `root-worktree-clean` 分支，
+   而那条分支被 TRAE 退回修评审问题 1-9，尚未合入。
+   **结构性结论：「用受控合并合入受控合并的修复」做不到。**
+   工具的首版必须允许一次裸合并送上线，否则它永远修不好自己。
+2. **`branches` 组要求已合入 main 的任务在任务表标 done。** 提案类任务
+   按定义是 review，于是当时的唯一出路是「把待裁决提案谎报为已完成」。
+   **断言在逼人说谎**，这是断言设计问题，不是使用问题。
+
+处置：`git reset --hard ORIG_HEAD` 回退 `bf20383`（根工作区无其它改动，
+回退干净；两个分支的提交均未受影响），随后把本任务状态改为
+`✅ done（提案已交付，采纳与否待裁决）` 才重新合并。
+
+把「交付完成」与「被采纳」拆成两件事，是这里唯一诚实的表达方式 ——
+原状态栏只有一个字段，两个含义互相冒充。
+
+### 验证结果
+
+  docstate    : 90 项检查，0 项失败
+  discipline  : 42 项检查，0 项失败（根工作区空闲时）
+  git diff    : tools/** 零改动 —— 本任务没有动任何人的交付物
+  提案自洽    : 迁移清单逐项核对到具体文件与行号（见提案文末）
+  序号自检    : 1..49 唯一且无缺号（第 12 次撞号后重编）
+  pytest      : tools 27 passed / backend 224 passed（合并前在本分支实测）
+
+未实施任何代码改动。若裁决为「采纳」，迁移应另开任务并按分片方案分配。
+
+顺带一提：本文写作期间取号再次被占 —— 序号 41 是在确认 main 最大为 40 之后
+取的，本提案若被采纳，这类记录将不再需要维护。
 ~~~
 
 ## 提交前自检
