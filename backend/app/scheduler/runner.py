@@ -19,20 +19,29 @@ from datetime import UTC, datetime
 from app.db.connection import Database
 from app.scheduler.report import SweepReport
 from app.scheduler.sweeps import (
+    sweep_aging,
+    sweep_blocked_sla,
     sweep_dependencies,
     sweep_expired_leases,
     sweep_resources,
+    sweep_stuck,
 )
 
 Sweep = Callable[[Database, datetime], SweepReport]
 
 #: Fixed execution order. New sweeps append themselves here (and to the test
 #: that pins this list) in the task that implements them. The lease sweep runs
-#: first so later sweeps observe the states it just produced (design §7.1).
+#: first so later sweeps observe the states it just produced (design §7.1);
+#: the resource resume runs before aging so a task whose capacity just freed
+#: is claimed rather than aged out in the same round; the blocked SLA runs
+#: before the generic stuck check so the specific edge wins.
 SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("expired_leases", sweep_expired_leases),
     ("dependencies", sweep_dependencies),
     ("resources", sweep_resources),
+    ("aging", sweep_aging),
+    ("blocked_sla", sweep_blocked_sla),
+    ("stuck", sweep_stuck),
 )
 
 

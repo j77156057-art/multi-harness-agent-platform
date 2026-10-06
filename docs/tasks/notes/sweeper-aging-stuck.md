@@ -1,4 +1,4 @@
-### sweeper-aging-stuck：老化、阻塞 SLA 与卡住指纹（🚧 doing）
+### sweeper-aging-stuck：老化、阻塞 SLA 与卡住指纹（✅ done）
 
 ~~~text
 任务编号：sweeper-aging-stuck
@@ -36,5 +36,23 @@
   7. PYTHONUTF8=1 ./scripts.sh check 全绿。
 test_id：SCHED-SWEEP-003
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 05:2x
+commit：`PENDING`
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 294 passed（本任务净增 8 项：test_sweeper_aging_stuck.py），exit 0
+  关键断言     : 老化对照组（30 分钟不动 / 200 分钟才动，阈值=90×2）；queued 老化；
+                 blocked 61 分钟触发、30 分钟不动；卡住计数逐轮断言（基线 0 → 1 → 2 →
+                 第 3 次观察触发 escalated 后离开观察集）；事件/新 head/progress_hash
+                 三种"有进展"都清零计数；count=4 驱动 stuck_human_threshold →
+                 awaiting_human（双阈值字面实现）；heartbeat 路由真实落 progress_hash。
+已知问题：
+  - stuck 的 5 号阈值在 +1/轮的常规路径下不可达（3 先触发、任务离开观察集）；按字面
+    实现两条守卫，可达性注记在 sweep_stuck docstring，不做取舍。
+  - 本任务顺带接通了 progress_hash 链路（此前 schema 无字段、API 静默丢弃、列上无
+    生产者）；heartbeat 的 progress_hash 现在会落库，属 §7 动词的首次真实生效。
+  - 全量门禁本次耗时 28 分钟（fleet 负载），结果不受影响。
 ~~~
