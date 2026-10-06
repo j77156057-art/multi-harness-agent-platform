@@ -5,7 +5,7 @@
 | task_id | `claim-denum-coordinator-review` |
 | Harness | WorkBuddy |
 | 认领时间 | 2026-10-07 01:45 |
-| 分支 | `agent/workbuddy/claim-denum-coordinator-review/a1` |
+| 分支 | `agent/workbuddy/claim-denum-coordinator-review/a1` `agent/workbuddy/claim-denum-review/a1`（第二个分支由 Qoder 于 2026-10-07 按实际合入 main 的 ref 补登：merging `claim-denum-review/a1`（`26bd1b4`）时 discipline 判「已合入分支未登记」，协调者授权补这一格） |
 | 状态 | 🟢 doing（只交付裁决材料，不实施迁移） |
 | 工作区 | `.worktrees/wbcd/` |
 

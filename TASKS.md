@@ -74,8 +74,9 @@
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
 | root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 | claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
-| claim-denum-coordinator-review | WorkBuddy | claim-denum | 🔄 doing（只交付裁决材料，不实施迁移） | `agent/workbuddy/claim-denum-review/a1` | `MVP-PROCESS-001` |
+| claim-denum-coordinator-review | WorkBuddy | claim-denum | ✅ done（材料已交付并合入；Qoder 按协调者授权收尾，见卡注） | `agent/workbuddy/claim-denum-review/a1` | `MVP-PROCESS-001` |
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
+| sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | 🟢 doing（实施 C2 的协调者部分：删占号机制 + parser + docstate 校验） | `agent/local/opencode/claim-denum-coordinator/a1` | `MVP-PROCESS-001` |
 
@@ -187,7 +188,7 @@
 | report-mergeguard-commit-bug | [卡](docs/tasks/notes/report-mergeguard-commit-bug.md) | tasks-split | [卡](docs/tasks/notes/tasks-split.md) |
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
-| — | — | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) |
+| claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
 
 ## 共享文件改动声明
 

@@ -55,6 +55,20 @@ class Settings:
         self.max_attempts: int = int(os.environ.get("AP_MAX_ATTEMPTS", "3"))
         self.max_review_rounds: int = int(os.environ.get("AP_MAX_REVIEW_ROUNDS", "2"))
 
+        # --- 巡检器家族（docs/proposals/sweeper-family.md §4；参数集中）---
+        self.sweeper_enabled: bool = _env_bool("AP_SWEEPER_ENABLED", True)
+        self.sweeper_interval_seconds: int = int(os.environ.get("AP_SWEEPER_INTERVAL", "60"))
+        self.aging_multiplier: float = float(os.environ.get("AP_AGING_MULTIPLIER", "2"))
+        self.block_sla_minutes: int = int(os.environ.get("AP_BLOCK_SLA_MINUTES", "60"))
+        self.review_wait_sla_minutes: int = int(os.environ.get("AP_REVIEW_WAIT_SLA_MINUTES", "60"))
+        self.reclaim_grace_minutes: int = int(os.environ.get("AP_RECLAIM_GRACE_MINUTES", "10"))
+        self.stuck_sweeps: int = int(os.environ.get("AP_STUCK_SWEEPS", "3"))
+        self.stuck_human_sweeps: int = int(os.environ.get("AP_STUCK_HUMAN_SWEEPS", "5"))
+        self.escalation_backoff_multiplier: float = float(
+            os.environ.get("AP_ESCALATION_BACKOFF", "2")
+        )
+        self.reminder_cap_minutes: int = int(os.environ.get("AP_REMINDER_CAP_MINUTES", "240"))
+
         # R10 §16
         self.verify_lease_seconds: int = int(os.environ.get("AP_VERIFY_LEASE", "1800"))  # 30 min
         self.review_lease_seconds: int = int(os.environ.get("AP_REVIEW_LEASE", "1200"))  # 20 min

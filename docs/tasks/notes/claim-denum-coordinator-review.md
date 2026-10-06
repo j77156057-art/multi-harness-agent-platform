@@ -1,4 +1,4 @@
-### claim-denum-coordinator-review：核实方案 C 的事实与代价（🔄 doing）
+### claim-denum-coordinator-review：核实方案 C 的事实与代价（✅ done）
 
 ~~~text
 任务编号：claim-denum-coordinator-review
@@ -12,7 +12,9 @@
 禁止修改目录：tools/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/claim-denum-coordinator-review/a1
 test_id：MVP-PROCESS-001
-当前状态：doing
+当前状态：done（材料已交付并随 `26bd1b4` 合入 main；2026-10-07 03:2x 由 Qoder 按协调者授权收尾：本卡范围是"只交付裁决材料，不实施迁移"，交付物已合入即完成，裁决动作属协调者。收尾缘由：discipline 新增的「已合入 main 的任务在任务表均已完成」检查因本卡挂 doing 判红，阻塞了 Qoder 的 sweeper-runner 合并提交）
+完成时间：2026-10-07 02:35（材料合入）
+commit：`26bd1b4`（材料合入；本卡的收尾登记随 Qoder 解阻塞的合并提交落地）
 验证结果：见下方「验证结果」
 ~~~
 
