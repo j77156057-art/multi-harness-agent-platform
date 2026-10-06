@@ -1,4 +1,4 @@
-### sweeper-deps-resources：依赖巡检与资源巡检（🚧 doing）
+### sweeper-deps-resources：依赖巡检与资源巡检（✅ done）
 
 ~~~text
 任务编号：sweeper-deps-resources
@@ -39,5 +39,22 @@ O1 裁定：**照字面授予**（协调者 2026-10-07 03:45）：queued 的 res
   5. PYTHONUTF8=1 ./scripts.sh check 全绿
 test_id：SCHED-SWEEP-002
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 04:1x
+commit：（本卡所在提交）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 46 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 见合并前全量门禁（本任务净增 7 项：test_sweeper_deps_resources.py）
+  关键断言     : 依赖三出口（满足/孤儿/超时，超时含"未超不动"对照）；资源恢复
+                 （O1 语义：请求者身份来自事件、不查存活；延迟行回填为活 claim，
+                 原 claim_request_id 回放得到已完成 attempt；幂等二跑 no-op）；
+                 O1 端到端（恢复后请求者离线 → 既有 lease 巡检链 → stale）；
+                 runner 顺序钉死更新为三元
+已知问题：
+  - dependencies_satisfied 的 "output hash 满足契约" 半条 guard 未实现（无 output
+    注册表）——按设计 §7 记录，不静默
+  - worktree_capacity / merge_capacity 的 queue_reason 目前无生产者（claim 只会
+    以 resource 延迟）；对应恢复分支未写，见提案 §2.2
 ~~~

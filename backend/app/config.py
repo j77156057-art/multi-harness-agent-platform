@@ -68,6 +68,10 @@ class Settings:
             os.environ.get("AP_ESCALATION_BACKOFF", "2")
         )
         self.reminder_cap_minutes: int = int(os.environ.get("AP_REMINDER_CAP_MINUTES", "240"))
+        # block_timeout 的上游时长求和用：快照里 expected_duration_min 缺省/为 0 时按此计
+        self.expected_duration_default_minutes: int = int(
+            os.environ.get("AP_EXPECTED_DURATION_DEFAULT", "90")
+        )
 
         # R10 §16
         self.verify_lease_seconds: int = int(os.environ.get("AP_VERIFY_LEASE", "1800"))  # 30 min
