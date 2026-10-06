@@ -72,7 +72,7 @@
 | merge-interlock-review | TRAE | merge-interlock | ✅ done（退回修 1-4 后再合） | `agent/local/trae/merge-interlock-review/a1` | `MVP-MERGE-LOCK-001` |
 | root-worktree-clean-review | TRAE | merge-interlock-review | ✅ done（退回修问题 1-9 后复审） | `agent/local/trae/root-worktree-clean-review/a1` | `MVP-PROCESS-002` |
 | claim-denum | OpenCode | claim-seq | ✅ done（提案已交付，采纳与否待裁决） | `agent/local/opencode/claim-denum/a1` | `MVP-PROCESS-001` |
-| sweeper-family | Qoder | MVP-11 | 🚧 doing（只交付设计） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
+| sweeper-family | Qoder | — | 🚧 doing（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -2104,7 +2104,9 @@ commit：ad25535
 任务编号：sweeper-family
 负责人 Harness：Qoder
 开始时间：2026-10-06 11:05
-依赖任务：MVP-11（✅ 已合入 bef5f25；其终审报告 §6-P3-1 圈定本设计范围）
+依赖任务：MVP-11（✅ 已合入 bef5f25；其终审报告 §6-P3-1 圈定本设计范围）。
+          任务表依赖列写「—」是台账要求：过程任务不进正式关键路径链
+          （declared path 9 节点的机制约束），真实依赖以本行为准。
 工作区：.worktrees/qoder/
 交付物：docs/proposals/sweeper-family.md —— **只交付设计，不含实现**
 真相源引用：R10 §10（迁移表守卫列：block_timeout/orphan_detected/aging_timeout/
