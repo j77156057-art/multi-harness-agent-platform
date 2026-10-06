@@ -60,7 +60,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | test_id | 检查什么 | 强制状态 | 由谁检查 |
 |---|---|---|---|
 | `MVP-API-001` | 仅通过 API 能跑完「建群 → 发方案 → 领取 → 提交 → 审查」 | 🟡 部分有断言 | `test_api_flow.py` 覆盖 HTTP 面上的建群/发方案/批准/领取/心跳/提交/审查；**缺口**：链路上两个迁移不属 MVP-08 —— `claimed → in_progress` 需要 worktree（MVP-05），`verifying → awaiting_review` 需要 verify receipt（MVP-06）。测试里这两步由调度器服务层驱动并在用例注释中标注，**没有伪造 receipt**。消息与事件共享全局 seq 的缺口已由 `message-global-seq`（迁移 003 单行表 `global_seq` 统一发号、task_events 去 AUTOINCREMENT）关闭：`test_api_events_messages.py` 断言两流交错严格递增、跨群不重号，并集为同一连续区间；`test_database_events.py` 覆盖存量库迁移续号与回滚不空洞；消息 refs「接收即丢」的缺口已由 `message-refs-persist`（迁移 004 为 task_messages 增加 JSON TEXT 列 refs，存量行回填 `[]`；post_message 同事务落库、list_messages 解码回数组）关闭：`test_api_events_messages.py` 断言 POST→GET refs 原样读回、缺省为 `[]`、非法 refs 拒绝，`test_database_events.py` 覆盖旧库（001~003）升级回填与升级后新消息往返 |
-| `MVP-UI-001` | 人类不直接访问数据库即可完成一条完整任务链路 | ⚠️ 仅声明 | 未实现（MVP-09） |
+| `MVP-UI-001` | 人类不直接访问数据库即可完成一条完整任务链路；前端不能绕过 API 改权威字段 | ✅ 有断言 | `tests/test_cli_flow.py`（6 项）。形态是 **CLI 而非界面** —— 清单允许（「先用一个 CLI 脚本代替人工操作」），且 CI 无前端门禁，一个无门禁的 UI 按本表标准属于「仅是名字」。链路测试跑 建群→发方案→看板→领取→提交→审查；「不绕过 API」由**源码级断言**守（CLI 不得 import `app.db`/任何 service）。**缺口**：链路上有两步没有 HTTP 通路 —— `claimed → in_progress`（§7 无此 verb）与 verify receipt（无端点），见下方 §7 差额一节 |
 | `MVP-ADAPTER-001` | Fake Harness 完整跑通 | ✅ 有断言 | `test_adapter.py`（**先从 R10 §7 解析动词表**再断言接口与实现对得上；Fake Harness 走真实 HTTP 跑完 claim→heartbeat→commit→publish→submit→verify→review→merge→merged；失败结果进 changes_requested；abandon；Lease 过期→stale→reclaim→take_over；旧 epoch 被拒；未注册 Harness 的 probe 判 degraded）。**缺口**：`accept_help`/`reject_help`/`split_task`/`ask_human` 四个 §7 动词尚无路由，方法存在但抛 `UnsupportedVerb` |
 | `MVP-ADAPTER-002` | 至少一个真实 Harness 完成 Claim / Heartbeat / Submit / Review | ✅ 有断言 | `test_real_adapters.py`（三个真实 Adapter —— codex / claude-code / opencode —— 各自注册可追踪（reg-001→reg-002 后旧版仍可 pinned），argv 契约逐字断言，并走真实 HTTP 完成 claim→heartbeat（CLI 运行期间回执有断言）→commit/publish（Push Proxy）→submit→verify→review→merge→merged；超时→杀进程→abandon；重启丢 token→复放 Claim 轮换出可用新 token→继续同一 attempt 提交；危险操作拒绝（main 分支、不可达 commit、旧 epoch、四个无路由动词）；`SubprocessRunner` 对真实子进程的 kill-on-deadline 单独验）。**边界**：模型进程多数用例用 ScriptedRunner 替身注入（argv 契约与 SubprocessRunner 各有独立断言补偿）；codex 本机未安装，其 argv 契约来自官方文档（模块 docstring 注明）。**顺带关闭**：10a 遗留的两个「方法存在但路由 404」的 §7 动词 —— `list_ready_tasks`（`redacted` 无 §17 定义，显式 422 拒绝）与 `read_context` 已补路由并逐 Adapter 断言 |
 | `MVP-PROCESS-001` | 协作纪律：登记表自洽、任务卡字段完整、依赖图自洽 | ✅ 有断言 | `tools/discipline`（registry / cards / deps / counts 组） |
@@ -87,6 +87,36 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 无法机械判定。
 
 这也是把登记处补齐的价值：现在能一眼看出哪些是名字、哪些是真门禁。
+
+## R10 §7 Adapter 接口的落地差额（MVP-10a 与 MVP-09 两次独立核实）
+
+R10 §7 规定 v1 主动拉取接口共 **16 个方法**。逐条对照 `backend/app/api/routes.py`：
+
+| 状态 | 方法 |
+|---|---|
+| 有端点 | `claim`、`heartbeat`、`submit_result`、`request_help`、`report_blocked`、`abandon`、`release`、`publish_task_branch`、`probe`、`capabilities`、`list_ready_tasks`、`read_context`（12 个） |
+| **无端点** | `accept_help`、`reject_help`、`split_task`、`ask_human`（4 个）—— `test_adapter.py` 断言它们抛 `UnsupportedVerb` |
+
+### 两个不在 §7 里、但操作链路离不开的步骤
+
+这两个是 **MVP-09（CLI）核实出来的**，因为它是第一个真把整条链路走完的交付：
+
+| 步骤 | 为何没有 HTTP 通路 |
+|---|---|
+| `claimed → in_progress`（`start_task`） | **§7 根本没有这个 verb**。§7 只有推送模型的 `start(task, workspace)`，且被标为「未来才需要」。而 `submit_result` 要求任务已在 `in_progress` |
+| 产出 verify receipt（`verifying → awaiting_review`） | Verify Worker 没有端点。R10 §7 也不含 verify 动词 —— 它属于调度中心/Worker 内部动作 |
+
+**后果**：操作员（或任何 harness）**无法只经 API 走完「领取 → 提交 → 审查」**。
+`tests/test_cli_flow.py` 与 `tests/test_api_flow.py` 都是**直接调
+`SchedulerService.start_task` / `VerifyWorker.run`** 绕过，并在用例注释里显式标注
+—— 而不是伪造 receipt 或偷偷开一条旁路。
+
+**要真正闭合**，需要在 §7 增补 verb（并走 R10 复审），或明确「这两步不属 adapter
+职责、由调度中心内部驱动」—— 后者目前是对的，但**没有任何一处规范文字这么说过**，
+所以每个实现者都要自己重新发现一遍。本表把这条写下来就是为了省掉那一次。
+
+> 上表**不被门禁断言**（`discipline` 只查 test_id 是否登记）。加断言前先核对此处；
+> 发现差额未同步时，改的是这张表而不是实现。
 
 ## 相关
 
