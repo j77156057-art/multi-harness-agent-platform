@@ -8,7 +8,7 @@
 依赖任务：claim-denum
 真相源引用：docs/proposals/claim-denum.md（OpenCode，2026-10-06 02:39）
             docs/proposals/claim-denum-coordinator-review.md（本任务的交付物）
-允许修改目录：docs/proposals/**、docs/claims/57-*.md、TASKS.md任务表与占号节
+允许修改目录：docs/proposals/**、docs/claims/workbuddy--claim-denum-coordinator-review.md、TASKS.md任务表
 禁止修改目录：tools/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/claim-denum-coordinator-review/a1
 test_id：MVP-PROCESS-001
