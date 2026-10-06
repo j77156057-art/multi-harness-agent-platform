@@ -71,13 +71,34 @@ class Result:
         self.checks.append({"ok": bool(ok), "msg": msg, "group": group})
         return ok
 
+    def warn(self, msg, group=""):
+        """记一条**告警**：不判红、不影响退出码，但默认就打印，且进 JSON。
+
+        为什么需要第三个等级：rootworktree 组要在「调用方不是占用者」时
+        给出信息而不是红灯，而另两条路都是错的 ——
+        - `chk(False, ...)`：代价落回所有人身上。这正是 TRAE 评审
+          （root-worktree-clean-review 问题 6）要求改掉的东西：根工作区脏的
+          时候所有人的 `check` 全红，包括正在自己 worktree 干活的人。
+        - `chk(True, ...)`：一条**内容为假**的绿色项。门禁最忌讳这个——
+          绿灯里含假账，等于用「看起来通过」换「不阻塞」。
+
+        告警两条都不是：它明确说「这不是你的问题，但也别当没看见」，而
+        占用者本人在根工作区跑时仍然拿到红灯。
+        """
+        self.checks.append({"ok": True, "warn": True, "msg": msg, "group": group})
+        return True
+
     @property
     def failed(self):
         return [c for c in self.checks if not c["ok"]]
 
     @property
+    def warnings(self):
+        return [c for c in self.checks if c.get("warn")]
+
+    @property
     def passed(self):
-        return [c for c in self.checks if c["ok"]]
+        return [c for c in self.checks if c["ok"] and not c.get("warn")]
 
 
 def read(path):
@@ -1068,19 +1089,67 @@ def root_worktree_status(repo_root):
     )
 
 
+def _same_dir(a, b):
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 def check_root_worktree(result, repo_root, reader=root_worktree_status):
     """断言：根工作区在非合并状态下没有未提交改动。
 
-    为什么需要它：`mergeguard` 只能阻止「自己那一次合并」，无法让占用
-    合并区的人承担代价。实测今天 Qoder、TRAE 轮流在根工作区写代码并留下
-    未解决冲突，导致合并反复被挡。这条断言把「占用合并区」变成全局可见
-    的门禁失败——刻意的强制函数。
+    **判定对象是「占用者」，不是「所有人」** —— 这是本组在 TRAE 评审
+    （root-worktree-clean-review 问题 6）之后的正式形态。
 
-    代价：别人占用根工作区时，所有人的 `./scripts.sh check` 都会变红，
-    包括正在自己 worktree 干活的人。退路是降级为告警。
+    早先版本一视同仁：根工作区脏 → 所有人的 `check` 全红，包括正在自己
+    worktree 干活、跟这事毫无关系的人。今天这个代价已经实际发生：它堵了
+    十几次合并，其中几次是我自己的。**代价落在所有人身上，却只有一个人
+    是原因** —— 那是错配。
+
+    现在的规则：
+
+    - 调用方**就在根工作区**（即占用者本人）→ 严格判红。代价落在他身上，
+      这正是这条断言设计时想要的强制函数。
+    - 调用方在**别的 worktree** → 记**告警**：明确点名文件、说明占用者
+      自己会看到红灯，但不判红、不阻塞他干活。
+    - **定位不到主工作区 / git 不可用** → 对任何人都 fail-closed 判红。
+      这条不因为「作用域反转」而放松：无法判断状态时静默放行，等于没有
+      这道检查。
+
+    为什么占用者能被识别出来：他要在根工作区留下改动，就必须**在根工作区
+    里**跑命令。这是这条设计的立足点。
     """
+    root = root_worktree_of(repo_root)
+    if root is None or not os.path.isdir(root):
+        result.chk(
+            False,
+            "无法定位主工作区（git 不可用或不在 git 仓库内）；fail-closed",
+            "rootworktree",
+        )
+        return
+
     ok, detail = reader(repo_root)
-    result.chk(ok, "根工作区在非合并状态下无未提交改动（%s）" % detail, "rootworktree")
+    if ok:
+        result.chk(
+            True,
+            "根工作区在非合并状态下无未提交改动（%s）" % detail,
+            "rootworktree",
+        )
+        return
+
+    if _same_dir(repo_root, root):
+        # 占用者本人：红灯。
+        result.chk(False, "根工作区有未提交改动：%s" % detail, "rootworktree")
+        return
+
+    result.warn(
+        "根工作区（%s）被占用，但本次是从 %s 运行的，**不判红**——"
+        "占用者自己跑 check 时会看到红灯。占用内容：%s"
+        % (
+            os.path.basename(root),
+            os.path.basename(os.path.abspath(repo_root)),
+            detail,
+        ),
+        "rootworktree",
+    )
 
 
 def parse_merge_subject(subject):
@@ -1422,12 +1491,16 @@ def main():
         return 2
 
     if args.json:
+        # warnings 放在 **stdout 的 JSON 体里**，不写 stderr。TRAE 评审问题 3
+        # 的教训：`.github/workflows/gate.yml` 用 `--json` 重定向只收 stdout，
+        # 写到 stderr 的留痕消费方根本看不到。
         print(
             json.dumps(
                 {
                     "total": len(result.checks),
                     "passed": len(result.passed),
                     "failed": len(result.failed),
+                    "warnings": len(result.warnings),
                     "checks": result.checks,
                 },
                 ensure_ascii=False,
@@ -1441,14 +1514,26 @@ def main():
             groups.setdefault(check["group"], []).append(check)
         for group, items in groups.items():
             bad = [i for i in items if not i["ok"]]
-            print("[%s] %d 项，%d 失败" % (group, len(items), len(bad)))
+            warned = [i for i in items if i.get("warn")]
+            extra = "，%d 告警" % len(warned) if warned else ""
+            print("[%s] %d 项，%d 失败%s" % (group, len(items), len(bad), extra))
             for item in items:
                 if not item["ok"]:
                     print("   FAIL  " + item["msg"])
+                elif item.get("warn"):
+                    # 告警**默认就打印**，不需要 --verbose：它的全部意义就是
+                    # 「不该被静默」。--verbose 控制的是通过项。
+                    print("   WARN  " + item["msg"])
                 elif args.verbose:
                     print("   ok    " + item["msg"])
         print("")
-        print("结果: %d 项检查，%d 项失败" % (len(result.checks), len(result.failed)))
+        summary = "结果: %d 项检查，%d 项失败" % (
+            len(result.checks),
+            len(result.failed),
+        )
+        if result.warnings:
+            summary += "，%d 项告警" % len(result.warnings)
+        print(summary)
 
     return 1 if result.failed else 0
 

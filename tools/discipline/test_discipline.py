@@ -327,6 +327,80 @@ def _root_repo(tmp_path):
     return repo
 
 
+def test_root_worktree_red_only_for_the_occupier(tmp_path, monkeypatch):
+    """**C 方案的核心**：同一个占用事实，只让占用者本人拿到红灯。
+
+    早先版本一视同仁：根工作区脏 → 所有人的 `check` 全红，包括正在自己
+    worktree 干活、跟这事毫无关系的人。今天这个代价实际发生：它堵了十几次
+    合并，其中几次是我自己的。**代价落在所有人身上，却只有一个人是原因**
+    —— 那是错配。
+
+    现在：调用方就在根工作区（即占用者）→ 判红；调用方在别的 worktree →
+    记告警，不判红、不阻塞。
+    """
+    repo = _root_repo(tmp_path)
+    linked = repo / "wt"
+    git(str(repo), "worktree", "add", "-b", "task", str(linked))
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+
+    occupier = d.Result()
+    d.check_root_worktree(occupier, str(repo))
+    assert len(occupier.failed) == 1, "占用者本人必须拿到红灯"
+    assert not occupier.warnings
+
+    bystander = d.Result()
+    d.check_root_worktree(bystander, str(linked))
+    assert not bystander.failed, "别人的 worktree 不该被这件事阻塞"
+    assert len(bystander.warnings) == 1, "但必须有一条可见告警"
+    msg = bystander.warnings[0]["msg"]
+    assert "不判红" in msg
+    assert "f.txt" in msg, "告警必须点名具体文件"
+
+
+def test_root_worktree_bystander_still_sees_a_failure_when_unlocatable(
+    tmp_path, monkeypatch
+):
+    """**fail-closed 不因作用域反转而放松**：定位不到主工作区时对谁都判红。
+
+    这条容易在「让告警更友好」时被顺手削掉 —— 但无法判断状态时静默放行，
+    等于没有这道检查。作用域反转只针对「知道是占用、且占用者不是自己」。
+    """
+    result = d.Result()
+    monkeypatch.setattr(d, "root_worktree_of", lambda _r: None)
+    d.check_root_worktree(result, str(tmp_path))
+    assert len(result.failed) == 1
+    assert "fail-closed" in result.failed[0]["msg"]
+    assert not result.warnings
+
+
+def test_warn_is_not_a_silent_pass(tmp_path):
+    """告警**默认就打印**，且进 JSON 的 stdout 体 —— 不写成 stderr。
+
+    两点都来自 TRAE 评审问题 3 的教训：`{"skipped":...}` 只写 stderr，而
+    `gate.yml` 的 `--json` 重定向只收 stdout，消费方根本看不到。
+    另外告警不能只在 `--verbose` 下出现 —— 它的全部意义就是「不该被静默」。
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import io,sys;"
+        "sys.path.insert(0, %r);"
+        "import discipline as d;"
+        "r=d.Result();"
+        "r.warn('W', 'g');"
+        "assert len(r.warnings)==1, r.checks;"
+        "assert len(r.passed)==0, 'warn 不该算通过项';"
+        "assert r.failed==[];"
+        "print('OK')" % str(Path(d.__file__).parent)
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "OK" in proc.stdout
+
+
 def test_root_worktree_clean_passes(tmp_path):
     repo = _root_repo(tmp_path)
     ok, detail = d.root_worktree_status(str(repo))

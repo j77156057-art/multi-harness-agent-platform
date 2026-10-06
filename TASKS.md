@@ -44,7 +44,7 @@
 | trace-closure | OpenCode | MVP-03-amend | ✅ done | `agent/local/opencode/gate-baseline-repair/a1` | `MVP-PROCESS-001` `MVP-TRANSITION-MIRROR-001` |
 | plan-evidence-failclosed | OpenCode | MVP-03 | ✅ done | `agent/local/opencode/plan-evidence-failclosed/a1` | `DOC-PLAN-001` `MVP-PROCESS-001` |
 | merge-interlock | OpenCode | discipline | ✅ done | `agent/local/opencode/merge-interlock/a1` | `MVP-MERGE-LOCK-001` `MVP-PROCESS-001` |
-| root-worktree-clean | OpenCode | merge-interlock | ✅ done（代码侧完成；合入待问题 6 拍板） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
+| root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | MVP-04 | Qoder | MVP-02 MVP-03 | ✅ 已验收（TRAE 代码核查 + WorkBuddy 注入验证 3/3） | `agent/local/qoder/MVP-04/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | MVP-04-verify | TRAE | MVP-04 | ✅ done | `agent/local/trae/MVP-04-verify/a1` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-LEASE-001` `CORE-FENCE-001` |
 | verify-mvp-04 | WorkBuddy | MVP-04 | ✅ done（注入验证） | `agent/workbuddy/verify-mvp-04` | `CORE-CLAIM-001` `CORE-CLAIM-002` `CORE-FENCE-001` |
@@ -681,10 +681,32 @@ test_id：MVP-PROCESS-002
 测试命令：./scripts.sh check（等价分步：docstate + discipline + ruff + pytest）
 当前状态：✅ done（代码侧完成；合入 main 需与「问题 6 耦合」一并拍板）
 commit：本分支 tip 见 `git log -1`（合并前已补全下方验证证据）
+问题 6 [中/操作面] 合入即时效应 —— 按 **C 方案**落地（2026-10-07）
+  原问题：本组一合入，根工作区脏时所有人的 `check` 与合并全部被堵。这是
+  刻意的强制函数，但**代价落在所有人身上而只有一个人是原因** —— 实测堵了
+  十几次合并，其中几次是无关 agent 的。
+  **C 方案：把判定对象从「所有人」换成「占用者本人」。**
+  - 新增 `Result.warn()` 第三个等级。不判红、不影响退出码，但**默认就打印**
+    （不需要 `--verbose`）且计入 `--json` 的 **stdout** 体。
+  - `check_root_worktree` 作用域反转：
+    · 调用方**就在根工作区**（占用者）→ 严格判红，代价落在他身上；
+    · 调用方在**别的 worktree** → 记 WARN，点名文件、说明占用者自己会看到
+      红灯，但不判红、不阻塞他干活；
+    · **定位不到主工作区 / git 不可用 → 对任何人都 fail-closed 判红。**
+  - 立足点：占用者要在根工作区留下改动，就**必须待在根工作区里**跑命令，
+    所以他一定拿得到红灯；别人只是看得见。
+  - 为什么不用 `chk(True, ...)` 冒充通过：那是**内容为假的绿色项**，绿灯
+    里含假账，比不检查更坏。这正是 Claude 在 claim-seq 卡里记的同形教训。
+  - 为什么不只做「降级为告警」（TRAE 卡的退路 B）：那样占用者也拿不到
+    红灯，断言基本没用。C 与 B 的区别就在「谁承担」。
+  实测（同一份占用事实）：占用者退出码 1；无关 agent 退出码 0 并看到 WARN。
+  同步更新 `docs/dev-convention.md` 的「会被门禁红掉的」表（含项数 42→45）。
+  新增 3 条用例；`Result.warnings` 另有子进程用例钉住「告警不是静默通过」。
+  **AGENTS.md 未改** —— 不在本任务允许目录内；按 AGENTS.md 自身的分工，
+  H-1/H-8 类细则归 `docs/dev-convention.md`。
+
 合入前提（阻塞中，非代码问题）：
-  1. **问题 6 的耦合需团队拍板** —— 本组一合入，根工作区脏时所有人的
-     `scripts.sh check` 与 mergeguard 合并全部被堵。这是刻意的强制函数，
-     但代价落在所有人身上（详见 review 卡问题 6）。
+  1. ~~问题 6 需团队拍板~~ → 已定为 C 并落地（见上）。
   2. **合并须走一次例外**：main 上跑的是 mergeguard 首版（无 `--no-commit`），
      用它合本分支会重现「门禁红了但 merge commit 已落地」。
      **「用受控合并合入受控合并的修复」在结构上做不到** —— 需要协调者
