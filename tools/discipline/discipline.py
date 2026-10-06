@@ -1042,6 +1042,31 @@ def root_worktree_of(repo_root):
 UNMERGED_STATUS_CODES = ("UU", "AA", "DD", "AU", "UA", "DU", "UD")
 
 
+def _ensure_repo_root_on_path():
+    """把本仓库的根目录插到 `sys.path` 最前面（幂等）。
+
+    背景（2026-10-07 实测死锁）：`mergeguard` 合并时用**子进程**跑
+    `tools/discipline/discipline.py`，此时 `sys.path[0]` 是该脚本所在的
+    `tools/discipline`，仓库根**不在** path 里，于是本模块里
+    `from tools.mergeguard import guard` 必然抛 ModuleNotFoundError。
+
+    那个 except 分支是 fail-closed，会把「导入路径不对」报成「无法证明合并
+    归属 → 不放行」。后果是**死锁**：mergeguard 合并时自己调本门禁 → 本组判红
+    → mergeguard 不提交 → MERGE_HEAD 留着 → 下一轮还是判红，永远合不进去。
+    实测就卡在这里，只能手工 abort 脱困。
+
+    按 `discipline.py` 的位置上溯两级推出仓库根（`tools/discipline/x.py`
+    → `tools/discipline` → `tools` → 仓库根）。**不改变 fail-closed 语义** ——
+    推不出根目录时 `sys.path` 原样返回，由调用方的 except 判不放行。
+    """
+    try:
+        repo_root_path = str(Path(__file__).resolve().parents[2])
+    except (NameError, OSError, IndexError):
+        return
+    if repo_root_path and repo_root_path not in sys.path:
+        sys.path.insert(0, repo_root_path)
+
+
 def _merge_exemption_verdict(root, unmerged):
     """根工作区有 MERGE_HEAD 时，判断这次合并是否**受控且正在进行**。
 
@@ -1069,6 +1094,10 @@ def _merge_exemption_verdict(root, unmerged):
             "、".join(p.split()[-1] for p in unmerged[:3]),
         )
 
+    #导入前先把**仓库根**放进 sys.path，否则脚本方式运行下
+    # `from tools.mergeguard import guard` 必然失败 —— 详见
+    # `_ensure_repo_root_on_path` 的注释（那是个把merge 锁死的死锁）。
+    _ensure_repo_root_on_path()
     try:
         from tools.mergeguard import guard  # 延迟 import：仅本分支需要
     except Exception as error:  # noqa: BLE001 - 读不到就一律不放行
