@@ -147,6 +147,20 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def is_holder_alive(info: LockInfo) -> bool:
+    """持有者进程此刻是否还活着。
+
+    与 `is_stale` 里的判据分开命名，因为**两者回答的是不同问题**：
+    `is_stale` 判「该不该接管」（死 且 超 TTL）；这里判「这是不是一次正在
+    进行的合并」（死 或 活）。
+
+    单独暴露而不是让调用方去摸私有的 `_pid_alive`：`discipline` 的
+    rootworktree 组要用它判断「根工作区的 MERGE_HEAD 是不是受控合并留下的」，
+    那是跨模块的公开需求，不该靠约定私有名。
+    """
+    return _pid_alive(info.pid)
+
+
 def read_lock(repo: Path) -> LockInfo | None:
     """读当前锁；不存在返回 None。内容损坏时也返回 None（视作无锁）。"""
     path = lock_path(repo) / "owner.json"

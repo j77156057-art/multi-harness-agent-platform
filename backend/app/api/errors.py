@@ -29,6 +29,7 @@ from app.claim.service import IdempotencyConflict
 from app.claim.transitions import ConcurrentStateChange, IllegalTransition
 from app.git.publish import PublishRejected
 from app.lease.service import LeaseExpired, LeaseNotFound, LeaseTokenMismatch
+from app.security.scan import SecretScanBlocked
 from app.tasks.service import Conflict, InvalidInput, NotFound
 
 #: Codes for which an as-is retry within the same attempt may succeed.
@@ -89,6 +90,17 @@ def _from_exception(exc: Exception) -> ApiError:
     if isinstance(exc, PublishRejected):
         retryable = exc.code in RETRYABLE
         return ApiError(exc.code, exc.http_status, str(exc), retryable=retryable)
+    if isinstance(exc, SecretScanBlocked):
+        # §17 + prep D-8: details carry only scan_id and rule_name; the
+        # message is static. task_id/seq make the refusal traceable.
+        return ApiError(
+            exc.code,
+            422,
+            str(exc),
+            details=exc.details,
+            seq=exc.event_seq,
+            task_id=exc.task_id,
+        )
     if isinstance(exc, IdempotencyConflict):
         return ApiError(exc.code.value, 409, str(exc))
     if isinstance(exc, StaleFencingEpoch):

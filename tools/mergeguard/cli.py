@@ -312,6 +312,57 @@ def _merge_with_retry(
     return proc, expected
 
 
+def _commit_landed(branch: str, *, git=None) -> tuple[bool, str]:
+    """核实「`git commit` 报错了，但 merge commit 其实已经落地」。
+
+    起因是 WorkBuddy 报的 bug（`docs/claims/52-workbuddy--report-mergeguard-commit-bug.md`，
+    2026-10-06 09:00）：git 在这台机器上**间歇性**写 index 失败，报
+    `fatal: unable to write new index file`，于是 `git commit` 退出码非零 ——
+    但 commit 实际已经写入（写 index 与落 commit 是两步，前者报错时后者
+    可能已完成）。工具据此报「提交失败」，而**调用方会以为合并没成功而重跑**，
+    重跑时分支已经在 main 上，第二次 merge 要么是 no-op、要么造出重复提交。
+    WorkBuddy 说他当天差点就这么干。
+
+    首版实现只用 `check=True` 捕获异常；本版改用 `check=False` 比 returncode，
+    误报**依然存在**（只是从 traceback 变成了一句「提交失败」）。所以必须
+    在报失败之前核实一次。
+
+    三条判据同时成立才算已落地：
+
+    1. **工作区干净** —— 还有改动就说明确实没提交完。
+    2. **HEAD 是 merge commit**（>= 2 个父）—— 防止把上一个 merge commit
+       误当成本次的结果。
+    3. **被合分支已是 HEAD 的祖先** —— 这条最关键：它直接证明「这次合并的
+       内容确实进了 main」，比前两条都强。
+
+    返回 (是否已落地, 说明)。
+
+    `git` 参数是注入点：默认 `_git` 绑在本模块的 `REPO_ROOT` 上，而
+    `REPO_ROOT` 是**导入时**按进程 cwd 定的。在 pytest 进程里它指向真实
+    工作区，所以直接调这个函数会去查真实仓库 —— 既测不到临时仓库，又
+    有误判风险。测试通过注入一个绑到临时仓库的 runner 来覆盖四条判据。
+    """
+    run = git if git is not None else _git
+
+    dirty = run("status", "--porcelain", check=False).stdout.strip()
+    if dirty:
+        return False, "工作区仍不干净（%s）" % dirty.splitlines()[0][:80]
+
+    parents = run("log", "-1", "--format=%P", check=False).stdout.split()
+    if len(parents) < 2:
+        return False, "HEAD 不是 merge commit（%d 个父）" % len(parents)
+
+    anc = run("merge-base", "--is-ancestor", branch, "HEAD", check=False)
+    if anc.returncode != 0:
+        return False, "被合分支 %s 还不是 HEAD 的祖先" % branch
+
+    return True, "HEAD=%s（%d 个父），且 %s 已是其祖先" % (
+        run("log", "-1", "--format=%h", check=False).stdout.strip(),
+        len(parents),
+        branch,
+    )
+
+
 def _commit_with_retry(
     *,
     sleep: Callable[[float], object] = time.sleep,
@@ -591,14 +642,12 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
             print("\n合并无冲突，改动已 staged 但**未提交**（--no-commit）。开始跑门禁…")
             gates = [
                 ("docstate", ["tools/docstate/docstate.py"]),
-                # 豁免 rootworktree 组：合并期间根工作区本来就该是「合并中」的脏状态，
-                # 那条断言会必然变红。而 mergeguard 自己已经查过脏工作区、也持有互斥锁，
-                # 重复把关只会造成死锁——占用者不清干净，合并就进不去。
-                # 豁免是显式的：下面会打印出来，不静默。
-                (
-                    "discipline",
-                    ["tools/discipline/discipline.py", "--skip-group", "rootworktree"],
-                ),
+                # 不再对 discipline 传 `--skip-group`（该选项已整体回退）。
+                # 合并期间根工作区是脏的，但 rootworktree 组的豁免判据已经
+                # 能正确识别「受控合并进行中」——mergeguard 此刻持有合并锁，
+                # 锁持有者 pid 存活且无未合并条目，所以那一组自己就放行。
+                # 换句话说：**该修的是豁免判据，不是加一个能关掉检查的开关。**
+                ("discipline", ["tools/discipline/discipline.py"]),
             ]
             failed = []
             for name, args in gates:
@@ -628,7 +677,22 @@ def do_merge(branch: str, task_id: str, skip_gate: bool) -> int:
         print("\n门禁通过，提交 merge commit。")
         commit = _commit_with_retry()
         if commit.returncode != 0:
+            landed, why = _commit_landed(branch)
+            if landed:
+                # 见 `_commit_landed` 的 docstring：git 间歇性写 index 失败会让
+                # commit 退出码非零，而 commit 其实已经落地。此时**必须**报成功，
+                # 否则调用方会重跑，重跑时分支已在 main 上。
+                print(
+                    "\n注意：`git commit` 返回非零，但核实后 merge commit "
+                    "已经落地（%s）。" % why
+                )
+                print("git 的报错：" + (commit.stderr or commit.stdout).strip())
+                print("按成功处理 —— 请**不要**重跑本命令。")
+                _clear_pending()
+                print("HEAD: " + _git("log", "--oneline", "-1").stdout.strip())
+                return 0
             print("提交失败：" + (commit.stderr or commit.stdout), file=sys.stderr)
+            print("核实结果：merge commit 未落地（%s）。" % why, file=sys.stderr)
             print(
                 f"MERGE_HEAD 仍在、合并结果已暂存。修好后重跑本命令即可只重试提交：\n"
                 f"  python tools/mergeguard/cli.py merge {branch} --task-id {task_id}",

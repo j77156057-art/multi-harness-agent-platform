@@ -850,6 +850,127 @@ def test_merge_does_not_retry_real_conflict():
 
 
 # ---------------------------------------------------------------------------
+# commit 误报：git 报错但 merge commit 其实已落地
+#
+# 起因：WorkBuddy 的报告（docs/claims/52-workbuddy--report-mergeguard-commit-bug.md）
+# —— git 在本机间歇性写 index 失败（unable to write new index file），commit
+# 退出码非零但实际已写入。工具报「提交失败」，调用方会以为没合并而重跑，
+# 而重跑时分支已在 main 上。他当天差点就这么干。
+# ---------------------------------------------------------------------------
+
+
+def _runner_at(repo: Path):
+    """一个绑到指定仓库的 git runner，用来给 cli._commit_landed 注入。"""
+
+    def run(*args: str, check: bool = False):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=check,
+        )
+
+    return run
+
+
+def test_commit_landed_recognises_a_real_merge_commit(repo_with_gates: Path):
+    """核实路径的正例：真的合完了，三条判据都成立。"""
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1", "--skip-gate")
+    _git(repo_with_gates, "commit", "--no-edit")
+
+    landed, why = cli._commit_landed("feature", git=_runner_at(repo_with_gates))
+    assert landed is True, why
+    assert "祖先" in why
+
+
+def test_commit_landed_rejects_dirty_worktree(repo_with_gates: Path):
+    """工作区仍不干净 -> 不能算已落地（否则会把别人的未提交改动认成合并成功）。"""
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1", "--skip-gate")
+    _git(repo_with_gates, "commit", "--no-edit")
+    (repo_with_gates / "theirs.txt").write_text("别人的", encoding="utf-8")
+
+    landed, why = cli._commit_landed("feature", git=_runner_at(repo_with_gates))
+    assert landed is False
+    assert "不干净" in why
+
+
+def test_commit_landed_rejects_non_merge_head(repo_with_gates: Path):
+    """HEAD 不是 merge commit -> 不能算已落地（防止把上一次的合并当成本次）。"""
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    landed, why = cli._commit_landed("feature", git=_runner_at(repo_with_gates))
+    assert landed is False
+    assert "merge commit" in why
+
+
+def test_commit_landed_requires_branch_to_be_ancestor(repo_with_gates: Path):
+    """**关键判据**：仓库里有个 merge commit、工作区也干净，但被合分支不是祖先。
+
+    只查「干净 + 两个父」不够 —— 那两条在上一次合并之后一直成立。
+    「分支已是 HEAD 的祖先」才真正证明**这次合并的内容**进了 main。
+    """
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1", "--skip-gate")
+    _git(repo_with_gates, "commit", "--no-edit")
+
+    # 再合一个别的分支，于是 HEAD 是 merge commit 且工作区干净
+    _commit_feature(repo_with_gates, "other", "h.txt")
+    _cli(repo_with_gates, "merge", "other", "--task-id", "T-2", "--skip-gate")
+    _git(repo_with_gates, "commit", "--no-edit")
+
+    run = _runner_at(repo_with_gates)
+    landed, why = cli._commit_landed("feature", git=run)
+    assert landed is True, "feature 早已合过，仍应算已落地：" + why
+
+    # 注意：`git branch X` 会把 X 建在**当前 HEAD** 上，那样它天然就是祖先，
+    # 断言会假通过。必须让该分支带一个 main 上没有的提交。
+    _git(repo_with_gates, "checkout", "-b", "never-merged")
+    (repo_with_gates / "n.txt").write_text("n", encoding="utf-8")
+    _git(repo_with_gates, "add", "n.txt")
+    _git(repo_with_gates, "commit", "-m", "not merged")
+    _git(repo_with_gates, "checkout", "main")
+    landed2, why2 = cli._commit_landed("never-merged", git=run)
+    assert landed2 is False, "未合入的分支不得算已落地：" + why2
+    assert "祖先" in why2
+
+
+def test_cli_reports_failure_when_commit_really_failed(repo_with_gates: Path):
+    """真失败仍然报 exit 6 —— 核实不能变成「一律当成功」。
+
+    用一个必然失败的 pre-commit hook 让 `git commit --no-edit` 确定性地失败：
+    不靠注入（子进程里注入无效），也不靠碰运气的间歇性故障。
+    """
+    _commit_feature(repo_with_gates, "feature", "g.txt")
+    hooks = repo_with_gates / ".git" / "hooks"
+    hooks.mkdir(exist_ok=True)
+    hook = hooks / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    before = _git_out(repo_with_gates, "rev-parse", "HEAD")
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 6, r.stdout + r.stderr
+    assert "提交失败" in r.stderr
+    assert "merge commit 未落地" in r.stderr, "必须说明核实结论"
+    assert _git_out(repo_with_gates, "rev-parse", "HEAD") == before
+    assert _merge_head_file(repo_with_gates).exists(), "真失败必须保留待提交现场"
+    assert not guard.lock_path(repo_with_gates).exists()
+
+
+# 覆盖范围的诚实说明：`_commit_landed` 的四条判据各有一条注入式单测
+# （含最容易写错的那条「分支不是祖先」），「真失败仍报 exit 6」有端到端用例。
+# 但**「commit 报错却已落地 -> 退出码 0」这条成功路径没有端到端用例**：
+# 它需要制造「commit 落地但退出码非零」，而唯一稳定的做法（pre-commit hook
+# 里自己提交）会递归触发 hook 并退化成 182 秒的退避重试。
+# 第一版硬写过一版，代价是单条用例占满整个测试文件的 75% 时长。
+# 这里选择**不留一条脆弱的用例**：判据逻辑本身已被穷尽覆盖，而一条依赖
+# hook 递归偶然行为的「绿」比没有更危险 —— 它绿了也证明不了什么。
+
+
+# ---------------------------------------------------------------------------
 # 问题 2（中）：最终 commit 也必须有界重试
 # ---------------------------------------------------------------------------
 

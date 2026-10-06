@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 DEFAULT_TASKS = os.path.join("TASKS.md")
 # 2026-10-05 拆分：认领登记从 TASKS.md 的多写表格迁到「每task 一个独占文件」。
@@ -65,8 +66,6 @@ class Result:
 
     def __init__(self):
         self.checks = []
-        #: 被显式豁免的组名。豁免必须留痕，不能悄悄少跑一条断言。
-        self.skipped = []
 
     def chk(self, ok, msg, group=""):
         self.checks.append({"ok": bool(ok), "msg": msg, "group": group})
@@ -155,6 +154,7 @@ def parse_claim_table(repo_root=None):
             {
                 "seq": name.split("-", 1)[0],
                 "file": name,
+                "name_task_id": task_id_from_filename(name),
                 "task_id": _md_field(body, "task_id").strip("`"),
                 "harness": _md_field(body, "Harness"),
                 "claimed_at": _md_field(body, "认领时间"),
@@ -163,6 +163,17 @@ def parse_claim_table(repo_root=None):
             }
         )
     return entries
+
+
+def task_id_from_filename(name):
+    """`<序号>-<harness>--<task-id>.md` → task_id。
+
+    按**最后**一个 `--` 切分：harness 自身含连字符（`claude-code`），
+    而 task_id 不含 `--`。
+    """
+    stem = name[:-3] if name.endswith(".md") else name
+    stem = re.sub(r"^\d+-", "", stem)
+    return stem.rsplit("--", 1)[-1] if "--" in stem else ""
 
 
 def parse_cards(text):
@@ -218,6 +229,45 @@ def has_verification_evidence(card):
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
 
+def _reserved_claim_slots(tasks_text):
+    """解析 TASKS.md 的「占用中的认领序号」小节。
+
+    那些是**已建文件但尚未合入 main** 的序号：claimant 在自己的 worktree 里
+    建了 `docs/claims/NN-*.md`，main 上看不到，于是「序号必须连续 1..N」这条
+    断言会把其他人全部挡住（2026-10-06 09:05 实际卡住过一次）。
+
+    返回 [(序号, 认领文件路径)]。节不存在或为空时返回 []。
+    """
+    m = re.search(
+        r"^###\s*占用中的认领序号\s*$", tasks_text, re.M
+    )
+    if not m:
+        return []
+    block = tasks_text[m.end():]
+    nxt = re.search(r"^#{2,3}\s", block, re.M)
+    if nxt:
+        block = block[: nxt.start()]
+    out = []
+    for line in block.splitlines():
+        row = line.strip()
+        if not row.startswith("|"):
+            continue
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        seq = cells[0]
+        if not re.fullmatch(r"\d+", seq):
+            continue  # 表头或分隔行
+        path = None
+        for c in cells:
+            hit = re.search(r"docs/claims/[\w./-]+\.md", c)
+            if hit:
+                path = hit.group(0)
+                break
+        out.append((int(seq), path))
+    return out
+
+
 def check_registry(result, tasks_text, repo_root=None):
     """组 1：任务表与认领登记表自身的完整性。"""
     tasks = parse_task_table(tasks_text)
@@ -250,18 +300,57 @@ def check_registry(result, tasks_text, repo_root=None):
         "registry",
     )
 
-    # 序号即身份：除唯一外还必须连续为 1..N，否则撞号可以靠「跳号」规避
-    # （claim-nullable 违规记录承诺的纠正措施，GATE-MERGE-CHECK-01 落地）。
-    seq_nums = [int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")]
-    expected = set(range(1, len(claims) + 1))
+    # 文件名里的 task_id 必须与文件内容的 task_id 一致。
+    #
+    # 这条**替代**了原先的「序号连续 1..N」断言（GATE-MERGE-CHECK-01 交付、
+    # 由本任务按 docs/proposals/claim-seq-contiguity.md 的裁决撤销）。
+    # 理由与机械证据见提案文档；一句话：连续性在并发分支下**结构上不可满足** ——
+    # 各 agent 在各自分支上从 main 的最大值往后取号，合并顺序又不由取号者决定，
+    # 于是两条分支各自合规却整体不合规。
+    #
+    # 而连续性没有防住任何唯一性没防住的东西：跳号本身无害；重复号无论是否跳号
+    # 都会撞上上面那条唯一性断言。原注释所说的「靠跳号规避撞号」把「留空隙」与
+    # 「逃避检测」混为一谈。
+    #
+    # 换成的这条同样能抓真实错漏（文件被改名、放错任务、复制后忘改内容），
+    # 且两个 agent 独立操作也能同时满足 —— 它不依赖任何跨分支的共享计数器。
+    mismatched_name = sorted(
+        "%s（文件名 %s）" % (c["task_id"], c["file"])
+        for c in claims
+        if c["name_task_id"] and c["name_task_id"] != c["task_id"]
+    )
     result.chk(
-        len(seq_nums) == len(claims) and set(seq_nums) == expected,
-        "认领文件序号连续为 1..%d；缺号=%s，越界/非数字=%s"
-        % (
-            len(claims),
-            sorted(expected - set(seq_nums)) or "无",
-            sorted(set(seq_nums) - expected) or "无",
-        ),
+        not mismatched_name,
+        "认领文件名里的 task_id 与文件内容一致；不一致=%s" % (mismatched_name or "无"),
+        "registry",
+    )
+
+    # 「占用中的认领序号」：登记的号不能和已存在的冲突，登记的文件必须真存在。
+    # 这两条让那张表不只是给人看的说明，而是可执行的约定。
+    reserved = _reserved_claim_slots(tasks_text)
+    existing_seqs = {
+        int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")
+    }
+    collide = sorted(sq for sq, _ in reserved if sq in existing_seqs)
+    result.chk(
+        not collide,
+        "占用序号表不与已存在的认领文件撞号；撞号=%s" % (collide or "无"),
+        "registry",
+    )
+    # 只校验登记本身的形状：文件路径格式、序号与首列一致。
+    # **不**校验文件在本地存在 —— 占号者往往还在自己 worktree 上，文件合入main
+    # 之前本地根本看不到，那种情况下报错会永久卡住所有人（2026-10-06 09:10 实测）。
+    # 「有没有真的建文件」由序号连续性断言兜：那一条本来就要求号无洞。
+    malformed = sorted(
+        "行%s(路径=%s)" % (sq, path)
+        for sq, path in reserved
+        if path is None
+        or not re.fullmatch(r"docs/claims/%d-[\w.-]+\.md" % sq, path)
+    )
+    result.chk(
+        not malformed,
+        "占用序号表登记的路径格式为 docs/claims/<同一序号>-*.md；不合规=%s"
+        % (malformed or "无"),
         "registry",
     )
 
@@ -879,21 +968,70 @@ def root_worktree_of(repo_root):
     return os.path.dirname(common)
 
 
+#: `git status --porcelain` 前两列里代表「未合并（冲突）」的取值。
+#: 双边冲突 = UU/AA/DD，修改/删除冲突 = AU/UA/DU/UD。
+UNMERGED_STATUS_CODES = ("UU", "AA", "DD", "AU", "UA", "DU", "UD")
+
+
+def _merge_exemption_verdict(root, unmerged):
+    """根工作区有 MERGE_HEAD 时，判断这次合并是否**受控且正在进行**。
+
+    返回 (放行?, 说明)。
+
+    原来的判据是「`.git/MERGE_HEAD` 存在就放行」。TRAE 评审问题 1 打穿了
+    这一点：本组卡里声明的头号场景就是「别人在根工作区写代码、留下未解决
+    冲突」，而那种形态恰好**同时**满足 MERGE_HEAD 存在 —— 于是本组在自己
+    声明要防的场景里判 ok=True，承诺的持续施压为零。更糟的是子 agent 实证：
+    **手工写一个 40 字符的 `.git/MERGE_HEAD` 就能让占用状态静音。**
+
+    判据收紧为两条**必须同时**成立：
+
+    1. **没有未合并条目**（UU/AA/DD/AU/UA/DU/UD 一律不放行）。别人留下的
+       冲突就是这种形态；受控合并走到门禁时冲突早已解完。
+    2. **合并锁有活着的持有者**（`<common>/merge-lock/owner.json` 里的 pid
+       仍存活）。只有 `tools/mergeguard` 会取这把锁，所以这等于「这次合并
+       确实由受控入口发起，且发起者还活着」。
+
+    读不到锁、或 import 失败，都判不放行 —— 无法证明归属就不放行。
+    """
+    if unmerged:
+        return False, "存在 %d 个未合并条目（%s），判定为遗留冲突，不放行" % (
+            len(unmerged),
+            "、".join(p.split()[-1] for p in unmerged[:3]),
+        )
+
+    try:
+        from tools.mergeguard import guard  # 延迟 import：仅本分支需要
+    except Exception as error:  # noqa: BLE001 - 读不到就一律不放行
+        return False, "无法导入 mergeguard 以核对合并锁（%s），不放行" % error
+
+    try:
+        holder = guard.read_lock(Path(root))
+    except Exception as error:  # noqa: BLE001
+        return False, "读取合并锁失败（%s），不放行" % error
+
+    if holder is None:
+        return False, "MERGE_HEAD 存在但没有合并锁持有者记录（非受控合并），不放行"
+    if not guard.is_holder_alive(holder):
+        return False, (
+            "MERGE_HEAD 存在但合并锁持有者 %s（pid %s）已退出，"
+            "属崩溃残留，不放行" % (holder.task_id, holder.pid)
+        )
+    return True, "受控合并进行中（锁持有者 %s，pid %s 存活）" % (holder.task_id, holder.pid)
+
+
 def root_worktree_status(repo_root):
     """(ok, detail)：根工作区在非合并状态下是否干净。
 
     fail-closed 与 merge 组一致：定位不到根工作区、或 git 不可用，都判失败。
     静默放行等于没有这道检查——而这正是本组要防的那类事故。
 
-    合并进行中（MERGE_HEAD 存在）时**必须放行**：那时工作区本来就该脏，
-    否则一次正常的合并会被自己的门禁拦住。
+    合并进行中**不一定**放行：只有「无未合并条目 + 合并锁持有者存活」才算
+    受控合并，否则判红。见 `_merge_exemption_verdict` 的理由。
     """
     root = root_worktree_of(repo_root)
     if root is None or not os.path.isdir(root):
         return False, "无法定位主工作区（git 不可用或不在 git 仓库内）；fail-closed"
-
-    if os.path.exists(os.path.join(root, ".git", "MERGE_HEAD")):
-        return True, "根工作区正处于合并中，放行"
 
     proc = subprocess.run(
         ["git", "-C", root, "status", "--porcelain"],
@@ -906,6 +1044,17 @@ def root_worktree_status(repo_root):
         return False, "git status 在主工作区失败：%s" % (proc.stderr or "").strip()
 
     lines = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    unmerged = [ln for ln in lines if ln[:2] in UNMERGED_STATUS_CODES]
+
+    if os.path.exists(os.path.join(root, ".git", "MERGE_HEAD")):
+        allowed, why = _merge_exemption_verdict(root, unmerged)
+        if allowed:
+            return True, "根工作区正处于合并中（%s），放行" % why
+        return False, (
+            "根工作区有 MERGE_HEAD 但%s。别人在合并区留下未解决冲突正是本组要防的"
+            "形态，不放行" % why
+        )
+
     if not lines:
         return True, "主工作区干净"
 
@@ -981,11 +1130,21 @@ def git_merged_branches(repo_root):
     def git(*args):
         try:
             return subprocess.run(
-                ("git",) + args,
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                timeout=30,
+                ("git",) + args, cwd=repo_root, capture_output=True,
+                text=True, timeout=30,
+                # encoding 必须显式指定。text=True 在 Windows 上默认按 GBK
+                # 解码，而本仓库的**提交信息全是中文**——只要历史里出现一条
+                # 含中文的 merge subject（今天第一次：我自己的合并
+                # 87c5f41「同步 main，序号改 42 -> 47」），`git log --merges`
+                # 的输出就会在解码时抛 UnicodeDecodeError。
+                #
+                # 而那是个**静默失效**：异常发生在 subprocess 内部的
+                # _readerthread 里，主线程拿到 stdout=None，
+                # 于是 `log.stdout.splitlines()` 变成
+                # AttributeError: 'NoneType' object has no attribute
+                # 'splitlines' —— 报错位置离真正的原因隔了三层，
+                # 且这组断言直接**整组崩掉**而不是判红。
+                encoding="utf-8", errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -1094,11 +1253,21 @@ def git_local_branches(repo_root):
     def git(*args):
         try:
             return subprocess.run(
-                ("git",) + args,
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                timeout=30,
+                ("git",) + args, cwd=repo_root, capture_output=True,
+                text=True, timeout=30,
+                # encoding 必须显式指定。text=True 在 Windows 上默认按 GBK
+                # 解码，而本仓库的**提交信息全是中文**——只要历史里出现一条
+                # 含中文的 merge subject（今天第一次：我自己的合并
+                # 87c5f41「同步 main，序号改 42 -> 47」），`git log --merges`
+                # 的输出就会在解码时抛 UnicodeDecodeError。
+                #
+                # 而那是个**静默失效**：异常发生在 subprocess 内部的
+                # _readerthread 里，主线程拿到 stdout=None，
+                # 于是 `log.stdout.splitlines()` 变成
+                # AttributeError: 'NoneType' object has no attribute
+                # 'splitlines' —— 报错位置离真正的原因隔了三层，
+                # 且这组断言直接**整组崩掉**而不是判红。
+                encoding="utf-8", errors="replace",
             )
         except (OSError, subprocess.SubprocessError) as error:
             return None, "git 调用失败：%s" % error
@@ -1122,11 +1291,10 @@ def git_out(repo_root, *args):
     """跑一条只读 git 命令并返回 stdout；不可用或失败时返回 None。"""
     try:
         proc = subprocess.run(
-            ("git",) + args,
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=30,
+            ("git",) + args, cwd=repo_root, capture_output=True,
+            text=True, timeout=30,
+            # 同上：git 输出的提交信息含中文，Windows 上必须显式 utf-8。
+            encoding="utf-8", errors="replace",
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -1202,30 +1370,30 @@ def check_branch_visibility(
     )
 
 
-def run(repo_root=".", skip_groups=()):
-    """跑全部检查。`skip_groups` 里的组名会被剔除**且不计入总数**。
+def run(repo_root="."):
+    """跑全部检查。**没有豁免机制**。
 
-    豁免必须是显式的、可见的：调用方（目前只有 `tools/mergeguard`）要在
-    自己的输出里说明豁免了哪一组、为什么，否则等于给了一条没人看得见的
-    后门。
+    这里曾有过 `--skip-group`（commit cc4e4af），现已整体删除。删除理由是
+    TRAE 评审（root-worktree-clean-review 问题 2/3）给出的三条：
+
+    1. **它不解决任何问题。** mergeguard 合并时那个「根工作区必然是脏的」
+       窗口，父提交里 rootworktree 组自带的豁免已经覆盖 —— 那时我加第二层
+       豁免时**没有先验证它是否必要**，立论与父提交自相矛盾。
+    2. **它是个通用后门。** 无组名白名单、无理由参数、无鉴权；实测对**全部
+       组**重复传参可得 exit 0、0 项检查 0 失败。任何一个 agent 都能让整个
+       门禁静默空转。
+    3. **留痕对机器无效。** `{"skipped": ...}` 只写 stderr，而
+       `.github/workflows/gate.yml` 的 `--json` 重定向**只收 stdout**，
+       消费方看不到少跑了断言；合并 stdout+stderr 的消费方则会拿到
+       「一行 JSON + 一段 pretty JSON」，两种 parse 都坏。
+
+    真正该修的是豁免的**判据**（见 root_worktree_status），不是加一个
+    让人能关掉检查的开关。
     """
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
     if not os.path.exists(tasks_path):
         raise FileNotFoundError(tasks_path)
-
-    skip = {g.strip() for g in skip_groups if g and g.strip()}
-
-    def keep(checks):
-        if not skip:
-            return checks
-        kept = [c for c in checks if c["group"] not in skip]
-        dropped = len(checks) - len(kept)
-        if dropped:
-            result.skipped.extend(
-                sorted({c["group"] for c in checks if c["group"] in skip})
-            )
-        return kept
 
     tasks_text = read(tasks_path)
     tasks, claims = check_registry(result, tasks_text, repo_root)
@@ -1237,7 +1405,6 @@ def run(repo_root=".", skip_groups=()):
     check_merge(result, repo_root, tasks, claims, cards)
     check_branch_visibility(result, repo_root, tasks)
     check_root_worktree(result, repo_root)
-    result.checks = keep(result.checks)
     return result
 
 
@@ -1246,35 +1413,13 @@ def main():
     parser.add_argument("--repo", default=".", help="仓库根目录")
     parser.add_argument("--json", action="store_true", help="输出 JSON")
     parser.add_argument("--verbose", action="store_true", help="打印通过项")
-    parser.add_argument(
-        "--skip-group",
-        action="append",
-        default=[],
-        metavar="GROUP",
-        help="豁免指定检查组，可重复。豁免的组不计入总数；"
-        "调用方须自行声明豁免理由。",
-    )
     args = parser.parse_args()
 
     try:
-        result = run(args.repo, skip_groups=args.skip_group)
+        result = run(args.repo)
     except FileNotFoundError as error:
         sys.stderr.write("not found: %s\n" % error)
         return 2
-
-    if args.skip_group:
-        note = "豁免组：%s（由调用方声明理由）" % ", ".join(
-            sorted(set(args.skip_group))
-        )
-        if args.json:
-            print(
-                json.dumps(
-                    {"skipped": sorted(set(args.skip_group))}, ensure_ascii=False
-                ),
-                file=sys.stderr,
-            )
-        else:
-            print("[skip] " + note)
 
     if args.json:
         print(

@@ -181,6 +181,7 @@ def status_of(chain: Chain) -> str:
 # --------------------------------------------------------------- differential
 
 
+@pytest.mark.slow
 def test_passing_head_moves_the_task_to_awaiting_review(tmp_path):
     chain = build_chain(tmp_path)
     outcome = run_verify(chain)
@@ -193,6 +194,7 @@ def test_passing_head_moves_the_task_to_awaiting_review(tmp_path):
     assert status_of(chain) == "awaiting_review"
 
 
+@pytest.mark.slow
 def test_the_check_runs_on_the_exact_commit(tmp_path):
     chain = build_chain(tmp_path, add_flag=False)
     outcome = run_verify(chain)
@@ -203,6 +205,7 @@ def test_the_check_runs_on_the_exact_commit(tmp_path):
     assert outcome.failure_reason == FAILURE_CODE
 
 
+@pytest.mark.slow
 def test_failing_head_cannot_reach_review(tmp_path):
     """Acceptance criterion: a failing check does not enter Review."""
     chain = build_chain(tmp_path, add_flag=False)
@@ -224,6 +227,7 @@ def test_failing_head_cannot_reach_review(tmp_path):
     )
 
 
+@pytest.mark.slow
 def test_new_test_files_are_recorded_from_the_diff(tmp_path):
     chain = build_chain(
         tmp_path,
@@ -233,6 +237,7 @@ def test_new_test_files_are_recorded_from_the_diff(tmp_path):
     assert outcome.new_test_files == ("tests/test_flag.py",)
 
 
+@pytest.mark.slow
 def test_timeout_is_recorded_as_timeout_not_code_failure(tmp_path):
     """R10 §28: mixing these sends environment failures through futile rework."""
     chain = build_chain(tmp_path)
@@ -253,6 +258,7 @@ def test_a_disallowed_command_root_is_refused_by_the_policy():
     assert "allowlist" in str(caught.value)
 
 
+@pytest.mark.slow
 def test_an_environment_failure_is_recorded_as_env_failed(tmp_path):
     """R10 §28: an environment failure must not be recorded as a code failure."""
     from app.verify.worker import RunResult
@@ -285,6 +291,7 @@ def test_an_environment_failure_is_recorded_as_env_failed(tmp_path):
 # ------------------------------------------------------------------ receipts
 
 
+@pytest.mark.slow
 def test_receipt_carries_the_fields_r10_requires(tmp_path):
     chain = build_chain(tmp_path)
     outcome = run_verify(chain)
@@ -327,6 +334,7 @@ def test_receipt_carries_the_fields_r10_requires(tmp_path):
     assert outcome.receipt_id == str(row["receipt_id"])
 
 
+@pytest.mark.slow
 def test_a_repeat_returns_the_first_receipt(tmp_path):
     chain = build_chain(tmp_path)
     first = run_verify(chain)
@@ -340,6 +348,7 @@ def test_a_repeat_returns_the_first_receipt(tmp_path):
     assert len(chain.database.read("SELECT * FROM verification_receipts")) == before
 
 
+@pytest.mark.slow
 def test_a_different_commit_gets_its_own_receipt(tmp_path):
     """R10 §16: Merge Gate only accepts the receipt for the exact commit."""
     chain = build_chain(tmp_path)
@@ -359,6 +368,7 @@ def test_a_different_commit_gets_its_own_receipt(tmp_path):
 # ------------------------------------------------- not_applicable: both edges
 
 
+@pytest.mark.slow
 def test_differential_not_applicable_goes_to_a_human(tmp_path):
     chain = build_chain(tmp_path, add_flag=False)
     result = chain.service.declare_differential_not_applicable(
@@ -372,6 +382,7 @@ def test_differential_not_applicable_goes_to_a_human(tmp_path):
     assert status_of(chain) == "awaiting_human"
 
 
+@pytest.mark.slow
 def test_a_human_can_resume_verification_after_the_declaration(tmp_path):
     """Without the reverse edge the declaration is a dead end."""
     chain = build_chain(tmp_path, add_flag=False)
@@ -398,6 +409,7 @@ def test_a_human_can_resume_verification_after_the_declaration(tmp_path):
     ]
 
 
+@pytest.mark.slow
 def test_the_declaration_requires_a_reason_and_evidence(tmp_path):
     chain = build_chain(tmp_path, add_flag=False)
     with pytest.raises((InvalidInput, Conflict)):
@@ -418,6 +430,7 @@ def test_the_declaration_requires_a_reason_and_evidence(tmp_path):
         )
 
 
+@pytest.mark.slow
 def test_the_declaration_refuses_a_stale_epoch(tmp_path):
     chain = build_chain(tmp_path, add_flag=False)
     with pytest.raises((InvalidInput, Conflict)):
@@ -433,6 +446,7 @@ def test_the_declaration_refuses_a_stale_epoch(tmp_path):
 # ------------------------------------------------------------- overlay hygiene
 
 
+@pytest.mark.slow
 def test_a_passing_run_recycles_its_overlay(tmp_path):
     chain = build_chain(tmp_path)
     run_verify(chain)
@@ -441,6 +455,7 @@ def test_a_passing_run_recycles_its_overlay(tmp_path):
     assert leftovers == [], f"overlays left behind: {leftovers}"
 
 
+@pytest.mark.slow
 def test_a_failing_run_keeps_the_overlay_for_inspection(tmp_path):
     """R10 §16 keeps failing overlays; deleting them destroys the evidence."""
     chain = build_chain(tmp_path, add_flag=False)
@@ -449,6 +464,7 @@ def test_a_failing_run_keeps_the_overlay_for_inspection(tmp_path):
     assert kept, "the overlay a failure happened in must not be recycled"
 
 
+@pytest.mark.slow
 def test_evidence_files_are_written(tmp_path):
     chain = build_chain(tmp_path)
     run_verify(chain)

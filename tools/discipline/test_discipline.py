@@ -6,9 +6,11 @@
 
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 # tools/ 与 tools/discipline/ 同时在路径上时，包目录会遮蔽同名模块；
@@ -105,17 +107,36 @@ def test_claim_serials_must_be_unique(tmp_path):
     assert "重复=['01']" in unique_msg
 
 
-def test_claim_serials_must_be_contiguous(tmp_path):
-    checks = registry_checks(
-        tmp_path,
-        [
-            "01-h--t1.md",
-            "03-h--t2.md",
-        ],
-    )
-    cont_msg = next(msg for msg in checks if msg.startswith("认领文件序号连续"))
-    assert checks[cont_msg] is False
-    assert "缺号=[2]" in cont_msg
+def test_gap_in_serials_is_accepted(tmp_path):
+    """跳号不再报错 —— 它是无害的，且并发分支下无法避免。
+
+    原「序号连续 1..N」断言由 `claim-seq-adopt` 按
+    `docs/proposals/claim-seq-contiguity.md` 的裁决撤销：连续性在并发下
+    **结构上不可满足**（各 agent 从 main 最大值往后取号，合并顺序不由取号者决定），
+    而它没有防住任何唯一性没防住的东西。
+    """
+    checks = registry_checks(tmp_path, [
+        "01-h--t1.md",
+        "03-h--t2.md",
+    ])
+    assert all(checks.values()), checks
+
+
+def test_claim_filename_must_match_its_content(tmp_path):
+    """文件名与内容必须指向同一个 task —— 这是替代连续性的那条不变量。
+
+    它能抓真实错漏（文件被改名、放错任务、复制后忘改内容），
+    且不依赖任何跨分支的共享计数器，因此两个 agent 独立操作也能同时满足。
+    """
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    (claims_dir / "01-h--t1.md").write_text(claim_file("t2"), encoding="utf-8")
+
+    result = d.Result()
+    d.check_registry(result, TASKS_HEADER, str(tmp_path))
+    message = next(c["msg"] for c in result.checks if "文件名" in c["msg"])
+    assert "t2" in message and "01-h--t1.md" in message
+    assert next(c for c in result.checks if "文件名" in c["msg"])["ok"] is False
 
 
 def test_claim_serials_happy_path(tmp_path):
@@ -332,17 +353,104 @@ def test_root_worktree_untracked_file_fails(tmp_path):
     assert "scratch" in detail
 
 
-def test_root_worktree_allows_merge_in_progress(tmp_path):
-    """合并进行中必须放行——那时工作区本来就该脏，否则正常合并会被自己拦住。
+def _take_merge_lock(repo, pid=None):
+    """在临时仓库里造一把**活着的**合并锁，模拟受控合并进行中。"""
+    lock = repo / ".git" / "merge-lock"
+    lock.mkdir(parents=True, exist_ok=True)
+    (lock / "owner.json").write_text(
+        json.dumps(
+            {
+                "pid": os.getpid() if pid is None else pid,
+                "task_id": "T-merge",
+                "branch": "agent/local/x/T-merge/a1",
+                "worktree": str(repo),
+                "acquired_at": time.time(),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return lock
 
+
+def test_root_worktree_allows_controlled_merge_in_progress(tmp_path):
+    """受控合并进行中必须放行——那时工作区本来就该脏，否则正常合并被自己拦住。
+
+    判据是「无未合并条目 + 合并锁持有者存活」，不再是一句「MERGE_HEAD 存在」。
     MERGE_HEAD 在 `.git/` 里，不在仓库根；写错位置会得到假阴性。
+    """
+    repo = _root_repo(tmp_path)
+    (repo / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    _take_merge_lock(repo)
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is True, detail
+    assert "合并中" in detail
+    assert "存活" in detail, "必须说明凭什么放行"
+
+
+def test_root_worktree_bare_merge_head_does_not_exempt(tmp_path):
+    """**回归**：只有 MERGE_HEAD 而无合并锁，必须判红。
+
+    这是 TRAE 评审（root-worktree-clean-review 问题 1）打穿的漏洞，也是本组
+    卡里声明的头号场景：别人在根工作区写代码、留下合并现场 —— 那种形态
+    恰好满足「MERGE_HEAD 存在」，于是本组在自己声明要防的场景里判 ok=True。
+    子 agent 更实证：**手工写一个 40 字符的 `.git/MERGE_HEAD` 就能让占用
+    状态静音。** 判据已从「存在即放行」收紧为「存在且锁持有者存活」。
     """
     repo = _root_repo(tmp_path)
     (repo / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
     (repo / "f.txt").write_text("dirty", encoding="utf-8")
     ok, detail = d.root_worktree_status(str(repo))
-    assert ok is True
-    assert "合并中" in detail
+    assert ok is False, detail
+    assert "非受控合并" in detail or "没有合并锁" in detail
+
+
+def test_root_worktree_dead_merge_lock_holder_does_not_exempt(tmp_path):
+    """合并锁持有者进程已退出 -> 属崩溃残留，不放行。
+
+    pid 999999 在实践中不存在（Linux pid 上限约 4194304，Windows 默认更小）。
+    """
+    repo = _root_repo(tmp_path)
+    (repo / ".git" / "MERGE_HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
+    _take_merge_lock(repo, pid=999999)
+    (repo / "f.txt").write_text("dirty", encoding="utf-8")
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is False, detail
+    assert "已退出" in detail or "存活" not in detail
+
+
+def test_root_worktree_unresolved_conflicts_never_exempt(tmp_path):
+    """**回归**：有未合并条目（UU/AA/DD…）时，即便锁活着也绝不放行。
+
+    「别人留下未解决冲突」正是本组要防的头号场景，而它在 git 里表现为
+    MERGE_HEAD 存在 **且** status 有未合并条目 —— 只查锁会把这一形态放过。
+    两条判据必须同时成立，缺一不可。
+    """
+    repo = _root_repo(tmp_path)
+    git(repo, "checkout", "-b", "side")
+    (repo / "c.txt").write_text("side", encoding="utf-8")
+    git(repo, "add", "c.txt")
+    git(repo, "commit", "-m", "side")
+    git(repo, "checkout", "main")
+    (repo / "c.txt").write_text("main", encoding="utf-8")
+    git(repo, "add", "c.txt")
+    git(repo, "commit", "-m", "main")
+    # 起一个真冲突，留下未解决状态
+    merge = subprocess.run(
+        ["git", "-C", str(repo), "merge", "side"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert merge.returncode != 0, "本用例需要一个真冲突"
+    assert (repo / ".git" / "MERGE_HEAD").exists()
+    _take_merge_lock(repo)  # 锁是活的
+
+    ok, detail = d.root_worktree_status(str(repo))
+    assert ok is False, "有未合并条目时不得放行：" + detail
+    assert "未合并" in detail
 
 
 def test_root_worktree_checked_from_linked_worktree(tmp_path):
@@ -413,46 +521,49 @@ _GROUPS = {
     "check_root_worktree": "rootworktree",
 }
 
+def test_no_skip_group_backdoor_remains():
+    """**回归**：豁免机制已整体回退，CLI 上不应再有能关掉检查的开关。
 
-def test_skip_group_removes_only_that_group(tmp_path, monkeypatch):
-    """豁免必须精确：只少被豁免的那一组，其他组一条不少。"""
-    _stub_all_groups(monkeypatch, _GROUPS)
-    io.open(tmp_path / "TASKS.md", "w", encoding="utf-8").write("x")
+    TRAE 评审问题 2/3：`--skip-group` 不解决任何问题（父提交的豁免已覆盖），
+    却是**通用后门** —— 无白名单、无理由、无鉴权，实测对全部组重复传参可得
+    exit 0、0 项检查 0 失败；且留痕只写 stderr，而 gate.yml 的 `--json`
+    重定向只收 stdout，消费方看不到少跑了断言。
 
-    full = d.run(str(tmp_path))
-    assert "rootworktree" in {c["group"] for c in full.checks}
-    assert len(full.skipped) == 0
-
-    skipped = d.run(str(tmp_path), skip_groups=["rootworktree"])
-    groups = {c["group"] for c in skipped.checks}
-    assert "rootworktree" not in groups
-    assert {"merge", "branches"} <= groups, "豁免不能波及其他组"
-    assert skipped.skipped == ["rootworktree"], "豁免必须留痕"
-    assert len(skipped.checks) == len(full.checks) - 1
-
-
-def test_skip_group_unknown_name_is_harmless(tmp_path, monkeypatch):
-    """豁免一个不存在的组名不应报错，也不应少跑任何断言——避免手滑就静默放过。"""
-    _stub_all_groups(monkeypatch, _GROUPS)
-    io.open(tmp_path / "TASKS.md", "w", encoding="utf-8").write("x")
-
-    full = d.run(str(tmp_path))
-    typo = d.run(str(tmp_path), skip_groups=["rootworktree_typo"])
-    assert len(typo.checks) == len(full.checks)
-    assert typo.skipped == []
-
-
-def test_mergeguard_exempts_rootworktree_gate():
-    """mergeguard 合并时必须豁免 rootworktree，且豁免要在输出里可见。
-
-    不豁免会死锁：合并期间根工作区本就该是「合并中」的脏状态，那条断言必然
-    变红；而占用者不清干净就合不进去，于是谁也动不了。
+    真正该修的是豁免的**判据**（root_worktree_status），不是加开关。
     """
-    cli = Path(d.__file__).with_name("mergeguard") / "cli.py"
+    text = io.open(d.__file__, encoding="utf-8").read()
+    # 解释性注释里允许提到这个名字（那是本次修复的由来），但**代码路径**
+    # 上不得再有该开关：查 argparse 注册与 run() 签名。
+    assert 'add_argument(\n        "--skip-group"' not in text
+    assert "def run(repo_root=\".\", skip_groups" not in text
+    assert "skip_groups=args.skip_group" not in text
+    assert "self.skipped" not in text
+    assert "skip = {g.strip() for g in skip_groups" not in text
+
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, d.__file__, "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert "--skip-group" not in proc.stdout, "CLI 帮助里不应再出现 --skip-group"
+
+
+def test_mergeguard_does_not_pass_skip_group_to_discipline():
+    """mergeguard 合并时**不得**再对 discipline 传 --skip-group。
+
+    合并期间根工作区是脏的，但 rootworktree 组的豁免判据已能正确识别
+    「受控合并进行中」—— mergeguard 此刻持有合并锁、锁持有者 pid 存活、
+    且无未合并条目，那一组自己就放行。所以不需要、也不允许再有第二层豁免。
+    """
+    cli = Path(d.__file__).resolve().parents[1] / "mergeguard" / "cli.py"
     if not cli.exists():  # discipline 的测试可能在只装了 discipline 的环境跑
         return
     text = io.open(cli, encoding="utf-8").read()
-    assert "--skip-group" in text
-    assert "rootworktree" in text
-    # 豁免信息必须被打出来，不能只存在于代码里
-    assert "[skip]" in text or "ln.startswith" in text
+    # 同理：注释里可以解释「为什么不再传」，但门禁调用里不得再出现它。
+    gate_calls = text.split("gates = [", 1)[1].split("]", 1)[0]
+    assert "skip-group" not in gate_calls, "mergeguard 的门禁调用不应再传 --skip-group"
