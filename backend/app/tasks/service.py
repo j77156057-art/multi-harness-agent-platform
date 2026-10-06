@@ -537,7 +537,10 @@ class SchedulerService:
                 aggregate_type="task",
                 aggregate_id=task_id,
                 actor_type="harness",
-                actor_id=guard.owner or "",
+                # Ownerless states (changes_requested) have a legal release
+                # edge in R10 §10 but no owner to name; v1 has no auth layer,
+                # so the actor is recorded as unknown rather than empty.
+                actor_id=guard.owner or "unknown",
                 payload=dict(payload, attempt_id=attempt_id),
                 connection=conn,
             )
