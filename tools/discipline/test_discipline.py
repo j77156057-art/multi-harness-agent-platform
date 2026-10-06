@@ -286,3 +286,178 @@ def test_git_lister_excludes_sync_merge(tmp_path):
     ok, branches, detail = d.git_merged_branches(str(repo))
     assert ok, detail
     assert branches == ["agent/h/t2"]
+
+
+# ---------- 任务卡读两个来源（2026-10-06 tasks-split） ----------
+
+CARD = """### {tid}：示例任务（✅ done）
+
+~~~text
+任务编号：{tid}
+负责人 Harness：WorkBuddy
+开始时间：2026-10-06 10:00
+工作区：.worktrees/x
+真相源引用：docs/claims/01-h--{tid}.md
+test_id：MVP-PROCESS-001
+当前状态：✅ done
+完成时间：2026-10-06 10:30
+commit：abc1234
+验证结果：scripts.sh check 四道全绿
+~~~
+"""
+
+TASKS_NO_CARD = """# 任务登记表
+
+## 任务表
+
+| task_id | Harness | 依赖 | 状态 | 分支 | test_id |
+|---|---|---|---|---|---|
+| {tid} | WorkBuddy | — | ✅ done | `agent/x/{tid}` | `MVP-PROCESS-001` |
+"""
+
+
+def _notes_dir(tmp_path):
+    path = tmp_path / "docs" / "tasks" / "notes"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_card_in_notes_is_recognized(tmp_path):
+    """卡在 notes 里、TASKS.md 里没有 —— 必须认到，否则 merge 组会误报缺卡。"""
+    tid = "t-notes"
+    (tmp_path / "TASKS.md").write_text(
+        TASKS_NO_CARD.format(tid=tid), encoding="utf-8"
+    )
+    (_notes_dir(tmp_path) / ("%s.md" % tid)).write_text(
+        CARD.format(tid=tid), encoding="utf-8"
+    )
+    claims = [{"task_id": tid, "file": "x", "name_task_id": tid,
+               "claimed_at": "2026-10-06 10:00", "branch": "agent/x/" + tid,
+               "status": "doing"}]
+    result = d.Result()
+    cards = d.check_cards(result, TASKS_NO_CARD.format(tid=tid), claims, str(tmp_path))
+    assert tid in cards, "notes 里的卡没被认到"
+    assert not result.failed, [c["msg"] for c in result.failed]
+
+
+def test_card_only_in_tasks_md_still_works(tmp_path):
+    """拆分前的旧形态：卡仍内联在 TASKS.md —— 判据不能因拆分而收紧。"""
+    tid = "t-inline"
+    tasks_text = TASKS_NO_CARD.format(tid=tid) + "\n" + CARD.format(tid=tid)
+    (tmp_path / "TASKS.md").write_text(tasks_text, encoding="utf-8")
+    claims = [{"task_id": tid, "file": "x", "name_task_id": tid,
+               "claimed_at": "2026-10-06 10:00", "branch": "agent/x/" + tid,
+               "status": "doing"}]
+    result = d.Result()
+    cards = d.check_cards(result, tasks_text, claims, str(tmp_path))
+    assert tid in cards
+    assert not result.failed, [c["msg"] for c in result.failed]
+
+
+def test_duplicate_card_is_reported(tmp_path):
+    """同一 task 在 TASKS.md 与 notes 各有一张卡 —— 必须报出来，不许静默覆盖。
+
+    那是「拆分没搬干净」的信号：有人改了 TASKS.md 里的旧卡，而门禁只读
+    notes 那份，于是这次改动永远不生效，且没有任何东西报警。
+    """
+    tid = "t-dup"
+    tasks_text = TASKS_NO_CARD.format(tid=tid) + "\n" + CARD.format(tid=tid)
+    (tmp_path / "TASKS.md").write_text(tasks_text, encoding="utf-8")
+    (_notes_dir(tmp_path) / ("%s.md" % tid)).write_text(
+        CARD.format(tid=tid), encoding="utf-8"
+    )
+    claims = [{"task_id": tid, "file": "x", "name_task_id": tid,
+               "claimed_at": "2026-10-06 10:00", "branch": "agent/x/" + tid,
+               "status": "doing"}]
+    result = d.Result()
+    d.check_cards(result, tasks_text, claims, str(tmp_path))
+    dup = next((c for c in result.failed if "两张卡" in c["msg"]), None)
+    assert dup is not None, "重复卡没报出来"
+    assert tid in dup["msg"]
+
+
+def test_card_identity_ignores_filename(tmp_path):
+    """文件名与 task_id 不一致时，仍以正文 `任务编号` 为准。
+
+    这是拆分后门禁不变的那个判据：卡片身份来自内容，不来自文件路径。
+    """
+    tid = "t-content"
+    (tmp_path / "TASKS.md").write_text(TASKS_NO_CARD.format(tid=tid), encoding="utf-8")
+    (_notes_dir(tmp_path) / "totally-wrong-name.md").write_text(
+        CARD.format(tid=tid), encoding="utf-8"
+    )
+    claims = [{"task_id": tid, "file": "x", "name_task_id": tid,
+               "claimed_at": "2026-10-06 10:00", "branch": "agent/x/" + tid,
+               "status": "doing"}]
+    result = d.Result()
+    cards = d.check_cards(result, TASKS_NO_CARD.format(tid=tid), claims, str(tmp_path))
+    assert tid in cards, "文件名不对就不认卡 —— 判据被改成依赖路径了"
+
+
+def test_reserved_slot_same_task_id_is_not_collision(tmp_path):
+    """占号表登记的号与已有认领文件**同 task** —— 不是撞号（H-8 的正常中间态）。
+
+    占号者在自己的分支上建文件 + 在自己的 TASKS.md 里登记，两者在合并前必然并存。
+    真正要报的是「同号不同 task」。这条 2026-10-06 11:20 实测踩过：
+    原断言不分 task_id，把正确流程判红。
+    """
+    from_text = """# 任务登记表
+
+## 任务表
+
+| task_id | Harness | 依赖 | 状态 | 分支 | test_id |
+|---|---|---|---|---|---|
+| t-same | WorkBuddy | — | ✅ done | `agent/x/t` | `MVP-PROCESS-001` |
+
+## 认领登记（R10 §0 总协调规则第 2 条）
+
+### 占用中的认领序号
+
+| 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
+|---|---|---|---|---|---|
+| 7 | WorkBuddy | `t-same` | `agent/x/t` | 2026-10-06 | `docs/claims/07-h--t-same.md` |
+"""
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    (claims_dir / "07-h--t-same.md").write_text(
+        "| task_id | `t-same` |\n| Harness | WorkBuddy |\n"
+        "| 认领时间 | 2026-10-06 10:00 |\n| 分支 | `agent/x/t` |\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "TASKS.md").write_text(from_text, encoding="utf-8")
+    result = d.Result()
+    d.check_registry(result, from_text, str(tmp_path))
+    collide = [c["msg"] for c in result.failed if "撞号" in c["msg"]]
+    assert not collide, "同号同 task 被误判成撞号：%s" % collide
+
+
+def test_reserved_slot_different_task_id_is_collision(tmp_path):
+    """占号表说 7 是 t-a，而 `docs/claims/07-*.md` 里是 t-b —— 必须报撞号。"""
+    from_text = """# 任务登记表
+
+## 任务表
+
+| task_id | Harness | 依赖 | 状态 | 分支 | test_id |
+|---|---|---|---|---|---|
+| t-b | WorkBuddy | — | ✅ done | `agent/x/b` | `MVP-PROCESS-001` |
+
+## 认领登记（R10 §0 总协调规则第 2 条）
+
+### 占用中的认领序号
+
+| 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
+|---|---|---|---|---|---|
+| 7 | WorkBuddy | `t-a` | `agent/x/a` | 2026-10-06 | `docs/claims/07-h--t-a.md` |
+"""
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    (claims_dir / "07-h--t-b.md").write_text(
+        "| task_id | `t-b` |\n| Harness | WorkBuddy |\n"
+        "| 认领时间 | 2026-10-06 10:00 |\n| 分支 | `agent/x/b` |\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "TASKS.md").write_text(from_text, encoding="utf-8")
+    result = d.Result()
+    d.check_registry(result, from_text, str(tmp_path))
+    collide = [c["msg"] for c in result.failed if "撞号" in c["msg"]]
+    assert collide, "同号不同 task 没报撞号"
