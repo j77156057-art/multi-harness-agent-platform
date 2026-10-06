@@ -91,20 +91,111 @@ def registry_checks(tmp_path, claim_names):
         (claims_dir / name).write_text(claim_file(tid), encoding="utf-8")
     result = d.Result()
     d.check_registry(result, TASKS_HEADER, str(tmp_path))
-    return {c["msg"]: c["ok"] for c in result.checks if "序号" in c["msg"]}
+    # 返回 registry 组的**全部**检查项，不再按「序号」筛：方案 C 取消了序号，
+    # 按关键字筛出来的字典会悄悄变空，而 `next(...)` 只会抛 StopIteration ——
+    # 一个看不出意图的失败。空集合本身就该是错误，所以这里放开过滤。
+    return {c["msg"]: c["ok"] for c in result.checks if c["group"] == "registry"}
 
 
-def test_claim_serials_must_be_unique(tmp_path):
+def test_claim_registry_refs_parses_only_comment_lines():
+    """只取真正的注释行，别把正文里出现的 docs/claims 字样也算进来。
+
+    TASKS.md 的说明段落与表格里都会出现 `docs/claims/...`，那些不是索引。
+    """
+    text = (
+        "**每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md`**，不要加行。\n"
+        "| 58 | OpenCode | `x` | `docs/claims/58-opencode--x.md` |\n"
+        "<!-- MVP-01 → docs/claims/01-workbuddy--MVP-01.md -->\n"
+        "<!-- MVP-02 → docs/claims/02-codex--MVP-02.md -->\n"
+    )
+    refs = d.claim_registry_refs(text)
+    assert refs == [
+        ("MVP-01", "docs/claims/01-workbuddy--MVP-01.md"),
+        ("MVP-02", "docs/claims/02-codex--MVP-02.md"),
+    ], refs
+
+
+def test_claim_registry_refs_flags_missing_file(tmp_path):
+    """**回归**：注释行指向的文件不存在时必须判红。
+
+    补 CLAUDE 在 `claim-seq-contiguity.md` 里点出、WorkBuddy 在
+    `claim-denum-coordinator-review.md` 里建议补的盲区：方案 C 要重命名 55 个
+    认领文件并同步改这些索引注释，而**没有任何检查盯着它们** —— 改错了不会
+    立刻变红，只在有人按注释找文件却找不到时才发现。
+    """
+    claims_dir = tmp_path / "docs" / "claims"
+    claims_dir.mkdir(parents=True)
+    (claims_dir / "opencode--t1.md").write_text(claim_file("t1"), encoding="utf-8")
+    tasks = (
+        "<!-- t1 → docs/claims/opencode--t1.md -->\n"
+        "<!-- t2 → docs/claims/qoder--t2.md -->\n"
+    )
+    result = d.Result()
+    d.check_registry(result, tasks, str(tmp_path))
+    items = [
+        c for c in result.checks if c["msg"].startswith("认领登记表注释行")
+    ]
+    assert len(items) == 1, items
+    assert items[0]["ok"] is False, items[0]["msg"]
+    assert "qoder--t2.md" in items[0]["msg"], "必须点名缺哪个文件"
+    assert "opencode--t1.md" not in items[0]["msg"].split("缺失=")[1]
+
+
+def test_duplicate_task_id_is_rejected(tmp_path):
+    """同一 task_id 出现两次必须判红 —— 序号取消后这是唯一的「撞号」形态。
+
+    序号已按方案 C 取消（docs/proposals/claim-denum.md），唯一键是 task_id。
+    注意夹具 `registry_checks` 是**从文件名推导正文 task_id** 的，所以要造出
+    「重复」必须让两个文件指向同一个 task_id（harness 不同、task 相同），
+    而不是让两个文件名长得像。
+    """
     checks = registry_checks(
         tmp_path,
         [
-            "01-h--t1.md",
-            "01-h--t2.md",
+            "claude-code--MVP-10a.md",
+            "qoder--MVP-10a.md",
         ],
     )
-    unique_msg = next(msg for msg in checks if msg.startswith("认领文件序号唯一"))
+    unique_msg = next(msg for msg in checks if msg.startswith("一个 task_id 只对应"))
     assert checks[unique_msg] is False
-    assert "重复=['01']" in unique_msg
+    assert "重复=['mvp-10a']" in unique_msg, unique_msg
+    assert "大小写不敏感" in unique_msg
+
+
+def test_task_id_uniqueness_is_case_insensitive(tmp_path):
+    """**回归**：task_id 唯一性必须**大小写不敏感**比对。
+
+    文件名在 Windows 上大小写不敏感：`MVP-10a.md` 与 `mvp-10a.md` 在 Windows
+    上是同一个路径、在 Linux 上是两个 —— 后者能过任何按原字符串比对的断言，
+    而前者会让两个 agent 以为自己各有一个文件，实际互相覆盖。
+    当前数据无此情况，断言要按未来的正确形态写。
+
+    这是协调者 2026-10-07 裁决的第 2 项，也是 claim-denum 提案第 3 条
+    反对意见的实现落地（提案指出了问题，但没说清必须改实现）。
+    """
+    checks = registry_checks(
+        tmp_path,
+        [
+            "claude-code--MVP-10a.md",
+            "qoder--mvp-10a.md",
+        ],
+    )
+    unique_msg = next(msg for msg in checks if msg.startswith("一个 task_id 只对应"))
+    assert checks[unique_msg] is False, "大小写不同的同一 task_id 必须判重"
+    assert "重复=['mvp-10a']" in unique_msg, unique_msg
+
+
+def test_task_id_from_filename_accepts_both_naming_forms():
+    """**回归**：迁移期两种命名共存，文件名解析对两者都成立。
+
+    C2 是分片迁移，各 owner 各自重命名，所以「有无序号前缀」会同时存在一段时间。
+    若只认一种，迁移期间会凭空冒出一批与内容无关的红灯 —— 而那会让人把
+    「迁移噪声」误判成「自己改坏了」。
+    """
+    assert d.task_id_from_filename("claude-code--MVP-10a.md") == "MVP-10a"
+    assert d.task_id_from_filename("12-claude-code--MVP-10a.md") == "MVP-10a"
+    # harness 含连字符、task_id 不含 `--`：按最后一个 `--` 切
+    assert d.task_id_from_filename("7-claude-code--claim-denum.md") == "claim-denum"
 
 
 def test_gap_in_serials_is_accepted(tmp_path):

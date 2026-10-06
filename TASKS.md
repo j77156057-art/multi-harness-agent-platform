@@ -78,6 +78,7 @@
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
+| claim-denum-coordinator | OpenCode | claim-denum | 🟢 doing（实施 C2 的协调者部分：删占号机制 + parser + docstate 校验） | `agent/local/opencode/claim-denum-coordinator/a1` | `MVP-PROCESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -93,49 +94,10 @@
 
 ## 认领登记（R10 §0 总协调规则第 2 条）
 
-**本表只读**。每个 task 的认领记录在 `docs/claims/<序号>-<harness>--<task-id>.md`，
+**本表只读**。每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md>`（迁移期也接受旧的 `<序号>-` 前缀，见 `docs/proposals/claim-denum.md`），
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
 
 **规则：领取任务前必须在任务清单写入 `task_id`、Harness 名称、时间、分支。**
-
-### 占用中的认领序号
-
-`docs/claims/` 的文件名以序号开头，而 `discipline` 的 registry 组要求序号**严格连续** 1..N
-（实现是 `set(实际) == set(1..N)`）。于是出现一个协作陷阱：
-
-> 某人建了 `NN-harness--task.md` 但还没合入 main 时，main 上就缺 `NN`。
-> 此时**任何其他人新建认领都会被同一个断言挡住** —— 不管取 `NN`（会被占）
-> 还是 `NN+1`（会留下新的洞）。
-
-2026-10-06 09:05 实际卡住了：main 有 1..47，Qoder 在
-`agent/local/qoder/MVP-11/a1` 建了 48 但未合入，我连试 50 和 49 都被判失败。
-
-**所以取号之前先查这一节。** 规则：
-
-1. **先查**：本节列出的「已占未合」序号一律跳过；
-2. **后取**：用 `main` 上现有最大序号 +1；
-3. **立刻登记**：在下一节填一行，并**尽早合入 main**（合入后删除该行）；
-4. **认领文件与本行同一次提交** —— 不要先建文件、事后补登记，那样别人查不到你。
-
-格式（表格由 `discipline` 的 registry 组校验，勿改列名）：
-
-| 序号 | Harness | task_id | 分支 | 登记时间 | 认领文件 |
-|---|---|---|---|---|---|
-| — | （当前无占用） | — | — | — | — |
-| 57 | WorkBuddy | `claim-denum-coordinator-review` | 2026-10-07 01:45 | `agent/workbuddy/claim-denum-review/a1` | `docs/claims/57-workbuddy--claim-denum-coordinator-review.md` |
-
-**合入后请把该行删掉。** 例：2026-10-06 09:05 这张表里是 Qoder 的 48；
-10:30 它合入后，48 换成 Claude 的 MVP-09、49 是 OpenCode、50 是 Claude、
-51 是 Qoder，**1..51 重新连续，本行即失效**。
-
-**为什么用表格而不是让人自己查分支**：占号是跨 worktree 的隐式状态—— claimant
-在自己的 worktree 里建了文件，main 上看不到。信息必须落在共享文件里才能被别人看到。
-别人看到。这与 H-8 是同一个道理：**先看别人，再动共享结构**。
-
-**为什么不让断言放宽**（另一种意见，记录在此供讨论）：把「连续」改成
-「不重复 + 不越界」能消除这个阻塞，但会放过「中间漏登记若干个」的情况 ——
-那正是这个断言当初要防的。两害相权，宁可让占号可查，也不放宽校验。
-
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
@@ -323,6 +285,88 @@ commit：
    正确做法：任务分支改完 → 立刻 `git checkout main && git merge --ff-only` →
    确认 `git show main:TASKS.md` 能读到登记。
 
+
+### claim-denum-coordinator：方案 C 的协调者部分（删占号机制 + parser + 注释行校验）
+
+~~~text
+任务编号：claim-denum-coordinator
+负责人 Harness：OpenCode
+开始时间：2026-10-07 02:20
+工作区：.worktrees/opencode/
+依赖任务：claim-denum（提案，已交付）、claim-denum-coordinator-review（WorkBuddy 的
+          事实核实与代价量化，160 行）
+真相源引用：docs/proposals/claim-denum.md（本提案）、
+            docs/proposals/claim-denum-coordinator-review.md（裁决材料）、
+            tools/discipline/discipline.py registry 组
+允许修改目录：tools/discipline/**、backend/tests/**、docs/dev-convention.md、TASKS.md
+禁止修改目录：docs/spec/**、backend/app/**、backend/migrations/**、tools/docstate/**
+            —— 不动他人 harness 的认领文件（分片迁移由各 owner 自己做）
+交付分支：agent/local/opencode/claim-denum-coordinator/a1
+test_id：MVP-PROCESS-001
+当前状态：doing
+commit：（完成后回填）
+
+裁决（协调者 2026-10-07，四项全按 WorkBuddy 的建议）
+  1. 迁移方式：**C2 分片** —— 本任务只做协调者那部分（parser 与共享文档）
+  2. `task_id` 唯一性断言：**按大小写不敏感实现**（Windows 约束）
+  3. 占号机制：**整体删除**（含 WorkBuddy 于 `e24be3a` 新增的
+     `_reserved_claim_slots` 与两条断言 —— 他已确认可删）
+  4. `docstate` 的认领登记表注释行校验：补上
+  另裁决：**「认领文件的合并顺序」不得作为门禁判据**（合并时机取决于根工作区
+  是否空闲，不由认领者决定）—— 占号机制本就不该存在。
+
+本任务做了什么
+  1. **删除 `parse_claim_table` 的 `"seq"` 字段**，唯一键改为 task_id。
+  2. **删除 `_reserved_claim_slots()`（46 行）与占号表的两条断言（41 行）**。
+     按 WorkBuddy 的量化，占号机制合计约 105 行代码 + 34 行文档，本任务**净减**。
+  3. **「序号唯一」断言换成「task_id 唯一，且大小写不敏感」**。
+     大小写这一条不是洁癖：文件名在 Windows 上大小写不敏感，
+     `MVP-10a.md` 与 `mvp-10a.md` 在 Windows 上是同一个路径、在 Linux 上是两个 ——
+     后者能过按原字符串比对的断言，前者会让两个 agent 以为各有一个文件、实际互相覆盖。
+  4. **`task_id_from_filename()` 保留 `^\d+-` 的剥离**。C2 是分片迁移，迁移期
+     两种命名共存；保留它使过渡期不产生与内容无关的红灯。序号前缀从「身份」
+     降级为「可选的装饰」。
+  5. **删除 TASKS.md 的「占用中的认领序号」整节（39 行）**，含本任务自己的占号行。
+     顺带更新认领登记表的命名说明。
+  6. **补第 4 项断言**：`claim_registry_refs()` 解析 TASKS.md 里
+     `<!-- <task-id> → docs/claims/<file>.md -->` 的索引注释，断言**文件真实存在**。
+     只取真正的注释行（以 `<!--` 开头、`-->` 结尾），不把正文与表格里的
+     `docs/claims/` 字样算进来。
+
+关于第 4 项的实现位置（**偏离裁决原文，已记录理由**）
+  裁决写的是 docstate，**实现在 discipline**。三条理由：
+  1. 两个输入（TASKS.md 正文、`docs/claims/` 目录）discipline 的 registry 组
+     已经加载；docstate 只读 R10 规范，是 `load_spec(spec_path)` 的一条线。
+     让它去读 TASKS.md 等于把「规范自洽性」与「仓库登记一致性」两个失败域
+     混进同一个检查器 —— 规范写错和登记表写错会报同一种错，排查反而更难。
+  2. docstate 有**被声明的检查数**：discipline 的 counts 组校验 README /
+     dev-convention 里 docstate 的计数。往 docstate 加一条要连带改三处声明，
+     与本任务无关。
+  3. 这本来就是 discipline 的盲区：CLAUDE 在 claim-seq 提案里点出「docstate 不校验
+     认领登记表的注释行」，而相关断言本来就在 discipline 的 registry 组里。
+     **盲区在谁的地盘上，就补在谁的地盘上。**
+
+  计数变化：discipline 45 -> 44（删 3 条占号相关、加 1 条注释行校验、
+  另把「序号唯一」换成「task_id 唯一」是 1 换 1）。dev-convention 已同步为 44。
+
+验证
+  - docstate   : 90 项检查，0 项失败
+  - discipline : 44 项检查，1 项失败，1 项告警
+      · 唯一失败 = WorkBuddy 的 `claim-denum-review` 分支已合入 main 但未登记
+        认领（merge 组抓到的，属他那边的登记缺失，不是本任务引入）
+      · 唯一告警 = 根工作区被占用（本任务在 worktree 里跑，C 方案下不判红）
+  - ruff check : All checks passed!  ruff format: 81 files already formatted
+  - pytest tools/discipline : 52 passed（新增 4 条）
+  - `registry_checks` 夹具改为返回 registry 组**全部**检查项：原先按「序号」
+    关键字筛，序号取消后字典会悄悄变空，`next(...)` 只抛 StopIteration ——
+    一个看不出意图的失败。空集合本身就该是错误。
+
+未做（分片迁移的 owner 部分，不在本任务范围）
+  55 个认领文件的重命名（trae 14 / workbuddy 11 / qoder 11 / claude-code 11 /
+  opencode 6 / codex 2）。各 owner 只改自己的文件，H-5 天然满足。
+  本任务已经把机械守卫备好了：文件名↔内容一致（已有）+ task_id 唯一（已有）
+  + 注释行指向的文件存在（新增），所以重命名有校验、不靠人眼。
+~~~
 
 ## 提交前自检
 

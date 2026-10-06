@@ -177,7 +177,8 @@ def parse_claim_table(repo_root=None):
         body = read(os.path.join(claims_dir, name))
         entries.append(
             {
-                "seq": name.split("-", 1)[0],
+                # 原先这里有 "seq": name.split("-", 1)[0]。序号已按方案 C
+                # 整体取消（docs/proposals/claim-denum.md），唯一键是 task_id。
                 "file": name,
                 "name_task_id": task_id_from_filename(name),
                 "task_id": _md_field(body, "task_id").strip("`"),
@@ -191,10 +192,14 @@ def parse_claim_table(repo_root=None):
 
 
 def task_id_from_filename(name):
-    """`<序号>-<harness>--<task-id>.md` → task_id。
+    """`<harness>--<task-id>.md` → task_id（迁移期也接受 `<序号>-` 前缀）。
 
     按**最后**一个 `--` 切分：harness 自身含连字符（`claude-code`），
     而 task_id 不含 `--`。
+
+    `^\d+-` 的剥离**保留**：方案 C 是分片迁移（C2），迁移期间两种命名会共存。
+    保留它使过渡期不产生额外的红灯，也使这个函数对两种形态都成立 ——
+    序号前缀从「身份」降级为「可选的装饰」，而不再是必须剥掉的语义。
     """
     stem = name[:-3] if name.endswith(".md") else name
     stem = re.sub(r"^\d+-", "", stem)
@@ -256,49 +261,29 @@ def has_verification_evidence(card):
     return bool(re.search(r"^###\s*(完成标准与验证结果|验收结果|验证结果)", body, re.M))
 
 
-def _reserved_claim_slots(tasks_text):
-    """解析 TASKS.md 的「占用中的认领序号」小节。
+def claim_registry_refs(tasks_text):
+    """TASKS.md 里形如 `<!-- <task-id> -> docs/claims/<file>.md -->` 的注释行。
 
-    那些是**已建文件但尚未合入 main** 的序号：claimant 在自己的 worktree 里
-    建了 `docs/claims/NN-*.md`，main 上看不到，于是「序号必须连续 1..N」这条
-    断言会把其他人全部挡住（2026-10-06 09:05 实际卡住过一次）。
+    这些注释是认领登记表的**索引**：每个 task 一行，指向它自己的认领文件。
+    迁移期重命名会同时改 55 个文件名与这些注释，而**没有任何检查盯着它们** ——
+    改错了不会立刻变红，只会在某天有人按注释找文件却找不到时才发现。
+    （CLAUDE 在 claim-seq-contiguity.md 提案里把它列为盲区；WorkBuddy 在
+    claim-denum-coordinator-review.md 里建议补上。）
 
-    返回 [(序号, 认领文件路径)]。节不存在或为空时返回 []。
+    返回 [(task_id, path)]。只取真正的注释行（含 `<!--` 且以 `-->` 结尾），
+    以免把正文里出现的 docs/claims 字样（表格、说明段落）也算进来。
     """
-    m = re.search(
-        r"^###\s*占用中的认领序号\s*$", tasks_text, re.M
-    )
-    if not m:
-        return []
-    block = tasks_text[m.end():]
-    nxt = re.search(r"^#{2,3}\s", block, re.M)
-    if nxt:
-        block = block[: nxt.start()]
     out = []
-    for line in block.splitlines():
+    for line in tasks_text.splitlines():
         row = line.strip()
-        if not row.startswith("|"):
+        if not (row.startswith("<!--") and row.endswith("-->")):
             continue
-        cells = [c.strip() for c in row.strip("|").split("|")]
-        if len(cells) < 2:
+        body = row[4:-3]
+        hit = re.search(r"docs/claims/[\w./-]+\.md", body)
+        if not hit:
             continue
-        seq = cells[0]
-        if not re.fullmatch(r"\d+", seq):
-            continue  # 表头或分隔行
-        path = None
-        for c in cells:
-            hit = re.search(r"docs/claims/[\w./-]+\.md", c)
-            if hit:
-                path = hit.group(0)
-                break
-        # task_id **不靠列序猜**：认领文件名本身带 task_id（`NN-harness--task.md`，
-        # 格式由上面那条「文件名与内容一致」断言保证），直接反解。
-        # 先按列序猜会在「序号 | Harness | task_id | ...」这种表里取到 Harness
-        # —— 2026-10-06 实测踩过，症状是撞号断言把 `WorkBuddy` 当成 task_id 报红。
-        task_id = (
-            task_id_from_filename(os.path.basename(path)) if path else None
-        ) or None
-        out.append((int(seq), path, task_id))
+        task_id = body.split("\u2192", 1)[0].strip().strip("`")
+        out.append((task_id, hit.group(0)))
     return out
 
 
@@ -310,27 +295,20 @@ def check_registry(result, tasks_text, repo_root=None):
     result.chk(bool(tasks), "任务表解析出 %d 行" % len(tasks), "registry")
     result.chk(bool(claims), "认领登记表解析出 %d 个" % len(claims), "registry")
 
-    # 拆分后「每task 一个独占文件」的两条不变量必须有守卫，否则绿灯不含信息
+    # 拆分后「每 task 一个独占文件」的不变量必须有守卫，否则绿灯不含信息
     # （Qoder 复核发现②③④：序号 14/15 各重复、claim-nullable 有两个逐字相同的文件，
     #  而当时 discipline 仍 24/24 全绿）。
-    seqs = [c["seq"] for c in claims]
-    dup_seq = sorted({q for q in seqs if seqs.count(q) > 1})
-    result.chk(
-        not dup_seq,
-        "认领文件序号唯一；重复=%s（%d 个文件，序号范围 %s~%s）"
-        % (
-            dup_seq or "无",
-            len(seqs),
-            min(seqs) if seqs else "-",
-            max(seqs) if seqs else "-",
-        ),
-        "registry",
-    )
-    tids = [c["task_id"] for c in claims]
-    dup_tid = sorted({t for t in tids if tids.count(t) > 1})
+    #
+    # 判据从「序号唯一」换成「**task_id 唯一，且大小写不敏感**」。
+    # 大小写这一条不是洁癖：文件名在 **Windows 上大小写不敏感**，于是
+    # `MVP-10a.md` 与 `mvp-10a.md` 在 Windows 上是同一个路径、在 Linux 上是两个 ——
+    # 后者能过任何按原字符串比对的断言，而前者会让两个 agent 以为自己各有
+    # 一个文件，实际互相覆盖。当前数据无此情况，断言要按未来的正确形态写。
+    folded = [c["task_id"].strip().lower() for c in claims]
+    dup_tid = sorted({t for t in folded if folded.count(t) > 1})
     result.chk(
         not dup_tid,
-        "一个 task_id 只对应一个认领文件；重复=%s" % (dup_tid or "无"),
+        "一个 task_id 只对应一个认领文件（大小写不敏感）；重复=%s" % (dup_tid or "无"),
         "registry",
     )
 
@@ -359,44 +337,23 @@ def check_registry(result, tasks_text, repo_root=None):
         "registry",
     )
 
-    # 「占用中的认领序号」：登记的号不能和已存在的冲突，登记的文件必须真存在。
-    # 这两条让那张表不只是给人看的说明，而是可执行的约定。
-    reserved = _reserved_claim_slots(tasks_text)
-    existing_seqs = {
-        int(c["seq"]) for c in claims if re.fullmatch(r"\d+", c["seq"] or "")
-    }
-    by_seq = {
-        int(c["seq"]): c["task_id"]
-        for c in claims
-        if re.fullmatch(r"\d+", c["seq"] or "")
-    }
-    # 同号**同 task** 不是冲突，而是同一件事的两处记录：占号者在自己的分支上
-    # 建了 `docs/claims/NN-*.md`，同时在自己的 TASKS.md 里登记了 NN —— 合并前
-    # 这两者必然并存，把这种情况判红等于惩罚正确流程（H-8：先登记再开工）。
-    # 真正的撞号是「同号不同 task」：两个人各自取到了同一个号。
-    collide = sorted(
-        "%d（占号 %s vs 文件 %s）" % (sq, tid, by_seq[sq])
-        for sq, _path, tid in reserved
-        if sq in existing_seqs and (tid is None or tid != by_seq[sq])
+    # 认领登记表注释行指向的文件必须真实存在。
+    #
+    # 补 CLAUDE 提案点出、WorkBuddy 建议补的那个盲区：docs/claims/ 重命名
+    # （方案 C）会同时改文件名与这些索引注释，而没有任何检查盯着它们。
+    # 只查「文件在不在」—— task_id 对不对得上由上面那条「文件名 ↔ 内容」
+    # 断言负责，序号已按方案 C 取消。
+    refs = claim_registry_refs(tasks_text)
+    _root = repo_root or os.getcwd()
+    missing = sorted(
+        "%s -> %s" % (tid, path)
+        for tid, path in refs
+        if not os.path.isfile(os.path.join(_root, path))
     )
     result.chk(
-        not collide,
-        "占用序号表不与已存在的认领文件撞号；撞号=%s" % (collide or "无"),
-        "registry",
-    )
-    # 只校验登记本身的形状：文件路径格式、序号与首列一致。
-    # **不**校验文件在本地存在 —— 占号者往往还在自己 worktree 上，文件合入main
-    # 之前本地根本看不到，那种情况下报错会永久卡住所有人（2026-10-06 09:10 实测）。
-    malformed = sorted(
-        "行%s(路径=%s)" % (sq, path)
-        for sq, path, _tid in reserved
-        if path is None
-        or not re.fullmatch(r"docs/claims/%d-[\w.-]+\.md" % sq, path)
-    )
-    result.chk(
-        not malformed,
-        "占用序号表登记的路径格式为 docs/claims/<同一序号>-*.md；不合规=%s"
-        % (malformed or "无"),
+        not missing,
+        "认领登记表注释行指向的文件均存在（%d 条索引）；缺失=%s"
+        % (len(refs), missing or "无"),
         "registry",
     )
 
