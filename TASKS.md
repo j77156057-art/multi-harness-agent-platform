@@ -32,7 +32,7 @@
 | fix-flaky-init | WorkBuddy | MVP-02 | ✅ done（结论：无法复现，撤回登记） | `agent/workbuddy/fix-flaky-init` | `CORE-RECOVER-001` |
 | chain-template-closeout | WorkBuddy | MVP-06 | ✅ done（已测为负收益，撤销优化） | `agent/workbuddy/chain-template-rejected` | `MVP-PROCESS-001` |
 | slow-test-visibility | WorkBuddy | — | ✅ done（慢测试排行 + slow marker 已落地） | `agent/workbuddy/slow-test-visibility` | `MVP-PROCESS-001` |
-| report-mergeguard-commit-bug | WorkBuddy | — | 🟢 doing（报给 opencode：commit 成功却判失败） | `agent/workbuddy/report-mergeguard-commit-bug` | `MVP-PROCESS-001` |
+| report-mergeguard-commit-bug | WorkBuddy | — | ✅ done（报告已交付；修复由 @opencode 单独认领） | `agent/workbuddy/report-mergeguard-commit-bug` | `MVP-PROCESS-001` |
 | fix-flaky-init-card | TRAE | fix-flaky-init | ✅ done | `agent/local/trae/fix-flaky-init-card/a1` | `MVP-PROCESS-001` |
 | claim-nullable | WorkBuddy | MVP-04 | ✅ done（R10-fix-11 裁定） | `agent/workbuddy/fix-claim-nullable` | `CORE-CLAIM-002` `CORE-RECOVER-001` |
 | claim-nullable-card | TRAE | claim-nullable | ✅ done | `agent/local/trae/claim-nullable-card/a1` | `MVP-PROCESS-001` |
@@ -2059,6 +2059,42 @@ commit：9a5527c（secret 扫描）、99175b1（状态覆盖+无主 release 修�
   - **特性缺口（记录非静默）**：revert 下游反向闭包（MERGE-REVERT-002）、§17 后半段
     （redact+加密归档）、artifact/mention 扫描面、独立 reverting 健康态——均见报告 §6。
   - **门禁环境**：证据命令均带 PYTHONUTF8=1（P3-3，详见报告 §1.3）。
+~~~
+
+### report-mergeguard-commit-bug：mergeguard 的 commit 成功却判失败（✅ done，报告已交付）
+
+~~~text
+任务编号：report-mergeguard-commit-bug
+负责人 Harness：WorkBuddy（报告方）；修复方 @opencode
+开始时间：2026-10-06 09:00
+当前状态：done —— 本task 的交付物是**报告**，已交付；修复是另一件事，由 @opencode 认领
+依赖任务：无
+工作区：.worktrees/workbuddy/
+真相源引用：R10 §26（VERIFY-RECEIPT-001 的验证要求）
+允许修改目录：docs/**、TASKS.md
+禁止修改目录：tools/mergeguard/**（属 opencode 所有）、backend/app/**、docs/spec/**
+交付分支：agent/workbuddy/report-mergeguard-commit-bug
+test_id：MVP-PROCESS-001
+测试命令：./scripts.sh check
+当前状态：done
+commit：ad25535
+验证结果：
+  - 复现：2026-10-06 09:00 合并 slow-test-visibility 时抛 CalledProcessError
+  - 但 merge commit 5dbb597 实际存在、两个父提交、内容全在位、门禁全绿
+  - 根因：cli.py:168 用 check=True，撞上本机间歇性的
+    fatal: unable to write new index file 就直接判失败
+  - 附带查到 unable to write new index file 的根因：TASKS.md 已涨到 249795 字节，
+    git 对 >128KB 的文件不做 delta 压缩，整块写入 object，写index 窗口变长
+后续（不在本 task 范围内）：
+  @opencode 需要**单独认领一个 task** 来修 tools/mergeguard/cli.py：
+  在 commit 调用处捕获
+  CalledProcessError 后先核实「工作区是否干净 + %P 是否两个父」，
+  确认已提交则视为成功；或用合并前的 ORIG_HEAD 是否推进来判断。
+  建议修法已写在 docs/claims/52-workbuddy--report-mergeguard-commit-bug.md
+已知问题：
+  TASKS.md 过大（250 KB）是 git add 间歇性失败的诱因，建议拆分为
+  「任务表 + 关键路径」与 docs/tasks/notes/<task-id>.md。这与 2026-10-05 的
+  claims 拆分同类——847cc69 只拆了认领表，复核记录和任务卡留在原地。
 ~~~
 
 ## 关键路径
