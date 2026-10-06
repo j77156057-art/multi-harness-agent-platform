@@ -34,7 +34,8 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 | **登记表自身不自洽** | `tools/discipline` 42 项（CI + `scripts.sh check`） |
 | **依赖图与关键路径自洽** | `tools/discipline` deps 组（从依赖图算出，不信手写数字） |
 | **两个 agent 同时合并 `main`** | `tools/mergeguard` 互斥锁 —— **但仅在走 `./scripts.sh merge` 时** |
-| **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一且连续（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
+| **已合入 main 的任务未登记 / 未完成 / 缺卡缺证据** | `tools/discipline` merge 组：`git log --merges` 反向核对认领表与任务卡；认领序号唯一（registry 组）。浅克隆 / 无 git 环境 fail-closed，故 CI `fetch-depth: 0` |
+| **认领文件名与内容指向不同任务** | `tools/discipline` registry 组：文件名里的 task_id 必须与文件内容的 `task_id` 一致。**这条替代了原先的「序号连续 1..N」**——连续性在并发分支下结构上不可满足（各 agent 从 main 最大值往后取号，合并顺序不由取号者决定），而它没有防住唯一性没防住的东西。裁决与 34 次重命名的机械证据见 `docs/proposals/claim-seq-contiguity.md` |
 | **未合入 main 但已开工的分支，其认领是否已登记** | `tools/discipline` branches 组。**只对「分支有提交、main 仍写 waiting、且该分支自己也没有认领文件」变红**；已在自己分支登记只是待合并的**不报** —— 那是正确流程的中间态，报红等于惩罚正确行为。**只在多分支的本地克隆下有牙齿**，CI 只检出当前分支时近乎空跑 |
 
 ### 合并必须走受控入口

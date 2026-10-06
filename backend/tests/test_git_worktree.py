@@ -140,3 +140,28 @@ def test_start_task_provisions_the_worktree(tmp_path):
         "SELECT * FROM workspaces WHERE attempt_id = ?", (item.attempt_id,)
     )
     assert len(rows) == 1 and rows[0]["status"] == "active"
+
+
+def test_long_task_ids_do_not_lengthen_the_physical_path(tmp_path):
+    """R10 §14: the physical directory carries a short id; the identity lives
+    in the branch name. That choice is what keeps deep roots + long task ids
+    under Windows' classic 260-char limit -- proven here end to end
+    (provision -> commit -> archive) instead of asserted in prose.
+    """
+    deep = tmp_path / ("d" * 100)
+    deep.mkdir()
+    fixture = make_fixture(deep)
+    long_task = "T-" + "a" * 90
+    item = seed_and_claim(fixture, task_id=long_task)
+
+    worktree = provision(fixture, task_id=long_task, attempt_id=item.attempt_id)
+    assert long_task in worktree.branch, "the branch still carries the long identity"
+    assert len(str(worktree.path)) < 260
+    assert len(str(worktree.gitdir)) < 260
+
+    commit_in(worktree, filename="a.txt", content="hello\n", message="feat: long path")
+    result = fixture.manager.archive_and_recycle(
+        attempt_id=item.attempt_id, archive_root=deep / "archives"
+    )
+    assert result.bundle.exists() and result.bundle.stat().st_size > 0
+    assert not worktree.path.exists(), "cleanup still works under a deep root"

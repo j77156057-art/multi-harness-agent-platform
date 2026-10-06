@@ -519,3 +519,87 @@ def test_the_subprocess_runner_reports_a_missing_binary(tmp_path):
             cwd=tmp_path,
             timeout_seconds=1,
         )
+
+
+def test_the_subprocess_runner_kills_the_whole_process_tree(tmp_path):
+    """TRAE's R2: killing only the direct child leaves grandchildren running.
+
+    The child spawns a grandchild that keeps writing a marker file; after the
+    deadline kill, the marker must stop changing. Without a tree kill the
+    grandchild survives and the marker keeps advancing.
+    """
+    marker = tmp_path / "marker.txt"
+    grand = tmp_path / "grand.py"
+    grand.write_text(
+        "import pathlib, sys, time\n"
+        "p = pathlib.Path(sys.argv[1])\n"
+        "for i in range(600):\n"
+        "    p.write_text(str(i))\n"
+        "    time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import subprocess, sys, time\n"
+        f"subprocess.Popen([sys.executable, {str(grand)!r}, {str(marker)!r}])\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+
+    runner = SubprocessRunner(poll_seconds=0.05)
+    with pytest.raises(HarnessTimeout):
+        runner.run(
+            [sys.executable, str(child)],
+            cwd=tmp_path,
+            timeout_seconds=0.6,
+            on_tick=lambda: None,
+            tick_interval_seconds=0.2,
+        )
+
+    deadline = time.monotonic() + 10
+    while not marker.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert marker.exists(), "the grandchild never started"
+    time.sleep(0.3)  # let any in-flight write land
+    frozen = marker.read_text(encoding="utf-8")
+    time.sleep(0.8)
+    assert (
+        marker.read_text(encoding="utf-8") == frozen
+    ), "the grandchild is still writing; the tree was not killed"
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_a_refused_heartbeat_stops_the_run_without_abandoning(case, tmp_path):
+    """TRAE's R3: the lease-lost path had no test.
+
+    The lease is expired for real (not mocked): the next heartbeat is refused
+    by the platform, which must surface as ``HarnessLeaseLost`` and must not
+    be turned into an abandon -- there is no live lease left to abandon with.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.adapter.harnesses import HarnessLeaseLost
+
+    rig = build_rig(tmp_path, case)
+    adapter = adapter_for(rig)
+    runner = ScriptedRunner(files={"flag.txt": "ok\n"}, stdout=case.stdout)
+    worker = CliHarnessWorker(adapter, runner=runner)
+
+    def expire(item):
+        past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+        with rig.database.transaction() as conn:
+            conn.execute("UPDATE leases SET lease_until = ? WHERE task_id = 'T-1'", (past,))
+        return provision(rig, item)
+
+    with pytest.raises(HarnessLeaseLost) as caught:
+        worker.work_on(
+            task_id="T-1",
+            claim_request_id=f"cr-lost-{case.name}",
+            on_claimed=expire,
+        )
+    assert caught.value.error.code == "lease.expired"
+    assert status_of(rig) == "in_progress", "a lost lease is not an abandon"
+    abandoned = rig.database.read(
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'abandon'"
+    )
+    assert abandoned[0]["n"] == 0

@@ -125,6 +125,10 @@ class CanonicalRepo:
         if not (self.path / "HEAD").exists():
             self.path.parent.mkdir(parents=True, exist_ok=True)
             run_git("init", "--bare", "--initial-branch", INTEGRATION_BRANCH, str(self.path))
+            # The Merge Worker and the push proxy write refs/heads/<branch>
+            # here, and a long branch name can exceed Windows' MAX_PATH; the
+            # same extended-length-path switch as worktrees (R10 §14).
+            run_git("config", "core.longpaths", "true", cwd=self.path)
         self.install_hook()
         if self.ref_commit(self.integration_ref) is None:
             self._seed_integration()
