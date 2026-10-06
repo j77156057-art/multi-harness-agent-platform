@@ -75,27 +75,71 @@ subprocess.run([sys.executable, str(SCRIPT)], cwd=str(REPO_ROOT), ...)
 **之后**才抓到的，说明它只能事后追认、不能事前阻断——这是
 「登记先于合并」这条规则当前只能做到事后检查的一个实证。
 
-## 四、顺带查实的 mergeguard 三个 bug（本轮只报不修）
+## 四、顺带查实的 mergeguard 四个 bug（本轮只报不修）
 
 | # | bug | 证据 | 状态 |
 |---|---|---|---|
 | 1 | commit 成功却判失败 | `a666d23` 提交标题 | 已由 OpenCode 修 |
 | 2 | 遇冲突直接退出，不 stage 解决结果也不报「有冲突待解」 | 本轮前一阶段留下 `.git/MERGE_HEAD` | 未修 |
 | 3 | **合并成功后不释放 `.git/merge-lock`** | `cli.py:705` 有 `finally: guard.release()`，但合并成功后锁目录仍在，`owner.json` 的 pid 11488 已退出 | 未修 |
+| 4 | **冲突路径不写 `merge-pending.json`**，导致下一次入口把自己的残留判成「别人的合并」 | `cli.py:625` 冲突分支 `return 4`，而 `_write_pending` 在 `cli.py:628`——**在冲突分支之后**，永远执行不到 | 未修 |
 
-bug 3 的具体形态：合并**成功落地**（main = `9071fb1`），锁目录
-`.git/merge-lock/` 仍在，下一次任何 `mergeguard merge` 都会被
-「已有 agent 持有合并锁」挡住，直到 TTL（`DEFAULT_TTL_SECONDS`）过期才可接管。
+### bug 3 的实测代价：每次残留锁赔 15 分钟
+
+`DEFAULT_TTL_SECONDS = 900`，而 `is_stale()` 要求**「pid 已死」且「超 TTL」**
+两个条件同时成立（`guard.py:188`，这是有意设计，防止 pid 被回收的误判）。
+所以一个残留锁要挡 15 分钟。实测两次：第一次等 904 秒，第二次等 90 秒后
+不得不进入轮询等待。
+
 `guard.release()` 在 `cli.py:705` 的 `finally` 里，理论上必然执行——
-所以要么它执行时报错被吞了，要么 `guard.release()` 的 `path.rmdir()`
-在 Windows 上因目录被占用而 `OSError`（`guard.py:257` 正是这么吞的，
-`return False` 但调用方没检查返回值）。
+所以要么它执行时报错被吞了，要么 `path.rmdir()` 在 Windows 上因目录被占用
+而 `OSError`（`guard.py:257` 正是这么吞的，`return False` 但**调用方没检查
+返回值**，`cli.py:706` 直接忽略了它）。
 
 **这解释了本轮那段自相矛盾的输出**：同一次调用里既打印了合并成功的
 `HEAD:`，又打印了「已有 agent 持有合并锁」——后者来自 `acquire()` 的
-`FileExistsError` 分支。也就是说流程是「取锁 → 合并 → 门禁 → 提交 →
+`FileExistsError` 分支。流程是「取锁 → 合并 → 门禁 → 提交 →
 `finally: release()` 失败 → 锁残留」，而我看到的 LockError 来自**下一次**
 读锁的检查路径。
+
+（第二次合 `deadlock-claim` 时「已释放合并锁」正常打印了。所以 bug 3
+**不是必现**，与「目录被占用」的猜测一致——间歇性。）
+
+### bug 4 是 bug 2 的放大器
+
+`cli.py` 的写入顺序：
+
+```
+590  if not resuming:
+592      proc, expected_head = _merge_with_retry(branch)
+605      if proc.returncode != 0:
+607          if unmerged:
+608              print("合并冲突，已保留现场**不要 git merge --abort**")
+625              return 4          ← 冲突在这里就返回了
+626      # 记下「待提交合并」的归属
+628      _write_pending(branch, task_id, expected_head)   ← 永远到不了
+```
+
+于是**一旦合并冲突**：`MERGE_HEAD` 留下、`merge-pending.json` 没写。
+下一次进���的 `_classify_pending_merge()`（`cli.py:484-488`）看到
+「`pending is None` 且 `MERGE_HEAD` 存在」→ 按 fail-closed 判成
+「别人的合并」→ `exit 7`。
+
+**明明是它自己留下的现场，它自己不敢认。** 本轮实测：合
+`claim-denum-review` 冲突后，下一次运行报
+「已存在进行中的合并（MERGE_HEAD 无本工具的归属记录）」。
+
+脱困方式（三方交叉验证归属后手工补 `_write_pending`）：
+
+| 证据 | 值 |
+|---|---|
+| `.git/MERGE_HEAD` | `b7ba623…` |
+| 分支 tip | `b7ba623…`（同一 commit） |
+| 锁持有者 | `claim-denum-review`，pid 22348 已退出 |
+
+三条一致即可认定「这是本工具这个任务的残留，不是他人的合并」。
+**这两条 bug 合起来构成一个完整的死锁**：bug 4 让入口不敢接管 →
+bug 3 的残留锁要等15 分钟 TTL → 就算等到了，bug 4 仍在挡。
 
 ## 五、方案 C（无序号认领）与本任务的关系
 
