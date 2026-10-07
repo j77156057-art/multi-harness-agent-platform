@@ -9,10 +9,11 @@ argument names stay intact instead of being widened with transport concerns.
 Two verbs gained their routes in MVP-10b, because the real adapters call them:
 ``list_ready_tasks`` (the pull model's entry point; ``visibility=redacted`` is
 refused until R10 §17 defines redaction) and ``read_context`` (the task's
-event page). Four verbs -- ``accept_help``, ``reject_help``, ``split_task``
-and ``ask_human`` -- still have no route, because MVP-08 covered the verbs its
-own card listed. They raise :class:`UnsupportedVerb` rather than pretending,
-and the gap is recorded in the MVP-10a card and in docs/traceability.md.
+event page). ``ask_human`` followed in human-ops (the §18 decision surface).
+Three verbs -- ``accept_help``, ``reject_help`` and ``split_task`` -- still
+have no route, because MVP-08 covered the verbs its own card listed. They
+raise :class:`UnsupportedVerb` rather than pretending, and the gap is recorded
+in the MVP-10a card and in docs/traceability.md.
 """
 
 from __future__ import annotations
@@ -228,7 +229,24 @@ class HttpAdapter(HarnessAdapter):
         raise UnsupportedVerb("split_task: no route yet (see the MVP-10a card)")
 
     def ask_human(self, *, task_id: str, question: str) -> dict[str, Any]:
-        raise UnsupportedVerb("ask_human: no route yet (see the MVP-10a card)")
+        """R10 §7: the adapter's attempt context rides along as the §13 guard.
+
+        Unlike ``release``/``abandon``, the task is not handed back: ownership
+        is unchanged and the same attempt continues after the human resumes
+        it, so the recorded context is kept.
+        """
+        context = self._context(task_id)
+        return self._post(
+            "ask_human",
+            "/adapter/ask_human",
+            {
+                "task_id": task_id,
+                "attempt_id": context.attempt_id,
+                "fencing_epoch": context.fencing_epoch,
+                "question": question,
+                "harness_id": self.registration.harness_id,
+            },
+        )
 
     def abandon(self, *, task_id: str, reason: str) -> dict[str, Any]:
         context = self._context(task_id)

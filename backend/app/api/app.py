@@ -63,6 +63,7 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     api = APIRouter(prefix=API_PREFIX)
     api.include_router(routes.management)
     api.include_router(routes.adapter)
+    api.include_router(routes.human)
     api.include_router(routes.review)
     api.include_router(routes.read)
     app.include_router(api)

@@ -231,6 +231,11 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "verifying",
             "tests.test_verify::test_a_human_can_resume_verification_after_the_declaration",
         ),
+        (
+            "human_wait_timeout",
+            "awaiting_human",
+            "tests.test_human_ops::test_the_first_reminder_fires_after_the_window",
+        ),
     ],
     "plan_drift": [
         (
@@ -246,15 +251,37 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "tests.test_sweeper_drift::test_drift_states_have_a_recovery_exit",
         ),
     ],
+    "abandoned": [
+        (
+            "reopen",
+            "ready",
+            "tests.test_human_ops::test_reopen_revives_an_abandoned_task",
+        ),
+    ],
+    "escalated": [
+        (
+            "human.release",
+            "ready",
+            "tests.test_human_ops::test_release_returns_an_escalated_task_to_ready",
+        ),
+        (
+            "human.adjudicate",
+            "awaiting_human",
+            "tests.test_human_ops::test_adjudicate_parks_an_escalated_task_with_a_decision",
+        ),
+        (
+            "escalation_reminder",
+            "escalated",
+            "tests.test_human_ops::test_the_escalation_reminder_backs_off_with_the_event_count",
+        ),
+    ],
 }
 
 #: States whose exits exist in the table but have no trigger anywhere in the
-#: MVP: the mechanisms (plan revision, reopen, human ops) are later-stage work.
-#: Every outgoing event must still lack a trigger.
+#: MVP: the mechanism (the plan revision flow) is later-stage work. Every
+#: outgoing event must still lack a trigger.
 WAIVERS_NO_EXIT: dict[str, str] = {
-    "draft_rejected": "plan revision (plan.revise) is not implemented in this MVP",
-    "abandoned": "reopen is a human action; no human-ops surface in this MVP",
-    "escalated": "human.release / human.adjudicate are §18 human actions, not implemented",
+    "draft_rejected": "plan revision (plan.revise / plan.supersede) is not implemented in this MVP",
 }
 
 #: States with exits but no reachable entry -- now empty: sweeper-drift landed
@@ -382,7 +409,7 @@ def test_every_non_terminal_state_is_mapped_or_explicitly_waived():
 
 def test_the_waiver_sets_are_pinned():
     """Implementing a mechanism must consciously move a state into the map."""
-    assert sorted(WAIVERS_NO_EXIT) == ["abandoned", "draft_rejected", "escalated"]
+    assert sorted(WAIVERS_NO_EXIT) == ["draft_rejected"]
     assert sorted(WAIVERS_UNREACHABLE) == [], "drift detectors landed; nothing unreachable"
 
 

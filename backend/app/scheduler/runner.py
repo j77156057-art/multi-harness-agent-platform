@@ -24,7 +24,9 @@ from app.scheduler.sweeps import (
     sweep_blocked_sla,
     sweep_dependencies,
     sweep_drift,
+    sweep_escalation_reminder,
     sweep_expired_leases,
+    sweep_human_wait_timeout,
     sweep_merge_recovery,
     sweep_resources,
     sweep_review_lease,
@@ -40,7 +42,9 @@ Sweep = Callable[[Database, datetime, "CanonicalRepo | None"], SweepReport]
 #: first so later sweeps observe the states it just produced (design §7.1);
 #: the resource resume runs before aging so a task whose capacity just freed
 #: is claimed rather than aged out in the same round; the blocked SLA runs
-#: before the generic stuck check so the specific edge wins.
+#: before the generic stuck check so the specific edge wins; the two reminder
+#: sweeps run last so a task parked by an earlier sweep in this very round is
+#: observed in its final state (they only ever write next_reminder_at).
 SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("expired_leases", sweep_expired_leases),
     ("dependencies", sweep_dependencies),
@@ -53,6 +57,8 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("review_lease", sweep_review_lease),
     ("merge_recovery", sweep_merge_recovery),
     ("drift", sweep_drift),
+    ("human_wait_timeout", sweep_human_wait_timeout),
+    ("escalation_reminder", sweep_escalation_reminder),
 )
 
 

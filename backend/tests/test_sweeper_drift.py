@@ -158,7 +158,7 @@ def test_drift_states_have_a_recovery_exit(tmp_path):
 
     reports = run_all_sweeps(database, now=NOW)
 
-    assert [report.sweep for report in reports][-1] == "drift"
+    assert [report.sweep for report in reports][-3] == "drift", "the two reminders run after"
     assert _status(database) == "stale"
     assert _event_count(database, "lease_expire") == 1
 
