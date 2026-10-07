@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-08 02:13 |
 | 分支 | `agent/local/qoder/alert-webhook/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 3c27193；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `alert-webhook`。
 
@@ -20,3 +20,7 @@
   §2.8；**原生实现、零代码复制**——不需要归属框架）。目标：关闭 jsonl-export
   卡里记录的「无外部告警通道」缺口：任务进入 `escalated`（含全部升级边，边集合
   从冻结迁移表推导）→ HMAC 签名 POST 到配置的 webhook → 失败重试、最终停靠可观察。
+- 2026-10-08 02:31：完成。实现 `3c27193`；全量门禁绿（docstate 90/0、
+  discipline 44/0、ruff 106 files、pytest 400 passed 净增 10）。测试含本地真
+  HTTP 服务端签名断言与 CLI 端到端（裸 SQL 种子升级事件→投递→重跑幂等）。
+
