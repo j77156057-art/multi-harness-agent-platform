@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-07 23:37 |
 | 分支 | `agent/local/qoder/frontend-thread/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 5905f4a；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `frontend-thread`。
 
@@ -19,3 +19,8 @@
   事件流）。无 lockfile/无 node_modules（MVP-01 骨架从未装过依赖）；无 git
   remote，CI（gate.yml）当前不构成验证面——验证方案见卡：vitest 组件测试 +
   vue-tsc + build + 对比度脚本（可重复）+ 真实浏览器实测留档（一次性）。
+- 2026-10-08 00:28：完成。实现 `5905f4a`；仓库门禁绿（docstate 90/0、
+  discipline 44/0、pytest 382 passed 净增 1）+ 前端四件绿（21 测试/typecheck/
+  build/对比度 9 对最低 4.79:1）+ 浏览器实测留档（console 零错误、网络全 200、
+  消息经 API 确证、深链冷启动）。组件测试未入共享门禁为**记录缺口**（fleet 决策）。
+

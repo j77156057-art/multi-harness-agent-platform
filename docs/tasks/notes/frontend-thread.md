@@ -1,4 +1,4 @@
-### frontend-thread：前端首切片——三栏壳 + 项目群 + 任务线程（🚧 doing）
+### frontend-thread：前端首切片——三栏壳 + 项目群 + 任务线程（✅ done）
 
 ~~~text
 任务编号：frontend-thread
@@ -48,5 +48,43 @@
 test_id：MVP-UI-001
 测试命令：cd frontend && npm run typecheck && npm test && npm run build &&
           npm run check:contrast（+ 仓库侧 PYTHONUTF8=1 ./scripts.sh check）
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 00:28
+commit：`5905f4a`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 382 passed（本任务净增 1 项：test_api_listing.py），exit 0
+  前端四件     : ①`vue-tsc` 0 错；②vitest **21 passed / 6 文件**（api 客户端
+                URL 编码+错误信封、ProjectRail/ChannelPane/TaskPane 状态矩阵、
+                Shell 路由编排〔落点跳群 + 深链〕、对比度脚本子进程）；
+                ③`vite build` 39 modules，dist JS 107KB（gzip 41.5KB）；
+                ④`check:contrast` **9 对 token 全 ≥4.5:1**（最低 4.79:1，
+                --ok/bone；早先 --muted #6b6b6b 对 panel 恰好 4.50 线，已加深到
+                #5f5c56 留余量）。
+  浏览器实测   : 真后端（临时 data 目录 + 种子：P-DEMO/G-DEMO、T-101 claimed /
+                T-102 ready / T-103 escalated、2 条初始消息）+ vite dev：
+                ①打开 5173 自动落入 /g/G-DEMO，三栏渲染真实数据；
+                ②composer 发消息 → 列表出现（operator 16:12:40）且输入框清空；
+                ③点 T-101 → 深链 /g/G-DEMO/t/T-101，线程显示 #1 plan.approve /
+                #4 claim（含 payload 折叠）；
+                ④刷新冷启动深链，全部数据自 API 重建；
+                ⑤console 零错误零警告、网络请求全 200；
+                ⑥直连后端 API 复核：3 条消息、末条即 UI 所发。
+                截图：`backend/data/fe-demo-shot-{1-board,2-thread}.png`
+                （gitignored，留档于工作区）。
+已知问题：
+  - **组件测试未入共享门禁**（记录缺口）：本仓无 git remote、gate.yml CI 当前
+    不构成验证面；`scripts.sh check` 不跑 npm（本地无 node_modules 时 `/test`
+    无意义）。是否接入（CI job vs scripts.sh 条件跑 vs 保持卡内命令）需 fleet
+    决策——前端若无门禁按本表标准是「仅是名字」，本切片以"卡内四件可重复命令
+    + 浏览器留档"过渡，不冒充已接入。
+  - 依赖安装走 **npmmirror**（本机对 npmjs 直连 10s 超时）：`package-lock.json`
+    的 resolved 指向镜像——环境事实，后装者用默认源可能慢，用 `--registry=
+    https://registry.npmmirror.com` 可复现。
+  - 出范围（卡内范围声明）：Harness 成员列（无 list 端点）、§22 其余页
+    （方案/Diff/审查/待办）、WebSocket 订阅（本片用加载时拉取，无断线补投）。
+  - 骨架遗留清理：App.vue 原先 ping 的 `/api/spec/status` 路径本不存在
+    （真实路由是 `/spec/status`，不在 /api/v1 下）——已随重写移除。
 ~~~
