@@ -143,12 +143,27 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "blocked",
             "tests.test_state_coverage::test_blocked_has_a_recovery_exit",
         ),
+        (
+            "split_parent_blocked",
+            "blocked",
+            "tests.test_adapter_verbs::test_split_creates_child_drafts_and_blocks_the_parent",
+        ),
     ],
     "needs_help": [
         (
             "release",
             "ready",
             "tests.test_api_flow::test_owner_actions_over_http",
+        ),
+        (
+            "help_accepted",
+            "needs_help",
+            "tests.test_adapter_verbs::test_accept_help_records_the_collaborator_without_moving_the_task",
+        ),
+        (
+            "help_rejected",
+            "needs_help",
+            "tests.test_adapter_verbs::test_reject_help_self_loops",
         ),
     ],
     "blocked": [

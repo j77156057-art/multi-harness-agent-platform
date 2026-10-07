@@ -6,14 +6,11 @@ needs the attempt and the fencing epoch to authorise the write; a real harness
 tracks its own attempts too, so keeping that state here is what lets the §7
 argument names stay intact instead of being widened with transport concerns.
 
-Two verbs gained their routes in MVP-10b, because the real adapters call them:
-``list_ready_tasks`` (the pull model's entry point; ``visibility=redacted`` is
-refused until R10 §17 defines redaction) and ``read_context`` (the task's
-event page). ``ask_human`` followed in human-ops (the §18 decision surface).
-Three verbs -- ``accept_help``, ``reject_help`` and ``split_task`` -- still
-have no route, because MVP-08 covered the verbs its own card listed. They
-raise :class:`UnsupportedVerb` rather than pretending, and the gap is recorded
-in the MVP-10a card and in docs/traceability.md.
+Route history: ``list_ready_tasks`` and ``read_context`` gained routes in
+MVP-10b; ``ask_human`` in human-ops; ``accept_help`` / ``reject_help`` /
+``split_task`` in adapter-verbs -- the last three that had been raising
+``UnsupportedVerb``. All sixteen §7 verbs are now wired to real routes; a verb
+that cannot be honoured is refused with an HTTP envelope, never silently.
 """
 
 from __future__ import annotations
@@ -35,10 +32,6 @@ class AdapterError(RuntimeError):
         self.status = status
         self.code = code
         self.detail = error.get("message")
-
-
-class UnsupportedVerb(NotImplementedError):
-    """The verb is in R10 §7 but the scheduler has no route for it yet."""
 
 
 class HttpTransport(Protocol):
@@ -218,15 +211,44 @@ class HttpAdapter(HarnessAdapter):
         )
 
     def accept_help(self, *, task_id: str, help_id: str) -> dict[str, Any]:
-        raise UnsupportedVerb("accept_help: no route yet (see the MVP-10a card)")
+        """§7 collaborator side: not owner-scoped, so no attempt context rides along."""
+        return self._post(
+            "accept_help",
+            "/adapter/accept_help",
+            {
+                "task_id": task_id,
+                "help_id": help_id,
+                "harness_id": self.registration.harness_id,
+            },
+        )
 
     def reject_help(self, *, task_id: str, help_id: str) -> dict[str, Any]:
-        raise UnsupportedVerb("reject_help: no route yet (see the MVP-10a card)")
+        return self._post(
+            "reject_help",
+            "/adapter/reject_help",
+            {
+                "task_id": task_id,
+                "help_id": help_id,
+                "harness_id": self.registration.harness_id,
+            },
+        )
 
     def split_task(
         self, *, task_id: str, child_specs: list[dict[str, Any]], idempotency_key: str
     ) -> dict[str, Any]:
-        raise UnsupportedVerb("split_task: no route yet (see the MVP-10a card)")
+        context = self._context(task_id)
+        return self._post(
+            "split_task",
+            "/adapter/split_task",
+            {
+                "task_id": task_id,
+                "attempt_id": context.attempt_id,
+                "fencing_epoch": context.fencing_epoch,
+                "child_specs": child_specs,
+                "idempotency_key": idempotency_key,
+                "harness_id": self.registration.harness_id,
+            },
+        )
 
     def ask_human(self, *, task_id: str, question: str) -> dict[str, Any]:
         """R10 §7: the adapter's attempt context rides along as the §13 guard.

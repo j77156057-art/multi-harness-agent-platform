@@ -123,6 +123,21 @@ class AskHumanRequest(BaseModel):
     harness_id: str = "harness"
 
 
+class HelpVoteRequest(BaseModel):
+    task_id: str
+    help_id: str = Field(min_length=1)
+    harness_id: str = "harness"
+
+
+class SplitTaskRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    fencing_epoch: int
+    child_specs: list[dict[str, Any]] = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1)
+    harness_id: str = "harness"
+
+
 class HumanResumeRequest(BaseModel):
     task_id: str
     decided_by: str = Field(min_length=1)
