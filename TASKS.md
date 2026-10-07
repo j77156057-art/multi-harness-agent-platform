@@ -82,7 +82,7 @@
 | sweeper-aging-stuck | Qoder | sweeper-deps-resources | ✅ done | `agent/local/qoder/sweeper-aging-stuck/a1` | `SCHED-SWEEP-003` |
 | sweeper-workers | Qoder | sweeper-aging-stuck | ✅ done | `agent/local/qoder/sweeper-workers/a1` | `SCHED-SWEEP-004` |
 | sweeper-drift | Qoder | sweeper-workers | ✅ done | `agent/local/qoder/sweeper-drift/a1` | `SCHED-SWEEP-005` |
-| human-ops | Qoder | sweeper-drift | 🚧 doing | `agent/local/qoder/human-ops/a1` | `HUMAN-OPS-001` |
+| human-ops | Qoder | sweeper-drift | ✅ done（实现 514c4b2；豁免 3→1，覆盖套件收官） | `agent/local/qoder/human-ops/a1` | `HUMAN-OPS-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
 | mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；卡由 Qoder 按协调者授权代笔，见卡注） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |

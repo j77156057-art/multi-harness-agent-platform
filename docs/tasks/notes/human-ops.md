@@ -1,4 +1,4 @@
-### human-ops：§18 人类决策面（首个切片）（🚧 doing）
+### human-ops：§18 人类决策面（首个切片）（✅ done）
 
 ~~~text
 任务编号：human-ops
@@ -53,5 +53,39 @@
      提醒退避（首提/二次间隔增长/封顶）、CLI 端到端、HTTP 端到端；全量门禁绿。
 test_id：HUMAN-OPS-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 12:0x
+commit：`514c4b2`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 351 passed（本任务净增 37 项：test_human_ops.py；另同步改钉
+                4 个既有测试文件的 runner 顺序与 drift 断言），exit 0
+  关键断言     : ①六操作全矩阵（含拒绝路径，被拒时零事件零决策行）；②ask 释放
+                开发租约、resume 同 attempt 同 epoch 重签（drift 残留租约先清
+                后签，恰一活跃）；③决策行开行/消费/未决保持 NULL（answer 原文 +
+                decided_seq 指向事件，作者在事件 payload）；④drift 无 owner 走
+                human.reopen_no_owner → ready，且随后的 fresh claim 真实可成
+                （覆盖 current_attempt_id 清零这条 claim 的隐式前提）；⑤cancel
+                按态选三事件（queue_cancel/human.cancel/cancel）+ 开发/资源租约
+                释放 + claimed review 置 expired；⑥提醒退避 30→60→120→240
+                封顶、只写 next_reminder_at（waiting_since / state_changed_seq
+                零进展，R10-fix-11）；⑦HTTP 端到端含 §13 fencing 409 与错误
+                信封；CLI 五个 human-* 端到端（EXIT_OK 与 EXIT_API_ERROR 两态）。
+  覆盖收官     : abandoned/escalated 移出 WAIVERS_NO_EXIT → RECOVERY（出口断言
+                5 条指向 test_human_ops.py：reopen / human.release /
+                human.adjudicate / 两提醒自环）；21 态豁免 3 → 1
+                （仅 draft_rejected，出口=plan 修订流，仍出范围）。
+已知问题：
+  - cancel 副作用按卡收窄：开发/资源租约释放 + claimed review 置 expired；
+    verify/review/merge 三类独立租约行与在途 intent 对账归 verify/merge 线，
+    downstream 传播归 MERGE-REVERT-002，worktree 回收归操作员（需 archive_root）
+    ——均已在范围声明先记，不静默。
+  - escalation_reminder 的锚点：无 escalated_at 的历史产出（merge worker 的
+    升级边）以"任务最近事件"兜底（入场时即升级事件本身）；首提后
+    next_reminder_at 接管，锚点不随提醒自身漂移。
+  - 身份=显式参数（decided_by），§18 pinned 决策与 harness token 403 语义仍待
+    认证层（同 capabilities() 先例）；决策进入 verify receipt 输入清单归
+    verify 线。
 ~~~
