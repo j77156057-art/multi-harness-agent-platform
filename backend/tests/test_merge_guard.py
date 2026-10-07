@@ -86,16 +86,43 @@ def _git_out(repo: Path, *args: str) -> str:
 #: 失败开关放在 `.git/` 下而不是工作区里：放在工作区会被
 #: 「拒绝脏工作区」那条守卫挡掉（`git status --porcelain` 看得见），
 #: 就没法构造「先红后绿」的续跑场景。
-_GATE_OK = 'print("{name}: 结果: 1 项检查，0 项失败")\n'
+#:
+#: **stub 必须自己把 stdout 钉成 UTF-8**，与真实门禁（`tools/docstate`、
+#: `tools/discipline` 里的 `_force_utf8_stdio`）保持一致。原因：stub 是在**代替**
+#: 门禁的，若它按控制台代码页输出（Windows 上是 cp936），而 `cli.py` 的
+#: `_run_gate` 按 UTF-8 解码，stub 打印的中文就会变成乱码 —— 于是
+#: 「断言门禁输出里能看到豁免提示」这类用例在**没设 PYTHONIOENCODING** 的
+#: 环境下平白失败。
+#:
+#: 这不是假想：本文件此前一直靠我在 shell 里手动设 `PYTHONIOENCODING=utf-8`
+#: 才全绿。**用环境变量才能跑通的测试，等于没有在测真实环境。**
+_GATE_FORCE_UTF8 = (
+    "import sys\n"
+    "for _s in (sys.stdout, sys.stderr):\n"
+    "    try:\n"
+    "        _s.reconfigure(encoding='utf-8', errors='replace')\n"
+    "    except (AttributeError, ValueError, OSError):\n"
+    "        pass\n"
+)
+_GATE_OK = _GATE_FORCE_UTF8 + 'print("{name}: 结果: 1 项检查，0 项失败")\n'
 #: discipline 的替身必须真的打印 [skip] 行 —— 「豁免是显式的、不静默」是
 #: mergeguard 的一条承诺，断言得在**成功路径**上就成立，而不是等某天门禁
 #: 真的豁免时才第一次被看到。
-_GATE_DISCIPLINE_OK = 'print("[skip] rootworktree（测试夹具）")\n' + _GATE_OK.format(
-    name="discipline"
+_GATE_DISCIPLINE_OK = (
+    _GATE_FORCE_UTF8
+    + 'print("[skip] rootworktree（测试夹具）")\n'
+    + _GATE_OK.format(name="discipline").split("\n", 1)[1]
 )
-_GATE_TOGGLING = """
+_GATE_TOGGLING = (
+    """
 import pathlib
 import sys
+
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
 
 _flag = pathlib.Path(".git/gate-fails.flag")
 print("[skip] rootworktree（测试夹具）")
@@ -104,6 +131,7 @@ if _flag.exists():
     sys.exit(1)
 print("discipline: 结果: 1 项检查，0 项失败")
 """
+)
 
 
 def _install_gates(repo: Path, discipline_body: str | None = None) -> None:

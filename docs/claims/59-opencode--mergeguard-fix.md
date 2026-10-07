@@ -7,8 +7,8 @@
 | task_id | `mergeguard-fix` |
 | Harness | OpenCode |
 | 认领时间 | 2026-10-07 03:10 |
-| 分支 | `agent/local/opencode/mergeguard-fix/a1` |
-| 状态 | 🟢 doing |
+| 分支 | `agent/local/opencode/mergeguard-fix/a1`<br>`agent/local/opencode/mergeguard-fix/a2` |
+| 状态 | ✅ done（a1 合入 2c85a9c；a2 回填状态与任务卡） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `mergeguard-fix`。
 
@@ -45,6 +45,8 @@
 
 ## 变更记录
 
+- 2026-10-07 03:40：状态 doing -> done（a1 已合入 main `2c85a9c`）。
+  顺带按上一条教训**提前登记 a2**，免得又掉进「合并后才补登记」的循环。
 - 2026-10-07 03:10：认领。序号 59 = 当时 main 最大值 58 + 1。
   ⚠️ 合并前请确认 main 上没有新的 59，并把本文件改名。
   （注：序号唯一性断言已在 `claim-denum-coordinator`（方案 C）里删除，

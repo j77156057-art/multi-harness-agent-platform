@@ -87,7 +87,8 @@
 | human-ops | Qoder | sweeper-drift | ✅ done（实现 514c4b2；豁免 3→1，覆盖套件收官） | `agent/local/qoder/human-ops/a1` | `HUMAN-OPS-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
-| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；卡由 Qoder 按协调者授权代笔，见卡注） | `agent/local/opencode/mergeguard-fix/a1` | `MVP-MERGE-LOCK-001` |
+| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 已由 Qoder 协助回填） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
+| win-utf8-stdio | OpenCode | — | ✅ done（已提交待合；a1 = 0ed6e0d，四道门禁在无任何 UTF-8 环境变量下全绿） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -392,6 +393,131 @@ commit：a1 = `27a21be` + `cf2748f`（含同步 main）；合入 main = `6aa788e
   opencode 6 / codex 2）。各 owner 只改自己的文件，H-5 天然满足。
   本任务已经把机械守卫备好了：文件名↔内容一致（已有）+ task_id 唯一（已有）
   + 注释行指向的文件存在（新增），所以重命名有校验、不靠人眼。
+~~~
+
+### win-utf8-stdio：把门禁的 UTF-8 处理固化进代码（✅ done）
+
+~~~text
+任务编号：win-utf8-stdio
+负责人 Harness：OpenCode
+开始时间：2026-10-07 03:55
+工作区：.worktrees/opencode/
+依赖任务：无（独立；与 mergeguard-fix 同批发现）
+真相源引用：tools/docstate/docstate.py:426（崩溃点）、
+            tools/discipline/discipline.py `merge` 组（曾因同类问题整组崩掉）、
+            tools/mergeguard/cli.py `_run_gate`（按 UTF-8 解码子进程输出）
+允许修改目录：tools/docstate/**、tools/discipline/**、tools/mergeguard/**、
+            backend/tests/**、docs/dev-convention.md、TASKS.md
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**
+交付分支：agent/local/opencode/win-utf8-stdio/a1
+test_id：MVP-PROCESS-002
+当前状态：✅ done
+commit：a1 = `0ed6e0d`
+
+### 实测到的崩溃
+
+`tools/docstate/docstate.py --verbose` 在 Windows 上**直接崩**：
+
+    File "tools/docstate/docstate.py", line 426, in main
+        print("   ok    " + i["msg"])
+    UnicodeEncodeError: 'gbk' codec can't encode character '⊆' in position 22
+
+`⊆`（U+2286）出现在一条断言消息里，而 **`gbk` 与 `cp936` 都编不出它**。
+CI 跑的是不带 `--verbose` 的 docstate，所以**从没撞到**；开发者一加
+`--verbose` 想看细节就崩。`discipline --verbose` 侥幸没崩，只是因为那条消息
+恰好不含不可编码字符。
+
+**这与本仓库此前那次「discipline 整组崩溃」是同一个根因的另一副面孔**：
+那次是**解码** git 输出（`text=True` 没给 `encoding`，按 GBK 解），
+这次是**编码**自己的输出（按 GBK 编不出去）。两边都栽在「跟着控制台代码页走」。
+
+### 第二个问题：门禁输出不是合法 UTF-8
+
+三道门禁在 `PYTHONIOENCODING` 为 `gbk` / `cp936` / 未设三种情况下的输出，
+**全部无法按 UTF-8 严格解码**。任何把门禁输出收进日志或 CI artifact 的环节
+拿到的都是乱码，而 `gate.yml` 正是用重定向收 `--json`。
+
+### 修法
+
+三个门禁入口在 `main()` 的第一件事就是 `_force_utf8_stdio()`：把
+`sys.stdout`/`sys.stderr` 重新 configure 成 `encoding="utf-8",
+errors="replace"`。
+
+- UTF-8：`⊆`、`§`、全角标点都能编码，输出**恒为合法 UTF-8**；
+- `errors="replace"`：万一还有别的字符编不出，**降级**而不是抛异常 ——
+  门禁给出「结果不对」远好过「门禁自己崩了、什么结果都没有」。
+
+刻意**不再**依赖 `PYTHONIOENCODING` / `PYTHONUTF8`：门禁是给别人用的工具，
+要求每个人先设环境变量才能正确跑，本身就是缺陷。
+
+三处**复制**这 6 行而非共享模块，是刻意的：三个入口都以
+`python tools/X/Y.py` 独立运行，sys.path[0] 是自己所在目录，跨目录 import 要先改
+sys.path —— 为 6 行去动三个入口的启动路径不划算。代价是「改一处要改三处」，
+用 `test_all_three_gates_have_the_hardening` 钉住。
+
+### 挖出两个被环境变量掩盖的既有缺陷
+
+**1. 测试里的门禁替身（stub）也按控制台代码页输出。**
+`test_merge_guard.py` 的 `_GATE_*` 是在**代替**真实门禁的，而 `cli.py` 的
+`_run_gate` 按 UTF-8 解码 —— stub 输出 cp936 就被解成乱码，于是
+`assert "[skip] rootworktree（测试夹具）" in r.stdout` 平白失败。已让 stub 同样
+自己钉 UTF-8，与真实门禁一致。
+
+**2. `test_cli_flow.py::test_module_entry_point_runs` 的断言会在解码失败时抛
+`TypeError`。** 它用 `encoding="utf-8"` 却**没给 `errors=`**，子进程按 cp936
+输出时 UnicodeDecodeError 让 `stdout` 变 `None`，下一句 `in result.stdout` 抛
+`argument of type 'NoneType' is not iterable` —— 一个完全看不出「真正问题是
+编码」的失败。那条用例的注释里其实写着「捕获 UnicodeDecodeError 后 stdout 变
+None」，作者遇到过，但断言没防。已改为：由**测试自己**给子进程设
+`PYTHONIOENCODING=utf-8`、解码加 `errors="replace"`、显式断言 `stdout is not
+None`（附可读的失败信息）。
+
+**这两条在我今天之前的所有运行里都是绿的** —— 因为我每次都在 shell 里手动设了
+`PYTHONIOENCODING=utf-8`。**用环境变量才能跑通的测试，等于没有在测真实环境。**
+这正是本任务的由来。
+
+### 顺带发现：我一直只在 backend/ 跑 ruff
+
+从仓库根跑 ruff 才是全量口径，会多出两条**既有问题**（stash 后同样报）：
+
+    docs/prep/MVP-08/mutation_test.py:130  F541 f-string without any placeholders
+    tools/docstate/docstate.py:176          E741 ambiguous variable name `O`
+
+两条都不在本任务的允许目录内（`tools/docstate/**` 在多张任务卡里是**明令禁止
+修改**的目录），因此**只记录不改**。顺带修掉了我自己新引入的一条 `UP031`，
+所以从 3 条回到既有的 2 条。
+
+### 验证结果
+
+新增 `backend/tests/test_gate_utf8.py` 13 条：
+- 三个门禁 × 三种编码，输出必须**严格**可按 UTF-8 解码（9 条）
+- `docstate --verbose` 三种编码下都不崩，且**确实打印了**那条含 `⊆` 的消息
+  （否则「不崩」可能只是因为什么都没输出）（3 条）
+- 三个入口都有 `_force_utf8_stdio` 且都在 `main()` 里先于任何输出调用（1 条）
+
+**负向验证**：stash 掉修复后跑这批用例 → **13 条全红**。
+
+四道门禁（`PYTHONIOENCODING` / `PYTHONUTF8` / `PYTHONLEGACYWINDOWSSTDIO`
+三者皆空）：
+
+    docstate    exit=0   90 项检查，0 项失败
+    discipline  exit=0   44 项检查，0 项失败
+    ruff        exit=1   2 条既有问题（见上，均不在允许目录内）
+    pytest      exit=0   303 passed
+
+ruff 的 exit=1 **不是本次引入**，也不是我能修的边界问题 —— 需协调者决定由谁
+处理，或授权我扩目录。
+
+### 一个值得单独记的教训
+
+本次之前，我每次跑门禁都在 shell 里加 `$env:PYTHONIOENCODING="utf-8"`，并把它
+当成「Windows 上跑 Python 的必要步骤」。结果是：
+
+1. 两个真实缺陷（门禁崩溃、测试因编码而失败）在我的日常运行里**一直是绿的**；
+2. 我据此报告过无数次「门禁全绿」，而那些绿灯**只在设了环境变量的环境里成立**。
+
+**我以为在固化环境，其实是在固化一个会掩盖问题的环境。** 真正的固化是让工具
+自己在任何环境下都正确 —— 那才是别人也能依赖的东西。
 ~~~
 
 ## 提交前自检
