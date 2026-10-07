@@ -1,4 +1,4 @@
-### permission-matrix：权限矩阵设计输入（🚧 doing）
+### permission-matrix：权限矩阵设计输入（✅ done）
 
 ~~~text
 任务编号：permission-matrix
@@ -7,7 +7,7 @@
 依赖任务：paperclip-buzz-source（✅ 553ee0f；机制核读报告）；
           paperclip-buzz-adr（✅ 8b6d98f；借鉴边界 ADR-DEV-003）
 工作区：.worktrees/qoder/
-真相源引用：R10 §17（权威权限矩阵本体：7 角色 × 13 操作 + 两条硬禁令，
+真相源引用：R10 §17（权威权限矩阵本体：7 角色 × 11 操作 + 两条硬禁令，
             文档检查 ID = DOC-AUTH-001；"所有 403 或 ACL 拒绝都写审计事件"）；
             §14（help-<n> 分支命名与权限矩阵共享一套口径）；ADR-DEV-002
             （单账户 ACL 降级 = 现状）；学习机制出处：Paperclip 21
@@ -50,5 +50,28 @@
      代码，pytest 数不变）
 test_id：DOC-AUTH-001（traceability 已有行；本卡为其设计输入）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 07:42
+commit：`a968ac7`（实现提交——本卡为纯文档交付；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（118 files already formatted）
+  pytest      : 443 passed（本卡零代码，计数不变），exit 0
+  关键证据     : ①R10 矩阵 7×11 逐行落点（`grep @adapter/@human/@review/@read/
+                @management` 实测路由表逐一对应；pin/delete_worktree/read_secret
+                三行**核实为无面**——grep 无对应端点，如实标注不硬造映射）；
+                ② **403 审计事件名缺口**用 store.py 同款解析器验证：R10 M/O/R
+                三块 88 项白名单中无权限类事件，唯一近亲 secret_scan_blocked
+                （认证任务需先走 R10-fix）；③Paperclip 21 键照录
+                （constants.ts:1003-1026 逐项核对）＋ grants schema 与决策
+                入口核读；④受控面清单（adapter 16、human 5+ask_human、review 2、
+                read 全族、management 5、进程面 5 族）与代码一一对应。
+  声明         : Paperclip 打分器（authorization.ts 核心裁决）未逐行读——
+                报告内已如实声明；本报告不构成 ADR。
+已知问题：
+  - 本卡为**设计输入**，不含任何认证实现（token/403/审计事件/OS ACL 全留
+    认证任务）；实现后 DOC-AUTH-001 升"✅ 有断言"。
+  - 报告 §4 缺口 5 的"进程面主体口径"是**建议**（进程面=调度中心主体、
+    人类工具=人类主体），最终结论留给认证任务。
 ~~~

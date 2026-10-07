@@ -100,7 +100,7 @@
 | liveness-watch | Qoder | alert-webhook | ✅ done（实现 6397e8f；观测+零commit告警+stuck 修复，变异验证） | `agent/local/qoder/liveness-watch/a1` | `OPS-LIVENESS-001` |
 | budget-guard | Qoder | liveness-watch | ✅ done（实现 ed00e94；预留/结算/巡检/事故，变异验证） | `agent/local/qoder/budget-guard/a1` | `OPS-BUDGET-001` |
 | diff-message | Qoder | frontend-thread | ✅ done（实现 551321d；线程内 diff 卡，浏览器实测） | `agent/local/qoder/diff-message/a1` | `MVP-UI-002` |
-| permission-matrix | Qoder | paperclip-buzz-source | 🚧 doing | `agent/local/qoder/permission-matrix/a1` | `DOC-AUTH-001` |
+| permission-matrix | Qoder | paperclip-buzz-source | ✅ done（实现 a968ac7；设计输入报告，403 审计名缺口） | `agent/local/qoder/permission-matrix/a1` | `DOC-AUTH-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
