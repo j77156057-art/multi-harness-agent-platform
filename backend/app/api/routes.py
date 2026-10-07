@@ -430,6 +430,20 @@ def review_submit(body: schemas.ReviewSubmitRequest, service: SchedulerDep) -> d
 # -------------------------------------------------------------------- read
 
 
+@read.get("/projects")
+def list_projects(service: SchedulerDep) -> dict[str, Any]:
+    """Read side of the management pair (frontend-thread): the rail's top level."""
+    return {"projects": service.list_projects()}
+
+
+@read.get("/groups")
+def list_groups(
+    service: SchedulerDep,
+    project_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    return {"groups": service.list_groups(project_id=project_id)}
+
+
 @read.get("/tasks/{task_id}")
 def get_task(task_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.get_task(task_id)

@@ -1380,6 +1380,28 @@ class SchedulerService:
             )
         return [dict(row) for row in rows]
 
+    def list_projects(self) -> list[dict]:
+        """Every project, oldest first -- the frontend rail's top level."""
+        rows = self.database.read(
+            "SELECT project_id, name, created_at FROM projects ORDER BY created_at, project_id"
+        )
+        return [dict(row) for row in rows]
+
+    def list_groups(self, *, project_id: str | None = None) -> list[dict]:
+        """Groups, optionally scoped to one project (frontend-rail read)."""
+        if project_id is None:
+            rows = self.database.read(
+                "SELECT group_id, project_id, name, created_at FROM groups"
+                " ORDER BY created_at, group_id"
+            )
+        else:
+            rows = self.database.read(
+                "SELECT group_id, project_id, name, created_at FROM groups"
+                " WHERE project_id = ? ORDER BY created_at, group_id",
+                (project_id,),
+            )
+        return [dict(row) for row in rows]
+
     def list_events(
         self, *, since_seq: int = 0, limit: int = 200, task_id: str | None = None
     ) -> list[EventRecord]:
