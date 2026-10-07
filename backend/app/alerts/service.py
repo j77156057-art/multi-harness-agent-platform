@@ -136,6 +136,43 @@ class AlertNotifier:
 
     # ------------------------------------------------------------ detection
 
+    def enqueue(
+        self,
+        *,
+        kind: str,
+        payload: dict[str, object],
+        task_id: str | None = None,
+        source_seq: int | None = None,
+        source_key: str | None = None,
+    ) -> bool:
+        """Queue one state-based alert (e.g. ``run.no_commit``).
+
+        Exactly one dedupe key is required: integer ``source_seq`` for
+        event-cursor feeds, or a semantic ``source_key`` (attempt id and the
+        like) for state feeds -- ``UNIQUE(kind, source_key)`` makes re-runs
+        idempotent. Returns True when a new delivery was queued.
+        """
+        if (source_seq is None) == (source_key is None):
+            raise ValueError("exactly one of source_seq / source_key is required")
+        inserted = False
+        with self.database.transaction() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO alert_deliveries(delivery_id, kind, task_id, source_seq,"
+                " source_key, payload_json, status, attempts, last_error, created_at, delivered_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, NULL, ?, NULL)",
+                (
+                    f"alert-{uuid.uuid4().hex}",
+                    kind,
+                    task_id,
+                    0 if source_seq is None else int(source_seq),
+                    source_key,
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                    _now(),
+                ),
+            )
+            inserted = cursor.rowcount == 1
+        return inserted
+
     def _scan(self) -> int:
         wanted = escalation_events()
         detected = 0
@@ -239,18 +276,18 @@ class AlertNotifier:
 
     def _body(self, row: sqlite3.Row) -> bytes:
         stored = json.loads(str(row["payload_json"]))
-        return json.dumps(
-            {
-                "alert": str(row["kind"]),
-                "task_id": row["task_id"],
-                "source_seq": int(row["source_seq"]),
-                "created_at": str(row["created_at"]),
-                "payload": stored,
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
+        body: dict[str, object] = {
+            "alert": str(row["kind"]),
+            "task_id": row["task_id"],
+            "source_seq": int(row["source_seq"]),
+            "created_at": str(row["created_at"]),
+            "payload": stored,
+        }
+        if row["source_key"] is not None:
+            body["source_key"] = str(row["source_key"])
+        return json.dumps(body, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode(
+            "utf-8"
+        )
 
     def _post(self, body: bytes, delivery_id: str) -> int:
         signature = hmac.new(self.secret.encode("utf-8"), body, hashlib.sha256).hexdigest()

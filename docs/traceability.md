@@ -37,6 +37,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `CORE-RECOVER-001` | 删除投影后可仅凭事件重建任务状态；失败不留孤儿事件 | ✅ 有断言 | `test_database_events.py`（投影重建、回滚无孤儿、并发定序） |
 | `CORE-EXPORT-001` | SQLite→JSONL 异步导出：水位、原子替换、失败重试、恢复按 seq 去重、对账（R10 §15 / ADR-055 / FIN-09） | ✅ 有断言 | `test_jsonl_export.py`（顺序导出与水位推进、幂等重跑、崩溃窗口两只〔替换后未推进水位→残尾修剪去重；替换前失败→文件/水位原样零残留〕、重试队列与自动补导、文件与库分歧触发重建、reconcile 检出 lag/篡改/残尾、CLI `--once`/`--check` 退出码与无库 2）；`python -m app.exporter`；ADR-DEV-004 |
 | `OPS-ALERT-001` | 出站告警 webhook：升级事件订阅→HMAC 签名投递→重试与停靠（alert-webhook；机制学习自报告 §2.8，原生实现） | ✅ 有断言 | `test_alerts.py`（升级事件集合由冻结迁移表推导不手抄、游标幂等与跨实例续跑、**本地真 HTTP 服务端**断言签名=hmac(body) 与载荷字段、500→跨轮重试至上限停靠、非 loopback http/缺 secret 拒跑、未配置显式 no-op、CLI 端到端含 exit 码）；`python -m app.alerts` |
+| `OPS-LIVENESS-001` | 存活观测面 + R10 §13 L706 零 commit 告警 + stuck 指纹计入续租（liveness-watch；机制学习自 Paperclip watchdog，原生实现） | ✅ 有断言 | `test_liveness.py`（政策回退链与含界阈值、续租为钟底的健康读数、发布 commit 清零窗口、死租约 critical、无租约走 attempt 钟、**零 commit 告警恰一次/attempt**（新 attempt 重计）、未配置不入队、**stuck 三向回归**〔续租不升级 / 不续租仍升级 / 无租约仍升级〕、CLI 干净与 critical 两态 exit 码）；`python -m app.liveness` |
 | `CORE-CLAIM-001` | Claim 幂等：重复 `claim_request_id` 返回首次结果，批量按任务项返回 | ✅ 有断言 | `test_claim.py`（重放返回首次结果且不烧 attempt、按任务项回放走 `task_claims`、payload 冲突拒绝整请求） |
 | `CORE-CLAIM-002` | 两个真实 SQLite 连接并发抢同一任务，只有一个成功 | ✅ 有断言 | `test_claim_concurrency.py`（`threading.Barrier` + 两个连接 + 断言 epoch 只 +1、恰一条 attempt/Lease） |
 | `CORE-LEASE-001` | Lease 创建 / 续期 / 过期回收 | ✅ 有断言 | `test_lease.py`（续期续期、过期拒绝、巡检转 `stale` 并释放 Lease 与资源、`reclaim`/`take_over`） |
