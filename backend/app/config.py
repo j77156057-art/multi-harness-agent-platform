@@ -84,6 +84,16 @@ class Settings:
         self.alert_timeout_seconds: int = int(os.environ.get("AP_ALERT_TIMEOUT", "10"))
         self.alert_max_attempts: int = int(os.environ.get("AP_ALERT_MAX_ATTEMPTS", "5"))
 
+        # --- 预算护栏（budget-guard；机制核读自 Paperclip budget-reservations，原生实现）---
+        # 任务声明 budget_tokens>0 才启用；未声明（0/缺）不启用——向后兼容。
+        # 预留额=单次 attempt 的估算持有量（Paperclip reservationCents 的对应物），
+        # 超过任务预算时封顶到预算（避免"估算大于预算 ⇒ 永不可跑"的死角）。
+        self.budget_reservation_tokens: int = int(
+            os.environ.get("AP_BUDGET_RESERVATION_TOKENS", "50000")
+        )
+        # committed/limit 达到该百分比即开 warning 事故（含界）。
+        self.budget_warn_percent: int = int(os.environ.get("AP_BUDGET_WARN_PERCENT", "80"))
+
         # R10 §16
         self.verify_lease_seconds: int = int(os.environ.get("AP_VERIFY_LEASE", "1800"))  # 30 min
         self.review_lease_seconds: int = int(os.environ.get("AP_REVIEW_LEASE", "1200"))  # 20 min

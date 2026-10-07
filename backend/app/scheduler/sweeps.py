@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from app.budget.service import BudgetGuard
 from app.claim.service import QUEUE_REASON_RESOURCE, ClaimService
 from app.claim.transitions import apply_transition
 from app.config import settings
@@ -1212,3 +1213,26 @@ def _snapshot_tasks(database: Database, snapshot_id: object) -> dict[str, dict[s
         if isinstance(entry, dict) and isinstance(entry.get("id"), str):
             out[entry["id"]] = entry
     return out
+
+
+def sweep_budget(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """budget-guard: reconcile stale holds and keep incidents in step.
+
+    Runs late in the round so holds whose attempts the earlier sweeps just
+    closed (lease expiry, reclaim) are settled in the same pass. Writes
+    reservations/incidents only -- no task state moves, and alert queueing
+    stays in ``python -m app.budget`` (sweeps never do outbound).
+    """
+    report = BudgetGuard(database).scan(now=now, enqueue=False)
+    return SweepReport(
+        sweep="budget",
+        actions=report.held_reconciled + report.incidents_opened + report.incidents_resolved,
+        detail={
+            "held_reconciled": report.held_reconciled,
+            "incidents_opened": report.incidents_opened,
+            "incidents_resolved": report.incidents_resolved,
+            "open_incidents": report.open_incidents,
+        },
+    )

@@ -9,6 +9,7 @@ from app.scheduler.runner import SWEEPS, run_all_sweeps
 from app.scheduler.sweeps import (
     sweep_aging,
     sweep_blocked_sla,
+    sweep_budget,
     sweep_dependencies,
     sweep_drift,
     sweep_escalation_reminder,
@@ -28,6 +29,7 @@ __all__ = [
     "run_all_sweeps",
     "sweep_aging",
     "sweep_blocked_sla",
+    "sweep_budget",
     "sweep_dependencies",
     "sweep_drift",
     "sweep_escalation_reminder",
