@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 from pathlib import Path
 
@@ -211,18 +212,33 @@ def test_module_entry_point_runs(tmp_path: Path) -> None:
     import sys
 
     backend = Path(__file__).resolve().parents[1]
-    # encoding 必须显式给 utf-8：Windows 默认按 GBK 解子进程输出，而 --help 里有中文，
-    # 会抛 UnicodeDecodeError 并把 stdout 变成 None（不是断言失败，是崩溃）。
+    # 子进程的输出编码由**测试自己**钉死，不要求使用者去设环境变量。
+    #
+    # 两处都要：
+    # - `PYTHONIOENCODING=utf-8` 给子进程：Windows 上它的 stdout 在管道里默认
+    #   按 cp936 输出，而 `--help` 里有中文。
+    # - `encoding="utf-8", errors="replace"` 给本进程：即便子进程仍吐出非 UTF-8
+    #   字节，解码也只降级、不抛。少了 `errors=` 时 UnicodeDecodeError 会让
+    #   `stdout` 变成 `None`，于是下面那句 `in result.stdout` 抛
+    #   `TypeError: argument of type 'NoneType' is not iterable` ——
+    #   一个看不出「真正的问题是编码」的失败。
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     result = subprocess.run(
         [sys.executable, "-m", "app.cli", "--help"],
         cwd=backend,
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
+        env=env,
         timeout=60,
     )
     assert result.returncode == 0, result.stderr
-    assert "只经 HTTP" in result.stdout
+    assert result.stdout is not None, "stdout 成了 None（解码失败？请检查 errors= 参数）"
+    assert "只经 HTTP" in result.stdout, (
+        f"子进程输出不是 UTF-8（拿到的是：{result.stdout[:200]!r}）—— "
+        "测试应自己用 PYTHONIOENCODING 钉住子进程，而不是要求使用者设环境变量"
+    )
 
 
 # --------------------------------------------------------------- 辅助与缺口说明

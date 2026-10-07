@@ -390,7 +390,41 @@ def run(spec_path, verbose=False):
     return r
 
 
+def _force_utf8_stdio():
+    """把 stdout/stderr 固定成 UTF-8，且**永不因编码而崩**。
+
+    为什么必须做，而不是靠调用方设 `PYTHONIOENCODING`：
+
+    实测 `tools/docstate/docstate.py --verbose` 在 Windows 上**直接崩溃**：
+
+        UnicodeEncodeError: 'gbk' codec can't encode character '\u2286'
+
+    `⊆`（U+2286）出现在一条断言消息里，而 `gbk` 与 `cp936` 都编不出它。
+    CI 跑的是不带 `--verbose` 的 docstate，所以从没撞到；开发者一加
+    `--verbose` 想看细节就崩。**门禁是给别人用的工具，要求每个人先设环境
+    变量才能正确跑，本身就是缺陷。**
+
+    顺带解决第二个问题：此前门禁输出跟着控制台代码页走，实测在
+    `gbk` / `cp936` / 未设三种情况下输出**都不是合法 UTF-8**，
+    被日志系统或 CI artifact 收走就是乱码（`gate.yml` 正是重定向收 `--json`）。
+
+    - `encoding="utf-8"`：输出恒为合法 UTF-8，`⊆`、`§`、全角标点都能编码。
+    - `errors="replace"`：万一还有别的字符编不出，**降级**而不是抛异常 ——
+      门禁给出「结果不对」远好过「门禁自己崩了、什么结果都没有」。
+
+    调用点放在 `main()` 的最前面，且用 try/except 兜住：某些宿主
+    （Jupyter、部分测试夹具）会把 stdout 换成没有 `reconfigure` 的对象，
+    那时保持原样即可，不该因此让门禁起不来。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def main():
+    _force_utf8_stdio()
     ap = argparse.ArgumentParser(description="规范一致性检查器")
     ap.add_argument("--spec", default=DEFAULT_SPEC, help="规范文件路径")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
