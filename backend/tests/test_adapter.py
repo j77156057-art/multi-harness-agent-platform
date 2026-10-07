@@ -14,10 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from app.adapter.fake import FakeHarness
-from app.adapter.http import HttpAdapter, UnsupportedVerb
+from app.adapter.http import HttpAdapter
 from app.adapter.protocol import HarnessAdapter, HarnessRegistration
 from app.adapter.registry import HarnessRegistry
 from app.git.repo import CanonicalRepo
@@ -72,15 +70,19 @@ def test_the_adapter_implements_every_section_7_verb(project_root):
     assert not inspect.isabstract(HttpAdapter), "HttpAdapter leaves §7 verbs unimplemented"
 
 
-def test_http_adapter_answers_every_verb_or_says_why_not():
-    """Three §7 verbs have no route yet; they must fail loudly, not silently."""
+def test_every_section_7_verb_speaks_http():
+    """adapter-verbs closed the last three routes: every §7 verb now wires to
+    the transport, and ``UnsupportedVerb`` is gone from the http module."""
     verbs = section_7_verbs(Path(__file__).resolve().parents[2] / "docs" / "spec" / "0.3-R10.md")
-    unsupported = {
-        verb for verb in verbs if "UnsupportedVerb" in getattr(HttpAdapter, verb).__code__.co_names
-    }
-    assert unsupported == {"accept_help", "reject_help", "split_task"}, unsupported
-    with pytest.raises(UnsupportedVerb):
-        HttpAdapter.__new__(HttpAdapter).accept_help(task_id="T", help_id="H")
+    unwired = [
+        verb
+        for verb in verbs
+        if not {"_post", "_get"} & set(getattr(HttpAdapter, verb).__code__.co_names)
+    ]
+    assert not unwired, f"§7 verbs with no transport call: {unwired}"
+    import app.adapter.http as http_module
+
+    assert not hasattr(http_module, "UnsupportedVerb")
 
 
 # ---------------------------------------------------------------- fixture

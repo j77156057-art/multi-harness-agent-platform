@@ -39,7 +39,7 @@ from app.adapter.harnesses import (
     SubprocessRunner,
     WorkRefused,
 )
-from app.adapter.http import AdapterError, UnsupportedVerb
+from app.adapter.http import AdapterError
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry
 from app.git.repo import CanonicalRepo, run_git
@@ -257,10 +257,12 @@ def test_each_adapter_declares_the_full_section_7_surface(case, project_root):
     assert not inspect.isabstract(case.cls)
     missing = [verb for verb in verbs if not hasattr(case.cls, verb)]
     assert not missing, f"{case.name} is missing §7 verbs: {missing}"
-    unsupported = {
-        verb for verb in verbs if "UnsupportedVerb" in getattr(case.cls, verb).__code__.co_names
-    }
-    assert unsupported == {"accept_help", "reject_help", "split_task"}, unsupported
+    unwired = [
+        verb
+        for verb in verbs
+        if not {"_post", "_get"} & set(getattr(case.cls, verb).__code__.co_names)
+    ]
+    assert not unwired, f"{case.name} has §7 verbs with no transport call: {unwired}"
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -410,8 +412,12 @@ def test_each_adapter_refuses_dangerous_operations(case, tmp_path):
         )
     assert caught.value.code == "publish.commit_unreachable"
 
-    with pytest.raises(UnsupportedVerb):
+    # A help vote needs a needs_help task with an open help_id; this task is
+    # claimed, so the real route refuses it on the wire (no UnsupportedVerb
+    # left to hide behind).
+    with pytest.raises(AdapterError) as caught:
         adapter.accept_help(task_id="T-1", help_id="h-1")
+    assert caught.value.code == "request.conflict"
 
 
 def test_a_stale_epoch_is_refused_through_a_real_adapter(tmp_path):

@@ -60,6 +60,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+#: R10 §10: the ``split`` edge's current states (``child_created`` is a pseudo
+#: state, so the parent status is unchanged by the edge itself).
+_SPLIT_PARENT_STATES = frozenset({TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED})
+
+
+def _payload_hash(value: object) -> str:
+    return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
 def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -463,15 +472,94 @@ class SchedulerService:
     def request_help(
         self, *, task_id: str, attempt_id: str, fencing_epoch: int, reason: str
     ) -> dict[str, object]:
-        return self._owner_transition(
+        """R10 §10 ``in_progress -> needs_help``; mints the ``help_id`` the guard names.
+
+        R10's guard is "owner lease valid and **help_id created**" -- until
+        adapter-verbs v1 minted no id, so accept/reject had nothing to validate
+        against. The id rides the event payload: there is no ``help_artifacts``
+        table in this repository (declared gap, adapter-verbs card).
+        """
+        help_id = f"help-{uuid.uuid4().hex}"
+        result = self._owner_transition(
             task_id=task_id,
             attempt_id=attempt_id,
             fencing_epoch=fencing_epoch,
             event=EventKind.REQUEST_HELP,
             allowed=TaskStatus.IN_PROGRESS,
-            payload={"reason": reason},
+            payload={"reason": reason, "help_id": help_id},
             keep_owner=True,
         )
+        return {**result, "help_id": help_id}
+
+    def accept_help(self, *, task_id: str, help_id: str, collaborator: str) -> dict[str, object]:
+        return self._help_vote(
+            task_id=task_id,
+            help_id=help_id,
+            collaborator=collaborator,
+            event=EventKind.HELP_ACCEPTED,
+        )
+
+    def reject_help(self, *, task_id: str, help_id: str, collaborator: str) -> dict[str, object]:
+        return self._help_vote(
+            task_id=task_id,
+            help_id=help_id,
+            collaborator=collaborator,
+            event=EventKind.HELP_REJECTED,
+        )
+
+    def _help_vote(
+        self, *, task_id: str, help_id: str, collaborator: str, event: EventKind
+    ) -> dict[str, object]:
+        """The ``needs_help`` self loops (R10 L453-L455), collaborator side.
+
+        The guard is "collaborator accepted/rejected with scoped task context":
+        v1 has no auth layer, so the collaborator is an explicit parameter
+        recorded in the event, and the hard check is that ``help_id`` is the id
+        of the task's most recent help request. Per R10-fix-11 these self loops
+        write no owner/attempt fields and do not advance ``state_changed_seq``.
+        The spec's richer side effects (a collaborator worktree/lease on
+        accept; an owner reminder on reject) have no carrier in this
+        repository -- declared gaps, not faked.
+        """
+        with self.database.transaction() as conn:
+            task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+            if task is None:
+                raise NotFound(f"unknown task: {task_id}")
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.NEEDS_HELP:
+                raise Conflict(f"{task_id} is {status.value}; {event.value} needs needs_help")
+            row = conn.execute(
+                "SELECT payload_json FROM task_events"
+                " WHERE aggregate_id = ? AND event_name = ? ORDER BY seq DESC LIMIT 1",
+                (task_id, EventKind.REQUEST_HELP.value),
+            ).fetchone()
+            payload = {} if row is None else json.loads(str(row["payload_json"]))
+            if payload.get("help_id") != help_id:
+                raise Conflict(f"{task_id} has no open help request {help_id}")
+            record = self.store.append(
+                event_name=event.value,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="harness",
+                actor_id=collaborator,
+                payload={"help_id": help_id, "collaborator": collaborator},
+                connection=conn,
+            )
+            apply_transition(
+                conn,
+                task_id=task_id,
+                current=status,
+                event=event,
+                expected_epoch=int(task["current_epoch"]),
+                extra_sets={},
+                state_seq=record.seq,
+            )
+            return {
+                "task_id": task_id,
+                "help_id": help_id,
+                "event": event.value,
+                "seq": record.seq,
+            }
 
     def report_blocked(
         self, *, task_id: str, attempt_id: str, fencing_epoch: int, blocker_ref: str
@@ -513,6 +601,140 @@ class SchedulerService:
             keep_owner=False,
             release_lease_too=True,
         )
+
+    def split_task(
+        self,
+        *,
+        task_id: str,
+        child_specs: list[dict[str, object]],
+        idempotency_key: str,
+        attempt_id: str,
+        fencing_epoch: int,
+    ) -> dict[str, object]:
+        """R10 §10 ``split``: child drafts + dependencies, parent -> blocked.
+
+        ``split`` lands on the pseudo state ``child_created`` -- the edge
+        itself does not change the parent's status -- so this method appends
+        that event without ``apply_transition`` and then walks
+        ``split_parent_blocked`` (the edge that enters ``blocked``) when the
+        parent was ``in_progress``; a split from ``blocked`` leaves the status
+        alone. Idempotency follows the publish pattern: the first result is
+        stored under ``(operation, idempotency_key)`` and a replay returns it
+        with no new child rows and no new events.
+
+        Declared gaps (adapter-verbs card): the "budget sufficient" guard has
+        no model to evaluate against (there is no plan-level child budget), so
+        it is recorded as not-evaluable rather than approximated; the children
+        are inert drafts -- their plan/claim lifecycle and the
+        ``all_children_merged`` wake-up are companion work.
+        """
+        if not child_specs:
+            raise Conflict("split needs at least one child spec")
+        child_ids: list[str] = []
+        for spec in child_specs:
+            if not isinstance(spec, dict) or not str(spec.get("id") or "").strip():
+                raise Conflict("every child spec needs a non-empty id")
+            child_ids.append(str(spec["id"]))
+        if len(set(child_ids)) != len(child_ids):
+            raise Conflict("child ids must be unique within one split request")
+        if task_id in child_ids:
+            raise Conflict(f"{task_id} cannot be its own child")
+
+        with self.database.transaction() as conn:
+            replay = self._split_replay(conn, idempotency_key)
+            if replay is not None:
+                return replay
+            guard = guarded_write(
+                conn,
+                task_id=task_id,
+                fencing_epoch=fencing_epoch,
+                attempt_id=attempt_id,
+                allowed_statuses=_SPLIT_PARENT_STATES,
+            )
+            for child_id in child_ids:
+                if conn.execute("SELECT 1 FROM tasks WHERE task_id = ?", (child_id,)).fetchone():
+                    raise Conflict(f"child task already exists: {child_id}")
+            parent = conn.execute(
+                "SELECT group_id, current_epoch FROM tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            moment = _now()
+            for child_id in child_ids:
+                conn.execute(
+                    "INSERT INTO tasks(task_id, group_id, status, created_at, updated_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (child_id, str(parent["group_id"]), TaskStatus.DRAFT.value, moment, moment),
+                )
+                conn.execute(
+                    "INSERT INTO task_dependencies(parent_task_id, child_task_id, relation)"
+                    " VALUES (?, ?, 'depends_on')",
+                    (task_id, child_id),
+                )
+            split_record = self.store.append(
+                event_name=EventKind.SPLIT.value,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="harness",
+                actor_id=guard.owner or "unknown",
+                payload={
+                    "attempt_id": attempt_id,
+                    "child_ids": child_ids,
+                    "child_specs": child_specs,
+                    "idempotency_key": idempotency_key,
+                },
+                connection=conn,
+            )
+            seq = split_record.seq
+            parent_status = guard.status
+            if parent_status is TaskStatus.IN_PROGRESS:
+                blocked_record = self.store.append(
+                    event_name=EventKind.SPLIT_PARENT_BLOCKED.value,
+                    aggregate_type="task",
+                    aggregate_id=task_id,
+                    actor_type="harness",
+                    actor_id=guard.owner or "unknown",
+                    payload={"child_ids": child_ids},
+                    connection=conn,
+                )
+                apply_transition(
+                    conn,
+                    task_id=task_id,
+                    current=TaskStatus.IN_PROGRESS,
+                    event=EventKind.SPLIT_PARENT_BLOCKED,
+                    expected_epoch=int(parent["current_epoch"]),
+                    extra_sets={},
+                    state_seq=blocked_record.seq,
+                )
+                seq = blocked_record.seq
+            result = {
+                "task_id": task_id,
+                "child_ids": child_ids,
+                "parent_status": (
+                    TaskStatus.BLOCKED.value
+                    if parent_status is TaskStatus.IN_PROGRESS
+                    else parent_status.value
+                ),
+                "seq": seq,
+                "replayed": False,
+            }
+            conn.execute(
+                "INSERT INTO command_idempotency(operation, idempotency_key, payload_hash,"
+                " first_result_json, created_seq) VALUES ('split_task', ?, ?, ?, NULL)",
+                (idempotency_key, _payload_hash(child_specs), _canonical(result)),
+            )
+            return result
+
+    @staticmethod
+    def _split_replay(conn: sqlite3.Connection, idempotency_key: str) -> dict[str, object] | None:
+        row = conn.execute(
+            "SELECT first_result_json FROM command_idempotency"
+            " WHERE operation = 'split_task' AND idempotency_key = ?",
+            (idempotency_key,),
+        ).fetchone()
+        if row is None or row["first_result_json"] is None:
+            return None
+        stored: dict[str, object] = json.loads(str(row["first_result_json"]))
+        stored["replayed"] = True
+        return stored
 
     def _owner_transition(
         self,

@@ -289,7 +289,7 @@ def request_help(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str
 
 @adapter.post("/ask_human")
 def ask_human(body: schemas.AskHumanRequest, service: HumanDep) -> dict[str, Any]:
-    """R10 §7's 14th verb, promoted from :class:`UnsupportedVerb` (human-ops).
+    """R10 §7's 14th verb, promoted in human-ops.
 
     The attempt context is required like the other harness write verbs: the
     §13 owner guard is what keeps a stale harness from parking a task that has
@@ -313,6 +313,35 @@ def report_blocked(body: schemas.ReportBlockedRequest, service: SchedulerDep) ->
         attempt_id=body.attempt_id,
         fencing_epoch=body.fencing_epoch,
         blocker_ref=body.blocker_ref,
+    )
+
+
+@adapter.post("/accept_help")
+def accept_help(body: schemas.HelpVoteRequest, service: SchedulerDep) -> dict[str, Any]:
+    """§7 collaborator side; not owner-scoped, so no attempt context rides along."""
+    return service.accept_help(
+        task_id=body.task_id, help_id=body.help_id, collaborator=body.harness_id
+    )
+
+
+@adapter.post("/reject_help")
+def reject_help(body: schemas.HelpVoteRequest, service: SchedulerDep) -> dict[str, Any]:
+    return service.reject_help(
+        task_id=body.task_id, help_id=body.help_id, collaborator=body.harness_id
+    )
+
+
+@adapter.post("/split_task")
+def split_task(body: schemas.SplitTaskRequest, service: SchedulerDep) -> dict[str, Any]:
+    """Owner-fenced like the other harness write verbs (the split guard is
+    "human or owner initiated"; the human side of that clause has no route in
+    v1 -- recorded in the adapter-verbs card)."""
+    return service.split_task(
+        task_id=body.task_id,
+        child_specs=body.child_specs,
+        idempotency_key=body.idempotency_key,
+        attempt_id=body.attempt_id,
+        fencing_epoch=body.fencing_epoch,
     )
 
 
