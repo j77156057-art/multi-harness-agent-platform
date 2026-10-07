@@ -68,6 +68,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-TRANSITION-MIRROR-001` | 代码迁移表与 R10 §10 逐三元组零差异（声明层） | ✅ 有断言 | `test_transition_mirror.py`（展开三元组双向零差异、展开计数 = 138、R10 §10 的状态与事件全部在代码注册、表结构诊断为空） |
 | `MVP-MERGE-LOCK-001` | 共享 main 的合并互斥：锁落在 git common dir、跨 worktree 生效、并发有且只有一个赢家、stale 可接管、脏工作区拒绝、门禁红不提交 merge commit | ✅ 有断言 | `test_merge_guard.py`（真 `git init` 仓库 + 真并发线程 + CLI 子进程端到端，不用 mock）+ `tools/mergeguard/cli.py` |
 | `HUMAN-OPS-001` | §18 人类决策面：六操作矩阵、决策台账、租约暂停/重发、提醒退避 | ✅ 有断言 | `test_human_ops.py`（六操作状态矩阵与拒绝、租约释放/同 attempt·epoch 重签、决策行生命周期、提醒退避 30→60→120→240 封顶且不动 waiting/state seq、HTTP 端到端含 §13 fencing 拒绝、CLI 端到端）；`/human/*` + `/adapter/ask_human` 路由；`sweep_human_wait_timeout` / `sweep_escalation_reminder` |
+| `MVP-ARCH-001` | Paperclip/Buzz 借鉴边界：R10 为唯一业务真相源，两域借鉴点对照 + 事件名映射 | ⚠️ 仅声明 | `docs/adr/ADR-DEV-003-paperclip-buzz-adoption.md`（**决策文件即交付物**；内容不作机械断言——按本表图例属"仅声明"，约束力由后续借鉴类任务在 scope 声明中引用它承担） |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
 ## 现状小结
