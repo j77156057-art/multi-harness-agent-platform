@@ -7,7 +7,7 @@
 完成时间：2026-10-06 12:05
 工作区：.worktrees/wbsplit
 依赖任务：claims-split
-真相源引用：docs/claims/55-workbuddy--tasks-split.md
+真相源引用：docs/claims/workbuddy--tasks-split.md
             TASKS.md 「任务卡」节（拆分后的位置说明与索引）
             tools/discipline/discipline.py check_cards（改为读两处）
 允许修改目录：TASKS.md、docs/tasks/notes/**、tools/discipline/**、docs/claims/55-*.md
@@ -21,7 +21,7 @@ commit：a7eca25（拆分主体）；本字段的回填随下一次提交
 
 ### 动机：上一轮拆分只解决了一半
 
-2026-10-05 的 `claims-split`（`24-workbuddy--claims-split.md`）只把**认领表**从
+2026-10-05 的 `claims-split`（`workbuddy--claims-split.md`）只把**认领表**从
 TASKS.md 拆到 `docs/claims/NN-*.md`，复核记录、违规记录、任务卡全部留在原地。
 文件从拆分时的规模又涨回 275 KB。**只拆一个多写点，不拆其余，等于没拆。**
 

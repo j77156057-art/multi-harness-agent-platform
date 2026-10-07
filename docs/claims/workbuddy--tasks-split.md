@@ -30,7 +30,7 @@
 
 ## 动机：上一轮拆分只解决了一半
 
-2026-10-05 的 `claims-split`（`24-workbuddy--claims-split.md`）只把**认领表**
+2026-10-05 的 `claims-split`（`workbuddy--claims-split.md`）只把**认领表**
 从 TASKS.md 拆到 `docs/claims/NN-*.md`，复核记录、违规记录、任务卡全部留在原地。
 文件从拆分时的规模又涨回 274 KB。**只拆一个多写点，不拆其余，等于没拆。**
 

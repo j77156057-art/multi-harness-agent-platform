@@ -83,7 +83,7 @@
 `docs/tasks/notes/` 下他人卡片
 
 **本任务不改门禁** —— 删占号机制需协调者点头（那部分是我加的）。
-`55-workbuddy--tasks-split.md` 是我自己的文件，但本任务也不动它：
+`workbuddy--tasks-split.md` 是我自己的文件，但本任务也不动它：
 方案 C 若落地它连同其余 54 个一起改名，单独改没有意义。
 
 ## test_id

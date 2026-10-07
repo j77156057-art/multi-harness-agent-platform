@@ -53,6 +53,7 @@
 | deadlock-fix | WorkBuddy | — | ✅ done（mergeguard × discipline 合并死锁，`_ensure_repo_root_on_path`） | `agent/workbuddy/deadlock-fix/a1` | `MVP-PROCESS-001` |
 | claim-denum-migrate | WorkBuddy | deadlock-fix | ✅ done（方案 C 文件层迁移，2 个认领文件去序号前缀 + 4 处自指同步） | `agent/workbuddy/claim-denum-migrate/a1` | `MVP-PROCESS-001` |
 | gate-sandbox-pitfall | WorkBuddy | — | ✅ done（回填「跑门禁须走沙箱外」+「撞号在 main 上是既成事实」） | `agent/workbuddy/gate-sandbox-pitfall/a1` | `MVP-PROCESS-001` |
+| claim-denum-migrate-rest | WorkBuddy | — | 🔄 doing（WorkBuddy 剩余 11 个认领文件去前缀 + 21 处自指同步） | `agent/workbuddy/claim-denum-migrate-rest/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
@@ -109,21 +110,21 @@
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
-<!-- MVP-01 → docs/claims/01-workbuddy--MVP-01.md -->
+<!-- MVP-01 → docs/claims/workbuddy--MVP-01.md -->
 <!-- MVP-02 → docs/claims/02-codex--MVP-02.md -->
 <!-- MVP-02-amend → docs/claims/03-claude-code--MVP-02-amend.md -->
 <!-- worktree-isolation → docs/claims/04-claude-code--worktree-isolation.md -->
 <!-- agent-onboarding → docs/claims/05-claude-code--agent-onboarding.md -->
 <!-- discipline → docs/claims/06-claude-code--discipline.md -->
 <!-- MVP-03 → docs/claims/07-codex--MVP-03.md -->
-<!-- fix-wal-lock-retry → docs/claims/09-workbuddy--fix-wal-lock-retry.md -->
+<!-- fix-wal-lock-retry → docs/claims/workbuddy--fix-wal-lock-retry.md -->
 <!-- MVP-08-prep → docs/claims/10-qoder--MVP-08-prep.md -->
-<!-- R10-fix-10 → docs/claims/11-workbuddy--R10-fix-10.md -->
+<!-- R10-fix-10 → docs/claims/workbuddy--R10-fix-10.md -->
 <!-- graph-traceability → docs/claims/08-claude-code--graph-traceability.md -->
-<!-- fix-flaky-init → docs/claims/14-workbuddy--fix-flaky-init.md -->
+<!-- fix-flaky-init → docs/claims/workbuddy--fix-flaky-init.md -->
 <!-- MVP-03-amend → docs/claims/12-trae--MVP-03-amend.md -->
-<!-- claim-nullable → docs/claims/19-workbuddy--claim-nullable.md -->
-<!-- verify-mvp-04 → docs/claims/21-workbuddy--verify-mvp-04.md -->
+<!-- claim-nullable → docs/claims/workbuddy--claim-nullable.md -->
+<!-- verify-mvp-04 → docs/claims/workbuddy--verify-mvp-04.md -->
 <!-- R10-fix-10-card → docs/claims/15-trae--R10-fix-10-card.md -->
 <!-- MVP-04 → docs/claims/13-qoder--MVP-04.md -->
 <!-- fix-flaky-init-card → docs/claims/18-trae--fix-flaky-init-card.md -->
@@ -132,7 +133,7 @@
 <!-- claim-nullable-card → docs/claims/22-trae--claim-nullable-card.md -->
 <!-- plan-evidence-failclosed → docs/claims/16-opencode--plan-evidence-failclosed.md -->
 <!-- claims-split-review → docs/claims/23-qoder--claims-split-review.md -->
-<!-- claims-split → docs/claims/24-workbuddy--claims-split.md -->
+<!-- claims-split → docs/claims/workbuddy--claims-split.md -->
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
@@ -199,7 +200,7 @@
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
 | sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | sweeper-aging-stuck | [卡](docs/tasks/notes/sweeper-aging-stuck.md) |
 | mergeguard-fix | [卡](docs/tasks/notes/mergeguard-fix.md) | claim-denum-migrate | [卡](docs/tasks/notes/claim-denum-migrate.md) |
-| gate-sandbox-pitfall | [卡](docs/tasks/notes/gate-sandbox-pitfall.md) | | |
+| gate-sandbox-pitfall | [卡](docs/tasks/notes/gate-sandbox-pitfall.md) | claim-denum-migrate-rest | [卡](docs/tasks/notes/claim-denum-migrate-rest.md) |
 | sweeper-workers | [卡](docs/tasks/notes/sweeper-workers.md) | | |
 | sweeper-drift | [卡](docs/tasks/notes/sweeper-drift.md) | | |
 | human-ops | [卡](docs/tasks/notes/human-ops.md) | | |
