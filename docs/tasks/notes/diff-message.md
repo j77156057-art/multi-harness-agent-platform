@@ -1,4 +1,4 @@
-### diff-message：diff 消息进任务线程（🚧 doing）
+### diff-message：diff 消息进任务线程（✅ done）
 
 ~~~text
 任务编号：diff-message
@@ -73,5 +73,53 @@
 test_id：MVP-UI-002（新登记，形态同 MVP-UI-001）
 测试命令：PYTHONUTF8=1 ./scripts.sh check；cd frontend && npm run typecheck &&
           npm test && npm run build && npm run check:contrast
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 05:15
+commit：`551321d`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（118 files already formatted）
+  pytest      : 443 passed（本任务净增 7：test_task_diff.py），exit 0
+  关键断言     : ①统计真值：已发布 attempt 的 diff 与真实 commit 一致
+                （2 文件/+2 行；二进制文件按 numstat 的 `-` 识别为
+                insertions=None+binary=true——不假装 0）；②未发布/无 attempt
+                → available:false + reason（**不发明空 diff**）；未知任务与
+                越界 attempt_id → 404；③patch 仅按需（默认响应 patch=null）、
+                字节级上限（patch_max_bytes=20 时 truncated=true 且
+                len(encode)<=20）、正常 patch 含 `diff --git` 且
+                truncated=false；④纯函数边界：numstat 空/垃圾行、
+                截断恰等于上限不截；⑤路由与 service 同读数（含 include_patch
+                的 URL 参数与 404 信封）。
+  前端四件     : ①`vue-tsc` 0 错；②vitest **27 passed / 6 文件**（净增 6：
+                TaskPane diff 卡四态〔文件表+计数+二进制、emit expandDiff、
+                patch+截断提示、unavailable 说明、loading〕+ api URL 拼接
+                〔attempt_id/include_patch 编码〕）；③`vite build` 110.21 kB
+                （gzip 42.62 kB）；④`check:contrast` 9 对全 ≥4.5:1（未新增
+                对——卡内只用已断言组合）。
+  浏览器实测   : 真后端（backend/data/diff-demo 种子：canonical 仓 + T-DEMO
+                已发布 attempt〔两 commit、2 文件〕+ T-WAIT 无 attempt）
+                + vite dev（**本实例 5174**——5173 被另一实例占用，未触碰）：
+                ①冷启动深链 /g/G-DEMO/t/T-DEMO → 差异卡 `2 个文件 +6 −0`、
+                `a54b996..f9e38bf`、两文件行、`展开 patch`；②展开 →
+                `GET …/diff?attempt_id=T-DEMO.a1&include_patch=1` [200] →
+                patch 真内容渲染（含 `+print('again')`）、按钮变 `收起 patch`；
+                ③切 T-WAIT → `差异不可用：no attempt has published a commit`；
+                ④刷新冷启动 → 差异卡自 API 重建；⑤当前页 console **零消息**、
+                网络 **25/25 全 200**。证据留档：
+                `backend/data/diff-message-browser-evidence.md`（gitignored）。
+  **声明（如实）**: **截图不可用**——browser-use 的 in-app browser surface
+                `visibilityState=hidden`（需人工前台化），两次尝试均报
+                `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`；本轮以结构快照 +
+                网络/console 记录代留档（frontend-thread 的截图路径本轮
+                不适用）。旁注：browser-use 的 uid 点击在本会话个别元素上
+                不派发事件（改用 `HTMLElement.click()` 验证正常）——工具
+                行为，非应用缺陷。
+已知问题：
+  - merge/review 维度的 diff、逐行高亮/并排视图、diff 落库、WebSocket 推送
+    均为显式出范围（见范围声明）；Buzz 的 repo URL 语义映射为 canonical
+    本地对象库（无远端，不硬造 URL）。
+  - numstat 的重命名行按 git 的原样路径串呈现（如 `{a => b}` 形式），
+    不做路径美化——阅读面够用，未做不应做。
+  - 组件测试仍未入共享门禁（frontend-thread 起记录在案的缺口，不变量）。
 ~~~
