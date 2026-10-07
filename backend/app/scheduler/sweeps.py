@@ -451,6 +451,72 @@ def sweep_drift(
     )
 
 
+def sweep_human_wait_timeout(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """A parked task past the reminder window: remind, never release (§18/§13).
+
+    The first window runs from ``waiting_since`` (the moment the task parked);
+    every later window from ``next_reminder_at``, which each reminder pushes
+    out by ``min(base x mult^count, cap)`` where ``count`` is how many
+    reminders this stint already emitted -- event counting, no new table
+    (design §2.9, card criterion 4). The self-loop is R10 §10's
+    ``awaiting_human | human_wait_timeout`` and writes only the reminder
+    field, never ``state_changed_seq`` or ``waiting_since`` (R10-fix-11).
+
+    R10 §13: the reminder never auto-releases or auto-cancels; a human verdict
+    (resume/reopen/cancel) is the only way out.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.AWAITING_HUMAN.value,)
+    )
+    reminded: list[str] = []
+    for row in rows:
+        if _reminder_round(
+            database,
+            store,
+            task_id=str(row["task_id"]),
+            now=now,
+            expected=TaskStatus.AWAITING_HUMAN,
+            event=EventKind.HUMAN_WAIT_TIMEOUT,
+            base_field="waiting_since",
+        ):
+            reminded.append(str(row["task_id"]))
+    return SweepReport("human_wait_timeout", len(reminded), {"reminded": reminded})
+
+
+def sweep_escalation_reminder(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """An escalation still undecided: back-off reminder on the same schedule.
+
+    Same mechanism as ``human_wait_timeout``, anchored on ``escalated_at``
+    (R10 §10's ``escalated | escalation_reminder`` self-loop; design §2.9's
+    "still not adjudicated"). Escalation edges that predate the column -- the
+    merge worker's, which sets no anchor -- fall back to the task's latest
+    event, which at entry *is* the escalation event; later reminders leave
+    ``next_reminder_at`` set, so the fallback cannot drift with them.
+    """
+    store = EventStore(database)
+    rows = database.read(
+        "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.ESCALATED.value,)
+    )
+    reminded: list[str] = []
+    for row in rows:
+        if _reminder_round(
+            database,
+            store,
+            task_id=str(row["task_id"]),
+            now=now,
+            expected=TaskStatus.ESCALATED,
+            event=EventKind.ESCALATION_REMINDER,
+            base_field="escalated_at",
+        ):
+            reminded.append(str(row["task_id"]))
+    return SweepReport("escalation_reminder", len(reminded), {"reminded": reminded})
+
+
 # ------------------------------------------------------------------ helpers
 
 
@@ -600,6 +666,83 @@ def _latest_event_iso(conn: Any, task_id: str) -> datetime | None:
         (task_id,),
     ).fetchone()
     return None if row is None else parse_iso(str(row["created_at"]))
+
+
+def _reminder_count(conn: Any, task_id: str, event: EventKind, since_seq: object) -> int:
+    """Reminders this stint already emitted: events after the entry transition.
+
+    ``state_changed_seq`` is the entry event's seq (both reminder targets are
+    entered by a status change), so counting beyond it scopes the back-off to
+    the current stint without a new table.
+    """
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM task_events"
+        " WHERE aggregate_id = ? AND event_name = ? AND seq > ?",
+        (task_id, event.value, int(since_seq or 0)),
+    ).fetchone()
+    return int(row["n"])
+
+
+def _reminder_round(
+    database: Database,
+    store: EventStore,
+    *,
+    task_id: str,
+    now: datetime,
+    expected: TaskStatus,
+    event: EventKind,
+    base_field: str,
+) -> bool:
+    """One reminder round for one parked task; returns True when one was sent."""
+    with database.transaction() as conn:
+        task = conn.execute(
+            "SELECT status, current_epoch, state_changed_seq, waiting_since, escalated_at,"
+            " next_reminder_at FROM tasks WHERE task_id = ?",
+            (task_id,),
+        ).fetchone()
+        if task is None or str(task["status"]) != expected.value:
+            return False
+        base = task[base_field]
+        moment = parse_iso(str(base)) if base is not None else _latest_event_iso(conn, task_id)
+        if moment is None:
+            return False
+        next_at = task["next_reminder_at"]
+        if next_at is None:
+            if now < moment + timedelta(minutes=settings.human_reminder_minutes):
+                return False
+        elif now < parse_iso(str(next_at)):
+            return False
+        prior = _reminder_count(conn, task_id, event, task["state_changed_seq"])
+        gap_minutes = int(
+            min(
+                settings.reminder_cap_minutes,
+                settings.human_reminder_minutes
+                * settings.escalation_backoff_multiplier ** (prior + 1),
+            )
+        )
+        record = store.append(
+            event_name=event.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={
+                "reminder_no": prior + 1,
+                "interval_minutes": gap_minutes,
+                "waited_seconds": max(0, int((now - moment).total_seconds())),
+            },
+            connection=conn,
+        )
+        apply_transition(
+            conn,
+            task_id=task_id,
+            current=expected,
+            event=event,
+            expected_epoch=int(task["current_epoch"]),
+            extra_sets={"next_reminder_at": (now + timedelta(minutes=gap_minutes)).isoformat()},
+            state_seq=record.seq,
+        )
+        return True
 
 
 def _current_task(conn: Any, task_id: str, expected: TaskStatus) -> Any:
@@ -862,7 +1005,10 @@ def _stuck_round(
         )
         if unchanged >= settings.stuck_human_sweeps:
             event = EventKind.STUCK_HUMAN_THRESHOLD
-            extra: dict[str, object] = {"waiting_since": now.isoformat()}
+            extra: dict[str, object] = {
+                "waiting_since": now.isoformat(),
+                "next_reminder_at": None,
+            }
             outcome = "awaiting_human"
         elif unchanged >= settings.stuck_sweeps:
             event = EventKind.STUCK_THRESHOLD_REACHED

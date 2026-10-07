@@ -169,6 +169,8 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "review_lease",
         "merge_recovery",
         "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
     ]
 
     run_all_sweeps(database, now=NOW + timedelta(hours=1))
@@ -189,4 +191,6 @@ def test_the_runner_order_includes_the_new_sweeps():
         "review_lease",
         "merge_recovery",
         "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
     ]
