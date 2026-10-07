@@ -51,6 +51,9 @@
 | tasks-split | WorkBuddy | claims-split | ✅ done（TASKS.md 279KB→24KB，卡片进 docs/tasks/notes/） | `agent/workbuddy/tasks-split/a1` | `MVP-PROCESS-001` |
 | claims-split-review | Qoder | verify-mvp-04 | ✅ done | `agent/local/qoder/claims-split-review/a1` | `MVP-PROCESS-001` |
 | deadlock-fix | WorkBuddy | — | ✅ done（mergeguard × discipline 合并死锁，`_ensure_repo_root_on_path`） | `agent/workbuddy/deadlock-fix/a1` | `MVP-PROCESS-001` |
+| claim-denum-migrate | WorkBuddy | deadlock-fix | ✅ done（方案 C 文件层迁移，2 个认领文件去序号前缀 + 4 处自指同步） | `agent/workbuddy/claim-denum-migrate/a1` | `MVP-PROCESS-001` |
+| gate-sandbox-pitfall | WorkBuddy | — | ✅ done（回填「跑门禁须走沙箱外」+「撞号在 main 上是既成事实」） | `agent/workbuddy/gate-sandbox-pitfall/a1` | `MVP-PROCESS-001` |
+| claim-denum-migrate-rest | WorkBuddy | — | ✅ done（WorkBuddy 剩余 11 个认领文件去前缀 + 21 处活指针同步；6 处跨边界引用如实留档） | `agent/workbuddy/claim-denum-migrate-rest/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |
@@ -78,10 +81,14 @@
 | sweeper-family | Qoder | — | ✅ done（只交付设计；承接 MVP-11 报告 §6） | `agent/local/qoder/sweeper-family/a1` | `SCHED-SWEEP-001` |
 | sweeper-runner | Qoder | sweeper-family | ✅ done | `agent/local/qoder/sweeper-runner/a1` | `SCHED-SWEEP-001` |
 | sweeper-deps-resources | Qoder | sweeper-runner | ✅ done | `agent/local/qoder/sweeper-deps-resources/a1` | `SCHED-SWEEP-002` |
+| sweeper-aging-stuck | Qoder | sweeper-deps-resources | ✅ done | `agent/local/qoder/sweeper-aging-stuck/a1` | `SCHED-SWEEP-003` |
+| sweeper-workers | Qoder | sweeper-aging-stuck | ✅ done | `agent/local/qoder/sweeper-workers/a1` | `SCHED-SWEEP-004` |
+| sweeper-drift | Qoder | sweeper-workers | ✅ done | `agent/local/qoder/sweeper-drift/a1` | `SCHED-SWEEP-005` |
+| human-ops | Qoder | sweeper-drift | ✅ done（实现 514c4b2；豁免 3→1，覆盖套件收官） | `agent/local/qoder/human-ops/a1` | `HUMAN-OPS-001` |
 | root-worktree-clean | OpenCode | merge-interlock | ✅ done（问题 6 按 C 方案落地） | `agent/local/opencode/root-worktree-clean/a1` | `MVP-PROCESS-002` |
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
-| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 回填状态与任务卡） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
-| win-utf8-stdio | OpenCode | — | ✅ done（固化 UTF-8，不依赖手动环境变量） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
+| mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 已由 Qoder 协助回填） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
+| win-utf8-stdio | OpenCode | — | ✅ done（已提交待合；a1 = 0ed6e0d，四道门禁在无任何 UTF-8 环境变量下全绿） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -104,21 +111,21 @@
 
 | 序号 | task_id | Harness | 认领时间 | 分支 | 状态 |
 |---|---|---|---|---|---|
-<!-- MVP-01 → docs/claims/01-workbuddy--MVP-01.md -->
+<!-- MVP-01 → docs/claims/workbuddy--MVP-01.md -->
 <!-- MVP-02 → docs/claims/02-codex--MVP-02.md -->
 <!-- MVP-02-amend → docs/claims/03-claude-code--MVP-02-amend.md -->
 <!-- worktree-isolation → docs/claims/04-claude-code--worktree-isolation.md -->
 <!-- agent-onboarding → docs/claims/05-claude-code--agent-onboarding.md -->
 <!-- discipline → docs/claims/06-claude-code--discipline.md -->
 <!-- MVP-03 → docs/claims/07-codex--MVP-03.md -->
-<!-- fix-wal-lock-retry → docs/claims/09-workbuddy--fix-wal-lock-retry.md -->
+<!-- fix-wal-lock-retry → docs/claims/workbuddy--fix-wal-lock-retry.md -->
 <!-- MVP-08-prep → docs/claims/10-qoder--MVP-08-prep.md -->
-<!-- R10-fix-10 → docs/claims/11-workbuddy--R10-fix-10.md -->
+<!-- R10-fix-10 → docs/claims/workbuddy--R10-fix-10.md -->
 <!-- graph-traceability → docs/claims/08-claude-code--graph-traceability.md -->
-<!-- fix-flaky-init → docs/claims/14-workbuddy--fix-flaky-init.md -->
+<!-- fix-flaky-init → docs/claims/workbuddy--fix-flaky-init.md -->
 <!-- MVP-03-amend → docs/claims/12-trae--MVP-03-amend.md -->
-<!-- claim-nullable → docs/claims/19-workbuddy--claim-nullable.md -->
-<!-- verify-mvp-04 → docs/claims/21-workbuddy--verify-mvp-04.md -->
+<!-- claim-nullable → docs/claims/workbuddy--claim-nullable.md -->
+<!-- verify-mvp-04 → docs/claims/workbuddy--verify-mvp-04.md -->
 <!-- R10-fix-10-card → docs/claims/15-trae--R10-fix-10-card.md -->
 <!-- MVP-04 → docs/claims/13-qoder--MVP-04.md -->
 <!-- fix-flaky-init-card → docs/claims/18-trae--fix-flaky-init-card.md -->
@@ -127,7 +134,7 @@
 <!-- claim-nullable-card → docs/claims/22-trae--claim-nullable-card.md -->
 <!-- plan-evidence-failclosed → docs/claims/16-opencode--plan-evidence-failclosed.md -->
 <!-- claims-split-review → docs/claims/23-qoder--claims-split-review.md -->
-<!-- claims-split → docs/claims/24-workbuddy--claims-split.md -->
+<!-- claims-split → docs/claims/workbuddy--claims-split.md -->
 <!-- MVP-08-verify → docs/claims/26-trae--MVP-08-verify.md -->
 <!-- message-global-seq → docs/claims/27-trae--message-global-seq.md -->
 <!-- GATE-MERGE-CHECK-01 → docs/claims/28-trae--GATE-MERGE-CHECK-01.md -->
@@ -192,7 +199,12 @@
 | root-worktree-clean | [卡](docs/tasks/notes/root-worktree-clean.md) | sweeper-family | [卡](docs/tasks/notes/sweeper-family.md) |
 | claim-seq-adopt | [卡](docs/tasks/notes/claim-seq-adopt.md) | deadlock-fix | [卡](docs/tasks/notes/deadlock-fix.md) |
 | claim-denum-coordinator-review | [卡](docs/tasks/notes/claim-denum-coordinator-review.md) | sweeper-runner | [卡](docs/tasks/notes/sweeper-runner.md) |
-| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | | |
+| sweeper-deps-resources | [卡](docs/tasks/notes/sweeper-deps-resources.md) | sweeper-aging-stuck | [卡](docs/tasks/notes/sweeper-aging-stuck.md) |
+| mergeguard-fix | [卡](docs/tasks/notes/mergeguard-fix.md) | claim-denum-migrate | [卡](docs/tasks/notes/claim-denum-migrate.md) |
+| gate-sandbox-pitfall | [卡](docs/tasks/notes/gate-sandbox-pitfall.md) | claim-denum-migrate-rest | [卡](docs/tasks/notes/claim-denum-migrate-rest.md) |
+| sweeper-workers | [卡](docs/tasks/notes/sweeper-workers.md) | | |
+| sweeper-drift | [卡](docs/tasks/notes/sweeper-drift.md) | | |
+| human-ops | [卡](docs/tasks/notes/human-ops.md) | | |
 
 ## 共享文件改动声明
 
@@ -381,106 +393,6 @@ commit：a1 = `27a21be` + `cf2748f`（含同步 main）；合入 main = `6aa788e
   opencode 6 / codex 2）。各 owner 只改自己的文件，H-5 天然满足。
   本任务已经把机械守卫备好了：文件名↔内容一致（已有）+ task_id 唯一（已有）
   + 注释行指向的文件存在（新增），所以重命名有校验、不靠人眼。
-~~~
-
-### mergeguard-fix：续跑必须证明「记录与请求是同一次合并」（✅ done）
-
-~~~text
-任务编号：mergeguard-fix
-负责人 Harness：OpenCode
-开始时间：2026-10-07 03:10
-工作区：.worktrees/opencode/
-依赖任务：root-worktree-clean（mergeguard 的续跑功能由本任务的父任务交付）
-真相源引用：docs/claims/59-opencode--mergeguard-fix.md（事故经过）、
-            tools/mergeguard/cli.py `_classify_pending_merge`
-允许修改目录：tools/mergeguard/**、backend/tests/**、TASKS.md
-禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
-交付分支：agent/local/opencode/mergeguard-fix/a1
-test_id：MVP-MERGE-LOCK-001
-当前状态：✅ done
-commit：a1 = `a80c5ad` + `2f55459`（解冲突）；合入 main = `2c85a9c`
-
-### 事故经过（2026-10-07 03:05，实测，不是设想）
-
-1. Qoder 用 mergeguard 合并 `agent/local/qoder/sweeper-deps-resources/a1`，
-   写下 `merge-pending.json`（`merge_head=eb7d8d36`）+ `MERGE_HEAD`。
-2. 他的进程退出（pid 38616 已死），合并悬在「已合并、未提交」。
-3. 随后有人请求合并**另一条分支**。`_classify_pending_merge()` 只比
-   「pending 的 `merge_head` == 当前 `MERGE_HEAD`」，两者都是 `eb7d8d36`
-   → 判定「本工具自己的遗留合并」→ **跳过 merge 步骤**，直接在
-   **别人的工作树**上跑门禁。
-4. `git merge-base --is-ancestor` 确认：**那个分支根本没被合并**。
-
-**最坏情况不是这一次**：门禁若恰好是绿的，工具会报成功并提交 ——
-**把别人的合并当成自己的合并提交掉**。这正是本工具存在的目的所防的事故
-（docstring 第 3 条「绝不接管别人的合并」），而我在续跑这条路径上漏掉了。
-
-### 修法
-
-续跑需要**两条独立证据**，缺一不可：
-1. `MERGE_HEAD` 内容 == 记录里的 `merge_head`（是同一次合并）
-2. **`MERGE_HEAD` == `rev-parse(本次请求的分支)`**
-
-第 2 条刻意**不**比对记录里的 `branch` / `task_id` 标签 —— 那是上次运行写下的
-字符串，是标签不是事实，会被改、被抄错、被手工编辑。而
-`MERGE_HEAD == rev-parse(请求的分支)` 是 git 自己的事实：它精确证明
-「现在悬着的这次合并，合并的正是我要求合的那个分支的那个 commit」。
-
-### 判据选型是被一条测试推翻的（值得记）
-
-第一版写成「记录的 branch 或 task_id 与请求相符」。结果
-`test_pending_record_of_another_task_same_branch_is_refused` 直接红 ——
-分支相同、task_id 不同时，悬着的合并**确实就是**请求的那一笔
-（MERGE_HEAD 就是那个分支的 tip），提交它就是完成请求。task_id 只是锁信息里
-的标签，不构成合并的身份。
-
-于是那条测试被我改成「仍然续跑」，并成为判据选型的对照。**用标签当身份，
-会多拒一次本该接受的续跑，而且拒得毫无理由。**
-
-### 顺带挡住的第二类现场
-
-请求的分支在悬着那次合并之后又前进了（别人从别处 fetch 或强推了那个 ref）
-→ 也拒绝续跑。所以「事实比对」同时挡住了「别人的现场」与「过期的现场」。
-
-构造顺序有讲究：必须**先推进分支再造 MERGE_HEAD**，反过来做不到 ——
-`git checkout` 会顺手清掉 MERGE_HEAD，悬置现场也就没了。
-
-### 验证结果
-
-  - docstate   : 90 项检查，0 项失败
-  - discipline : 44 项检查，0 项失败
-  - ruff check : All checks passed!  ruff format: 87 files already formatted
-  - pytest tools : 52 passed
-  - pytest backend : 284 passed（新增 4）
-  - test_merge_guard : 39 -> **43 passed**，连跑 3 次 0 flake
-  - **负向验证**：换回 main 上的旧 cli.py 跑这批用例 → 两条「拒绝接管」用例
-    **都红**（2 failed / 2 passed），确认用例真能抓住这个 bug，不是空断言
-
-新增 3 条用例：
-  - 别人的 pending 记录不得被当成自己的续跑（并断言现场与归属记录都原样保留）
-  - 同一分支不同 task_id **仍然续跑**（判据选型的对照）
-  - 分支 tip 已前进则拒绝（并同时给出悬着的 MERGE_HEAD 与当前 tip）
-
-### 这次 bug 的教训（比代码本身更值得记）
-
-我给续跑机制写的第一条用例
-（`test_cli_gate_failure_does_not_commit_and_rerun_resumes`）只测了
-「**自己的**记录能续跑」，**没测「别人的记录不能被当成自己的」**。
-
-续跑机制的风险全在「认错人」这一侧，而我的用例全在「认对人」这一侧 ——
-整整一天的测试都建在另一半上。它也不在任何人的评审清单上：TRAE 评的是
-merge-interlock（早于续跑功能），WorkBuddy 报的是 commit 误报（另一半问题）。
-
-**新功能的风险不在「能不能用」，而在「会不会认错人」；而我给新功能写的第一
-批用例，全都在验证前者。**
-
-### 尚未修（不在本任务范围）
-
-`_run_gate` 取门禁输出的最后一行做摘要，对「门禁自己在结果之后还打印别的东西」
-没有防护。实测吃过：discipline 打印的 SyntaxWarning 出现在结果之后，摘要变成
-那条警告，**真正的检查结果被吃掉**，而退出码仍是 0 —— 门禁是绿的，绿的证据是
-错的。正确做法是让门禁把摘要写进机器可读位置（`--json` 已有），或让 `_run_gate`
-识别 `结果: ` 前缀。
 ~~~
 
 ### win-utf8-stdio：把门禁的 UTF-8 处理固化进代码（✅ done）

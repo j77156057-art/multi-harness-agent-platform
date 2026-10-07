@@ -20,6 +20,7 @@ import time
 
 from app.config import settings
 from app.db import Database
+from app.git.repo import CanonicalRepo
 from app.scheduler.runner import run_all_sweeps
 
 
@@ -44,9 +45,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no database at {database.path}; run `python -m app.db` first", file=sys.stderr)
         return 2
 
+    try:
+        repo: CanonicalRepo | None = CanonicalRepo.from_settings()
+    except Exception:  # noqa: BLE001 - a missing repo must not kill the loop
+        repo = None
+
     interval = args.interval or settings.sweeper_interval_seconds
     while True:
-        for report in run_all_sweeps(database):
+        for report in run_all_sweeps(database, repo=repo):
             print(json.dumps(report.as_json(), ensure_ascii=False))
         if not args.loop:
             return 0

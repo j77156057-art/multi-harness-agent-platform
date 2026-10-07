@@ -157,7 +157,21 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
 
     first = run_all_sweeps(database, now=NOW)
     assert _status(database, "T-1") == "claimed"
-    assert [report.sweep for report in first] == ["expired_leases", "dependencies", "resources"]
+    assert [report.sweep for report in first] == [
+        "expired_leases",
+        "dependencies",
+        "resources",
+        "aging",
+        "blocked_sla",
+        "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
+        "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
+    ]
 
     run_all_sweeps(database, now=NOW + timedelta(hours=1))
     assert _status(database, "T-1") == "stale"
@@ -165,4 +179,18 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
 
 
 def test_the_runner_order_includes_the_new_sweeps():
-    assert [name for name, _sweep in SWEEPS] == ["expired_leases", "dependencies", "resources"]
+    assert [name for name, _sweep in SWEEPS] == [
+        "expired_leases",
+        "dependencies",
+        "resources",
+        "aging",
+        "blocked_sla",
+        "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
+        "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
+    ]

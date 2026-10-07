@@ -73,14 +73,14 @@ def test_the_adapter_implements_every_section_7_verb(project_root):
 
 
 def test_http_adapter_answers_every_verb_or_says_why_not():
-    """Four §7 verbs have no route yet; they must fail loudly, not silently."""
+    """Three §7 verbs have no route yet; they must fail loudly, not silently."""
     verbs = section_7_verbs(Path(__file__).resolve().parents[2] / "docs" / "spec" / "0.3-R10.md")
     unsupported = {
         verb for verb in verbs if "UnsupportedVerb" in getattr(HttpAdapter, verb).__code__.co_names
     }
-    assert unsupported == {"accept_help", "reject_help", "split_task", "ask_human"}, unsupported
+    assert unsupported == {"accept_help", "reject_help", "split_task"}, unsupported
     with pytest.raises(UnsupportedVerb):
-        HttpAdapter.__new__(HttpAdapter).ask_human(task_id="T", question="?")
+        HttpAdapter.__new__(HttpAdapter).accept_help(task_id="T", help_id="H")
 
 
 # ---------------------------------------------------------------- fixture

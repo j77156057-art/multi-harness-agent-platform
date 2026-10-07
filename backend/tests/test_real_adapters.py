@@ -260,7 +260,7 @@ def test_each_adapter_declares_the_full_section_7_surface(case, project_root):
     unsupported = {
         verb for verb in verbs if "UnsupportedVerb" in getattr(case.cls, verb).__code__.co_names
     }
-    assert unsupported == {"accept_help", "reject_help", "split_task", "ask_human"}, unsupported
+    assert unsupported == {"accept_help", "reject_help", "split_task"}, unsupported
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -412,8 +412,6 @@ def test_each_adapter_refuses_dangerous_operations(case, tmp_path):
 
     with pytest.raises(UnsupportedVerb):
         adapter.accept_help(task_id="T-1", help_id="h-1")
-    with pytest.raises(UnsupportedVerb):
-        adapter.ask_human(task_id="T-1", question="?")
 
 
 def test_a_stale_epoch_is_refused_through_a_real_adapter(tmp_path):

@@ -65,7 +65,9 @@ def seed_task(
             conn.execute(
                 "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
                 " VALUES (?, ?, 'approved', ?, ?)",
-                (f"plan-{task_id}", group_id, f"plan-hash-{task_id}", now),
+                # same value as the snapshot below: create_plan writes one hash
+                # into both rows, and the drift detector relies on that consistency.
+                (f"plan-{task_id}", group_id, f"hash-{task_id}", now),
             )
             conn.execute(
                 "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"

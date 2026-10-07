@@ -17,6 +17,7 @@ from app.api.errors import ApiError
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
 from app.git.publish import PublishProxy
+from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
 from app.spec import TaskStatus
 from app.tasks.service import NotFound, SchedulerService
@@ -35,9 +36,17 @@ def _scheduler(database: DatabaseDep) -> SchedulerService:
 
 SchedulerDep = Annotated[SchedulerService, Depends(_scheduler)]
 
+
+def _human(database: DatabaseDep) -> HumanOpsService:
+    return HumanOpsService(database)
+
+
+HumanDep = Annotated[HumanOpsService, Depends(_human)]
+
 management = APIRouter(tags=["management"])
 adapter = APIRouter(prefix="/adapter", tags=["adapter"])
 review = APIRouter(prefix="/review", tags=["review"])
+human = APIRouter(prefix="/human", tags=["human"])
 read = APIRouter(tags=["read"])
 
 
@@ -219,6 +228,14 @@ def heartbeat(body: schemas.HeartbeatRequest, database: DatabaseDep) -> dict[str
             lease_token=body.lease_token,
             fencing_epoch=body.fencing_epoch,
         )
+        if body.progress_hash is not None:
+            # The stuck sweep's fingerprint reads this (§7's progress_hash had
+            # no producer before sweeper-aging-stuck); same transaction as the
+            # renewal that authorised the write.
+            conn.execute(
+                "UPDATE tasks SET progress_hash = ? WHERE task_id = ?",
+                (body.progress_hash, body.task_id),
+            )
     return {
         "task_id": body.task_id,
         "attempt_id": body.attempt_id,
@@ -270,6 +287,25 @@ def request_help(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str
     )
 
 
+@adapter.post("/ask_human")
+def ask_human(body: schemas.AskHumanRequest, service: HumanDep) -> dict[str, Any]:
+    """R10 §7's 14th verb, promoted from :class:`UnsupportedVerb` (human-ops).
+
+    The attempt context is required like the other harness write verbs: the
+    §13 owner guard is what keeps a stale harness from parking a task that has
+    changed hands. §18's token rules (harness tokens get 403 on human
+    decisions) are the future auth task's -- recorded, not faked.
+    """
+    return service.ask_human(
+        task_id=body.task_id,
+        question=body.question,
+        options=body.options,
+        actor=body.harness_id,
+        attempt_id=body.attempt_id,
+        fencing_epoch=body.fencing_epoch,
+    )
+
+
 @adapter.post("/report_blocked")
 def report_blocked(body: schemas.ReportBlockedRequest, service: SchedulerDep) -> dict[str, Any]:
     return service.report_blocked(
@@ -298,6 +334,40 @@ def abandon(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any
         fencing_epoch=body.fencing_epoch,
         reason=body.reason,
     )
+
+
+# ------------------------------------------------------------------- human
+
+
+@human.post("/resume")
+def human_resume(body: schemas.HumanResumeRequest, service: HumanDep) -> dict[str, Any]:
+    """§18 human.resume: same attempt, same epoch, fresh development lease."""
+    return service.resume(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
+
+
+@human.post("/reopen")
+def human_reopen(body: schemas.HumanReopenRequest, service: HumanDep) -> dict[str, Any]:
+    return service.reopen(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
+
+
+@human.post("/release")
+def human_release(body: schemas.HumanReleaseRequest, service: HumanDep) -> dict[str, Any]:
+    return service.release(task_id=body.task_id, decided_by=body.decided_by)
+
+
+@human.post("/adjudicate")
+def human_adjudicate(body: schemas.HumanAdjudicateRequest, service: HumanDep) -> dict[str, Any]:
+    return service.adjudicate(
+        task_id=body.task_id,
+        decided_by=body.decided_by,
+        question=body.question,
+        options=body.options,
+    )
+
+
+@human.post("/cancel")
+def human_cancel(body: schemas.HumanCancelRequest, service: HumanDep) -> dict[str, Any]:
+    return service.cancel(task_id=body.task_id, decided_by=body.decided_by, reason=body.reason)
 
 
 # ------------------------------------------------------------------ review

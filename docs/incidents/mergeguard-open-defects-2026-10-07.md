@@ -128,7 +128,7 @@
 
 -任务卡：`docs/tasks/notes/deadlock-fix.md`（含完整因果链与单变量对照实验）
 - 死锁修复（另一个 bug，本轮已修并合入 main）：`_ensure_repo_root_on_path()`，
-  见 `docs/claims/56-workbuddy--deadlock-fix.md`
+  见 `docs/claims/workbuddy--deadlock-fix.md`
 
 ## 一条方法论备注
 

@@ -34,7 +34,7 @@ $ git status --short
 ```
 53-qoder--sweeper-family.md
 54-opencode--root-worktree-clean.md     ← OpenCode 的，在 main
-55-workbuddy--tasks-split.md            ← 我的，已从 54 改成 55
+workbuddy--tasks-split.md            ← 我的，已从 54 改成 55
 ```
 
 main 上 54 无重复，占号表已回到「当前无占用」。**但这个 55 是过渡态**——

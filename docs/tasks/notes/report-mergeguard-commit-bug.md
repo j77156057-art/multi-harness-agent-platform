@@ -27,7 +27,7 @@ commit：ad25535
   在 commit 调用处捕获
   CalledProcessError 后先核实「工作区是否干净 + %P 是否两个父」，
   确认已提交则视为成功；或用合并前的 ORIG_HEAD 是否推进来判断。
-  建议修法已写在 docs/claims/52-workbuddy--report-mergeguard-commit-bug.md
+  建议修法已写在 docs/claims/workbuddy--report-mergeguard-commit-bug.md
 已知问题：
   TASKS.md 过大（250 KB）是 git add 间歇性失败的诱因，建议拆分为
   「任务表 + 关键路径」与 docs/tasks/notes/<task-id>.md。这与 2026-10-05 的

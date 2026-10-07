@@ -46,6 +46,7 @@ class HeartbeatRequest(BaseModel):
     attempt_id: str
     lease_token: str
     fencing_epoch: int
+    progress_hash: str | None = None
 
 
 class AttemptAction(BaseModel):
@@ -111,3 +112,42 @@ class ProbeRequest(BaseModel):
     adapter_version: str
     self_reported_capabilities: list[str] = Field(default_factory=list)
     host_mode: str | None = None
+
+
+class AskHumanRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    fencing_epoch: int
+    question: str = Field(min_length=1)
+    options: list[str] = Field(default_factory=list)
+    harness_id: str = "harness"
+
+
+class HumanResumeRequest(BaseModel):
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    answer: str | None = None
+
+
+class HumanReopenRequest(BaseModel):
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    answer: str | None = None
+
+
+class HumanReleaseRequest(BaseModel):
+    task_id: str
+    decided_by: str = Field(min_length=1)
+
+
+class HumanAdjudicateRequest(BaseModel):
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    options: list[str] = Field(default_factory=list)
+
+
+class HumanCancelRequest(BaseModel):
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    reason: str = ""

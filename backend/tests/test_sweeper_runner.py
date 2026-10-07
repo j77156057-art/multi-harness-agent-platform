@@ -47,6 +47,16 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
         "expired_leases",
         "dependencies",
         "resources",
+        "aging",
+        "blocked_sla",
+        "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
+        "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
     ]
     assert reports[0].actions == 1
     assert reports[0].detail["tasks"] == ["T-1"]
@@ -59,7 +69,21 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
 
 def test_the_runner_order_is_pinned():
     """Inserting a sweep in the middle must be a deliberate edit (design §7.1)."""
-    assert [name for name, _sweep in SWEEPS] == ["expired_leases", "dependencies", "resources"]
+    assert [name for name, _sweep in SWEEPS] == [
+        "expired_leases",
+        "dependencies",
+        "resources",
+        "aging",
+        "blocked_sla",
+        "stuck",
+        "verify_lease",
+        "verify_queue",
+        "review_lease",
+        "merge_recovery",
+        "drift",
+        "human_wait_timeout",
+        "escalation_reminder",
+    ]
 
 
 def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
@@ -69,7 +93,7 @@ def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
     run_all_sweeps(database, now=future)
     second = run_all_sweeps(database, now=future)
 
-    assert [report.actions for report in second] == [0, 0, 0]
+    assert [report.actions for report in second] == [0] * 13
     events = database.read(
         "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_expire'"
     )

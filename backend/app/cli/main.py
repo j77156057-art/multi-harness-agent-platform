@@ -223,6 +223,40 @@ class Commands:
             },
         )
 
+    # ------------------------------------------------------------- 人类决策面
+
+    def human_resume(self, a: argparse.Namespace) -> Any:
+        payload: dict[str, Any] = {"task_id": a.task, "decided_by": a.by}
+        if a.answer is not None:
+            payload["answer"] = a.answer
+        return self._post("/human/resume", payload)
+
+    def human_reopen(self, a: argparse.Namespace) -> Any:
+        payload: dict[str, Any] = {"task_id": a.task, "decided_by": a.by}
+        if a.answer is not None:
+            payload["answer"] = a.answer
+        return self._post("/human/reopen", payload)
+
+    def human_release(self, a: argparse.Namespace) -> Any:
+        return self._post("/human/release", {"task_id": a.task, "decided_by": a.by})
+
+    def human_adjudicate(self, a: argparse.Namespace) -> Any:
+        return self._post(
+            "/human/adjudicate",
+            {
+                "task_id": a.task,
+                "decided_by": a.by,
+                "question": a.question,
+                "options": a.option,
+            },
+        )
+
+    def human_cancel(self, a: argparse.Namespace) -> Any:
+        return self._post(
+            "/human/cancel",
+            {"task_id": a.task, "decided_by": a.by, "reason": a.reason},
+        )
+
     # ------------------------------------------------------------- 群聊与事件
 
     def say(self, a: argparse.Namespace) -> Any:
@@ -344,6 +378,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--verdict", required=True, choices=["approve", "request_changes"])
     p.add_argument("--commit", required=True)
     p.add_argument("--revision", type=int, default=1)
+
+    p = add("human-resume", "人类裁决：恢复（awaiting_human/drift → in_progress/ready）")
+    p.add_argument("--task", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--answer", default=None, help="结构化答复；给了就写进决策行")
+
+    p = add("human-reopen", "人类裁决：重开（awaiting_human/drift/abandoned → ready）")
+    p.add_argument("--task", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--answer", default=None)
+
+    p = add("human-release", "人类裁决：放行（escalated → ready）")
+    p.add_argument("--task", required=True)
+    p.add_argument("--by", required=True)
+
+    p = add("human-adjudicate", "人类裁决：受理升级（escalated → awaiting_human，开决策行）")
+    p.add_argument("--task", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--question", required=True)
+    p.add_argument("--option", action="append", default=[], help="可重复")
+
+    p = add("human-cancel", "人类裁决：取消任务")
+    p.add_argument("--task", required=True)
+    p.add_argument("--by", required=True)
+    p.add_argument("--reason", default="")
 
     p = add("say", "在群里发言")
     p.add_argument("--group", required=True)
