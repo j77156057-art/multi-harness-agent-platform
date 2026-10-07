@@ -1,4 +1,4 @@
-### paperclip-buzz-source：源码核实——Paperclip / Buzz 深读 + ADR-DEV-003 勘误（🚧 doing）
+### paperclip-buzz-source：源码核实——Paperclip / Buzz 深读 + ADR-DEV-003 勘误（✅ done）
 
 ~~~text
 任务编号：paperclip-buzz-source
@@ -43,5 +43,39 @@
   4. traceability MVP-ARCH-001 行同步；`PYTHONUTF8=1 ./scripts.sh check` 全绿
 test_id：MVP-ARCH-001
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 02:01
+commit：`be8291b`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 390 passed（零代码改动），exit 0
+  快照与方法   : block/buzz @ `c96d707f…`（4431/4445 文本文件）、paperclipai/
+                paperclip @ `ceabc3bc…`（8482/8494）；github.com 直连被墙，
+                经 api.github.com 树 + raw.githubusercontent.com 抓取到仓外
+                `_refs/`（脚本 fetch_repo.mjs/fetch_files.mjs 留存）。两仓各
+                14/12 个文件 404/超限未取（含个别被引模块——对应对"未证实"项
+                已逐条标注，不冒充全量）。
+  关键核实     : ①Buzz `kind.rs` ALL_KINDS **134**（文档自称 127 已过期为实测；
+                抽查逐行核对）；②NIP-29 频道/NIP-10 线程/NIP-34 git 全族
+                （1617/1618/1619/1621/1630-1633，1631 带 merge_commit）；
+                ③`task.*`(43001-43006) 与 workflow 审批事件(46001-46012)
+                **"已定义未发射"**（executor.rs:738 TODO WF-08 逐字核对）；
+                ④Paperclip 7 态 issue + CAS statusVersion + 唤醒队列 + 16 内置
+                adapter（claude_local/codex_local/opencode_local…）+ billed_cents
+                三级预算+预留执行点 + 21 权限键 + MCP server + external-task-
+                protocol Draft（均抽查原文）；⑤11 事件名三方对照成表——
+                **提议名并非 Buzz 现有事件名**（命名灵感）。
+  交付物       : `docs/reports/paperclip-buzz-source-review.md`（8 节：方法/两仓
+                事实/三方对照/校正点/集成候选/借鉴候选/未证实/可复现）；ADR-
+                DEV-003 追加「源码核实修订」addendum（不改写正文）；traceability
+                MVP-ARCH-001 行同步。
+已知问题：
+  - 快照缺口如实记录（Buzz 缺 relay bridge 模块根等 14 个文件；Paperclip 缺
+    server/src/routes/issues.ts 等 12 个——issue 迁移守卫实现与心跳主循环因此
+    只能引规范与被引纯函数）。
+  - 上游仓库在 pinned commit 之后的变化不在覆盖范围；报告结论以快照为准。
+  - 快照与抓取脚本在**仓外** `D:\study\tools\agent\_refs\`（刻意不 vendor
+    进本仓；复现方式见报告 §8）。
 ~~~

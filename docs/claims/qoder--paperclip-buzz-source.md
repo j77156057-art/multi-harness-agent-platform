@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-08 01:07 |
 | 分支 | `agent/local/qoder/paperclip-buzz-source/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 be8291b；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `paperclip-buzz-source`。
 
@@ -21,3 +21,8 @@
   直连被墙，经 api.github.com 树 + raw.githubusercontent.com 抓文本快照到仓外
   `D:\study\tools\agent\_refs\`；抓取脚本一并留存）。交付：源码核实报告 +
   ADR-DEV-003 勘误 addendum（零代码改动）。
+- 2026-10-08 02:01：完成。实现 `be8291b`；全量门禁绿（docstate 90/0、
+  discipline 44/0、pytest 390 passed 零代码改动）。报告含三方对照表（待认领的
+  11 个事件名并非 Buzz 现有事件名——命名灵感）；集成候选第一选=单向发布到
+  Buzz 频道；Paperclip external-task-protocol 天生双向，需先主从裁决。
+
