@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-07 22:53 |
 | 分支 | `agent/local/qoder/split-closure/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 27d7be0；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `split-closure`。
 
@@ -21,3 +21,8 @@
   parent=等待方，而 `_materialise_task` 写反且零测试覆盖；②既有巡检会误杀
   split 父任务（stuck 指纹不含子任务活动 → 3 个巡检周期即升级；blocked_sla
   60 分钟无条件升级）。
+- 2026-10-07 23:26：完成。实现 `27d7be0`；全量门禁绿（docstate 90/0、
+  discipline 44/0、ruff 97 files、pytest 381 passed 净增 7）。两个新守卫均经
+  变异验证（反向修改必红）。`CORE-SPLIT-001` 升 🟡（upstream_invalidated_seq
+  仍归 MERGE-REVERT-002）。
+

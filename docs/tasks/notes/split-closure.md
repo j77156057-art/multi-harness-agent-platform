@@ -1,4 +1,4 @@
-### split-closure：split 闭环——子任务生命周期 + 唤醒巡检（🚧 doing）
+### split-closure：split 闭环——子任务生命周期 + 唤醒巡检（✅ done）
 
 ~~~text
 任务编号：split-closure
@@ -54,5 +54,34 @@
      traceability `CORE-SPLIT-001` 升 🟡 并注明缺口；`PYTHONUTF8=1 ./scripts.sh check` 全绿
 test_id：CORE-SPLIT-001
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 23:26
+commit：`27d7be0`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（97 files already formatted）
+  pytest      : 381 passed（本任务净增 7 项：test_split_closure.py），exit 0
+  关键断言     : ①split 后子任务带 plan_snapshot_id、子计划 draft 且
+                snapshot_hash==plan_hash（漂移不变量）；`plan.approve` 可把全部
+                子任务推入 ready；幂等重放不产生第二份子计划；②全部子任务
+                merged → `all_children_merged` → 父任务 ready + waiting_since
+                清零 + 幂等第二轮零动作；③owner 报的 blocker（dependency_missing）
+                不被长合并上游误唤醒（判别式验证）；④方向契约：计划物化的
+                依赖行为 (parent=等待方, child=上游)，多任务计划可正常唤醒；
+                ⑤健康 split：子任务有活动时父任务 4 轮不被 stuck 升级、
+                blocked_sla 跳过；全静默 4 轮仍按 3/5 规则升级（死裂分有出口）。
+  变异验证     : ①方向改回旧写法 → test_plan_dependencies… 必红；②stuck 指纹
+                去掉子任务活动 → test_a_healthy_split… 必红。两个新守卫都真实
+                可被反向证伪，非名义断言。
+  顺带修复     : `_materialise_task` 的 task_dependencies 方向 bug（R10 §10
+                L587 实锤；此前的计划依赖任务会被 block_timeout 误升级——该
+                路径在修复前无任何测试覆盖）。
+已知问题：
+  - `CORE-SPLIT-001` 仅升 🟡：`upstream_invalidated_seq`（revert 影响链写侧）
+    仍归 MERGE-REVERT-002，见 traceability 行。
+  - 子任务 worktree 并发上限沿用既有机制（R8-01 提及的计数项不在本切片）；
+    human 侧 split 路由仍另案。
+  - split 的「budget sufficient」守卫仍不可评估（无 plan 级子任务预算模型），
+    adapter-verbs 卡的声明缺口不变。
 ~~~
