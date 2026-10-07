@@ -43,9 +43,10 @@ commit：`edae3c1`（实现提交；合并提交见 git log main）
   红点定位     : main（`a68be60`）唯一红点 = `ruff format --check` 拒收
                 `backend/tests/test_gate_utf8.py` 与 `backend/tests/test_merge_guard.py`；
                 漂移来源经 diff 证实是 `0ed6e0d` 本身（合入过程未再改动这两文件）；
-                `set -e` 令 `check` 在 lint 处短路，pytest 此前从未在 main 上跑过 ——
-                本任务补跑：364 passed。另注：当时 main 的 pytest 此前未验证，
-                本次为首次全量验证通过。
+                `set -e` 令 `check` 在 lint 处短路 —— 修复前，经 `check` 入口的
+                任何人都跑不到 pytest。本次收尾对未修 lint 的 main 独立补跑 pytest：
+                **364 passed**；修复分支全量 `check` 复跑：同为 **364 passed**
+                （两者一致 → 格式化零语义改动）。
   记录核对     : `claim-denum-coordinator` 的 a1/a2/a3/a4 四条分支全部在 main 上
                 （`6aa788e`/`6f9fb73`/`074df23`/`7a56061`）且均在认领 58 的「分支」
                 格登记 —— 协调者提到的「a1/a2 合并记录不一致」经核实现已一致
