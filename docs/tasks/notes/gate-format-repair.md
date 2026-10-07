@@ -1,4 +1,4 @@
-### gate-format-repair：收尾——恢复 main 门禁全绿 + 卡标题回填（🚧 doing）
+### gate-format-repair：收尾——恢复 main 门禁全绿 + 卡标题回填（✅ done）
 
 ~~~text
 任务编号：gate-format-repair
@@ -30,5 +30,35 @@
   3. `PYTHONUTF8=1 ./scripts.sh check` 全绿（lint 不再短路，pytest 真实跑完）
 test_id：MVP-PROCESS-002
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 21:00
+commit：`edae3c1`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : `ruff format --check backend/` 95 files 全绿（修复前 2 个文件
+                待格式化；`ruff check` All checks passed）
+  pytest      : 364 passed（与 main 在修 lint 前的独立 pytest 跑分一致，
+                说明本提交零语义改动），exit 0
+  红点定位     : main（`a68be60`）唯一红点 = `ruff format --check` 拒收
+                `backend/tests/test_gate_utf8.py` 与 `backend/tests/test_merge_guard.py`；
+                漂移来源经 diff 证实是 `0ed6e0d` 本身（合入过程未再改动这两文件）；
+                `set -e` 令 `check` 在 lint 处短路，pytest 此前从未在 main 上跑过 ——
+                本任务补跑：364 passed。另注：当时 main 的 pytest 此前未验证，
+                本次为首次全量验证通过。
+  记录核对     : `claim-denum-coordinator` 的 a1/a2/a3/a4 四条分支全部在 main 上
+                （`6aa788e`/`6f9fb73`/`074df23`/`7a56061`）且均在认领 58 的「分支」
+                格登记 —— 协调者提到的「a1/a2 合并记录不一致」经核实现已一致
+                （由 a2 回填 + a3/a4 补登解决），本任务无需改动其任何文件。
+  卡标题回填   : notes 目录 `doing` 标题清零（5 张：claim-denum-migrate-rest /
+                gate-sandbox-pitfall / gate-baseline-repair / root-worktree-clean /
+                trace-closure —— 正文「当前状态」与任务行均已是 done）。
+已知问题：
+  - **过程缺口（非本任务范围）**：mergeguard 的合并门禁只跑 docstate+discipline，
+    lint/pytest 不在其内；作者的「本地全绿」声明一旦失真（本次：`0ed6e0d` 未过
+    formatter 即合入），红点会直达 main，且 `set -e` 短路会掩盖后续步骤。是否把
+    lint/pytest 纳入 mergeguard 门禁属 tools/mergeguard 的决策，建议另案（fleet 讨论）。
+  - `root-worktree-clean` 卡的 commit 行仍是「本分支 tip 见 git log -1」的指针式
+    表述（其作者刻意如此，指向的分支已合入 `a80c5ad` 一线）；本任务按要求只回填
+    标题，未改其正文一个字。
 ~~~

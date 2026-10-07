@@ -89,7 +89,7 @@
 | claim-denum-coordinator | OpenCode | claim-denum | ✅ done（合入 6aa788e；a2/a3/a4 回填与登记） | `agent/local/opencode/claim-denum-coordinator/a1` `a2` `a3` `a4` | `MVP-PROCESS-001` |
 | mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 已由 Qoder 协助回填） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
 | win-utf8-stdio | OpenCode | — | ✅ done（已提交待合；a1 = 0ed6e0d，四道门禁在无任何 UTF-8 环境变量下全绿） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
-| gate-format-repair | Qoder | — | 🚧 doing（协调者收尾指令：lint 基线红修复 + 5 卡标题回填） | `agent/local/qoder/gate-format-repair/a1` | `MVP-PROCESS-002` |
+| gate-format-repair | Qoder | — | ✅ done（实现 edae3c1；lint 基线恢复 + 5 卡标题回填） | `agent/local/qoder/gate-format-repair/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
