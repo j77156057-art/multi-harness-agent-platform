@@ -94,6 +94,7 @@
 | adapter-verbs | Qoder | paperclip-buzz-adr | ✅ done（实现 3c98a77；§7 十六动词收满，差额清零） | `agent/local/qoder/adapter-verbs/a1` | `MVP-ADAPTER-001` |
 | split-closure | Qoder | adapter-verbs | ✅ done（实现 27d7be0；闭环成形，顺带修方向 bug） | `agent/local/qoder/split-closure/a1` | `CORE-SPLIT-001` |
 | frontend-thread | Qoder | paperclip-buzz-adr | ✅ done（实现 5905f4a；三栏壳+项目群+任务线程，浏览器实测留档） | `agent/local/qoder/frontend-thread/a1` | `MVP-UI-001` |
+| jsonl-export | Qoder | frontend-thread | 🚧 doing（八步计划第 8 步：深度集成面——JSONL 异步导出 + 对账） | `agent/local/qoder/jsonl-export/a1` | `CORE-EXPORT-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -215,6 +216,7 @@
 | adapter-verbs | [卡](docs/tasks/notes/adapter-verbs.md) | | |
 | split-closure | [卡](docs/tasks/notes/split-closure.md) | | |
 | frontend-thread | [卡](docs/tasks/notes/frontend-thread.md) | | |
+| jsonl-export | [卡](docs/tasks/notes/jsonl-export.md) | | |
 
 ## 共享文件改动声明
 
