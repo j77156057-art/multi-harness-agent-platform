@@ -139,3 +139,29 @@ append-only、闭环检查器逐条命中）本身就是反双源的机械守卫
 - `docs/adr/ADR-DEV-002-single-account-acl.md`（临时降级先例）
 - `docs/proposals/sweeper-family.md`（调度域最近一笔设计）
 - `TASKS.md` 任务卡 `paperclip-buzz-adr`（协调者八步计划的第 2 步）
+
+---
+
+## 源码核实修订（2026-10-08；paperclip-buzz-source 任务）
+
+**本文档初稿的"借鉴点"列来自协调者描述，未经两个项目的源码核实**（正文
+对照表的"事实"列只描述本仓 main 上的资产）。2026-10-08 完成源码深读：
+`block/buzz @ c96d707f6efd359e6cfdc34bd93c8b5fb36f1d5d`、
+`paperclipai/paperclip @ ceabc3bc880676c49eee907a8d736f961a1358eb`；证据链与
+三方对照见 **`docs/reports/paperclip-buzz-source-review.md`**。核实结论：
+
+1. **两域描述成立，且均被低估**：Buzz 不只是"频道/线程"——是 134-kind 的
+   Nostr 事件日志（含 NIP-34 git 全族：patch/PR/merged 状态）与多 harness
+   宿主（buzz-acp 跑 Goose/Codex/Claude Code）；Paperclip 的"预算/权限"比
+   字样深（company/agent/project 三级预算 + 调度前预留执行点、21 权限键 +
+   五态审批 + governance）。
+2. **事件名映射表的重要更正**：协调者提议的 11 个事件名是"Buzz 风格"的
+   命名灵感，**不是 Buzz 现有事件名**；Buzz 中 `task.*`（43001-43006）与
+   审批事件（46001-46012）属"已定义未发射"，真实在用者是频道/消息/NIP-34
+   git 系。正文该表的"R10 对应"列仍有效，三方对照以报告 §3 为准。
+3. **深度集成的第一候选**（报告 §5）：**单向发布**——平台事件（JSONL 导出）
+   经 buzz-sdk/WS 以 kind:9 发到 Buzz 频道（countdown-bot 为同款示例）；
+   Paperclip 的 `external-task-protocol`（Draft）**天生双向**，与"单真相源"
+   边界冲突，需先裁决主从而后另立 ADR。
+4. 本文档决策 4（深度集成须另立 ADR）**不因本次核实而改变**；上述候选在
+   落地前仍须各自过闸。引用本文档者，本节的源码事实优先于初稿描述。
