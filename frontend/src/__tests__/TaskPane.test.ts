@@ -1,6 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
-import type { EventRecord, TaskSummary } from '../api'
+import type { EventRecord, TaskDiff, TaskSummary } from '../api'
 import TaskPane from '../components/TaskPane.vue'
 
 const tasks: TaskSummary[] = [
@@ -51,9 +51,37 @@ const events: EventRecord[] = [
   },
 ]
 
+const diffFixture: TaskDiff = {
+  task_id: 'T-1',
+  attempt_id: 'T-1.a1',
+  available: true,
+  reason: null,
+  base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  head_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  branch: 'agent/g1/codex/T-1/a1',
+  files: [
+    { path: 'src/app.py', insertions: 3, deletions: 1, binary: false },
+    { path: 'assets/logo.png', insertions: null, deletions: null, binary: true },
+  ],
+  files_changed: 2,
+  insertions: 3,
+  deletions: 1,
+  patch: null,
+  truncated: false,
+}
+
 function render(props: Partial<InstanceType<typeof TaskPane>['$props']> = {}) {
   return mount(TaskPane, {
-    props: { tasks: [], selectedTask: null, events: [], loading: false, error: null, ...props },
+    props: {
+      tasks: [],
+      selectedTask: null,
+      events: [],
+      diff: null,
+      diffLoading: false,
+      loading: false,
+      error: null,
+      ...props,
+    },
   })
 }
 
@@ -91,5 +119,82 @@ describe('TaskPane', () => {
 
     const failing = render({ error: 'resource.not_found: unknown task' })
     expect(failing.get('[role="alert"]').text()).toContain('resource.not_found')
+  })
+
+  it('renders the diff card with files, counts and binaries', () => {
+    const wrapper = render({
+      tasks,
+      selectedTask: tasks[0] ?? null,
+      events,
+      diff: diffFixture,
+    })
+
+    expect(wrapper.get('.diff-card').text()).toContain('2 个文件')
+    expect(wrapper.get('.diff-card').text()).toContain('+3')
+    expect(wrapper.get('.diff-card').text()).toContain('−1')
+    expect(wrapper.get('.diff-card').text()).toContain('src/app.py')
+    expect(wrapper.get('.diff-card').text()).toContain('assets/logo.png')
+    expect(wrapper.get('.diff-card').text()).toContain('二进制')
+    expect(wrapper.get('.diff-card').text()).toContain('aaaaaaa..bbbbbbb')
+    expect(wrapper.find('.diff-patch').exists()).toBe(false)
+  })
+
+  it('emits expandDiff from the diff card button', async () => {
+    const wrapper = render({
+      tasks,
+      selectedTask: tasks[0] ?? null,
+      events,
+      diff: diffFixture,
+    })
+
+    const button = wrapper.findAll('button').find((b) => b.text().includes('展开 patch'))
+    expect(button).toBeDefined()
+    await button?.trigger('click')
+    expect(wrapper.emitted('expandDiff')).toEqual([[]])
+  })
+
+  it('shows the patch and the truncation note once it is loaded', () => {
+    const wrapper = render({
+      tasks,
+      selectedTask: tasks[0] ?? null,
+      events,
+      diff: { ...diffFixture, patch: 'diff --git a/x b/x\n+hello\n', truncated: true },
+    })
+
+    expect(wrapper.get('.diff-patch').text()).toContain('diff --git a/x b/x')
+    expect(wrapper.get('.diff-card').text()).toContain('已截断')
+  })
+
+  it('shows the honest unavailable reason instead of a fake empty diff', () => {
+    const wrapper = render({
+      tasks,
+      selectedTask: tasks[0] ?? null,
+      events,
+      diff: {
+        ...diffFixture,
+        available: false,
+        reason: 'no attempt has published a commit',
+        files: [],
+        files_changed: 0,
+        insertions: 0,
+        deletions: 0,
+      },
+    })
+
+    const card = wrapper.get('.diff-card')
+    expect(card.text()).toContain('差异不可用：no attempt has published a commit')
+    expect(card.find('.diff-files').exists()).toBe(false)
+  })
+
+  it('shows the diff loading state', () => {
+    const wrapper = render({
+      tasks,
+      selectedTask: tasks[0] ?? null,
+      events,
+      diff: null,
+      diffLoading: true,
+    })
+
+    expect(wrapper.get('.diff-head').text()).toContain('加载中')
   })
 })

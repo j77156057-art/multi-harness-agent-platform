@@ -8,6 +8,7 @@ import {
   type GroupSummary,
   type MessageRecord,
   type ProjectSummary,
+  type TaskDiff,
   type TaskSummary,
 } from '../api'
 
@@ -17,6 +18,7 @@ interface SessionState {
   tasks: TaskSummary[]
   messages: MessageRecord[]
   events: EventRecord[]
+  diff: TaskDiff | null
   selectedTask: TaskSummary | null
   loading: Record<string, boolean>
   error: string | null
@@ -29,6 +31,7 @@ export const useSession = defineStore('session', {
     tasks: [],
     messages: [],
     events: [],
+    diff: null,
     selectedTask: null,
     loading: {},
     error: null,
@@ -60,6 +63,7 @@ export const useSession = defineStore('session', {
       this.error = null
       this.selectedTask = null
       this.events = []
+      this.diff = null
       this.loading.group = true
       try {
         const [tasks, messages] = await Promise.all([
@@ -77,6 +81,7 @@ export const useSession = defineStore('session', {
     async openTask(taskId: string): Promise<void> {
       this.error = null
       this.loading.task = true
+      this.diff = null
       try {
         const [task, page] = await Promise.all([api.getTask(taskId), api.taskEvents(taskId)])
         this.selectedTask = task
@@ -85,6 +90,39 @@ export const useSession = defineStore('session', {
         this.error = describeError(error)
       } finally {
         this.loading.task = false
+      }
+      // diff 是线程的一部分（diff-message 卡）：随打开一起取。取不到不拖垮
+      // 线程本身——错误走共享 error 面；迟到的响应属于别的任务时丢弃。
+      this.loading.diff = true
+      try {
+        const diff = await api.taskDiff(taskId)
+        if (this.selectedTask?.task_id === taskId) {
+          this.diff = diff
+        }
+      } catch (error) {
+        this.error = describeError(error)
+      } finally {
+        this.loading.diff = false
+      }
+    },
+    async expandDiff(): Promise<void> {
+      const taskId = this.selectedTask?.task_id
+      if (taskId === undefined || this.loading.diffPatch === true) {
+        return
+      }
+      this.loading.diffPatch = true
+      try {
+        const diff = await api.taskDiff(taskId, {
+          includePatch: true,
+          ...(this.diff?.attempt_id != null ? { attemptId: this.diff.attempt_id } : {}),
+        })
+        if (this.selectedTask?.task_id === taskId) {
+          this.diff = diff
+        }
+      } catch (error) {
+        this.error = describeError(error)
+      } finally {
+        this.loading.diffPatch = false
       }
     },
     async sendMessage(groupId: string, body: string): Promise<boolean> {

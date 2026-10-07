@@ -12,7 +12,7 @@ import TaskPane from './TaskPane.vue'
 const store = useSession()
 const route = useRoute()
 const router = useRouter()
-const { projects, groups, tasks, messages, events, selectedTask, error, loading } =
+const { projects, groups, tasks, messages, events, diff, selectedTask, error, loading } =
   storeToRefs(store)
 
 const selectedGroupId = ref<string | null>(null)
@@ -73,6 +73,10 @@ async function onSend(body: string): Promise<void> {
     await store.sendMessage(groupId, body)
   }
 }
+
+function onExpandDiff(): void {
+  void store.expandDiff()
+}
 </script>
 
 <template>
@@ -94,9 +98,12 @@ async function onSend(body: string): Promise<void> {
       :tasks="tasks"
       :selected-task="selectedTask"
       :events="events"
+      :diff="diff"
+      :diff-loading="loading.diff === true || loading.diffPatch === true"
       :loading="loading.task === true || loading.group === true"
       :error="error"
       @select="onSelectTask"
+      @expand-diff="onExpandDiff"
     />
   </div>
 </template>

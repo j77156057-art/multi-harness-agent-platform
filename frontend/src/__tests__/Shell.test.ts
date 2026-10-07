@@ -65,6 +65,21 @@ const ROUTES: Record<string, unknown> = {
     waiting_since: null,
     escalated_at: null,
   },
+  '/api/v1/tasks/T-1/diff': {
+    task_id: 'T-1',
+    attempt_id: 'T-1.a1',
+    available: true,
+    reason: null,
+    base_commit: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    head_commit: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    branch: 'agent/g1/codex/T-1/a1',
+    files: [{ path: 'src/app.py', insertions: 3, deletions: 1, binary: false }],
+    files_changed: 1,
+    insertions: 3,
+    deletions: 1,
+    patch: null,
+    truncated: false,
+  },
   '/api/v1/tasks/T-1/events': {
     events: [
       {
@@ -131,5 +146,6 @@ describe('Shell (route → store → three panes)', () => {
 
     expect(wrapper.text()).toContain('线程 · T-1')
     expect(wrapper.text()).toContain('claim')
+    expect(wrapper.get('.diff-card').text()).toContain('src/app.py')
   })
 })

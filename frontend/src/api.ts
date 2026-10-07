@@ -93,6 +93,31 @@ export interface NewMessage {
   body: string
 }
 
+export interface DiffFile {
+  path: string
+  insertions: number | null
+  deletions: number | null
+  binary: boolean
+}
+
+// 任务线程的 diff 读数（后端按需从 canonical 仓计算；diff-message 卡）。
+// available=false 时 files 为空、reason 说明原因——不发明空 diff。
+export interface TaskDiff {
+  task_id: string
+  attempt_id: string | null
+  available: boolean
+  reason: string | null
+  base_commit: string | null
+  head_commit: string | null
+  branch: string | null
+  files: DiffFile[]
+  files_changed: number
+  insertions: number
+  deletions: number
+  patch: string | null
+  truncated: boolean
+}
+
 interface EventPage {
   events: EventRecord[]
   next_seq: number
@@ -116,6 +141,20 @@ export const api = {
   },
   taskEvents(taskId: string, sinceSeq = 0): Promise<EventPage> {
     return request(`/tasks/${encodeURIComponent(taskId)}/events?since_seq=${sinceSeq}`)
+  },
+  taskDiff(
+    taskId: string,
+    options: { attemptId?: string; includePatch?: boolean } = {},
+  ): Promise<TaskDiff> {
+    const params = new URLSearchParams()
+    if (options.attemptId !== undefined) {
+      params.set('attempt_id', options.attemptId)
+    }
+    if (options.includePatch === true) {
+      params.set('include_patch', '1')
+    }
+    const query = params.size > 0 ? `?${params.toString()}` : ''
+    return request(`/tasks/${encodeURIComponent(taskId)}/diff${query}`)
   },
   listMessages(groupId: string, sinceSeq = 0): Promise<{ messages: MessageRecord[] }> {
     return request(`/groups/${encodeURIComponent(groupId)}/messages?since_seq=${sinceSeq}`)

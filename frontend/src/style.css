@@ -128,3 +128,20 @@ button:disabled { color: var(--muted); cursor: not-allowed; }
 .event-actor { color: var(--muted); font-size: 0.78rem; }
 .event-payload { grid-column: 1 / -1; color: var(--muted); font-size: 0.78rem; }
 .event-payload pre { margin: 0.2rem 0 0.3rem; padding: 0.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; }
+
+/* 差异卡（diff-message 卡）：线程头部下的只读读数。配色只用已断言的
+   token 对（ok/bad/muted/ink × bone；patch 用 ink/panel）——不新增对。 */
+.diff-card { border: 1px solid var(--line); border-radius: 4px; padding: 0.5rem 0.6rem; margin-bottom: 0.7rem; }
+.diff-head { display: flex; justify-content: space-between; align-items: baseline; }
+.diff-head h3 { margin: 0 0 0.3rem; font-size: 0.85rem; }
+.diff-summary { margin: 0 0 0.4rem; display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; }
+.diff-files { list-style: none; margin: 0 0 0.4rem; padding: 0; }
+.diff-file { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.1rem 0; }
+.diff-path { overflow-wrap: anywhere; }
+.diff-counts { display: flex; gap: 0.4rem; }
+.diff-add { color: var(--ok); }
+.diff-del { color: var(--bad); }
+.diff-meta { color: var(--muted); font-size: 0.78rem; }
+.diff-note { margin: 0.2rem 0; color: var(--muted); font-size: 0.78rem; }
+.diff-actions { margin: 0.2rem 0; }
+.diff-patch { margin: 0.3rem 0 0.2rem; padding: 0.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; color: var(--ink); font-size: 0.78rem; }

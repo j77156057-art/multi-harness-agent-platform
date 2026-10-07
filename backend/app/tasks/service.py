@@ -35,6 +35,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.db.sequence import next_global_seq
 from app.events.store import EventRecord, EventStore
+from app.git.diff import PATCH_LIMIT_BYTES, compute_task_diff
 from app.git.repo import CanonicalRepo
 from app.git.worktree import WorktreeManager
 from app.lease.service import iso, parse_iso, release_lease
@@ -1408,6 +1409,104 @@ class SchedulerService:
         if not rows:
             raise NotFound(f"unknown task: {task_id}")
         return dict(rows[0])
+
+    def diff_for_task(
+        self,
+        task_id: str,
+        *,
+        attempt_id: str | None = None,
+        include_patch: bool = False,
+        repo: CanonicalRepo | None = None,
+        patch_max_bytes: int = PATCH_LIMIT_BYTES,
+    ) -> dict[str, object]:
+        """The task thread's diff reading (diff-message card; Buzz kind:40008).
+
+        Read-only: the diff is computed from the canonical object store on
+        demand. ``available: False`` with a reason is the honest answer for a
+        task whose attempt has not published (or whose commits are gone) --
+        never an invented empty diff. The patch rides only on request and is
+        byte-bounded with an explicit ``truncated`` flag.
+        """
+        if not self.database.read("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,)):
+            raise NotFound(f"unknown task: {task_id}")
+        attempt = self._diff_attempt(task_id, attempt_id=attempt_id)
+        result: dict[str, object] = {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "available": False,
+            "reason": None,
+            "base_commit": None,
+            "head_commit": None,
+            "branch": None,
+            "files": [],
+            "files_changed": 0,
+            "insertions": 0,
+            "deletions": 0,
+            "patch": None,
+            "truncated": False,
+        }
+        if attempt is None:
+            result["reason"] = (
+                "no attempt has published a commit"
+                if attempt_id is None
+                else "attempt has not published a commit"
+            )
+            return result
+        base = attempt["base_commit"]
+        head = attempt["head_commit"]
+        result["attempt_id"] = str(attempt["attempt_id"])
+        if head is None:
+            result["reason"] = "attempt has not published a commit"
+            return result
+        if base is None:
+            result["reason"] = "attempt has no frozen base commit"
+            return result
+        result["base_commit"] = str(base)
+        result["head_commit"] = str(head)
+        branch = self.database.read(
+            "SELECT branch FROM workspaces WHERE attempt_id = ? ORDER BY rowid DESC LIMIT 1",
+            (str(attempt["attempt_id"]),),
+        )
+        if branch:
+            result["branch"] = str(branch[0]["branch"])
+        canonical = repo if repo is not None else CanonicalRepo.from_settings()
+        if not canonical.has_object(str(base)) or not canonical.has_object(str(head)):
+            result["reason"] = "commits are not in the canonical repository"
+            return result
+        result.update(
+            compute_task_diff(
+                canonical,
+                base_commit=str(base),
+                head_commit=str(head),
+                include_patch=include_patch,
+                patch_max_bytes=patch_max_bytes,
+            )
+        )
+        result["available"] = True
+        return result
+
+    def _diff_attempt(self, task_id: str, *, attempt_id: str | None) -> dict | None:
+        """The attempt a diff is asked for: named, or the best published one.
+
+        Default resolution prefers the task's current attempt when it has
+        published a commit, else the newest attempt that did -- the thread
+        should keep showing the last real work after a merge.
+        """
+        if attempt_id is not None:
+            rows = self.database.read(
+                "SELECT * FROM task_attempts WHERE attempt_id = ? AND task_id = ?",
+                (attempt_id, task_id),
+            )
+            if not rows:
+                raise NotFound(f"unknown attempt: {attempt_id} for task {task_id}")
+            return dict(rows[0])
+        rows = self.database.read(
+            "SELECT * FROM task_attempts WHERE task_id = ? AND head_commit IS NOT NULL"
+            " ORDER BY (attempt_id = (SELECT current_attempt_id FROM tasks WHERE task_id = ?))"
+            " DESC, attempt_no DESC LIMIT 1",
+            (task_id, task_id),
+        )
+        return None if not rows else dict(rows[0])
 
     def list_tasks(self, group_id: str, *, status: str | None = None) -> list[dict]:
         if status is None:

@@ -76,6 +76,21 @@ describe('api client', () => {
     })
   })
 
+  it('builds diff URLs with attempt and patch flags', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, { task_id: 'T-1', available: false }),
+      jsonResponse(200, { task_id: 'T-1', available: false }),
+    )
+
+    await api.taskDiff('T-1')
+    expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/tasks/T-1/diff')
+
+    await api.taskDiff('T-1', { attemptId: 'T-1.a2', includePatch: true })
+    expect(mock.mock.calls[1]?.[0]).toBe(
+      '/api/v1/tasks/T-1/diff?attempt_id=T-1.a2&include_patch=1',
+    )
+  })
+
   it('fetches a task thread page', async () => {
     const mock = stubFetch(jsonResponse(200, { events: [], next_seq: 7, has_more: false }))
 
