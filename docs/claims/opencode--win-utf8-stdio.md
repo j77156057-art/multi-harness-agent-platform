@@ -8,7 +8,7 @@
 | Harness | OpenCode |
 | 认领时间 | 2026-10-07 03:55 |
 | 分支 | `agent/local/opencode/win-utf8-stdio/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（合入 main；四道门禁在无任何 UTF-8 环境变量的环境下全绿）|
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `win-utf8-stdio`。
 
