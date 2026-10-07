@@ -92,6 +92,7 @@
 | gate-format-repair | Qoder | — | ✅ done（实现 edae3c1；lint 基线恢复 + 5 卡标题回填） | `agent/local/qoder/gate-format-repair/a1` | `MVP-PROCESS-002` |
 | paperclip-buzz-adr | Qoder | gate-format-repair | ✅ done（实现 59b4960；ADR-DEV-003 落成） | `agent/local/qoder/paperclip-buzz-adr/a1` | `MVP-ARCH-001` |
 | adapter-verbs | Qoder | paperclip-buzz-adr | ✅ done（实现 3c98a77；§7 十六动词收满，差额清零） | `agent/local/qoder/adapter-verbs/a1` | `MVP-ADAPTER-001` |
+| split-closure | Qoder | adapter-verbs | 🚧 doing（split 闭环：子任务计划 + 唤醒巡检 + 方向修复） | `agent/local/qoder/split-closure/a1` | `CORE-SPLIT-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -211,6 +212,7 @@
 | gate-format-repair | [卡](docs/tasks/notes/gate-format-repair.md) | | |
 | paperclip-buzz-adr | [卡](docs/tasks/notes/paperclip-buzz-adr.md) | | |
 | adapter-verbs | [卡](docs/tasks/notes/adapter-verbs.md) | | |
+| split-closure | [卡](docs/tasks/notes/split-closure.md) | | |
 
 ## 共享文件改动声明
 
