@@ -90,7 +90,7 @@
 | mergeguard-fix | OpenCode | root-worktree-clean | ✅ done（合入 2c85a9c；a2 已由 Qoder 协助回填） | `agent/local/opencode/mergeguard-fix/a1` `a2` | `MVP-MERGE-LOCK-001` |
 | win-utf8-stdio | OpenCode | — | ✅ done（已提交待合；a1 = 0ed6e0d，四道门禁在无任何 UTF-8 环境变量下全绿） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
 | gate-format-repair | Qoder | — | ✅ done（实现 edae3c1；lint 基线恢复 + 5 卡标题回填） | `agent/local/qoder/gate-format-repair/a1` | `MVP-PROCESS-002` |
-| paperclip-buzz-adr | Qoder | gate-format-repair | 🚧 doing（八步计划第 2 步：借鉴边界 ADR） | `agent/local/qoder/paperclip-buzz-adr/a1` | `MVP-ARCH-001` |
+| paperclip-buzz-adr | Qoder | gate-format-repair | ✅ done（实现 59b4960；ADR-DEV-003 落成） | `agent/local/qoder/paperclip-buzz-adr/a1` | `MVP-ARCH-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。

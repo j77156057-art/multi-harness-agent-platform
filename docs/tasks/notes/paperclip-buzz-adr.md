@@ -1,4 +1,4 @@
-### paperclip-buzz-adr：借鉴 Paperclip / Buzz 的边界与唯一真相源（🚧 doing）
+### paperclip-buzz-adr：借鉴 Paperclip / Buzz 的边界与唯一真相源（✅ done）
 
 ~~~text
 任务编号：paperclip-buzz-adr
@@ -38,5 +38,31 @@
   5. `MVP-ARCH-001` 登记进 traceability.md；`PYTHONUTF8=1 ./scripts.sh check` 全绿
 test_id：MVP-ARCH-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 21:30
+commit：`59b4960`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败（含 [traceability]：MVP-ARCH-001 已登记）
+  ruff        : All checks passed（95 files already formatted）
+  pytest      : 364 passed，exit 0
+  ADR 落点     : `docs/adr/ADR-DEV-003-paperclip-buzz-adoption.md`（按 ADR-DEV-001
+                格式：状态/日期/关联任务/影响范围 + 背景/决策/理由/后果/回退条件/
+                兼容性保证/关联）
+  对照表事实   : Paperclip 五域（调度 `1973238` / Adapter `ae07649` / Heartbeat /
+                预算 / 权限🟡）与 Buzz 五域（频道 / 线程🟡 / 事件日志 / 身份🟡 /
+                Git 协作）逐项经 main 核对，缺口显式登记（三动词无路由、认证层、
+                前端、caused_by、lifespan 接线）
+  事件名映射   : 11 项提议 → 9 项已有 R10 对应（claim / request_help /
+                help_accepted / submit_result / abandon / verify_passed / approve /
+                merge_success 等）；project.created 与 agent.joined 属管理面
+                （无事件），如需进事件流必须走 §37.7 白名单变更
+已知问题：
+  - `docs/traceability.md` 的「现状小结」计数（"31 个已登记的 ID…"）是**历史遗留
+    散文、早已过时**（加本行前真实为 32 行 / 24✅ / 3🟡 / 5⚠️；"MVP 才走到 MVP-02"
+    更是早期文字），无机械检查、不随新行同步；本任务按要求只加行、不改小结，
+    如需重写小结应另立清理任务。
+  - `DOC-ADR-001`（ADR 清单完整）在 traceability 里仍是「⚠️ 仅声明」：本 ADR 落成
+    后 docs/adr/ 有三个文件，但没有任何检查器枚举/校验清单——维持现状，改动属
+    该 ID 的归属任务。
 ~~~
