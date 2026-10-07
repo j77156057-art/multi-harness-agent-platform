@@ -25,6 +25,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from app.budget.service import (
+    raise_incidents,
+    record_reservation,
+    reservation_for_claim,
+    reserve_blocked,
+    task_budget,
+)
 from app.claim.transitions import ConcurrentStateChange, apply_transition
 from app.config import settings
 from app.db.connection import Database
@@ -59,6 +66,7 @@ class RejectCode(StrEnum):
     TASK_NOT_READY = "claim.task_not_ready"
     ALREADY_OWNED = "claim.already_owned"
     ATTEMPT_BUDGET_EXHAUSTED = "claim.attempt_budget_exhausted"
+    TOKEN_BUDGET_EXHAUSTED = "claim.token_budget_exhausted"
     CONCURRENT_CLAIM = "claim.concurrent_claim"
     BATCH_ABORTED = "claim.batch_aborted"
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
@@ -482,6 +490,22 @@ class ClaimService:
         fencing_epoch = int(task["current_epoch"]) + 1
         lease_until = (moment + timedelta(seconds=settings.lease_seconds)).isoformat()
 
+        # budget-guard: the dispatch-time reservation. R10 §11's "预占资源"
+        # read as the task's declared token budget too; the check runs before
+        # any claim state is written, so a denial leaves no claim event, no
+        # resource lock and no hold behind (the incident is the only trace).
+        budget_limit = task_budget(conn, task_id)
+        budget_amount = 0
+        if budget_limit is not None:
+            budget_amount = reservation_for_claim(budget_limit)
+            if reserve_blocked(conn, task_id=task_id, limit=budget_limit, amount=budget_amount):
+                raise_incidents(conn, task_id=task_id, now=moment)
+                return ClaimItem(
+                    task_id=task_id,
+                    outcome=OUTCOME_REJECTED,
+                    error_code=RejectCode.TOKEN_BUDGET_EXHAUSTED.value,
+                )
+
         blocked = self._resource_blocker(conn, resources, moment)
         if blocked is not None:
             return self._defer(
@@ -571,6 +595,14 @@ class ClaimService:
                 moment.isoformat(),
             ),
         )
+        if budget_limit is not None:
+            record_reservation(
+                conn,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                amount=budget_amount,
+                now=moment,
+            )
         return ClaimItem(
             task_id=task_id,
             outcome=OUTCOME_CLAIMED,
@@ -697,6 +729,16 @@ class ClaimService:
             attempt_id = f"{task_id}.a{attempt_no}"
             fencing_epoch = int(task["current_epoch"]) + 1
             lease_until = (moment + timedelta(seconds=settings.lease_seconds)).isoformat()
+            # budget-guard: a deferred resume is a real dispatch too -- the
+            # hold is re-checked now (budget may have moved since the defer)
+            # and stays queued (returns None) when it no longer fits.
+            budget_limit = task_budget(conn, task_id)
+            budget_amount = 0
+            if budget_limit is not None:
+                budget_amount = reservation_for_claim(budget_limit)
+                if reserve_blocked(conn, task_id=task_id, limit=budget_limit, amount=budget_amount):
+                    raise_incidents(conn, task_id=task_id, now=moment)
+                    return None
             self._acquire_resources(
                 conn,
                 resources,
@@ -780,6 +822,14 @@ class ClaimService:
             )
             if cursor.rowcount != 1:
                 raise ConcurrentStateChange(f"could not reopen the deferred claim for {task_id}")
+            if budget_limit is not None:
+                record_reservation(
+                    conn,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    amount=budget_amount,
+                    now=moment,
+                )
             return ClaimItem(
                 task_id=task_id,
                 outcome=OUTCOME_CLAIMED,

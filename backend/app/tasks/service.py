@@ -22,6 +22,13 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from app.budget.service import (
+    committed_buckets,
+    raise_incidents,
+    settle_attempt,
+    task_budget,
+    usage_tokens,
+)
 from app.claim.guarded_write import guarded_write
 from app.claim.transitions import apply_transition
 from app.config import settings
@@ -491,6 +498,18 @@ class SchedulerService:
                 "UPDATE task_attempts SET status = ?, head_commit = ? WHERE attempt_id = ?",
                 (TaskStatus.VERIFYING.value, str(completion["commit"]), attempt_id),
             )
+            # budget-guard: settle the attempt's hold in the same transaction.
+            # Reported usage becomes the actual; an unreported one stays NULL
+            # (the policy layer counts it at the hold amount -- never a zero).
+            moment = datetime.now(UTC)
+            if settle_attempt(
+                conn,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                actual_tokens=usage_tokens(completion),
+                now=moment,
+            ):
+                raise_incidents(conn, task_id=task_id, now=moment)
             return record
 
     def request_help(
@@ -652,11 +671,14 @@ class SchedulerService:
         under ``(operation, idempotency_key)`` and a replay returns it with no
         new plan, child rows, or events.
 
-        Declared gaps (card): the "budget sufficient" guard has no model to
-        evaluate against (there is no plan-level child budget), so it is
-        recorded as not-evaluable rather than approximated. The
-        ``all_children_merged`` wake-up lives in ``sweep_dependencies``
-        (split-closure).
+        Budget guard (budget-guard card): when the parent task enforces a token
+        budget (its plan snapshot declares ``budget_tokens > 0``), the budgets
+        the child specs declare must fit inside the parent's **unused** budget
+        (limit minus committed tokens) -- R10 L679's "继承未使用预算" as the
+        smallest decidable rule. Children keep their own declared budgets
+        (auto-allocation is out of scope); parents without an enforced budget
+        are not checked (backward compatible). The ``all_children_merged``
+        wake-up lives in ``sweep_dependencies`` (split-closure).
         """
         if not child_specs:
             raise Conflict("split needs at least one child spec")
@@ -687,6 +709,25 @@ class SchedulerService:
             parent = conn.execute(
                 "SELECT group_id, current_epoch FROM tasks WHERE task_id = ?", (task_id,)
             ).fetchone()
+            parent_limit = task_budget(conn, task_id)
+            if parent_limit is not None:
+                children_budget = 0
+                for spec in child_specs:
+                    try:
+                        declared = int(spec.get("budget_tokens", 0) or 0)
+                    except (TypeError, ValueError):
+                        raise Conflict(
+                            f"child {spec.get('id')} budget_tokens is not a number"
+                        ) from None
+                    if declared < 0:
+                        raise Conflict(f"child {spec.get('id')} budget_tokens is negative")
+                    children_budget += declared
+                remaining = parent_limit - committed_buckets(conn, task_id).committed
+                if children_budget > remaining:
+                    raise Conflict(
+                        f"split children budget {children_budget} exceeds parent"
+                        f" {task_id} remaining {remaining}"
+                    )
             child_plan_id = f"plan-split-{uuid.uuid4().hex}"
             child_snapshot_id, _child_plan_hash = self._store_plan(
                 conn,
