@@ -1,4 +1,4 @@
-### adapter-verbs：§7 十六动词收满（help/split 三动词转正）（🚧 doing）
+### adapter-verbs：§7 十六动词收满（help/split 三动词转正）（✅ done）
 
 ~~~text
 任务编号：adapter-verbs
@@ -53,5 +53,36 @@
      `PYTHONUTF8=1 ./scripts.sh check` 全绿
 test_id：MVP-ADAPTER-001
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-07 22:26
+commit：`3c98a77`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（96 files already formatted）
+  pytest      : 374 passed（本任务净增 10 项：test_adapter_verbs.py），exit 0
+  关键断言     : ①request_help 锻造 help_id 并随事件负载落库（R10 守卫「help_id
+                已创建」v1 首次落实）；②accept/reject 自环：错 help_id / 非
+                needs_help 拒绝且零写入，成功时 owner/attempt/state_changed_seq
+                全不动（R10-fix-11），collaborator 记入事件 actor；③split：
+                child drafts + depends_on 依赖 + 两事件（伪状态 child_created
+                不走 apply_transition）+ in_progress→blocked，blocked 起步只发
+                split；同幂等键重放返回首次结果零新事件；stale epoch 拒绝；
+                自身/重复/已存在的 child id 拒绝；④十六动词全部接传输层
+                （test_adapter / test_real_adapters 联合钉死，UnsupportedVerb
+                类已删）；⑤HTTP 端到端：request_help→accept→reject→split（含
+                幂等重放）经真实 HttpAdapter 走完。
+  覆盖与台账   : 覆盖套件补 needs_help 两自环 + in_progress split_parent_blocked
+                出口；traceability §7 差额表 16/16 归零、MVP-ADAPTER-001/-002
+                行同步；`UnsupportedVerb` 的「仅名字」缺口关闭。
+已知问题：
+  - 声明缺口（卡内范围声明逐条对应，均无载体可写而非略过）：`help_artifacts`
+    表不存在（§8 清单有、迁移从未建），accept 的「协作者 worktree/Lease」与
+    reject 的「提醒 owner」只做事件记账；`help_resolved`（needs_help→
+    in_progress）无 §7 动词、无生产者；split 的「budget sufficient」守卫无模
+    型可评估（plan 级子任务预算不存在），显式不造近似；子任务为惰性 draft
+    （无快照/审批入口），`all_children_merged`（blocked→ready）生产者缺失——
+    这一条是 split 闭环的下一块拼图，建议作为并卡（连同子任务生命周期）。
+  - human-initiated split（R10 守卫的「human or owner」中的 human 侧）v1 无
+    路由；如需应经 §18 面补（另案）。
 ~~~

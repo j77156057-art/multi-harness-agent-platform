@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-07 21:37 |
 | 分支 | `agent/local/qoder/adapter-verbs/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 3c98a77；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `adapter-verbs`。
 
@@ -18,3 +18,8 @@
   三个动词：`accept_help` / `reject_help` / `split_task`（`UnsupportedVerb` 清零）。
   前置：gate-format-repair（`203d49a`）、paperclip-buzz-adr（`8b6d98f`）已合入，
   main 全量门禁全绿。
+- 2026-10-07 22:26：完成。实现 `3c98a77`；全量门禁绿（docstate 90/0、
+  discipline 44/0、ruff 96 files、pytest 374 passed = 净增 10）。
+  traceability §7 差额表 16/16 归零。声明缺口与并卡建议（子任务生命周期 +
+  all_children_merged 生产者）见卡内「已知问题」。
+

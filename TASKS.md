@@ -91,7 +91,7 @@
 | win-utf8-stdio | OpenCode | — | ✅ done（已提交待合；a1 = 0ed6e0d，四道门禁在无任何 UTF-8 环境变量下全绿） | `agent/local/opencode/win-utf8-stdio/a1` | `MVP-PROCESS-002` |
 | gate-format-repair | Qoder | — | ✅ done（实现 edae3c1；lint 基线恢复 + 5 卡标题回填） | `agent/local/qoder/gate-format-repair/a1` | `MVP-PROCESS-002` |
 | paperclip-buzz-adr | Qoder | gate-format-repair | ✅ done（实现 59b4960；ADR-DEV-003 落成） | `agent/local/qoder/paperclip-buzz-adr/a1` | `MVP-ARCH-001` |
-| adapter-verbs | Qoder | paperclip-buzz-adr | 🚧 doing（§7 十六动词收满：help/split 三动词） | `agent/local/qoder/adapter-verbs/a1` | `MVP-ADAPTER-001` |
+| adapter-verbs | Qoder | paperclip-buzz-adr | ✅ done（实现 3c98a77；§7 十六动词收满，差额清零） | `agent/local/qoder/adapter-verbs/a1` | `MVP-ADAPTER-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
