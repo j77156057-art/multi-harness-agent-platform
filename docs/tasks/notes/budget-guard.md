@@ -1,4 +1,4 @@
-### budget-guard：任务级 token 预算 + 调度前预留（🚧 doing）
+### budget-guard：任务级 token 预算 + 调度前预留（✅ done）
 
 ~~~text
 任务编号：budget-guard
@@ -85,5 +85,52 @@
   8. `PYTHONUTF8=1 ./scripts.sh check` 全绿；traceability 新增 `OPS-BUDGET-001`
 test_id：OPS-BUDGET-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 04:28
+commit：`ed00e94`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（116 files already formatted）
+  pytest      : 436 passed（本任务净增 20：test_budget.py；既有套件 0 回归），exit 0
+  关键断言     : ①政策：三桶 observed/committed 分账；准入含界（相等放行、
+                越界拒、零额行在满额时仍拒）；事故分类 observed 口径含界
+                （79 ok / 80 warning / 100 exhausted）——**在途预留不制造
+                事故**（Paperclip 同款分工）；usage 解析只信 harness
+                （total 优先、in+out 齐才计、部分上报按未上报、不发明零）。
+                ②准入：预算任务 claim 授予即有 held 行且重放不双预留；
+                `committed+amount>limit` 拒绝——**零 claim 状态**（无 claim
+                事件/无 attempt/无 held），R10 §11 必需的任务项行带
+                `rejected:claim.token_budget_exhausted`；拒绝对应 observed
+                阈值时开对应事故。③结算：submit 带 usage → settled+actual；
+                无 usage → actual NULL 且按预留额保守计入（≠0）；重复结算
+                no-op。④巡检：租约过期后滞留 held 被同轮 budget 巡检收口
+                （settled+NULL+note），第二轮幂等 0 动作；活跃 attempt 的
+                held 不动。⑤事故与告警：跨 warn% 开 warning、到限额开
+                exhausted；告警一次/事故（source_key=budget:<incident_id>，
+                重扫不重复）；未配 webhook 时事故仍开、队列零行；resolve
+                后 check 归 0。⑥split：子预算超父剩余 → Conflict（且零写入
+                ——无子任务行/子计划），恰等 → 放行；父未启用 → 兼容不查。
+                ⑦CLI：无库 exit 2；干净 exit 0 / 有 open 事故 exit 1；
+                settle/release/resolve 三态（无 held 可操作时 exit 2）。
+  变异验证     : ①去掉 reconcile 巡检 → 滞留收口断言必红；②准入谓词改
+                恒 False → 拒绝断言必红。均还原后 20/20 绿。
+  顺带修正     : 巡检测试初版用 `import 时刻+16min` 的时钟——租约以**真实
+                claim 时刻**起算 15 分钟，全量套件里 claim 晚于 import 约
+                2 分钟，单跑绿/全跑红。改为 +1h 从构造上消除时序依赖
+                （TestOrder 无关）。
+已知问题：
+  - **reclaim / take_over 路径不预留**（声明缺口）：两条路径创建的 attempt
+    没有 held 行——拒绝它们会卡死救援路径。其 usage 仍会在 submit 时入账
+    （amount 0 的 settled 行，observability 不丢）；准入控制的兜底是下一次
+    claim 被拒 + 事故 + 告警。
+  - **未上报 usage 按预留额保守计入**：宁可高估不发明数字；人类纠偏走
+    CLI `--settle/--release`（记录 note）。平台无法证明"没干活"的
+    attempt 一律 settle-unknown（Paperclip "未证实不落账"的保守侧）。
+  - 预算粒度=任务级（R10 只有任务级 `budget_tokens`）；project/agent 级、
+    cost_usd 计价（claude 已报）、预算 API/前端、自动升预算、snooze/dismiss
+    均为显式出范围（见上方范围声明）。
+  - 事故阈值口径是 **observed**（settled+保守未上报）；"下一个 attempt 装不下
+    估算"（admission 拒）本身不开事故——拒绝留痕在 task_claims 行（Paperclip
+    同款：reservation conflict 是暂态并发状况，不该惊动人）。
 ~~~
