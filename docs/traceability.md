@@ -67,6 +67,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-PROCESS-002` | 合并纪律：已合入 main 的任务必须已登记、已完成且卡证据完整；认领序号唯一 | ✅ 有断言 | `tools/discipline` merge 组 6 项 + registry 序号唯一断言（GATE-MERGE-CHECK-01，含 `test_discipline.py` 与 gate.yml `fetch-depth: 0`；2026-10-05 合 main 时移植到 docs/claims/ 认领目录版检查器）。**序号连续性断言已由 `claim-seq-adopt` 撤销**：它在并发分支下结构上不可满足，替换为「文件名 task_id 与内容一致」，理由与 34 次重命名的机械证据见 `docs/proposals/claim-seq-contiguity.md` |
 | `MVP-TRANSITION-MIRROR-001` | 代码迁移表与 R10 §10 逐三元组零差异（声明层） | ✅ 有断言 | `test_transition_mirror.py`（展开三元组双向零差异、展开计数 = 138、R10 §10 的状态与事件全部在代码注册、表结构诊断为空） |
 | `MVP-MERGE-LOCK-001` | 共享 main 的合并互斥：锁落在 git common dir、跨 worktree 生效、并发有且只有一个赢家、stale 可接管、脏工作区拒绝、门禁红不提交 merge commit | ✅ 有断言 | `test_merge_guard.py`（真 `git init` 仓库 + 真并发线程 + CLI 子进程端到端，不用 mock）+ `tools/mergeguard/cli.py` |
+| `HUMAN-OPS-001` | §18 人类决策面：六操作矩阵、决策台账、租约暂停/重发、提醒退避 | ⚠️ 仅声明 | 未实现（human-ops，2026-10-07 开单） |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
 ## 现状小结
