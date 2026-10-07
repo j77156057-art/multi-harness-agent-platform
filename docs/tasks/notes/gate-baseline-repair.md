@@ -1,4 +1,4 @@
-### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（doing）
+### gate-baseline-repair：修复 main 门禁基线红 + 消除 detached HEAD 风险（✅ done）
 
 ~~~text
 任务编号：gate-baseline-repair

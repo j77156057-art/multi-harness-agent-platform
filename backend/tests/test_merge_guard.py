@@ -113,8 +113,7 @@ _GATE_DISCIPLINE_OK = (
     + 'print("[skip] rootworktree（测试夹具）")\n'
     + _GATE_OK.format(name="discipline").split("\n", 1)[1]
 )
-_GATE_TOGGLING = (
-    """
+_GATE_TOGGLING = """
 import pathlib
 import sys
 
@@ -131,7 +130,6 @@ if _flag.exists():
     sys.exit(1)
 print("discipline: 结果: 1 项检查，0 项失败")
 """
-)
 
 
 def _install_gates(repo: Path, discipline_body: str | None = None) -> None:

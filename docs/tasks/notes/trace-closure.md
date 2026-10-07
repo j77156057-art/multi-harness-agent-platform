@@ -1,4 +1,4 @@
-### trace-closure：补 MVP-TRANSITION-MIRROR-001 + 收窄 CORE-STATE-COVERAGE-001（doing）
+### trace-closure：补 MVP-TRANSITION-MIRROR-001 + 收窄 CORE-STATE-COVERAGE-001（✅ done）
 
 ~~~text
 任务编号：trace-closure

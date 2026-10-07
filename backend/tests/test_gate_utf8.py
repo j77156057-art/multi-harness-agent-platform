@@ -69,9 +69,9 @@ def test_docstate_verbose_does_not_crash(encoding):
     assert proc.returncode == 0, err[-800:]
     assert "UnicodeEncodeError" not in err, err[-400:]
     # 且确实打印了通过项（否则「不崩」可能只是因为什么都没输出）
-    assert "⊆" in proc.stdout.decode("utf-8", "replace"), (
-        "这条用例的前提是 --verbose 真的会打印那条含 ⊆ 的消息"
-    )
+    assert "⊆" in proc.stdout.decode(
+        "utf-8", "replace"
+    ), "这条用例的前提是 --verbose 真的会打印那条含 ⊆ 的消息"
 
 
 def test_all_three_gates_have_the_hardening():
@@ -84,10 +84,10 @@ def test_all_three_gates_have_the_hardening():
     for script in GATES:
         text = script.read_text(encoding="utf-8")
         assert "def _force_utf8_stdio(" in text, f"{script.name} 缺少 _force_utf8_stdio"
-        assert 'encoding="utf-8", errors="replace"' in text, (
-            f"{script.name} 没有同时指定 encoding 与 errors"
-        )
-        body = text[text.index("def main("):]
+        assert (
+            'encoding="utf-8", errors="replace"' in text
+        ), f"{script.name} 没有同时指定 encoding 与 errors"
+        body = text[text.index("def main(") :]
         first = body[body.index("\n") + 1 :].lstrip()
         assert first.startswith("_force_utf8_stdio()"), (
             f"{script.name} 的 main() 第一件事应当是 _force_utf8_stdio()，"

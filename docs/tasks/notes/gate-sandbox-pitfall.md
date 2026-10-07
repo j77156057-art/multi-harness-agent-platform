@@ -1,4 +1,4 @@
-### gate-sandbox-pitfall：把两条实测结论回填进文档（🔄 doing）
+### gate-sandbox-pitfall：把两条实测结论回填进文档（✅ done）
 
 ~~~text
 任务编号：gate-sandbox-pitfall
