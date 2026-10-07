@@ -188,6 +188,41 @@ def test_failed_delivery_retries_then_parks(tmp_path):
     assert fourth.pending == 0
 
 
+def test_enqueue_with_source_key_dedupes_and_delivers(tmp_path):
+    database = _rig(tmp_path)
+
+    with _serve() as (url, records):
+        notifier = AlertNotifier(database, webhook_url=url, secret=SECRET)
+        first = notifier.enqueue(
+            kind="run.no_commit",
+            task_id="T-1",
+            payload={"attempt_id": "T-1.a1"},
+            source_key="T-1.a1",
+        )
+        second = notifier.enqueue(
+            kind="run.no_commit",
+            task_id="T-1",
+            payload={"attempt_id": "T-1.a1"},
+            source_key="T-1.a1",
+        )
+        report = notifier.run_once()
+
+    assert first is True and second is False
+    assert report.delivered == 1
+    body = json.loads(records[0]["body"])
+    assert body["alert"] == "run.no_commit" and body["source_key"] == "T-1.a1"
+
+
+def test_enqueue_requires_exactly_one_dedupe_key(tmp_path):
+    database = _rig(tmp_path)
+    notifier = AlertNotifier(database, webhook_url="https://example.invalid/h", secret=SECRET)
+
+    with pytest.raises(ValueError):
+        notifier.enqueue(kind="run.no_commit", payload={})
+    with pytest.raises(ValueError):
+        notifier.enqueue(kind="run.no_commit", payload={}, source_seq=1, source_key="k")
+
+
 # ------------------------------------------------------------ safety floor
 
 

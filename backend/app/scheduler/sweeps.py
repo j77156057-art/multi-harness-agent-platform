@@ -1071,7 +1071,19 @@ def _stuck_round(
                 (str(task["current_attempt_id"]),),
             ).fetchone()
             head = None if attempt is None else attempt["head_commit"]
-        material = f"{latest_seq}:{head}:{task['progress_hash']}"
+        # R10 §13's division of labour: a lease renewal proves the owner is
+        # alive, so it counts as progress here -- without this, every healthy
+        # long run escalated three sweeps after it started (our CLI worker
+        # heartbeats without progress_hash, and nothing else moves mid-run).
+        # "Alive but committing nothing" is the zero-commit alarm's job
+        # (R10 L706, implemented in app.liveness), not the stuck edge; a task
+        # whose lease is not renewed still reaches the lease-expiry path.
+        lease_until = conn.execute(
+            "SELECT MAX(lease_until) AS until FROM leases"
+            " WHERE task_id = ? AND released_at IS NULL",
+            (task_id,),
+        ).fetchone()["until"]
+        material = f"{latest_seq}:{head}:{task['progress_hash']}:{lease_until}"
         if str(task["status"]) == TaskStatus.BLOCKED.value and _is_split_parent(conn, task_id):
             # A split parent's progress IS its children's progress (R10 §13's
             # 无进展 judged on the waiting task): without this the parent would

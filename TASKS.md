@@ -97,6 +97,7 @@
 | jsonl-export | Qoder | frontend-thread | ✅ done（实现 cead61a；导出水位/原子替换/重试/对账 + ADR-DEV-004） | `agent/local/qoder/jsonl-export/a1` | `CORE-EXPORT-001` |
 | paperclip-buzz-source | Qoder | paperclip-buzz-adr | ✅ done（实现 be8291b；源码核实报告 + ADR-DEV-003 勘误） | `agent/local/qoder/paperclip-buzz-source/a1` | `MVP-ARCH-001` |
 | alert-webhook | Qoder | paperclip-buzz-source | ✅ done（实现 3c27193；升级事件→签名投递→重试停靠；闭告警通道缺口） | `agent/local/qoder/alert-webhook/a1` | `OPS-ALERT-001` |
+| liveness-watch | Qoder | alert-webhook | 🚧 doing（吸收②：liveness 观测 + 零 commit 告警 + stuck 误杀修复） | `agent/local/qoder/liveness-watch/a1` | `OPS-LIVENESS-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -221,6 +222,7 @@
 | jsonl-export | [卡](docs/tasks/notes/jsonl-export.md) | | |
 | paperclip-buzz-source | [卡](docs/tasks/notes/paperclip-buzz-source.md) | | |
 | alert-webhook | [卡](docs/tasks/notes/alert-webhook.md) | | |
+| liveness-watch | [卡](docs/tasks/notes/liveness-watch.md) | | |
 
 ## 共享文件改动声明
 
