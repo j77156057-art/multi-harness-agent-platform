@@ -172,6 +172,11 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "ready",
             "tests.test_state_coverage::test_blocked_has_a_recovery_exit",
         ),
+        (
+            "all_children_merged",
+            "ready",
+            "tests.test_split_closure::test_all_children_merged_wakes_the_parent",
+        ),
     ],
     "changes_requested": [
         (

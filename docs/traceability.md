@@ -39,7 +39,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `CORE-CLAIM-002` | 两个真实 SQLite 连接并发抢同一任务，只有一个成功 | ✅ 有断言 | `test_claim_concurrency.py`（`threading.Barrier` + 两个连接 + 断言 epoch 只 +1、恰一条 attempt/Lease） |
 | `CORE-LEASE-001` | Lease 创建 / 续期 / 过期回收 | ✅ 有断言 | `test_lease.py`（续期续期、过期拒绝、巡检转 `stale` 并释放 Lease 与资源、`reclaim`/`take_over`） |
 | `CORE-FENCE-001` | 旧 epoch 的写入被拒 | ✅ 有断言 | `test_lease.py`（`guarded_write` 单一入口；旧 epoch 的 renew / take_over 被拒） |
-| `CORE-SPLIT-001` | 父子任务拆分与 `upstream_invalidated_seq` | ⚠️ 仅声明 | 未实现（MVP-03/04） |
+| `CORE-SPLIT-001` | 父子任务拆分与 `upstream_invalidated_seq` | 🟡 部分有断言 | 拆分闭环已实现并有断言（split-closure，`test_split_closure.py`）：split 产子任务计划（draft plan+snapshot）→ 标准 `plan.approve` 放行；全部子任务 merged → `all_children_merged` 唤醒父任务；`task_dependencies` 方向契约（R10 §10 L587）含回归测试；stuck/blocked_sla 不为难健康 split。**缺口**：`upstream_invalidated_seq`（revert 影响链写侧）仍属 MERGE-REVERT-002 |
 | `CORE-STATE-COVERAGE-001` | 所有非终态都有恢复出口的集成级覆盖 | ✅ 有断言（7 态显式豁免+反向守卫） | `test_state_coverage.py`：21 个非终态的完整性、映射边的合法性/触发器存在性/引用测试存在性均为机械断言；14 态映射到活的集成测试（含本任务新增的 blocked、changes_requested 出口补测），5 态无出口机制 + 2 态不可达为显式豁免且带反向守卫（实现即红）。豁免清单与理由见终审报告 §3 |
 
 ## 阶段 2：Git / Verify / Merge 检查

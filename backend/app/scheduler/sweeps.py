@@ -86,14 +86,25 @@ def sweep_expired_leases(
 def sweep_dependencies(
     database: Database, now: datetime, repo: CanonicalRepo | None = None
 ) -> SweepReport:
-    """Exit ``ready_waiting_deps`` (design §2.1, guards quoted from R10 §10).
+    """Exit ``ready_waiting_deps``; wake split parents whose children finished.
 
-    Order of judgement per task: all upstreams merged → ``dependencies_satisfied``;
-    else all upstreams dead-ended → ``orphan_detected``; else waited past
-    2× the upstreams' expected durations → ``block_timeout``; else stay.
+    Two passes, both on ``task_dependencies`` (R10 §10 L587: the parent column
+    is the *waiting* task, the child column is the upstream it waits for):
 
-    The output-hash half of the ``dependencies_satisfied`` guard is recorded,
-    not implemented: the MVP has no output registry (proposal §7).
+    * **``ready_waiting_deps``** (design §2.1): all upstreams merged →
+      ``dependencies_satisfied``; else all upstreams dead-ended →
+      ``orphan_detected``; else waited past 2× the upstreams' expected
+      durations → ``block_timeout``; else stay. The output-hash half of the
+      ``dependencies_satisfied`` guard is recorded, not implemented: the MVP
+      has no output registry (proposal §7).
+    * **``blocked`` split parents** (R10 §10 ``all_children_merged``): every
+      child merged → ``ready``. Only split parents qualify -- the
+      discriminator is a blocked-entry of ``split_parent_blocked``/``split``
+      rather than an owner's ``dependency_missing``, so a task parked on an
+      external blocker is never lifted by upstreams that merged long ago.
+      Children that dead-end (cancelled/draft_rejected) never satisfy this
+      edge; the parent's exits for that case are the stuck sweep and the
+      human surface (recorded, matching the spec's edges).
 
     ``ready_waiting_deps`` deliberately has no aging edge (R10 §10 note), so
     this sweep is its only time-driven exit besides the two escalations.
@@ -158,10 +169,47 @@ def sweep_dependencies(
             extra_sets={"escalated_at": now.isoformat()},
         ):
             timed_out.append(task_id)
+
+    unblocked: list[str] = []
+    for row in database.read(
+        "SELECT task_id FROM tasks WHERE status = ?", (TaskStatus.BLOCKED.value,)
+    ):
+        task_id = str(row["task_id"])
+        with database.connect() as conn:
+            if not _is_split_parent(conn, task_id):
+                continue
+        children = database.read(
+            "SELECT td.child_task_id AS child_id, t.status AS status"
+            "  FROM task_dependencies td"
+            "  LEFT JOIN tasks t ON t.task_id = td.child_task_id"
+            " WHERE td.parent_task_id = ?",
+            (task_id,),
+        )
+        child_statuses = [str(item["status"]) for item in children]
+        if (
+            child_statuses
+            and all(status == TaskStatus.MERGED.value for status in child_statuses)
+            and _apply(
+                database,
+                store,
+                task_id=task_id,
+                expected=TaskStatus.BLOCKED,
+                event=EventKind.ALL_CHILDREN_MERGED,
+                payload={"children": [str(item["child_id"]) for item in children]},
+                extra_sets={"waiting_since": None},
+            )
+        ):
+            unblocked.append(task_id)
+
     return SweepReport(
         sweep="dependencies",
-        actions=len(satisfied) + len(orphaned) + len(timed_out),
-        detail={"satisfied": satisfied, "orphaned": orphaned, "block_timeout": timed_out},
+        actions=len(satisfied) + len(orphaned) + len(timed_out) + len(unblocked),
+        detail={
+            "satisfied": satisfied,
+            "orphaned": orphaned,
+            "block_timeout": timed_out,
+            "unblocked": unblocked,
+        },
     )
 
 
@@ -240,6 +288,12 @@ def sweep_blocked_sla(
 
     Distinct from the dependency sweep's ``block_timeout``: that one fires out
     of ``ready_waiting_deps`` on upstream durations; this one on the block SLA.
+
+    Split parents are skipped: their "blocker" is their in-flight children,
+    each watched by the whole family individually, so the SLA would only
+    escalate healthy long-running splits. The safety net for dead-end children
+    (cancelled/draft_rejected) is the stuck sweep, whose fingerprint for split
+    parents tracks the children's activity.
     """
     store = EventStore(database)
     rows = database.read(
@@ -248,16 +302,22 @@ def sweep_blocked_sla(
     )
     escalated: list[str] = []
     for row in rows:
-        if _waited_seconds(row["waiting_since"], now) > settings.block_sla_minutes * 60 and _apply(
+        if _waited_seconds(row["waiting_since"], now) <= settings.block_sla_minutes * 60:
+            continue
+        task_id = str(row["task_id"])
+        with database.connect() as conn:
+            if _is_split_parent(conn, task_id):
+                continue
+        if _apply(
             database,
             store,
-            task_id=str(row["task_id"]),
+            task_id=task_id,
             expected=TaskStatus.BLOCKED,
             event=EventKind.BLOCK_TIMEOUT,
             payload={"waited_seconds": _waited_seconds(row["waiting_since"], now)},
             extra_sets={"escalated_at": now.isoformat()},
         ):
-            escalated.append(str(row["task_id"]))
+            escalated.append(task_id)
     return SweepReport("blocked_sla", len(escalated), {"escalated": escalated})
 
 
@@ -668,6 +728,34 @@ def _latest_event_iso(conn: Any, task_id: str) -> datetime | None:
     return None if row is None else parse_iso(str(row["created_at"]))
 
 
+def _is_split_parent(conn: Any, task_id: str) -> bool:
+    """True when the task's most recent blocked-entry is a split.
+
+    ``blocked`` has two entries: ``split_parent_blocked`` (R10 §10's split
+    edge, whose ``split`` preamble also counts so a split from ``blocked`` is
+    recognised) and ``dependency_missing`` (an owner reporting an external
+    blocker). Split parents wait on their own children, so the blocked SLA and
+    the stuck fingerprint judge them against the children's liveness;
+    owner-reported blockers keep the plain rules.
+    """
+    row = conn.execute(
+        "SELECT event_name FROM task_events WHERE aggregate_id = ?"
+        " AND event_name IN (?, ?, ?) ORDER BY seq DESC LIMIT 1",
+        (
+            task_id,
+            EventKind.SPLIT.value,
+            EventKind.SPLIT_PARENT_BLOCKED.value,
+            EventKind.DEPENDENCY_MISSING.value,
+        ),
+    ).fetchone()
+    if row is None:
+        return False
+    return str(row["event_name"]) in {
+        EventKind.SPLIT.value,
+        EventKind.SPLIT_PARENT_BLOCKED.value,
+    }
+
+
 def _reminder_count(conn: Any, task_id: str, event: EventKind, since_seq: object) -> int:
     """Reminders this stint already emitted: events after the entry transition.
 
@@ -983,9 +1071,27 @@ def _stuck_round(
                 (str(task["current_attempt_id"]),),
             ).fetchone()
             head = None if attempt is None else attempt["head_commit"]
-        fingerprint = hashlib.sha256(
-            f"{latest_seq}:{head}:{task['progress_hash']}".encode()
-        ).hexdigest()
+        material = f"{latest_seq}:{head}:{task['progress_hash']}"
+        if str(task["status"]) == TaskStatus.BLOCKED.value and _is_split_parent(conn, task_id):
+            # A split parent's progress IS its children's progress (R10 §13's
+            # 无进展 judged on the waiting task): without this the parent would
+            # escalate three sweeps after every healthy split.
+            children = conn.execute(
+                "SELECT td.child_task_id AS child_id, t.status AS child_status,"
+                " t.progress_hash AS child_progress,"
+                " (SELECT COALESCE(MAX(seq), 0) FROM task_events"
+                "   WHERE aggregate_id = td.child_task_id) AS child_seq"
+                "  FROM task_dependencies td"
+                "  JOIN tasks t ON t.task_id = td.child_task_id"
+                " WHERE td.parent_task_id = ? ORDER BY td.child_task_id",
+                (task_id,),
+            ).fetchall()
+            child_state = ";".join(
+                f"{row['child_id']}={row['child_status']}:{row['child_progress']}:{row['child_seq']}"
+                for row in children
+            )
+            material += f":children[{child_state}]"
+        fingerprint = hashlib.sha256(material.encode()).hexdigest()
         stored = conn.execute(
             "SELECT fingerprint, unchanged_count FROM sweep_progress WHERE task_id = ?",
             (task_id,),

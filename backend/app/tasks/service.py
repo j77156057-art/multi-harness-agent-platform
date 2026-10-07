@@ -164,40 +164,9 @@ class SchedulerService:
             if exists is not None:
                 raise Conflict(f"plan {plan_id} already exists")
 
-            raw = dict(snapshot)
-            raw.setdefault("plan_id", plan_id)
-            try:
-                spec = PlanSpec.from_mapping(raw)
-            except (TypeError, ValueError) as exc:
-                raise InvalidInput(f"plan snapshot is malformed: {exc}") from exc
-            validation = PlanValidator().validate(spec)
-            if not validation.ok:
-                raise InvalidInput("; ".join(validation.errors))
-
-            snapshot_id = f"snap-{uuid.uuid4().hex}"
-            plan_hash = _hash(raw)
-            now = _now()
-            conn.execute(
-                "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
-                " VALUES (?, ?, 'draft', ?, ?)",
-                (plan_id, group_id, plan_hash, now),
+            snapshot_id, plan_hash = self._store_plan(
+                conn, plan_id=plan_id, group_id=group_id, raw=snapshot
             )
-            conn.execute(
-                "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"
-                " content_json, created_at) VALUES (?, ?, ?, ?, ?)",
-                (snapshot_id, plan_id, plan_hash, _canonical(raw), now),
-            )
-            # Tasks exist from the moment the plan is published, in `draft`.
-            # R10 §10 gives `draft` both an approve and a reject edge, so a plan
-            # rejected before approval still has state to move.
-            for task in spec.tasks:
-                self._materialise_task(
-                    conn,
-                    task_id=task.task_id,
-                    group_id=group_id,
-                    snapshot_id=snapshot_id,
-                    depends_on=list(task.depends_on),
-                )
         return PlanOutcome(
             plan_id=plan_id,
             snapshot_id=snapshot_id,
@@ -205,6 +174,57 @@ class SchedulerService:
             ready=(),
             waiting=(),
         )
+
+    def _store_plan(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        plan_id: str,
+        group_id: str,
+        raw: dict[str, object],
+    ) -> tuple[str, str]:
+        """Validate and store a plan snapshot, materialising its tasks in draft.
+
+        Shared by ``create_plan`` and ``split_task`` (a split hands its children
+        to the same plan-approval path -- R10 §10's only ``draft -> ready``
+        entry). The caller owns the transaction and the group/plan-id checks.
+        Returns ``(snapshot_id, plan_hash)``.
+        """
+        raw = dict(raw)
+        raw.setdefault("plan_id", plan_id)
+        try:
+            spec = PlanSpec.from_mapping(raw)
+        except (TypeError, ValueError) as exc:
+            raise InvalidInput(f"plan snapshot is malformed: {exc}") from exc
+        validation = PlanValidator().validate(spec)
+        if not validation.ok:
+            raise InvalidInput("; ".join(validation.errors))
+
+        snapshot_id = f"snap-{uuid.uuid4().hex}"
+        plan_hash = _hash(raw)
+        now = _now()
+        conn.execute(
+            "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
+            " VALUES (?, ?, 'draft', ?, ?)",
+            (plan_id, group_id, plan_hash, now),
+        )
+        conn.execute(
+            "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"
+            " content_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            (snapshot_id, plan_id, plan_hash, _canonical(raw), now),
+        )
+        # Tasks exist from the moment the plan is published, in `draft`.
+        # R10 §10 gives `draft` both an approve and a reject edge, so a plan
+        # rejected before approval still has state to move.
+        for task in spec.tasks:
+            self._materialise_task(
+                conn,
+                task_id=task.task_id,
+                group_id=group_id,
+                snapshot_id=snapshot_id,
+                depends_on=list(task.depends_on),
+            )
+        return snapshot_id, plan_hash
 
     # ---------------------------------------------------------------- plans
 
@@ -281,10 +301,14 @@ class SchedulerService:
             parent = conn.execute("SELECT 1 FROM tasks WHERE task_id = ?", (upstream,)).fetchone()
             if parent is None:
                 raise InvalidInput(f"task {task_id} depends on unknown task {upstream}")
+            # R10 §10 (L587): parent_task_id is the WAITING task -- "父任务依赖
+            # 子任务"; the child column carries the upstream it waits for. This
+            # direction is what every reader (the dependency sweeps) assumes;
+            # split-closure fixed this insert, which had it inverted and untested.
             conn.execute(
                 "INSERT OR IGNORE INTO task_dependencies(parent_task_id, child_task_id, relation)"
                 " VALUES (?, ?, 'depends_on')",
-                (upstream, task_id),
+                (task_id, upstream),
             )
 
     def _approve_one(
@@ -611,22 +635,28 @@ class SchedulerService:
         attempt_id: str,
         fencing_epoch: int,
     ) -> dict[str, object]:
-        """R10 §10 ``split``: child drafts + dependencies, parent -> blocked.
+        """R10 §10 ``split``: child drafts + a draft child plan; parent -> blocked.
 
         ``split`` lands on the pseudo state ``child_created`` -- the edge
         itself does not change the parent's status -- so this method appends
         that event without ``apply_transition`` and then walks
         ``split_parent_blocked`` (the edge that enters ``blocked``) when the
         parent was ``in_progress``; a split from ``blocked`` leaves the status
-        alone. Idempotency follows the publish pattern: the first result is
-        stored under ``(operation, idempotency_key)`` and a replay returns it
-        with no new child rows and no new events.
+        alone.
 
-        Declared gaps (adapter-verbs card): the "budget sufficient" guard has
-        no model to evaluate against (there is no plan-level child budget), so
-        it is recorded as not-evaluable rather than approximated; the children
-        are inert drafts -- their plan/claim lifecycle and the
-        ``all_children_merged`` wake-up are companion work.
+        The children are materialised through the same plan path as any other
+        task: a draft ``plans`` row + snapshot is created in this transaction,
+        the children carry its ``plan_snapshot_id``, and a human approves it
+        to move them ``draft -> ready`` (R10 §10's only entry into ready).
+        Idempotency follows the publish pattern: the first result is stored
+        under ``(operation, idempotency_key)`` and a replay returns it with no
+        new plan, child rows, or events.
+
+        Declared gaps (card): the "budget sufficient" guard has no model to
+        evaluate against (there is no plan-level child budget), so it is
+        recorded as not-evaluable rather than approximated. The
+        ``all_children_merged`` wake-up lives in ``sweep_dependencies``
+        (split-closure).
         """
         if not child_specs:
             raise Conflict("split needs at least one child spec")
@@ -657,13 +687,17 @@ class SchedulerService:
             parent = conn.execute(
                 "SELECT group_id, current_epoch FROM tasks WHERE task_id = ?", (task_id,)
             ).fetchone()
-            moment = _now()
+            child_plan_id = f"plan-split-{uuid.uuid4().hex}"
+            child_snapshot_id, _child_plan_hash = self._store_plan(
+                conn,
+                plan_id=child_plan_id,
+                group_id=str(parent["group_id"]),
+                raw={"plan_version": "v1", "tasks": child_specs},
+            )
             for child_id in child_ids:
-                conn.execute(
-                    "INSERT INTO tasks(task_id, group_id, status, created_at, updated_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
-                    (child_id, str(parent["group_id"]), TaskStatus.DRAFT.value, moment, moment),
-                )
+                # The split semantics of this edge is "parent depends on
+                # child" (R10 §10 L530): the waiting task goes in the parent
+                # column, the child in the child column.
                 conn.execute(
                     "INSERT INTO task_dependencies(parent_task_id, child_task_id, relation)"
                     " VALUES (?, ?, 'depends_on')",
@@ -679,6 +713,8 @@ class SchedulerService:
                     "attempt_id": attempt_id,
                     "child_ids": child_ids,
                     "child_specs": child_specs,
+                    "child_plan_id": child_plan_id,
+                    "child_snapshot_id": child_snapshot_id,
                     "idempotency_key": idempotency_key,
                 },
                 connection=conn,
@@ -701,13 +737,17 @@ class SchedulerService:
                     current=TaskStatus.IN_PROGRESS,
                     event=EventKind.SPLIT_PARENT_BLOCKED,
                     expected_epoch=int(parent["current_epoch"]),
-                    extra_sets={},
+                    # R10 §10's wake edge says "清除 waiting_since" on the way
+                    # out, so the wait clock starts on the way in.
+                    extra_sets={"waiting_since": _now()},
                     state_seq=blocked_record.seq,
                 )
                 seq = blocked_record.seq
             result = {
                 "task_id": task_id,
                 "child_ids": child_ids,
+                "child_plan_id": child_plan_id,
+                "child_snapshot_id": child_snapshot_id,
                 "parent_status": (
                     TaskStatus.BLOCKED.value
                     if parent_status is TaskStatus.IN_PROGRESS
