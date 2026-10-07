@@ -1,23 +1,130 @@
+/* 设计 token：既有「纸面 + 等宽」的主题在 MVP-01 定下，这里只扩展、不改宗。
+   对比度由 `npm run check:contrast`（scripts/contrast.mjs）逐对断言 ≥ 4.5:1，
+   改色必须让那个脚本继续绿。 */
 :root {
-  --ink: #1a1a1a;
-  --bone: #faf8f5;
-  --line: #d8d4cd;
+  --bone: #faf8f5;      /* 页面底 */
+  --panel: #f2efe9;     /* 栏底 */
+  --panel-2: #e9e5dd;   /* 悬浮/选中底 */
+  --line: #d8d4cd;      /* 分隔线 */
+  --ink: #1a1a1a;       /* 主文字 */
+  --muted: #5f5c56;     /* 次要文字（对 panel 也 ≥4.5） */
+  --accent: #1f5fbf;    /* 链接/激活 */
   --ok: #1a7f37;
+  --warn: #8a5a00;
   --bad: #b3261e;
-  --muted: #6b6b6b;
 }
+
 * { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
 body {
   margin: 0;
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--ink);
   background: var(--bone);
 }
-main { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem; }
-h1 { font-size: 1.25rem; letter-spacing: -0.01em; }
-h2 { font-size: 1rem; margin-top: 2rem; }
-.muted { color: var(--muted); }
-.ok { color: var(--ok); }
-.bad { color: var(--bad); }
-ul { padding-left: 1.2rem; }
-li { margin: 0.25rem 0; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--panel-2); }
+button:disabled { color: var(--muted); cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+
+.app-head {
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.app-head h1 { margin: 0; font-size: 1.05rem; letter-spacing: -0.01em; }
+.app-sub { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.8rem; }
+
+/* R10 §22：桌面三栏 */
+.shell {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(320px, 1fr) minmax(380px, 1.15fr);
+}
+
+.pane {
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0.9rem 1rem;
+  border-right: 1px solid var(--line);
+}
+.pane:last-child { border-right: none; }
+
+.pane-head h2 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.pane-head { padding-bottom: 0.4rem; border-bottom: 1px solid var(--line); margin-bottom: 0.6rem; }
+
+.empty, .notice { color: var(--muted); margin: 0.5rem 0; }
+.notice.tone-bad { color: var(--bad); }
+
+/* 左栏 */
+.rail { background: var(--panel); display: flex; flex-direction: column; }
+.rail-nav { flex: 1; }
+.rail-project { margin-bottom: 0.9rem; }
+.rail-heading { margin: 0 0 0.3rem; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.rail-groups { list-style: none; margin: 0; padding: 0; }
+.rail-group {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 0.5rem;
+  width: 100%; text-align: left; border: none; padding: 0.3rem 0.45rem; border-radius: 4px;
+}
+.rail-group.active { background: var(--panel-2); color: var(--accent); }
+.rail-group-id { color: var(--muted); font-size: 0.75rem; }
+.rail-note { margin-top: auto; padding-top: 0.6rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.75rem; }
+
+/* 中栏：项目群 */
+.messages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.message-meta { display: flex; justify-content: space-between; gap: 0.5rem; color: var(--muted); font-size: 0.75rem; }
+.message-sender { color: var(--accent); }
+.message-body { margin: 0.1rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.composer { display: flex; gap: 0.4rem; margin-top: 0.8rem; position: sticky; bottom: 0; background: var(--bone); padding-top: 0.5rem; }
+.composer-input {
+  flex: 1; font: inherit; color: inherit; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0.35rem 0.5rem;
+}
+
+/* 右栏：任务 + 线程 */
+.task-list { list-style: none; margin: 0 0 0.9rem; padding: 0; }
+.task-row {
+  display: grid; grid-template-columns: minmax(64px, auto) auto 1fr; gap: 0.5rem;
+  align-items: baseline; width: 100%; text-align: left;
+  border: none; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0.35rem 0.2rem;
+}
+.task-row.active { background: var(--panel-2); }
+.task-owner { color: var(--muted); text-align: right; font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; }
+
+.status { font-size: 0.8rem; }
+.tone-ok { color: var(--ok); }
+.tone-accent { color: var(--accent); }
+.tone-warn { color: var(--warn); }
+.tone-bad { color: var(--bad); }
+.tone-muted { color: var(--muted); }
+
+.thread { border-top: 1px solid var(--line); padding-top: 0.6rem; }
+.thread-head { display: flex; justify-content: space-between; align-items: baseline; }
+.thread-meta { margin: 0; color: var(--muted); font-size: 0.78rem; }
+.event-list { list-style: none; margin: 0; padding: 0; }
+.event {
+  display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem; align-items: baseline;
+  padding: 0.25rem 0; border-bottom: 1px dotted var(--line);
+}
+.event-seq { color: var(--muted); font-size: 0.78rem; }
+.event-name { color: var(--accent); overflow-wrap: anywhere; }
+.event-actor { color: var(--muted); font-size: 0.78rem; }
+.event-payload { grid-column: 1 / -1; color: var(--muted); font-size: 0.78rem; }
+.event-payload pre { margin: 0.2rem 0 0.3rem; padding: 0.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; }
