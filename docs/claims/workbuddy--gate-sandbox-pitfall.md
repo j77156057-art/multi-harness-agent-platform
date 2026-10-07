@@ -6,7 +6,7 @@
 | Harness | WorkBuddy |
 | 认领时间 | 2026-10-07 09:25 |
 | 分支 | `agent/workbuddy/gate-sandbox-pitfall/a1` |
-| 状态 | 🔄 doing |
+| 状态 | ✅ done（内容提交 `8860052`） |
 | 工作区 | `.worktrees/workbuddy` |
 
 任务表对应行：`TASKS.md` → 「任务表」，搜 `gate-sandbox-pitfall`。

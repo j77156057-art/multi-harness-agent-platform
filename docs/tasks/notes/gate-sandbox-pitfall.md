@@ -16,9 +16,9 @@
 禁止修改目录：tools/**、backend/**、docs/spec/**、docs/proposals/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/gate-sandbox-pitfall/a1
 test_id：MVP-PROCESS-001
-当前状态：doing
-完成时间：（待填）
-commit：（待填）
+当前状态：done
+完成时间：2026-10-07 09:45
+commit：`8860052`（两处内容回填 + 登记三件套）
 验证结果：见下方「验证结果」
 ~~~
 
