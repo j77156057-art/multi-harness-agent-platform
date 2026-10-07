@@ -1,4 +1,4 @@
-### liveness-watch：存活观测面 + 零 commit 告警 + stuck 误杀修复（🚧 doing）
+### liveness-watch：存活观测面 + 零 commit 告警 + stuck 误杀修复（✅ done）
 
 ~~~text
 任务编号：liveness-watch
@@ -63,5 +63,41 @@
   5. `PYTHONUTF8=1 ./scripts.sh check` 全绿；traceability 新增 `OPS-LIVENESS-001`
 test_id：OPS-LIVENESS-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 03:01
+commit：`6397e8f`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（111 files already formatted）
+  pytest      : 416 passed（本任务净增 16：test_liveness.py 14 + test_alerts.py 2），exit 0
+  关键断言     : ①政策：回退链四源顺序（事件>续租>attempt>创建）；阈值含界
+                （599 ok/600 suspicious/1199 suspicious/1200 critical、租约
+                余 0 critical、余 299 suspicious、非活跃 not_applicable）；
+                ②扫描：续租 1 分钟前的健康长跑 = ok（silence 从续租起算）、
+                head 已发布 → 零 commit 窗口归零、死租约（余 -5min）=
+                critical（"lease expired …ago"）、安静但健在 = suspicious、
+                无租约任务走 attempt 钟；③零 commit 告警：恰一次/attempt
+                （重跑 0、换新 attempt 重新计 1）；未配 webhook 不入队、
+                队列零行；④**stuck 三向回归**：续租的 4 轮不升级 / 不续租的
+                第 4 轮仍升级（事件恰 1 条）/ 无租约的仍升级；⑤CLI：无库
+                exit 2、空库 --check exit 0、塞一条 2 小时静默任务后
+                --check exit 1（readings 含该任务）。
+  变异验证     : 去掉指纹中的租约项 → `test_a_renewed_lease…` 必红；恢复后
+                14/14 绿。（stuck 误杀的存在性同理被"续租 4 轮不升级"断言反向
+                钉死——旧代码下它必红。）
+  顺带修复     : **迁移 010 一次真实缺陷**：009 的表级 `UNIQUE(kind,
+                source_seq)` 会让所有 key 型行（seq 恒 0）互相撞掉——测试先
+                抓到（新 attempt 的告警被静默 IGNORE），改为表重建 + 两个
+                部分唯一索引（seq 族 / key 族各管各的）。
+已知问题：
+  - **僵尸心跳**（只续租不干活）：stuck 不再升级（指纹随续租移动），改由零
+    commit 告警（人）兜底——取舍如实记录，与 R10-706 的"告警档"分责一致；
+    如需自动升级应另案改 R10 语义。
+  - "零 commit"以平台可见的发布为准（publish 才写 attempt.head_commit）；
+    工作树内增量 commit 平台不可见——卡内声明近似，测试按此语义钉死。
+  - 未做：snooze/dismiss 抑制（无操作面承载）、产出质量分类（verify/review
+    门禁的领域）、liveness 进 API/前端（后续小卡）。
+  - 观测定级是 advisory——不移动任何任务状态（R10 出口原样）；告警通道
+    opt-in（未配 webhook 时观测仍工作、告警不入队）。
 ~~~
