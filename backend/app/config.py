@@ -77,6 +77,13 @@ class Settings:
             os.environ.get("AP_EXPECTED_DURATION_DEFAULT", "90")
         )
 
+        # --- 出站告警（alert-webhook；机制参考见 docs/reports/paperclip-buzz-source-review.md，原生实现）---
+        # 未配置 URL 时整个子系统显式 no-op；配了就要求 secret 做 HMAC 签名。
+        self.alert_webhook_url: str | None = os.environ.get("AP_ALERT_WEBHOOK_URL") or None
+        self.alert_webhook_secret: str = os.environ.get("AP_ALERT_WEBHOOK_SECRET", "")
+        self.alert_timeout_seconds: int = int(os.environ.get("AP_ALERT_TIMEOUT", "10"))
+        self.alert_max_attempts: int = int(os.environ.get("AP_ALERT_MAX_ATTEMPTS", "5"))
+
         # R10 §16
         self.verify_lease_seconds: int = int(os.environ.get("AP_VERIFY_LEASE", "1800"))  # 30 min
         self.review_lease_seconds: int = int(os.environ.get("AP_REVIEW_LEASE", "1200"))  # 20 min
