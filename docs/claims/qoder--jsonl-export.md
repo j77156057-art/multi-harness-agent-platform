@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-08 00:42 |
 | 分支 | `agent/local/qoder/jsonl-export/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（实现 cead61a；待合入，外部验收待认） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `jsonl-export`。
 
@@ -21,3 +21,8 @@
   临时文件 + fsync + 原子 rename、失败重试、重启/巡检比较 max(seq) 自动补导、
   恢复按 seq 去重禁空洞）——即"外部系统只读消费权威事件、SQLite 仍是唯一事实
   源"的集成底座（Buzz 事件层的深水区）。
+- 2026-10-08 01:01：完成。实现 `cead61a`；全量门禁绿（docstate 90/0、
+  discipline 44/0、ruff 102 files、pytest 390 passed 净增 8）。dogfood：对
+  fe-demo 真库先给 schema 预检提示 → 迁移 → 导出 4 条真事件 → 对账 ok。
+  ADR-DEV-004 落成；`CORE-EXPORT-001` 登记为 ✅ 有断言。
+

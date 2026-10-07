@@ -1,4 +1,4 @@
-### jsonl-export：深度集成面——SQLite→JSONL 异步导出 + 恢复对账（🚧 doing）
+### jsonl-export：深度集成面——SQLite→JSONL 异步导出 + 恢复对账（✅ done）
 
 ~~~text
 任务编号：jsonl-export
@@ -56,5 +56,39 @@
      `CORE-EXPORT-001` 行（✅ 有断言）；ADR-DEV-004 落成
 test_id：CORE-EXPORT-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 01:01
+commit：`cead61a`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（102 files already formatted）
+  pytest      : 390 passed（本任务净增 8 项：test_jsonl_export.py），exit 0
+  关键断言     : ①顺序导出与水位推进（records_read/exported_seq/lag、行序、payload
+                对象、file_hash=sha256(文件字节)）；②二次运行零增量幂等；③崩溃
+                窗口 A（替换后、水位未推进）：注入 _advance 失败 → 水位不动、
+                status=failed/attempts=1、文件已含残尾；重跑按水位修剪后去重
+                （`len(set(seqs))==3`）且归 ok/attempts=0；④崩溃窗口 B（替换前）：
+                注入 os.replace 失败 → 旧文件字节不动、无 .tmp 残留、水位不动；
+                重跑自动补导；⑤文件与库分歧（删中间行）触发"重建"路径；⑥reconcile
+                检出 lag/篡改（追加 junk）/尾部无换行/哈希不符；⑦CLI：缺库 exit 2；
+                `--once`/`--check` 正常 0、库侧漂移后 `--check` exit 1、`--once`
+                补导后恢复 0（子进程真跑，含裸 SQL 注入的 9999 号事件）。
+  dogfood      : 对前端实测的演示库（fe-demo，真事件 4 条）实跑：旧库先给出
+                「schema is behind；先跑 python -m app.db」exit 2 → 迁移 →
+                `--once` 导出 4 条（plan.approve×3 + claim）→ `--check` ok、
+                hash_matches true。导出文件样例（gitignored）：
+                `backend/data/fe-demo/exports/task_events.jsonl`。
+  ADR          : `docs/adr/ADR-DEV-004-deep-integration-export.md`（闸门后第一份
+                裁决：集成面=只读导出；Nostr 运行时/外部调度器互联/传输层替换
+                仍各自另立 ADR；双向同步 = 停，回退条件明写）。
+已知问题：
+  - **无外部告警通道**（记录）：告警面 = jsonl_exports 的 status/attempts/
+    last_error + `--check` 退出码/stderr；推送通道若需要属另一份 ADR。
+  - **全量重写式导出**：文件每次以"修剪后的既有内容 + 增量"重建后原子替换——
+    正确性优先；大事件量下的增量追加/轮转被显式推迟（ADR-DEV-004 决策 4）。
+  - **仅 `task_events` 一个 stream**（表结构按 stream 泛化）；`usage_records`
+    等其余 stream 未做；调度器自动串跑未接（运维 cron `--once` 即可）。
+  - schema 预检是本任务 dogfood 后补的（旧库给出明确提示而非 traceback）；
+    `_record_failure` 为尽力而为——连记账行都写不进去时不把报告变成回溯。
 ~~~
