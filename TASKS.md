@@ -53,7 +53,7 @@
 | deadlock-fix | WorkBuddy | — | ✅ done（mergeguard × discipline 合并死锁，`_ensure_repo_root_on_path`） | `agent/workbuddy/deadlock-fix/a1` | `MVP-PROCESS-001` |
 | claim-denum-migrate | WorkBuddy | deadlock-fix | ✅ done（方案 C 文件层迁移，2 个认领文件去序号前缀 + 4 处自指同步） | `agent/workbuddy/claim-denum-migrate/a1` | `MVP-PROCESS-001` |
 | gate-sandbox-pitfall | WorkBuddy | — | ✅ done（回填「跑门禁须走沙箱外」+「撞号在 main 上是既成事实」） | `agent/workbuddy/gate-sandbox-pitfall/a1` | `MVP-PROCESS-001` |
-| claim-denum-migrate-rest | WorkBuddy | — | 🔄 doing（WorkBuddy 剩余 11 个认领文件去前缀 + 21 处自指同步） | `agent/workbuddy/claim-denum-migrate-rest/a1` | `MVP-PROCESS-001` |
+| claim-denum-migrate-rest | WorkBuddy | — | ✅ done（WorkBuddy 剩余 11 个认领文件去前缀 + 21 处活指针同步；6 处跨边界引用如实留档） | `agent/workbuddy/claim-denum-migrate-rest/a1` | `MVP-PROCESS-001` |
 | MVP-08-verify | TRAE | MVP-08 | ✅ done（验收通过，附遗留清单 4 项） | `agent/local/trae/MVP-08-verify/a1` | `DOC-TRACE-001` `MVP-API-001` |
 | message-global-seq | TRAE | MVP-08 | ✅ done（关闭验收遗留 3a） | `agent/local/trae/message-global-seq/a1` | `MVP-API-001` |
 | message-refs-persist | TRAE | MVP-08 | ✅ done（关闭验收遗留 3b） | `agent/local/trae/message-refs-persist/a1` | `MVP-API-001` |

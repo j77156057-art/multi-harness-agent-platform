@@ -12,9 +12,9 @@
 禁止修改目录：tools/**、backend/**、docs/spec/**、docs/claims/ 下他人文件
 交付分支：agent/workbuddy/claim-denum-migrate-rest/a1
 test_id：MVP-PROCESS-001
-当前状态：doing
-完成时间：（待填）
-commit：（待填）
+当前状态：done
+完成时间：2026-10-07 10:05
+commit：`5f25665`（11 个改名 + 21 处活指针同步）
 验证结果：见下方「验证结果」
 ~~~
 
@@ -106,4 +106,8 @@ main 上共 **27 处**对带前缀 workbuddy 认领的引用，分布：
 
 ### 验证结果
 
-（待填）
+- 11 个文件改名全部被 git 识别为 `R`（rename，历史保留，无新增/删除对）
+- 我名下文件（认领 + 卡 + 提案 + TASKS.md）**零残留**旧名
+- `discipline` **44/0**、`docstate` **90/0**、pytest **52 passed**（沙箱外）
+- 剩余 6 处指向旧名的引用全部在**别人文件或门禁代码**里，已如实列在上面，
+  未假装做完
