@@ -32,6 +32,10 @@ class Settings:
         # --- 存储 ---
         self.data_dir: Path = Path(os.environ.get("AP_DATA_DIR", str(PROJECT_ROOT / "data")))
         self.db_path: Path = self.data_dir / "state.db"
+        # R10 §15：事件 JSONL 异步导出的落点（导出器只写文件，SQLite 仍是唯一事实源）
+        self.export_dir: Path = Path(
+            os.environ.get("AP_EXPORT_DIR", str(self.data_dir / "exports"))
+        )
         # R10 §23：Windows 下建议排除 Defender 对 state.db/WAL/SHM 的实时锁定
         self.sqlite_busy_timeout_ms: int = int(os.environ.get("AP_SQLITE_BUSY_TIMEOUT", "5000"))
         # R10 §23：20GB 触发 PostgreSQL 迁移评估（ADR-007）
@@ -109,7 +113,7 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         """创建运行期目录。幂等。"""
-        for d in (self.data_dir, self.worktree_root):
+        for d in (self.data_dir, self.worktree_root, self.export_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def summary(self) -> dict[str, object]:
