@@ -1,4 +1,4 @@
-### claim-denum-migrate-rest：WorkBuddy 剩余 11 个认领文件去前缀（🔄 doing）
+### claim-denum-migrate-rest：WorkBuddy 剩余 11 个认领文件去前缀（✅ done）
 
 ~~~text
 任务编号：claim-denum-migrate-rest

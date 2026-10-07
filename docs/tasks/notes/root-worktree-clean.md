@@ -1,4 +1,4 @@
-### root-worktree-clean：断言根工作区非合并状态下无未提交改动（doing）
+### root-worktree-clean：断言根工作区非合并状态下无未提交改动（✅ done）
 
 ~~~text
 任务编号：root-worktree-clean
