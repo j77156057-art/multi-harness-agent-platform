@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import type { EventRecord, TaskSummary } from '../api'
+import { ref, watch } from 'vue'
+import type { EventRecord, TaskDiff, TaskSummary } from '../api'
 
-defineProps<{
+const props = defineProps<{
   tasks: TaskSummary[]
   selectedTask: TaskSummary | null
   events: EventRecord[]
+  diff: TaskDiff | null
+  diffLoading: boolean
   loading: boolean
   error: string | null
 }>()
 
-const emit = defineEmits<{ select: [taskId: string] }>()
+const emit = defineEmits<{ select: [taskId: string]; expandDiff: [] }>()
 
 const STATUS_TONE: Record<string, string> = {
   merged: 'ok',
@@ -32,6 +35,21 @@ const STATUS_TONE: Record<string, string> = {
 function tone(status: string): string {
   return STATUS_TONE[status] ?? 'muted'
 }
+
+function short(commit: string | null): string {
+  return commit === null ? '—' : commit.slice(0, 7)
+}
+
+// patch 拉回来即默认展开（用户点了"展开 patch"，结果却折叠着会更奇怪）。
+const patchOpen = ref(props.diff?.patch != null)
+watch(
+  () => props.diff?.patch,
+  (patch) => {
+    if (patch !== null && patch !== undefined) {
+      patchOpen.value = true
+    }
+  },
+)
 </script>
 
 <template>
@@ -65,6 +83,54 @@ function tone(status: string): string {
           owner {{ selectedTask.owner ?? '—' }} · epoch {{ selectedTask.current_epoch }}
         </p>
       </header>
+
+      <section class="diff-card" aria-label="任务差异">
+        <header class="diff-head">
+          <h3>差异</h3>
+          <span v-if="diffLoading" class="diff-meta">加载中…</span>
+        </header>
+        <p v-if="diff === null && !diffLoading" class="diff-note">还没有差异读数。</p>
+        <template v-else-if="diff !== null">
+          <p v-if="!diff.available" class="diff-note">差异不可用：{{ diff.reason }}</p>
+          <template v-else>
+            <p class="diff-summary">
+              <span>{{ diff.files_changed }} 个文件</span>
+              <span class="diff-add">+{{ diff.insertions }}</span>
+              <span class="diff-del">−{{ diff.deletions }}</span>
+              <span class="diff-meta">
+                {{ short(diff.base_commit) }}..{{ short(diff.head_commit) }}
+              </span>
+            </p>
+            <p v-if="diff.files_changed === 0" class="diff-note">与基线相比没有差异。</p>
+            <ul v-else class="diff-files">
+              <li v-for="file in diff.files" :key="file.path" class="diff-file">
+                <span class="diff-path">{{ file.path }}</span>
+                <span v-if="file.binary" class="diff-meta">二进制</span>
+                <span v-else class="diff-counts">
+                  <span class="diff-add">+{{ file.insertions }}</span>
+                  <span class="diff-del">−{{ file.deletions }}</span>
+                </span>
+              </li>
+            </ul>
+            <p v-if="diff.files_changed > 0" class="diff-actions">
+              <button
+                v-if="diff.patch === null"
+                type="button"
+                :disabled="diffLoading"
+                @click="emit('expandDiff')"
+              >
+                {{ diffLoading ? '拉取 patch…' : '展开 patch' }}
+              </button>
+              <button v-else type="button" @click="patchOpen = !patchOpen">
+                {{ patchOpen ? '收起 patch' : '展开 patch' }}
+              </button>
+            </p>
+            <p v-if="diff.truncated" class="diff-note">patch 预览已截断（有界预览）。</p>
+            <pre v-if="diff.patch !== null && patchOpen" class="diff-patch">{{ diff.patch }}</pre>
+          </template>
+        </template>
+      </section>
+
       <p v-if="events.length === 0" class="empty">还没有事件。</p>
       <ol v-else class="event-list">
         <li v-for="event in events" :key="event.seq" class="event">

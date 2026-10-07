@@ -468,6 +468,23 @@ def task_events(
     return _event_page(service, since_seq=since_seq, limit=limit, task_id=task_id)
 
 
+@read.get("/tasks/{task_id}/diff")
+def task_diff(
+    task_id: str,
+    request: Request,
+    service: SchedulerDep,
+    attempt_id: Annotated[str | None, Query()] = None,
+    include_patch: Annotated[bool, Query()] = False,
+) -> dict[str, Any]:
+    """The task thread's diff reading (diff-message card; Buzz kind:40008)."""
+    return service.diff_for_task(
+        task_id,
+        attempt_id=attempt_id,
+        include_patch=include_patch,
+        repo=request.app.state.canonical_repo,
+    )
+
+
 @read.get("/events")
 def events(
     service: SchedulerDep,
