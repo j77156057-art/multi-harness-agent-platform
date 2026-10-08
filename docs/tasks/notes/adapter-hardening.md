@@ -1,4 +1,4 @@
-### adapter-hardening：F3/F4/F9——codex 沙箱、opencode 启动、replay worktree 路径（🚧 doing）
+### adapter-hardening：F3/F4/F9——codex 沙箱、opencode 启动、replay worktree 路径（✅ done）
 
 ~~~text
 任务编号：adapter-hardening
@@ -62,5 +62,42 @@
      `MVP-ADAPTER-003`
 test_id：MVP-ADAPTER-003（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-09 00:40
+commit：`e68c48f`（实现提交；登记 `2b6e99d`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 498 passed（本任务净增 5：codex 两平台 argv+覆盖、opencode
+                壳/直启/bash 缺失回落与开关覆盖、两开关 fail-closed、F9 replay
+                round-trip、F9 worker 无旁路续跑），exit 0
+  真实 CLI 抽查 : 走**修复后的 adapter.command() argv** 真跑（披露：两次最小
+                prompt 消耗用户中继配额；留档 backend/data/adapter-smoke/）：
+                - codex nt argve= `exec --json --sandbox danger-full-access`：
+                  进程启动并到达模型请求段——**F3 的
+                  `CreateProcessAsUserW failed: 2` 不再出现**；
+                - opencode nt argv= 壳（`bash -lc 'exec "$0" "$@"'`）+ `run
+                  --format json --auto`：经壳建出 session 并发 step_start——
+                  **F4 的直启 DB 报错形态不再出现**；
+                - 两者均止步 `returncode=1`：**127.0.0.1:8402 中继当时未监听**
+                  （外部依赖，curl 000/netstat 空）——启动层修复各自证实，
+                  模型往返未完成如实记录；中继恢复后可用
+                  backend/data/e2e-drill/ 脚本复跑全链。
+  测试要点     : 两平台分支用可注入 platform 钉死（不依赖宿主平台）；开关值
+                非法 → Settings() 抛错（fail-closed）；`bash_path=""` 语义
+                = 机器上没有 bash；F9 的 fresh=null / replay=活工作树路径 /
+                同 attempt 非新 attempt；worker 重放无 on_claimed 直接续跑。
+已知问题：
+  - **模型往返未完成**（above）：中继是外部依赖，启动层与契约层已证；
+    卡不冒充全绿。
+  - codex 带引号命令经 cmd 被拆（F3 的 `pathspec 'sub''`）与 opencode 单
+    provider 错误即退——CLI 内部行为，记载仍属实，不修不复刻；
+  - F10（codex usage 未接预算）与 F8（ConnectError 映射）不在本卡；
+  - 顺带修掉一个**已引爆的时间炸弹**（非本卡引入）：
+    test_sweeper_deps_resources 的持有者资源租约用冻结 NOW 播种，而 claim
+    路径读真实时钟——越过 2026-10-08 21:00 本地即 `queued` 断言翻红；续授
+    时钟同理（冻结时钟授予的租约在真实时钟下出生即死、replay 拒绝重发
+    token）。改为真实时钟播种/续授后修复；与 frontend-token 卡修的
+    test_sweeper_workers 同族（导入时刻 vs 真实时钟 vs 冻结日期三种形态）。
 ~~~
