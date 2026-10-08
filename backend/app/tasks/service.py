@@ -22,6 +22,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from app.adapter.registry import HarnessRegistry
 from app.budget.service import (
     committed_buckets,
     raise_incidents,
@@ -869,6 +870,40 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- review
 
+    def _assert_review_policy(self, *, task: sqlite3.Row, owner: str, reviewer: str) -> None:
+        """R10 §21 review_policy enforcement (rules-tighten, drill F5).
+
+        ``cross_provider`` is the only policy v1 produces; anything else is
+        refused rather than interpreted -- no second policy model is invented
+        here (a new value needs its own card). Both sides must be known to the
+        human-maintained registry: a self-declared reviewer cannot be *proven*
+        cross-provider, and self-report is not authorization (R10 §6, the same
+        stance as probe's degraded path). Self-review is checked before this,
+        so its specific code keeps winning.
+        """
+        policy = str(task["review_policy"])
+        if policy != "cross_provider":
+            raise Conflict(
+                f"review policy {policy!r} is not implemented",
+                code="review.policy_unknown",
+            )
+        registry = HarnessRegistry(self.database)
+        owner_row = registry.current(owner)
+        reviewer_row = registry.current(reviewer)
+        if owner_row is None or reviewer_row is None:
+            unknown = owner if owner_row is None else reviewer
+            raise Conflict(
+                f"harness {unknown!r} is not in the registry;"
+                " cross-provider review needs both providers known",
+                code="review.provider_unknown",
+            )
+        if str(owner_row["provider"]) == str(reviewer_row["provider"]):
+            raise Conflict(
+                f"reviewer provider {reviewer_row['provider']!r} equals the owner's;"
+                " cross_provider review is required",
+                code="review.cross_provider_required",
+            )
+
     def review_claim(
         self,
         *,
@@ -910,6 +945,7 @@ class SchedulerService:
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
+            self._assert_review_policy(task=task, owner=owner, reviewer=reviewer_harness_id)
 
             existing = conn.execute(
                 "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
@@ -1030,6 +1066,9 @@ class SchedulerService:
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
+            self._assert_review_policy(
+                task=task, owner=str(attempt["owner"]), reviewer=reviewer_harness_id
+            )
             held = (
                 conn.execute(
                     "SELECT * FROM reviews WHERE review_id = ? AND reviewer_harness_id = ?",

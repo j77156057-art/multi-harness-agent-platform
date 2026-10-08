@@ -216,6 +216,7 @@ class VerifyWorker:
         head_output = ""
         changed: list[tuple[str, str]] = []
         failure_reason: str | None = None
+        empty_diff = False
         head_overlay: Overlay | None = None
 
         try:
@@ -236,6 +237,18 @@ class VerifyWorker:
                 failure_reason = FAILURE_ENV
             elif head_exit != 0:
                 failure_reason = FAILURE_CODE
+            elif job.differential_mode == MODE_REQUIRED and job.base_commit and not changed:
+                # rules-tighten (drill F11): a head tree identical to the base
+                # is a vacuous differential -- "the task produced nothing" must
+                # not ride an existence-only acceptance check to a passing
+                # receipt. Stays inside the frozen four-value vocabulary
+                # (code_failed; R10 L432 names "differential 不成立" as its
+                # meaning) with an explicit `empty_diff` marker on the receipt.
+                # The human escape hatch is untouched: a genuinely no-op task
+                # declares differential:not_applicable and goes to
+                # awaiting_human (R10 §16 step 5).
+                failure_reason = FAILURE_CODE
+                empty_diff = True
         except OverlayError as exc:
             failure_reason = FAILURE_ENV
             head_output = str(exc)
@@ -263,6 +276,7 @@ class VerifyWorker:
             head_output=head_output,
             baseline_output=baseline_output,
             changed=changed,
+            empty_diff=empty_diff,
         )
 
     # ------------------------------------------------------------- internals
@@ -327,6 +341,7 @@ class VerifyWorker:
         head_output: str,
         baseline_output: str,
         changed: list[tuple[str, str]],
+        empty_diff: bool = False,
     ) -> VerifyOutcome:
         receipt = {
             "receipt_id": f"rc-{uuid.uuid4().hex}",
@@ -344,6 +359,10 @@ class VerifyWorker:
             "toolchain": _toolchain(),
             "fencing_epoch": job.fencing_epoch,
             "failure_reason": failure_reason,
+            # rules-tighten (F11): distinguishable inside the frozen four-value
+            # failure vocabulary -- an empty differential is a code failure,
+            # and this marker is what lets an operator tell the two apart.
+            "empty_diff": empty_diff,
             "log_hash": _hash_text(head_output + baseline_output),
             "diff_hash": _hash_text("\n".join(f"{kind}\t{path}" for kind, path in changed)),
             "status": status,

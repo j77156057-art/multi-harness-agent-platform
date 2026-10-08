@@ -30,6 +30,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, run_git
+from app.git.worktree import WorktreeError, WorktreeManager
 from app.lease.service import expire_stale_leases, parse_iso
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
@@ -1235,4 +1236,48 @@ def sweep_budget(
             "incidents_resolved": report.incidents_resolved,
             "open_incidents": report.open_incidents,
         },
+    )
+
+
+def sweep_worktree_recycle(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """Recycle worktrees whose attempt is dead (rules-tighten, drill F7).
+
+    R10 §14 L795 pins both the trigger states and the safety order:
+    merged / abandoned / cancelled and the rework freeze put the old worktree
+    into ``pending_archive``, and "归档校验通过后才回收 worktree" -- so the
+    only path used here is ``archive_and_recycle`` (bundle -> verify ->
+    remove). A failed archive leaves the tree in place for a human and is
+    reported as skipped rather than retried blind.
+
+    Deliberately does NOT touch the current attempt of a live task: a
+    restarted harness may still replay-claim it (F9), and the stale/reclaiming
+    window keeps its workspace until a successor attempt exists -- which this
+    same sweep recycles on a later round. Capacity falls back naturally: the
+    active-workspace count is what ``provision`` checks, and the drill's F7
+    exhaustion was exactly a pile of merged/stale attempts.
+    """
+    rows = database.read(
+        "SELECT w.attempt_id FROM workspaces w JOIN tasks t ON t.task_id = w.task_id"
+        " WHERE w.status = 'active'"
+        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested')"
+        "        OR (t.current_attempt_id IS NOT NULL"
+        "            AND w.attempt_id != t.current_attempt_id))"
+        " ORDER BY w.rowid"
+    )
+    if not rows:
+        return SweepReport("worktree_recycle", 0, {"recycled": [], "skipped": []})
+    manager = WorktreeManager(database, repo or CanonicalRepo.from_settings())
+    recycled: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for row in rows:
+        attempt_id = str(row["attempt_id"])
+        try:
+            manager.archive_and_recycle(attempt_id=attempt_id)
+            recycled.append(attempt_id)
+        except WorktreeError as exc:
+            skipped.append({"attempt_id": attempt_id, "reason": str(exc)})
+    return SweepReport(
+        "worktree_recycle", len(recycled), {"recycled": recycled, "skipped": skipped}
     )

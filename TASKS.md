@@ -112,6 +112,7 @@
 | frontend-token | Qoder | auth-layer | ✅ done（实现 b26680a；Bearer+whoami+认证面板，enforce 实测） | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 | adapter-hardening | Qoder | e2e-harness-drill | ✅ done（实现 e68c48f；F3/F4/F9 清账，真实 CLI 抽查留档） | `agent/local/qoder/adapter-hardening/a1` | `MVP-ADAPTER-003` |
 | gate-summary-fix | OpenCode | — | ✅ done（a1 = 45cb04a；负向验证做过两轮，第二轮按旧行为忠实退回才 2 条全红） | `agent/local/opencode/gate-summary-fix/a1` | `MVP-PROCESS-003` |
+| rules-tighten | Qoder | adapter-hardening | ✅ done（实现 e2a4545；F5/F7/F11 收紧，测试 +13） | `agent/local/qoder/rules-tighten/a1` | `CORE-RULES-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -251,6 +252,7 @@
 | auth-layer | [卡](docs/tasks/notes/auth-layer.md) | | |
 | frontend-token | [卡](docs/tasks/notes/frontend-token.md) | | |
 | adapter-hardening | [卡](docs/tasks/notes/adapter-hardening.md) | | |
+| rules-tighten | [卡](docs/tasks/notes/rules-tighten.md) | | |
 
 ## 共享文件改动声明
 

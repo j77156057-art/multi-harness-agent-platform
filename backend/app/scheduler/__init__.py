@@ -21,6 +21,7 @@ from app.scheduler.sweeps import (
     sweep_stuck,
     sweep_verify_lease,
     sweep_verify_queue,
+    sweep_worktree_recycle,
 )
 
 __all__ = [
@@ -41,4 +42,5 @@ __all__ = [
     "sweep_stuck",
     "sweep_verify_lease",
     "sweep_verify_queue",
+    "sweep_worktree_recycle",
 ]

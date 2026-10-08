@@ -24,7 +24,7 @@ from app.merge.worker import MergeWorker
 from app.tasks.service import SchedulerService
 from app.verify.worker import VerifyWorker
 from tests.api_support import bootstrap, make_client, publish_plan, verify_policy
-from tests.merge_support import PROFILE
+from tests.merge_support import PROFILE, register_harness
 from tests.merge_support import policy as merge_policy
 
 HARNESS = "fake-1"
@@ -108,6 +108,9 @@ def build_rig(tmp_path: Path, *, register: bool = True) -> Rig:
     service = SchedulerService(database)
     if register:
         HarnessRegistry(database).register(REGISTRATION)
+        # rules-tighten F5: the review face needs both sides in the registry
+        # with distinct providers; fake-1 (fake) owns, reviewer-1 (local) reviews.
+        register_harness(database, "reviewer-1", provider="local")
 
     bootstrap(client)
     publish_plan(client, plan_id="PL-1", tasks=[{"id": "T-1"}])
