@@ -112,7 +112,9 @@
 | frontend-token | Qoder | auth-layer | ✅ done（实现 b26680a；Bearer+whoami+认证面板，enforce 实测） | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 | adapter-hardening | Qoder | e2e-harness-drill | ✅ done（实现 e68c48f；F3/F4/F9 清账，真实 CLI 抽查留档） | `agent/local/qoder/adapter-hardening/a1` | `MVP-ADAPTER-003` |
 | gate-summary-fix | OpenCode | — | ✅ done（a1 = 45cb04a；负向验证做过两轮，第二轮按旧行为忠实退回才 2 条全红） | `agent/local/opencode/gate-summary-fix/a1` | `MVP-PROCESS-003` |
+| lint-baseline-repair | OpenCode | — | ✅ done（a1 = ff0d47b；ruff check . 从 exit=1 变 All checks passed!） | `agent/local/opencode/lint-baseline-repair/a1` | `MVP-PROCESS-003` |
 | rules-tighten | Qoder | adapter-hardening | ✅ done（实现 e2a4545；F5/F7/F11 收紧，测试 +13） | `agent/local/qoder/rules-tighten/a1` | `CORE-RULES-001` |
+| office-anim-proto | OpenCode | — | 🟢 doing（前端动画原型：左侧办公室拟人场景 + 右侧手机群聊，任务表轮传机制） | `agent/local/opencode/office-anim-proto/a1` | `MVP-UI-006` |
 | buzz-bridge-adr | Qoder | paperclip-buzz-source | ✅ done（交付 e1a839b；ADR-DEV-005 提议，待裁决） | `agent/local/qoder/buzz-bridge-adr/a1` | `MVP-ARCH-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
@@ -172,6 +174,9 @@
 <!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
 <!-- claim-denum → docs/claims/49-opencode--claim-denum.md -->
 <!-- gate-summary-fix → docs/claims/opencode--gate-summary-fix.md -->
+<!-- lint-baseline-repair → docs/claims/opencode--lint-baseline-repair.md -->
+<!-- office-anim-proto → docs/claims/opencode--office-anim-proto.md -->
+
 
 
 ## 任务卡
@@ -655,6 +660,93 @@ DeprecationWarning、库提示——都会插在结果行后面，于是摘要�
 `_run_gate` 只跑 docstate + discipline 两道门禁；ruff 与 pytest 在
 `scripts.sh check` 里，**不在 mergeguard 的合并路径上**。也就是说：一次
 合并的绿灯并不代表 ruff/pytest 是绿的。这是另一个问题，本次不展开。
+~~~
+
+### lint-baseline-repair：清掉仓库根 ruff 全量口径下的 2 条既有问题（✅ done）
+
+~~~text
+任务编号：lint-baseline-repair
+负责人 Harness：OpenCode
+开始时间：2026-10-09 01:40
+工作区：.worktrees/opencode/
+依赖任务：无。**由用户明确授权扩目录**（两条问题都不在我的任务卡允许目录内）
+真相源引用：`ruff check .`（仓库根 = 全量口径）的输出；`git stash` 后同样报
+            → 证明是既有问题，不是任何在途任务引入
+允许修改目录：docs/prep/MVP-08/**、tools/docstate/**（**本次经用户授权**）、
+            TASKS.md、docs/traceability.md、docs/claims/**
+禁止修改目录：backend/app/**、docs/spec/**（授权仅限上列两项）
+交付分支：agent/local/opencode/lint-baseline-repair/a1
+test_id：MVP-PROCESS-003
+当前状态：✅ done
+commit：a1 = `ff0d47b` + `ee13ffc`
+
+### 起因：我一直只在 backend/ 跑 ruff
+
+`ruff check .` 在**仓库根**才是全量口径。此前我一路报「ruff 全绿」，
+跑的是 `cd backend; ruff check .` —— 单目录口径。
+
+从仓库根看，长期挂着 2 条问题。`git stash` 掉全部改动后同样报 → **既有问题**。
+两条都不在任何人的任务卡允许目录内，其中 `tools/docstate/**` 在多张任务卡里
+是**明令禁止修改**的目录。本次由用户明确授权后才动。
+
+### 修 1：docs/prep/MVP-08/mutation_test.py:130（F541）
+
+    print(f"baseline (unmutated contract):")
+      → print("baseline (unmutated contract):")
+
+字符串无占位符，纯删 `f` 前缀，**输出不变**。
+
+### 修 2：tools/docstate/docstate.py:176（E741）
+
+    M, O, R = al.get("M", set()), al.get("O", set()), al.get("R", set())
+
+只改**局部变量名** `O` → `ops`。字典键 `"O"`、断言消息文案里的 `"O"`
+（`"O 集合 = %d"`）**一律不动**：`M`/`O`/`R` 是 R10 §37.7 allowlist 的三类
+领域术语，是文档事实不是代码风格；`EXPECTED_COUNTS = {"M": 74, "O": 14, ...}`
+同理保持原样。
+
+只改 `O` 不改 `M`/`R`：E741 只针对 `l`/`O`/`I` 这三个和数字混淆的字母，
+`M`/`R` 不触发。为「对称」把三个都改名会扩大 diff 面积，而
+`EXPECTED_COUNTS` 的键有改变断言语义的风险——不值得。
+
+### 验证结果（这句值得复用）
+
+**改的是门禁，所以不能只证明「门禁还跑得动」，要证明「输出没变」。**
+做法：改前先跑一遍存基线，改后跑第二遍，逐字节比哈希。
+
+    改前：结果: 90 项检查，0 项失败
+    改后：结果: 90 项检查，0 项失败
+    输出 sha256 一致 ✓
+
+    ruff check .   exit=1 → All checks passed!
+    pytest 全量    500 passed
+    ruff format    0 处新增
+
+### 顺带发现（未修，如实记录）
+
+`docs/prep/MVP-08/mutation_test.py` 裸跑会在 Windows 上崩：
+
+    UnicodeEncodeError: 'gbk' codec can't encode character '\ufffd'
+    （print(base.stdout[-2000:]) 附近）
+
+它打印子进程的 stdout，自己却没钉 stdio 编码——与 win-utf8-stdio 那轮修的
+是**同一个缺陷类**，当时只覆盖了三个门禁入口，这个 prep 脚本不在内。
+`git stash` 确认崩溃在本次改动之前就存在，与删 `f` 前缀无关。
+
+未顺手修：本轮范围是 ruff lint，扩到「改这个脚本的编码处理」是另一件事。
+已确认它**不被任何门禁调用**（docstate 里搜不到 mutation_test 引用），
+所以不影响门禁结果。
+
+### 另一条记录：本分支合并时被 Qoder 的在途合并挡住
+
+`lint-baseline-repair/a1` 自测全绿后走 mergeguard 合并，被正确拒绝
+（根工作区有他人 staged 的受控合并现场）。现场为 Qoder 的
+`qoder--rules-tighten`：`MERGE_HEAD=2f66d39e`，暂存区含
+`backend/tests/test_rules_tighten.py` 等 19 条改动。**按工具规则未 abort、
+未代其收尾**，等占用者自己提交。
+
+这件事本身是 mergeguard 应有的行为，记为一次**正面**观察：它确实拦住了
+一次会在别人半成品上继续写的合并。
 ~~~
 
 ## 提交前自检
