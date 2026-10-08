@@ -69,6 +69,11 @@ merge_start → merge_success(merge-worker-1)`。集成分支按序累计 4+2 �
   **无任何实现**：T-CDX verify 失败后重领被 `claim.already_owned` 永久挡住
   （`current_attempt_id` 不清）。任何 verify 失败目前都是死端（只能人类
   reopen 换任务）。建议优先立卡（体量≈一张中等卡）。
+  **→ 已修复**：`rework-loop` 卡实现 `claim_for_revision`（in-process 全环
+  回归 + 变异验证）；**实机复核**：本演练实例上 T-CDX 于 seq97 吃到
+  `claim_for_revision`（payload `revised_from=T-CDX.a1`、attempt `T-CDX.a2`、
+  epoch 2，worktree 已配）——死端消失；该次 live 尝试随后因 relay 断流
+  （F13）被 CLI 失败中断，完整的返工到 merge 由 in-process 测试覆盖。
 - **F2（已修）：worktree alternates 被写成 CRLF**——git 不剥尾 CR，导致 worktree
   内每条 git 命令都报 `object directory ... does not exist`（codex/opencode
   CLI 实测刷屏；此前靠 `.strip()` 断言漏网）。修复=`newline="\n"`

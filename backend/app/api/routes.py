@@ -171,8 +171,10 @@ def list_ready_tasks(
             422,
             "visibility=redacted is not implemented; R10 §17 defines redaction",
         )
-    sql = "SELECT * FROM tasks WHERE status = ?"
-    params: list[Any] = [TaskStatus.READY.value]
+    # changes_requested is claimable too (R10 §10 claim_for_revision, L449) --
+    # a rework the pull model cannot see would stay a dead end.
+    sql = "SELECT * FROM tasks WHERE status IN (?, ?)"
+    params: list[Any] = [TaskStatus.READY.value, TaskStatus.CHANGES_REQUESTED.value]
     if group_id is not None:
         sql += " AND group_id = ?"
         params.append(group_id)
