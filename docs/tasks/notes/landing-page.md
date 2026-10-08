@@ -1,4 +1,4 @@
-### landing-page：根路径落地页 + favicon（🚧 doing）
+### landing-page：根路径落地页 + favicon（✅ done）
 
 ~~~text
 任务编号：landing-page
@@ -37,5 +37,23 @@
   5. `PYTHONUTF8=1 ./scripts.sh check` 全绿；traceability 新增 `MVP-UI-003`
 test_id：MVP-UI-003（新登记，形态同 MVP-UI-001/002）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 13:22
+commit：`a6237dc`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（format 120 文件）
+  pytest      : 455 passed（本任务净增 4 项：test_landing.py），exit 0
+  实机 curl    : 临时实例 127.0.0.1:8870（独立 AP_DATA_DIR，不打扰协调者
+                8848 实例）逐项留档：①`GET /` → 200 `text/html; charset=utf-8`，
+                响应体含 /health、/docs、/spec/status、5173 四处链接；
+                ②`GET /favicon.ico` → 204 空体；③`Host: evil.example` 请 `/`
+                → 400 `auth.host_header_rejected`（中间件覆盖根路径）。
+                实例已停、临时数据目录已删。
+已知问题：
+  - 入口页里「规范一致性（90 项）」与 README 同为字面量：若 docstate 检查
+    数变化，两处需要一起改（spec 总项数变化极少，暂不做模板化）。
+  - 入口页是静态 HTML 字符串（不读库、无模板引擎）——单文件改动面最小；
+    若以后要动态渲染（如显示最近事件），需换模板方案，属新卡范围。
 ~~~

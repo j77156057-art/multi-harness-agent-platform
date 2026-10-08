@@ -104,7 +104,7 @@
 | e2e-harness-drill | Qoder | diff-message | ✅ done（实现 0c6b40e；6 链真实 merged + 六项演练 + 前端追溯；附 alternates 修复） | `agent/local/qoder/e2e-harness-drill/a1` | `OPS-DRILL-001` |
 | rework-loop | Qoder | e2e-harness-drill | ✅ done（实现 af80d4e；claim_for_revision 返工闭环，变异验证） | `agent/local/qoder/rework-loop/a1` | `CORE-REWORK-001` |
 | start-bat | Qoder | — | ✅ done（实现 5520786；Windows 一键启动器，实测三模式） | `agent/local/qoder/start-bat/a1` | `MVP-PROCESS-002` |
-| landing-page | Qoder | start-bat | 🚧 doing | `agent/local/qoder/landing-page/a1` | `MVP-UI-003` |
+| landing-page | Qoder | start-bat | ✅ done（实现 a6237dc；根路径入口页 + favicon 204，实机 curl 留档） | `agent/local/qoder/landing-page/a1` | `MVP-UI-003` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
