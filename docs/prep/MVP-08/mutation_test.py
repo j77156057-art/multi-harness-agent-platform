@@ -127,7 +127,7 @@ def run_one(name: str, fname: str, find: str, repl: str, expect: str) -> bool:
 
 
 def main() -> int:
-    print(f"baseline (unmutated contract):")
+    print("baseline (unmutated contract):")
     base = subprocess.run(
         [sys.executable, str(HERE / "check_contract.py"), "--here", str(HERE)],
         capture_output=True, text=True, encoding="utf-8", errors="replace",

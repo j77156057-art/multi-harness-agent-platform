@@ -173,14 +173,18 @@ def run(spec_path, verbose=False):
 
     # --- 组 2：allowlist 集合 ---
     al = extract_allowlist(text)
-    M, O, R = al.get("M", set()), al.get("O", set()), al.get("R", set())
-    union = M | O | R
+    # 局部变量叫 `ops` 而不是 `O`：`O` 与数字 0 视觉混淆，ruff 的 E741 会拦。
+    # **`"O"` 这个字符串一律不动** —— M/O/R 是 R10 §37.7 allowlist 的三类领域
+    # 术语，字典键（`EXPECTED_COUNTS["O"]`）与断言消息（"O 集合 = %d"）都是
+    # 文档事实，不是代码风格。只改名，不改语义。
+    M, ops, R = al.get("M", set()), al.get("O", set()), al.get("R", set())
+    union = M | ops | R
     r.chk(len(M) == EXPECTED_COUNTS["M"], "M 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["M"], len(M)), "allowlist")
-    r.chk(len(O) == EXPECTED_COUNTS["O"], "O 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["O"], len(O)), "allowlist")
+    r.chk(len(ops) == EXPECTED_COUNTS["O"], "O 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["O"], len(ops)), "allowlist")
     r.chk(len(R) == EXPECTED_COUNTS["R"], "R 集合 = %d（实际 %d）" % (EXPECTED_COUNTS["R"], len(R)), "allowlist")
     r.chk(len(union) == EXPECTED_COUNTS["UNION"],
           "并集 = %d（实际 %d）" % (EXPECTED_COUNTS["UNION"], len(union)), "allowlist")
-    r.chk(not (M & O) and not (M & R) and not (O & R), "M/O/R 两两交集为空", "allowlist")
+    r.chk(not (M & ops) and not (M & R) and not (ops & R), "M/O/R 两两交集为空", "allowlist")
     for key in ("M", "O", "R"):
         raw = al.get(key + "_raw", [])
         r.chk(len(raw) == len(set(raw)), "%s 集合内部无重复" % key, "allowlist")
