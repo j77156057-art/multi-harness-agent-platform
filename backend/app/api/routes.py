@@ -13,6 +13,13 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.adapter.registry import HarnessRegistry, capabilities_from
 from app.api import schemas
+from app.api.auth_deps import (
+    Principal,
+    bind_branch_subject,
+    bind_declared,
+    bind_task_owner,
+    require_for,
+)
 from app.api.errors import ApiError
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
@@ -21,6 +28,16 @@ from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
 from app.spec import TaskStatus
 from app.tasks.service import NotFound, SchedulerService
+
+
+def _guard(key: str):
+    """Annotated dependency for one R10 §17 permission key.
+
+    One factory for both faces: the allowed subject types come from
+    ``auth.POLICY[key]``, so a route cannot drift from the matrix silently —
+    an unregistered key refuses everything (``unknown_permission``).
+    """
+    return Annotated[Principal | None, Depends(require_for(key))]
 
 
 def _database(request: Request) -> Database:
@@ -54,19 +71,31 @@ read = APIRouter(tags=["read"])
 
 
 @management.post("/projects")
-def create_project(body: schemas.CreateProject, service: SchedulerDep) -> dict[str, Any]:
+def create_project(
+    body: schemas.CreateProject,
+    service: SchedulerDep,
+    _principal: _guard("project:create"),
+) -> dict[str, Any]:
     return service.create_project(project_id=body.project_id, name=body.name)
 
 
 @management.post("/projects/{project_id}/groups")
 def create_group(
-    project_id: str, body: schemas.CreateGroup, service: SchedulerDep
+    project_id: str,
+    body: schemas.CreateGroup,
+    service: SchedulerDep,
+    _principal: _guard("group:create"),
 ) -> dict[str, Any]:
     return service.create_group(group_id=body.group_id, project_id=project_id, name=body.name)
 
 
 @management.post("/groups/{group_id}/plans")
-def create_plan(group_id: str, body: schemas.CreatePlan, service: SchedulerDep) -> dict[str, Any]:
+def create_plan(
+    group_id: str,
+    body: schemas.CreatePlan,
+    service: SchedulerDep,
+    _principal: _guard("plan:submit"),
+) -> dict[str, Any]:
     outcome = service.create_plan(plan_id=body.plan_id, group_id=group_id, snapshot=body.snapshot)
     return {
         "plan_id": outcome.plan_id,
@@ -76,7 +105,17 @@ def create_plan(group_id: str, body: schemas.CreatePlan, service: SchedulerDep) 
 
 
 @management.post("/plans/{plan_id}/approve")
-def approve_plan(plan_id: str, body: schemas.PlanDecision, service: SchedulerDep) -> dict[str, Any]:
+def approve_plan(
+    plan_id: str,
+    body: schemas.PlanDecision,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("plan:approve"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="plan:approve", database=database, request=request
+    )
     outcome = service.approve_plan(plan_id=plan_id, decided_by=body.decided_by)
     return {
         "plan_id": outcome.plan_id,
@@ -86,7 +125,15 @@ def approve_plan(plan_id: str, body: schemas.PlanDecision, service: SchedulerDep
 
 
 @management.post("/plans/{plan_id}/reject")
-def reject_plan(plan_id: str, body: schemas.PlanDecision, service: SchedulerDep) -> dict[str, Any]:
+def reject_plan(
+    plan_id: str,
+    body: schemas.PlanDecision,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("plan:reject"),
+) -> dict[str, Any]:
+    bind_declared(principal, body.decided_by, key="plan:reject", database=database, request=request)
     rejected = service.reject_plan(
         plan_id=plan_id, decided_by=body.decided_by, reason=body.reason or ""
     )
@@ -97,7 +144,12 @@ def reject_plan(plan_id: str, body: schemas.PlanDecision, service: SchedulerDep)
 
 
 @adapter.post("/probe")
-def probe(body: schemas.ProbeRequest, database: DatabaseDep) -> dict[str, Any]:
+def probe(
+    body: schemas.ProbeRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("harness:probe"),
+) -> dict[str, Any]:
     """R10 §7 ``probe()`` / §6 capability source.
 
     The self-report is recorded every time, but it does not become the effective
@@ -106,6 +158,9 @@ def probe(body: schemas.ProbeRequest, database: DatabaseDep) -> dict[str, Any]:
     the human-maintained registry does not know comes back degraded with no
     effective capabilities, rather than being trusted because it said so.
     """
+    bind_declared(
+        principal, body.harness_id, key="harness:probe", database=database, request=request
+    )
     registry = HarnessRegistry(database)
     registered = registry.current(body.harness_id)
     warnings: list[str] = []
@@ -132,12 +187,20 @@ def probe(body: schemas.ProbeRequest, database: DatabaseDep) -> dict[str, Any]:
 
 
 @adapter.get("/capabilities")
-def capabilities(database: DatabaseDep, harness_id: Annotated[str, Query()]) -> dict[str, Any]:
+def capabilities(
+    database: DatabaseDep,
+    harness_id: Annotated[str, Query()],
+    request: Request,
+    principal: _guard("harness:capabilities"),
+) -> dict[str, Any]:
     """R10 §7 ``capabilities()``.
 
     Identity is an explicit parameter because v1 has no authentication layer yet;
     the card records that rather than pretending the caller is authenticated.
     """
+    bind_declared(
+        principal, harness_id, key="harness:capabilities", database=database, request=request
+    )
     row = HarnessRegistry(database).current(harness_id)
     if row is None:
         raise NotFound(f"unknown harness: {harness_id}")
@@ -154,6 +217,7 @@ def capabilities(database: DatabaseDep, harness_id: Annotated[str, Query()]) -> 
 @adapter.get("/list_ready_tasks")
 def list_ready_tasks(
     database: DatabaseDep,
+    _principal: _guard("task:list_ready"),
     visibility: Annotated[str, Query(pattern="^(authorized|redacted)$")] = "authorized",
     group_id: Annotated[str | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -189,6 +253,7 @@ def read_context(
     task_id: str,
     database: DatabaseDep,
     service: SchedulerDep,
+    _principal: _guard("task:context"),
     since_seq: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
     """R10 §7 ``read_context()``: the task's events from a cursor (§15).
@@ -203,7 +268,14 @@ def read_context(
 
 
 @adapter.post("/claim")
-def claim(body: schemas.ClaimRequestModel, database: DatabaseDep, response: Response):
+def claim(
+    body: schemas.ClaimRequestModel,
+    database: DatabaseDep,
+    response: Response,
+    request: Request,
+    principal: _guard("task:claim"),
+):
+    bind_declared(principal, body.harness_id, key="task:claim", database=database, request=request)
     result = ClaimService(database).claim(
         ClaimRequest(
             claim_request_id=body.claim_request_id,
@@ -221,7 +293,15 @@ def claim(body: schemas.ClaimRequestModel, database: DatabaseDep, response: Resp
 
 
 @adapter.post("/heartbeat")
-def heartbeat(body: schemas.HeartbeatRequest, database: DatabaseDep) -> dict[str, Any]:
+def heartbeat(
+    body: schemas.HeartbeatRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:heartbeat"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal, task_id=body.task_id, key="task:heartbeat", database=database, request=request
+    )
     with database.transaction() as conn:
         lease_until = renew_lease(
             conn,
@@ -247,7 +327,20 @@ def heartbeat(body: schemas.HeartbeatRequest, database: DatabaseDep) -> dict[str
 
 
 @adapter.post("/submit_result")
-def submit_result(body: schemas.SubmitResultRequest, service: SchedulerDep) -> dict[str, Any]:
+def submit_result(
+    body: schemas.SubmitResultRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:submit_result"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal,
+        task_id=body.task_id,
+        key="task:submit_result",
+        database=database,
+        request=request,
+    )
     record = service.submit_result(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -265,9 +358,22 @@ def submit_result(body: schemas.SubmitResultRequest, service: SchedulerDep) -> d
 
 @adapter.post("/publish_task_branch")
 def publish_task_branch(
-    body: schemas.PublishTaskBranchRequest, request: Request, database: DatabaseDep
+    body: schemas.PublishTaskBranchRequest,
+    request: Request,
+    database: DatabaseDep,
+    principal: _guard("task:publish_branch"),
 ) -> dict[str, Any]:
     """The only way an agent gitdir's objects reach canonical (R10 §13)."""
+    bind_task_owner(
+        principal,
+        task_id=body.task_id,
+        key="task:publish_branch",
+        database=database,
+        request=request,
+    )
+    bind_branch_subject(
+        principal, body.branch, key="task:publish_branch", database=database, request=request
+    )
     result = PublishProxy(database, request.app.state.canonical_repo).publish_task_branch(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -280,7 +386,20 @@ def publish_task_branch(
 
 
 @adapter.post("/request_help")
-def request_help(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any]:
+def request_help(
+    body: schemas.AttemptAction,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:request_help"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal,
+        task_id=body.task_id,
+        key="task:request_help",
+        database=database,
+        request=request,
+    )
     return service.request_help(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -290,14 +409,31 @@ def request_help(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str
 
 
 @adapter.post("/ask_human")
-def ask_human(body: schemas.AskHumanRequest, service: HumanDep) -> dict[str, Any]:
+def ask_human(
+    body: schemas.AskHumanRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:ask_human"),
+) -> dict[str, Any]:
     """R10 §7's 14th verb, promoted in human-ops.
 
     The attempt context is required like the other harness write verbs: the
     §13 owner guard is what keeps a stale harness from parking a task that has
     changed hands. §18's token rules (harness tokens get 403 on human
-    decisions) are the future auth task's -- recorded, not faked.
+    decisions) landed with auth-layer: the harness face is token-checked, and
+    the human face lives on /human/*.
     """
+    bind_declared(
+        principal, body.harness_id, key="task:ask_human", database=database, request=request
+    )
+    bind_task_owner(
+        principal,
+        task_id=body.task_id,
+        key="task:ask_human",
+        database=database,
+        request=request,
+    )
     return service.ask_human(
         task_id=body.task_id,
         question=body.question,
@@ -309,7 +445,20 @@ def ask_human(body: schemas.AskHumanRequest, service: HumanDep) -> dict[str, Any
 
 
 @adapter.post("/report_blocked")
-def report_blocked(body: schemas.ReportBlockedRequest, service: SchedulerDep) -> dict[str, Any]:
+def report_blocked(
+    body: schemas.ReportBlockedRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:report_blocked"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal,
+        task_id=body.task_id,
+        key="task:report_blocked",
+        database=database,
+        request=request,
+    )
     return service.report_blocked(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -319,25 +468,53 @@ def report_blocked(body: schemas.ReportBlockedRequest, service: SchedulerDep) ->
 
 
 @adapter.post("/accept_help")
-def accept_help(body: schemas.HelpVoteRequest, service: SchedulerDep) -> dict[str, Any]:
+def accept_help(
+    body: schemas.HelpVoteRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:accept_help"),
+) -> dict[str, Any]:
     """§7 collaborator side; not owner-scoped, so no attempt context rides along."""
+    bind_declared(
+        principal, body.harness_id, key="task:accept_help", database=database, request=request
+    )
     return service.accept_help(
         task_id=body.task_id, help_id=body.help_id, collaborator=body.harness_id
     )
 
 
 @adapter.post("/reject_help")
-def reject_help(body: schemas.HelpVoteRequest, service: SchedulerDep) -> dict[str, Any]:
+def reject_help(
+    body: schemas.HelpVoteRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:reject_help"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="task:reject_help", database=database, request=request
+    )
     return service.reject_help(
         task_id=body.task_id, help_id=body.help_id, collaborator=body.harness_id
     )
 
 
 @adapter.post("/split_task")
-def split_task(body: schemas.SplitTaskRequest, service: SchedulerDep) -> dict[str, Any]:
+def split_task(
+    body: schemas.SplitTaskRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:split"),
+) -> dict[str, Any]:
     """Owner-fenced like the other harness write verbs (the split guard is
     "human or owner initiated"; the human side of that clause has no route in
     v1 -- recorded in the adapter-verbs card)."""
+    bind_declared(principal, body.harness_id, key="task:split", database=database, request=request)
+    bind_task_owner(
+        principal, task_id=body.task_id, key="task:split", database=database, request=request
+    )
     return service.split_task(
         task_id=body.task_id,
         child_specs=body.child_specs,
@@ -348,7 +525,16 @@ def split_task(body: schemas.SplitTaskRequest, service: SchedulerDep) -> dict[st
 
 
 @adapter.post("/release")
-def release(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any]:
+def release(
+    body: schemas.AttemptAction,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:release"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal, task_id=body.task_id, key="task:release", database=database, request=request
+    )
     return service.release(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -358,7 +544,16 @@ def release(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any
 
 
 @adapter.post("/abandon")
-def abandon(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any]:
+def abandon(
+    body: schemas.AttemptAction,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:abandon"),
+) -> dict[str, Any]:
+    bind_task_owner(
+        principal, task_id=body.task_id, key="task:abandon", database=database, request=request
+    )
     return service.abandon(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -371,23 +566,59 @@ def abandon(body: schemas.AttemptAction, service: SchedulerDep) -> dict[str, Any
 
 
 @human.post("/resume")
-def human_resume(body: schemas.HumanResumeRequest, service: HumanDep) -> dict[str, Any]:
+def human_resume(
+    body: schemas.HumanResumeRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:resume"),
+) -> dict[str, Any]:
     """§18 human.resume: same attempt, same epoch, fresh development lease."""
+    bind_declared(principal, body.decided_by, key="task:resume", database=database, request=request)
     return service.resume(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
 
 
 @human.post("/reopen")
-def human_reopen(body: schemas.HumanReopenRequest, service: HumanDep) -> dict[str, Any]:
+def human_reopen(
+    body: schemas.HumanReopenRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:reopen"),
+) -> dict[str, Any]:
+    bind_declared(principal, body.decided_by, key="task:reopen", database=database, request=request)
     return service.reopen(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
 
 
 @human.post("/release")
-def human_release(body: schemas.HumanReleaseRequest, service: HumanDep) -> dict[str, Any]:
+def human_release(
+    body: schemas.HumanReleaseRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:release_escalated"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal,
+        body.decided_by,
+        key="task:release_escalated",
+        database=database,
+        request=request,
+    )
     return service.release(task_id=body.task_id, decided_by=body.decided_by)
 
 
 @human.post("/adjudicate")
-def human_adjudicate(body: schemas.HumanAdjudicateRequest, service: HumanDep) -> dict[str, Any]:
+def human_adjudicate(
+    body: schemas.HumanAdjudicateRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:adjudicate"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="task:adjudicate", database=database, request=request
+    )
     return service.adjudicate(
         task_id=body.task_id,
         decided_by=body.decided_by,
@@ -397,7 +628,14 @@ def human_adjudicate(body: schemas.HumanAdjudicateRequest, service: HumanDep) ->
 
 
 @human.post("/cancel")
-def human_cancel(body: schemas.HumanCancelRequest, service: HumanDep) -> dict[str, Any]:
+def human_cancel(
+    body: schemas.HumanCancelRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:cancel"),
+) -> dict[str, Any]:
+    bind_declared(principal, body.decided_by, key="task:cancel", database=database, request=request)
     return service.cancel(task_id=body.task_id, decided_by=body.decided_by, reason=body.reason)
 
 
@@ -405,8 +643,21 @@ def human_cancel(body: schemas.HumanCancelRequest, service: HumanDep) -> dict[st
 
 
 @review.post("/claim")
-def review_claim(body: schemas.ReviewClaimRequest, service: SchedulerDep) -> dict[str, Any]:
+def review_claim(
+    body: schemas.ReviewClaimRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("review:claim"),
+) -> dict[str, Any]:
     """R10 §21 ``review.claim``: take the review lease, independent of development."""
+    bind_declared(
+        principal,
+        body.reviewer_harness_id,
+        key="review:claim",
+        database=database,
+        request=request,
+    )
     return service.review_claim(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
@@ -416,7 +667,20 @@ def review_claim(body: schemas.ReviewClaimRequest, service: SchedulerDep) -> dic
 
 
 @review.post("/submit")
-def review_submit(body: schemas.ReviewSubmitRequest, service: SchedulerDep) -> dict[str, Any]:
+def review_submit(
+    body: schemas.ReviewSubmitRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("review:submit"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal,
+        body.reviewer_harness_id,
+        key="review:submit",
+        database=database,
+        request=request,
+    )
     return service.submit_review(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
