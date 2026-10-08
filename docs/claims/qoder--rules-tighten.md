@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-09 01:05 |
 | 分支 | `agent/local/qoder/rules-tighten/a1` |
-| 状态 | 🚧 doing |
+| 状态 | ✅ done（实现 e2a4545；待合入） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `rules-tighten`。
 
@@ -22,3 +22,6 @@
   `archive_and_recycle`（bundle→verify→删除）；③验收"存在性"判据可被空产出
   通过——VerifyWorker 对"与基线无差异"的产出不再放行（receipt 标
   empty_diff，仍是冻结四值里的 code_failed）。
+- 2026-10-09 01:35：实现完成并提交 `e2a4545`（review 守卫 + worktree_recycle
+  巡检第 15 员 + verify 空差收紧；测试 +13，fixture 补注册）。全量门禁
+  511 passed；三条矩阵逐项见卡。状态 → done。

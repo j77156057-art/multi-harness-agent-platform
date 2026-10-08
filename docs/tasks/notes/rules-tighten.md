@@ -1,4 +1,4 @@
-### rules-tighten：F5/F7/F11——cross_provider、worktree 回收、差分收紧（🚧 doing）
+### rules-tighten：F5/F7/F11——cross_provider、worktree 回收、差分收紧（✅ done）
 
 ~~~text
 任务编号：rules-tighten
@@ -71,5 +71,44 @@
      `CORE-RULES-001`
 test_id：CORE-RULES-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-09 01:35
+commit：`e2a4545`（实现提交；登记 `f634f71`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 511 passed（本任务净增 13：test_rules_tighten.py + 既有
+                fixture 补注册），exit 0
+  F5 矩阵      : 同 provider 领取 409 cross_provider_required；未注册
+                reviewer/owner 409 provider_unknown（claim 与 submit 两处）；
+                自审仍 409 self_review_forbidden（次序在先）；未定义策略值
+                409 review.policy_unknown；异 provider 正例 approve 全链
+                照旧（merge_support/test_adapter/test_real_adapters/
+                test_rework_loop 的 fixture 全部补注册、provider 互异）。
+  F7 矩阵      : 终态（merged，真 MergeWorker 合并后）→ recycled + bundle/
+                patch 落 archives + 树删；活跃 attempt 不回收（F9 重启窗口）
+                → 顶替后回收；changes_requested 冻结回收（§14 L795/§10
+                L513）；archive 失败（注入 WorktreeError）→ skipped + 树在 +
+                巡检不崩；容量 1 时 start 拒 → 回收后 provision 成功（drill
+                F7 的容量闭环）；runner 顺序测试 14→15（budget 后、提醒前）。
+  F11 矩阵     : 空提交（树==base）→ failed + code_failed + receipt
+                `empty_diff:true` + changes_requested；有真实差异的旧通过行为
+                逐字不变（receipt `empty_diff:false`）；not_applicable 模式
+                不受收紧影响（人行逃生口仍在，§16 步 5）。
+已知问题：
+  - F5 只比较 provider 串（注册表没有更细的可信级别话语）；同 provider 的
+    不同模型（如两个 codex 实例）间审查也被拦——这是"跨 provider"的字面
+    语义，更细的策略留给未来卡；
+  - worktree_recycle 不做归档保留策略/磁盘配额（archives 目录清理属运维）；
+    被顶替判定读 tasks.current_attempt_id，与 §14 的 pending_archive 字面
+    状态没建列——登记为后续小卡（"pending_archive" 目前只是语义态）；
+  - F11 只堵"全空产出"，不替靶场设计验收判据（"判据要含 delta 语义"仍是
+    计划侧人类职责，drill F11 的教训原文在报告里）；
+  - F8/F10 仍不在本组（ConnectError 映射 / codex usage 接预算）。
+  - 排障留痕：首轮门禁 3 红——F5 的 fixture 漏网（grep 只扫下划线命名，
+    HTTP 路径 `/review/submit` 与 CLI `review-claim` 的审查流没扫到）。
+    `test_api_flow`×2、`test_cli_flow`×1 补注册后全绿（`0d4858c`）。
+    教训：跨面规则的落点扫描要把 **HTTP 路径与 CLI 命令字符串**一并列出
+    （本卡 §"完成标准"的 F5 反例当初只写了服务层命名）。
 ~~~

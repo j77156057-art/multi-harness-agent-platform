@@ -111,7 +111,7 @@
 | auth-layer | Qoder | R10-fix-12 | ✅ done（实现 521f7e9；token+身份绑定+矩阵执行，enforce 实机留档） | `agent/local/qoder/auth-layer/a1` | `DOC-AUTH-001` |
 | frontend-token | Qoder | auth-layer | ✅ done（实现 b26680a；Bearer+whoami+认证面板，enforce 实测） | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 | adapter-hardening | Qoder | e2e-harness-drill | ✅ done（实现 e68c48f；F3/F4/F9 清账，真实 CLI 抽查留档） | `agent/local/qoder/adapter-hardening/a1` | `MVP-ADAPTER-003` |
-| rules-tighten | Qoder | adapter-hardening | 🚧 doing | `agent/local/qoder/rules-tighten/a1` | `CORE-RULES-001` |
+| rules-tighten | Qoder | adapter-hardening | ✅ done（实现 e2a4545；F5/F7/F11 收紧，测试 +13） | `agent/local/qoder/rules-tighten/a1` | `CORE-RULES-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
