@@ -1,4 +1,4 @@
-### e2e-harness-drill：Codex＋OpenCode 真实联调 + 故障演练 + 前端追溯（🚧 doing）
+### e2e-harness-drill：Codex＋OpenCode 真实联调 + 故障演练 + 前端追溯（✅ done）
 
 ~~~text
 任务编号：e2e-harness-drill
@@ -60,6 +60,53 @@
   6. `PYTHONUTF8=1 ./scripts.sh check` 全绿（有小修则测试净增）；traceability
      新增 `OPS-DRILL-001`
 test_id：OPS-DRILL-001（新登记）
-测试命令：PYTHONUTF8=1 ./scripts.sh check（演练本体为报告内可复跑命令）
-当前状态：doing
+测试命令：PYTHONUTF8=1 ./scripts.sh check（演练本体为报告 §5 可复跑命令）
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 11:24
+commit：`0c6b40e`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（118 files already formatted）
+  pytest      : 443 passed（alternates 修复含字节断言+变异验证；计数不变），exit 0
+  前端四件     : vue-tsc 0 错；vitest 27 passed（含新增事件时间戳断言）；
+                build 110.30 kB；contrast 9 对全 ≥4.5:1
+  真实全流程   : **6 条链 merged**（T-CDX2/codex、T-OC/opencode、T-ISO-A/codex、
+                T-ISO-B/opencode、T-RESTART2/opencode、T-RESTART3/codex〔重放
+                补跑闭环〕）；另有 T-CDX 被平台正确拦下（空产出→
+                verify_code_failed→changes_requested）。事件链实例：claim→start→
+                submit_result→verify_passed→approve(异 provider)→merge_start→
+                merge_success；集成分支按序累计 merge。
+  故障演练六项 : ①并发抢=opencode claimed / codex already_owned（恰一胜者）；
+                ②进程退出=CLI 运行中 taskkill，心跳停；③租约过期=真实巡检器
+                `-m app.scheduler --once`（首轮 actions=3→stale，二轮同钟 0，
+                幂等）；④旧 token=409 `fencing.epoch_stale`（对照新 token 200）；
+                ⑤重启恢复=杀 uvicorn→worker ConnectError 失联退出→重启→同
+                claim_request_id 重放挂回**同 attempt/worktree**并补跑完成
+                （4 轮，前 3 轮完成段被 relay 抖动阻断，第 4 轮闭环）；
+                ⑥worktree 隔离=并发双任务 distinct paths/branches+交叉文件
+                互不可见（双向断言）。
+  前端追溯     : 群聊（operator+时间）、线程全链事件（**新增时间列**：claim 01:15:17
+                →merge_success 01:18:10）、负责人（codex/opencode/verify-worker/
+                merge-worker）、审核 payload（review_id/reviewed_commit/findings_hash）、
+                diff 卡（4 文件 +13−5；.pyc 标"二进制"；空产出诚实显示"0 文件"）、
+                任务列表异常态（changes_requested/stale/abandoned）；当前页
+                console 零消息、网络 7/7 全 200。
+  附修复       : **worktree alternates CRLF**（git 不剥尾 CR→worktree 每条 git 命令
+                报 `object directory ... does not exist`；显式 `newline="
+"` +
+                字节断言，变异验证去掉即红）；前端线程事件时间列（追溯要求）。
+已知问题（发现清单 F1-F13，详见报告）：
+  - **F1（高）**：`claim_for_revision`/`resubmit`（R10 L449/523）未实现——verify
+    失败后重领被 already_owned 永久挡住，**返工是死端**；建议优先立卡。
+  - F3/F4（高，适配器）：codex workspace-write 沙箱在本机起不了 shell
+    （CreateProcessAsUserW）+ 引号经 cmd 被拆；opencode 由 python 直启不稳
+    （DB 错/usage dump），bash 壳稳定——适配器/驱动面硬化另立卡。
+  - F5：review_policy=cross_provider 无强制；F6：verify/merge 无生产驱动进程；
+    F7：worktree 无回收→容量闸 8/8 挡新任务；F8：_tick 只映射 AdapterError；
+    F9：replay 响应不含 worktree 路径；F10：codex usage 未接线（预算数据源）；
+    F11：靶场判据需 delta 语义（空产出可通过存在性判据）；F12/F13：本机文件锁
+    高发 + relay 高抖动（环境，非平台）。
+  - **脚本 gitignored**（`backend/data/e2e-drill/`）：真实 CLI/额度不可作 CI
+    依赖，报告命令可复跑；截图不可用（浏览器 surface hidden）以结构快照留档。
 ~~~
