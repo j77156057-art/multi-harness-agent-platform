@@ -116,6 +116,9 @@ func _build_office() -> void:
 		w.desk_pos = dp
 		w.mirror = col >= 2
 		w.position = dp
+		# 放大 1.3 倍：不设 scale 时角色在设计稿里只占格子的约 1/6，
+		# 实测第一眼觉得「办公室空、人小」。格子间距 250×300 撑得住。
+		w.scale = Vector2(1.3, 1.3)
 		w.name = String(c["key"])
 		add_child(w)
 		workers[c["key"]] = w
@@ -139,6 +142,25 @@ func _apply_states() -> void:
 
 # ------------------------------------------------------------------ 右侧手机
 
+## 把一个控件钉在「设计坐标系」的矩形里。
+##
+## **别再手算 offset_right**。Godot 的 offset_* 是「相对锚点的偏移」，
+## 不是「距父容器边缘的距离」。我在这里栽过一个真 bug：
+##
+##     scroll.offset_left  = PHONE_X + 12   # 1100
+##     scroll.offset_right = PHONE_X        # 想表达「右边到手机左边界」
+##
+## 而 PRESET_FULL_RECT 的右锚点是 1.0，于是 right = 1600 + 1088 = 2688，
+## 控件宽出 **1588 像素**、伸到视口外 1088 像素，聊天内容被裁掉大半，
+## 而表面上只看得出「右边一栏有点空」。转储场景树才量出来。
+func _pin(c: Control, x: float, y: float, w: float, h: float) -> void:
+	c.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	c.offset_left = x
+	c.offset_top = y
+	c.offset_right = x + w
+	c.offset_bottom = y + h
+
+
 func _build_phone() -> void:
 	var layer := CanvasLayer.new()
 	layer.name = "Phone"
@@ -147,18 +169,12 @@ func _build_phone() -> void:
 	# 底
 	var bg := ColorRect.new()
 	bg.color = Color("e9edf2")
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	bg.offset_left = PHONE_X
-	bg.offset_right = 0
+	_pin(bg, PHONE_X, 0.0, PHONE_W, VPH)
 	layer.add_child(bg)
 
 	# 头部
 	var head := PanelContainer.new()
-	head.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	head.offset_left = PHONE_X
-	head.offset_right = 0
-	head.offset_top = 0
-	head.offset_bottom = 56
+	_pin(head, PHONE_X, 0.0, PHONE_W, 56.0)
 	layer.add_child(head)
 	var hs := StyleBoxFlat.new()
 	hs.bg_color = Color("f7f8fa")
@@ -166,21 +182,18 @@ func _build_phone() -> void:
 	hs.set_border_width(SIDE_BOTTOM, 1)
 	head.add_theme_stylebox_override("panel", hs)
 
-	var hbox := HBoxContainer.new()
-	hbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	hbox.offset_left = 14
-	hbox.offset_right = -14
-	head.add_child(hbox)
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 9)
+	head.add_child(hb)
 	var av := Panel.new()
 	av.custom_minimum_size = Vector2(30, 30)
 	var avs := StyleBoxFlat.new()
 	avs.bg_color = Color("f2b632")
 	avs.set_corner_radius_all(8)
 	av.add_theme_stylebox_override("panel", avs)
-	hbox.add_child(av)
+	hb.add_child(av)
 	var vb := VBoxContainer.new()
-	vb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(vb)
+	hb.add_child(vb)
 	var t1 := Label.new()
 	t1.text = "项目协作群"
 	t1.add_theme_font_size_override("font_size", 14)
@@ -193,11 +206,7 @@ func _build_phone() -> void:
 
 	# 聊天滚动区
 	var scroll := ScrollContainer.new()
-	scroll.set_anchors_preset(Control.PRESET_FULL_RECT)
-	scroll.offset_left = PHONE_X + 12
-	scroll.offset_right = PHONE_X - 0
-	scroll.offset_top = 56
-	scroll.offset_bottom = -96
+	_pin(scroll, PHONE_X + 12.0, 56.0, PHONE_W - 24.0, VPH - 152.0)
 	layer.add_child(scroll)
 	_chat_box = VBoxContainer.new()
 	_chat_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -206,11 +215,7 @@ func _build_phone() -> void:
 
 	# 轮次提示区（默认隐藏）
 	_tip_panel = PanelContainer.new()
-	_tip_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_tip_panel.offset_left = PHONE_X + 12
-	_tip_panel.offset_right = PHONE_X - 0
-	_tip_panel.offset_top = -150
-	_tip_panel.offset_bottom = -96
+	_pin(_tip_panel, PHONE_X + 12.0, VPH - 150.0, PHONE_W - 24.0, 54.0)
 	_tip_panel.visible = false
 	layer.add_child(_tip_panel)
 	var ts := StyleBoxFlat.new()
@@ -234,11 +239,7 @@ func _build_phone() -> void:
 
 	# 输入区
 	var bar := PanelContainer.new()
-	bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	bar.offset_left = PHONE_X
-	bar.offset_right = 0
-	bar.offset_top = -96
-	bar.offset_bottom = 0
+	_pin(bar, PHONE_X, VPH - 96.0, PHONE_W, 96.0)
 	layer.add_child(bar)
 	var bs := StyleBoxFlat.new()
 	bs.bg_color = Color("f7f8fa")
@@ -360,6 +361,10 @@ func rebuild() -> void:
 	_apply_states()
 	_play_btn.text = "▶ 开始"
 	_phase.text = "待开始"
+	# 预置一条欢迎消息：否则打开就是**三分之一屏宽的空白盒子**，
+	# 第一印象直接归零。用户实测提过这个问题。
+	_push_msg({"from": "群主", "text": "群里的人都到齐了。点左上角「开始」，看任务表怎么一轮轮细化下去。", "kind": "text"})
+	_push_msg({"from": "管理员", "text": "我在。任务表轮次可以在上面调，默认轮 2 次。", "kind": "text"})
 
 
 func tick() -> void:

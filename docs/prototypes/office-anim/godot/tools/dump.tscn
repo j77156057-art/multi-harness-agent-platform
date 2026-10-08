@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cdumpoffice9an01"]
+
+[ext_resource type="Script" path="res://tools/dump.gd" id="1_dump"]
+
+[node name="Dump" type="Node"]
+script = ExtResource("1_dump")

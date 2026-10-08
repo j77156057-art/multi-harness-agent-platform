@@ -323,6 +323,20 @@ func _draw_desk_props() -> void:
 	draw_rect(Rect2(Vector2(mx - 5, my + 16), Vector2(10, 4)), Color("2b2f3a"))
 	draw_rect(Rect2(Vector2(mx - 12, my + 20), Vector2(24, 3)), Color("2b2f3a"))
 
+	# 名牌：不写这个的时候，8 个色块摆在一起**看不出谁是谁** ——
+	# 那是用户第一眼就会问的问题（实测被问到了）。
+	var name: String = String(spec.get("name", ""))
+	if name.is_empty():
+		return
+	var f := ThemeDB.fallback_font
+	var nw: float = f.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12.0).x
+	var nr := Rect2(Vector2(-nw / 2.0 - 8.0, my + 6.0), Vector2(nw + 16.0, 18.0))
+	var nbg := StyleBoxFlat.new()
+	nbg.bg_color = Color(1, 1, 1, 0.88)
+	nbg.set_corner_radius_all(4)
+	draw_style_box(nbg, nr)
+	draw_string(f, nr.position + Vector2(8.0, 13.0), name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12.0, Color("374151"))
+
 
 # ------------------------------------------------------------------ 小工具
 
@@ -347,3 +361,8 @@ func _blob(center: Vector2, radii: Vector2, color: Color) -> void:
 func set_state(s: String, lbl: String) -> void:
 	state = s
 	label_text = lbl
+
+
+## 供 dump 工具识别「这是角色」（角色是 Node2D + 脚本，从类名看不出来）。
+func is_worker() -> bool:
+	return true
