@@ -73,6 +73,11 @@ start.bat help     rem 用法
 前置仍是一次性的（venv 与前端 `npm install`，见上一节）；缺 venv/依赖时
 `start.bat` 会打印修复命令并以 exit 2 退出。
 
+运行环（Verify/Merge 的正式驱动，F6）：`python -m app.runtime --once` 跑一轮、
+`--loop` 常驻（`AP_RUNTIME_INTERVAL` 默认 10s）、`--check` 只读盘点候选；verify
+命令来自 `AP_RUNTIME_POLICY_FILE` 指向的人类维护策略（未设时用仓库
+`verify-profiles.json`），策略缺失=拒绝执行（exit 2）。
+
 ### 有 make 的环境
 
 ~~~bash
