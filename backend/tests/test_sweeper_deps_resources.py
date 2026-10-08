@@ -93,11 +93,16 @@ def _queued_rig(tmp_path):
     database = make_database(tmp_path)
     seed_project(database)
     seed_task(database, task_id="T-1", exclusive_resources=["port:8188"])
+    # The claim path reads the *real* clock (only sweeps get `now` injected),
+    # so the holder's lease must be live in the real frame: pinned to the
+    # frozen NOW it read as expired once wall time passed NOW + 1h
+    # (2026-10-08 21:00 local) and the claim answered "claimed" instead of
+    # "queued". Repaired 2026-10-09 while clearing the frontend-token gate.
     hold_resource(
         database,
         "port:8188",
         attempt_id="T-9.a1",
-        lease_until=(NOW + timedelta(hours=1)).isoformat(),
+        lease_until=(datetime.now(UTC) + timedelta(hours=1)).isoformat(),
     )
     claimed = ClaimService(database).claim(
         ClaimRequest(claim_request_id="cr-1", harness_id="harness-1", task_ids=("T-1",))
@@ -115,7 +120,11 @@ def test_a_queued_task_resumes_to_claimed_when_the_resource_frees(tmp_path):
             "UPDATE resource_leases SET released_at = 'gone' WHERE resource_id = 'port:8188'"
         )
 
-    report = sweep_resources(database, NOW)
+    # The sweep grants the development lease with the `now` it is handed, and
+    # the replay path (real clock) only reissues a token for a lease that is
+    # still live -- so this clock must be real, not the frozen NOW, or the
+    # grant below is born expired and `item.lease_token` comes back None.
+    report = sweep_resources(database, datetime.now(UTC))
 
     assert report.actions == 1
     assert report.detail["claimed"] == ["T-1"]

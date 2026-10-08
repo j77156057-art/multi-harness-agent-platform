@@ -42,6 +42,7 @@ from app.adapter.harnesses import (
 from app.adapter.http import AdapterError
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry
+from app.config import Settings, settings
 from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeManager
 from app.merge.worker import MergeWorker
@@ -291,10 +292,24 @@ def test_each_registration_is_traceable(case, tmp_path):
     assert str(pinned["superseded_by"]) == "reg-002"
 
 
+def new_adapter(case: HarnessCase, *, platform: str | None = None):
+    """Construct the case's adapter with the platform injected.
+
+    The posix contract is the historical base contract, so the verbatim test
+    below pins it explicitly instead of inheriting the host's platform
+    (adapter-hardening gave both CLIs per-platform argv).
+    """
+    if case.cls is CodexAdapter:
+        return CodexAdapter(client=None, platform=platform or "posix")
+    if case.cls is OpenCodeAdapter:
+        return OpenCodeAdapter(client=None, platform=platform or "posix", bash_path="/usr/bin/bash")
+    return case.cls(client=None)
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_each_cli_contract_is_pinned(case, tmp_path):
     """The argv is the integration fact: assert it verbatim, flag by flag."""
-    adapter = case.cls(client=None)
+    adapter = new_adapter(case, platform="posix")
     order = "do the thing"
     assert adapter.command(order, tmp_path) == [adapter.binary, *case.flags, order]
     parsed = adapter.parse_output(case.stdout)
@@ -338,6 +353,117 @@ def test_redacted_visibility_is_refused_not_guessed(tmp_path):
     assert caught.value.code == "request.invalid"
 
 
+# ------------------------------------------------- adapter-hardening (F3/F4)
+
+
+def test_codex_sandbox_argv_per_platform(tmp_path, monkeypatch):
+    """F3: Windows keeps the drill-proven danger-full-access argv; POSIX keeps
+    --full-auto; the setting overrides both, and both spellings stay pinned."""
+    order = "do the thing"
+    posix = CodexAdapter(client=None, platform="posix")
+    nt = CodexAdapter(client=None, platform="nt")
+
+    assert posix.command(order, tmp_path) == ["codex", "exec", "--json", "--full-auto", order]
+    assert nt.command(order, tmp_path) == [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        order,
+    ]
+    assert nt.sandbox_mode() == "danger-full-access"
+
+    monkeypatch.setattr(settings, "codex_sandbox", "workspace-write")
+    assert nt.sandbox_mode() == "workspace-write"
+    assert nt.command(order, tmp_path) == ["codex", "exec", "--json", "--full-auto", order]
+
+    monkeypatch.setattr(settings, "codex_sandbox", "danger-full-access")
+    assert posix.command(order, tmp_path) == [
+        "codex",
+        "exec",
+        "--json",
+        "--sandbox",
+        "danger-full-access",
+        order,
+    ]
+
+
+def test_opencode_launch_shim_per_platform(tmp_path, monkeypatch):
+    """F4: Windows goes through the bash shim (the drill's recipe); POSIX runs
+    direct; a missing bash falls back to direct instead of failing at launch."""
+    order = "do the thing"
+    shim = ["bash", "-lc", 'exec "$0" "$@"']
+    direct = ["opencode", "run", "--format", "json", "--auto", order]
+
+    nt = OpenCodeAdapter(client=None, platform="nt", bash_path="/usr/bin/bash")
+    assert nt.command(order, tmp_path) == [*shim, *direct]
+    assert nt.use_shell_shim() is True
+
+    posix = OpenCodeAdapter(client=None, platform="posix", bash_path="/usr/bin/bash")
+    assert posix.command(order, tmp_path) == direct
+
+    no_bash = OpenCodeAdapter(client=None, platform="nt", bash_path="")
+    assert no_bash.use_shell_shim() is False
+    assert no_bash.command(order, tmp_path) == direct
+
+    monkeypatch.setattr(settings, "opencode_launch", "bash")
+    assert no_bash.use_shell_shim() is False, "no bash on PATH -> direct, not a crash"
+    assert nt.use_shell_shim() is True
+
+    monkeypatch.setattr(settings, "opencode_launch", "direct")
+    assert nt.use_shell_shim() is False, "explicit override wins on Windows too"
+
+
+def test_cli_settings_are_fail_closed(monkeypatch):
+    """A typo in either knob refuses to start instead of silently degrading."""
+    monkeypatch.setenv("AP_CODEX_SANDBOX", "yolo")
+    with pytest.raises(ValueError, match="AP_CODEX_SANDBOX"):
+        Settings()
+
+    monkeypatch.delenv("AP_CODEX_SANDBOX")
+    monkeypatch.setenv("AP_OPENCODE_LAUNCH", "sneaky")
+    with pytest.raises(ValueError, match="AP_OPENCODE_LAUNCH"):
+        Settings()
+
+
+def test_claim_replay_carries_the_worktree_path(tmp_path):
+    """F9: the replay response hands the live worktree back to a restarted
+    harness; before `start_task` (no workspace yet) it is honestly NULL."""
+    rig = build_rig(tmp_path, CODEX_CASE)
+    adapter = adapter_for(rig)
+
+    first = adapter.claim(claim_request_id="cr-f9", task_ids=["T-1"])["items"][0]
+    assert first["outcome"] == "claimed"
+    assert first["worktree_path"] is None, "no worktree exists before start_task"
+
+    path = provision(rig, first)
+
+    replay = adapter.claim(claim_request_id="cr-f9", task_ids=["T-1"])["items"][0]
+    assert replay["replayed"] is True
+    assert replay["worktree_path"] == str(path)
+    assert replay["attempt_id"] == first["attempt_id"], "same attempt, not a new one"
+
+
+def test_replayed_claim_resumes_without_a_side_channel(tmp_path):
+    """F9 end to end: the restarted worker needs neither a pre-known worktree
+    nor an on_claimed callback -- the replay response carries the path."""
+    rig = build_rig(tmp_path, CODEX_CASE)
+    adapter = adapter_for(rig)
+
+    first = adapter.claim(claim_request_id="cr-f9b", task_ids=["T-1"])["items"][0]
+    provision(rig, first)
+
+    runner = ScriptedRunner(files={"flag.txt": "ok\n"}, stdout=CODEX_OUT)
+    worker = CliHarnessWorker(adapter, runner=runner)
+
+    outcome = worker.work_on(task_id="T-1", claim_request_id="cr-f9b")
+
+    assert outcome.attempt_id == first["attempt_id"]
+    assert outcome.changed_files == ["flag.txt"]
+    assert status_of(rig) == "verifying"
+
+
 # ---------------------------------------------------------------- the loop
 
 
@@ -356,7 +482,10 @@ def test_each_adapter_completes_claim_to_merged_over_http(case, tmp_path):
     )
 
     assert runner.ticks and runner.ticks[0].get("lease_until"), "heartbeat must land"
-    assert runner.argv[0] == adapter.binary
+    expected_head = adapter.binary
+    if isinstance(adapter, OpenCodeAdapter) and adapter.use_shell_shim():
+        expected_head = "bash"  # F4: the Windows launcher replaces the parent
+    assert runner.argv[0] == expected_head
     assert outcome.changed_files == ["flag.txt"]
     assert outcome.parsed["session_id"]
     assert status_of(rig) == "verifying"

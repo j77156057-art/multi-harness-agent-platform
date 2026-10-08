@@ -146,6 +146,24 @@ class Settings:
         if self.auth_mode not in {"off", "enforce"}:
             raise ValueError(f"AP_AUTH_MODE must be 'off' or 'enforce', got {self.auth_mode!r}")
 
+        # --- Harness CLI（adapter-hardening；drill F3/F4）---
+        # codex 沙箱：auto=按平台（nt→danger-full-access：Windows 上 codex 自带
+        # 的 workspace-write 沙箱起不了 shell，drill F3 实证；posix→--full-auto）。
+        # 显式覆盖留给 codex 修好沙箱后的部署；未知值拒绝启动。
+        self.codex_sandbox: str = os.environ.get("AP_CODEX_SANDBOX", "auto").strip().lower()
+        if self.codex_sandbox not in {"auto", "workspace-write", "danger-full-access"}:
+            raise ValueError(
+                "AP_CODEX_SANDBOX must be 'auto', 'workspace-write' or"
+                f" 'danger-full-access', got {self.codex_sandbox!r}"
+            )
+        # opencode 启动：auto=nt 且 bash 可用时经壳（drill F4：python 直启不稳，
+        # bash 壳稳定）；bash/direct 为显式覆盖；未知值拒绝启动。
+        self.opencode_launch: str = os.environ.get("AP_OPENCODE_LAUNCH", "auto").strip().lower()
+        if self.opencode_launch not in {"auto", "bash", "direct"}:
+            raise ValueError(
+                f"AP_OPENCODE_LAUNCH must be 'auto', 'bash' or 'direct', got {self.opencode_launch!r}"
+            )
+
     def ensure_dirs(self) -> None:
         """创建运行期目录。幂等。"""
         for d in (self.data_dir, self.worktree_root, self.export_dir):
