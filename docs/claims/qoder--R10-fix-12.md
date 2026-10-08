@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-08 15:05 |
 | 分支 | `agent/local/qoder/r10-fix-12/a1` |
-| 状态 | 🚧 doing |
+| 状态 | ✅ done（实现 55d3516；待合入） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `R10-fix-12`。
 
@@ -24,3 +24,7 @@
   由后续 auth-layer 卡实现，本卡只让事件名合法；`schema_version` 提升与
   "阶段 0a 冻结表登记 actor/side_effect"（§37.7 封闭规则 5）在仓内冻结表
   生成器尚不存在，如实登记为其落地时的待办而非静默跳过。
+- 2026-10-08 15:12：实现完成并提交 `55d3516`（spec §37.7/§29.3/§26+§38.10、
+  docstate、spec.py、test_spec_mirror.py 升级与 +3 断言）。docstate 90/90、
+  discipline 44/44；镜像注入验证入库（改常量必红）；EventStore 往返证明
+  `permission_denied` 运行期可写、未登记名仍拒。状态 → done。
