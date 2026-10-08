@@ -196,3 +196,7 @@ button:disabled { color: var(--muted); cursor: not-allowed; }
 .decision-question { margin: 0.2rem 0 0.4rem; color: var(--ink); overflow-wrap: anywhere; }
 .decision-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0; }
 .decision-none { margin: 0.2rem 0; color: var(--muted); font-size: 0.78rem; }
+
+/* 认证面板（frontend-token 卡）：令牌输入 + whoami 状态徽标。 */
+.auth-panel { border-top: 1px solid var(--line); padding-top: 0.6rem; margin-top: 0.6rem; }
+.auth-status { margin: 0 0 0.3rem; font-size: 0.78rem; }

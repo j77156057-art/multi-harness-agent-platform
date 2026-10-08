@@ -323,3 +323,45 @@ def test_policy_table_is_resource_action_shaped(env):
         parts = key.split(":")
         assert len(parts) == 2 and all(parts), key
         assert roles and roles <= {"harness", "human"}, key
+
+
+# ------------------------------------------------------------------ whoami
+
+
+def test_whoami_four_states_without_refusing_or_auditing(env):
+    """frontend-token: 自省四态；刻意不拒绝、不写审计（浏览器加载探针）。"""
+    anonymous = env.client.get("/api/v1/auth/whoami")
+    assert anonymous.status_code == 200
+    assert anonymous.json() == {
+        "mode": "enforce",
+        "subject": None,
+        "token_reason": "token_missing",
+    }
+
+    bad = env.client.get("/api/v1/auth/whoami", headers=bearer("apt_deadbeef"))
+    assert bad.status_code == 200
+    assert bad.json()["token_reason"] == "token_invalid"
+
+    service = TokenService(env.database)
+    revoked = service.issue(subject_type="human", subject_id=OPERATOR)
+    service.revoke(raw=revoked)
+    gone = env.client.get("/api/v1/auth/whoami", headers=bearer(revoked))
+    assert gone.json()["token_reason"] == "token_revoked"
+
+    mine = env.client.get("/api/v1/auth/whoami", headers=bearer(env.token_a))
+    assert mine.json() == {
+        "mode": "enforce",
+        "subject": {"type": "harness", "id": "h-A"},
+        "token_reason": None,
+    }
+
+    assert denials(env.database) == []  # introspection never manufactures audit noise
+
+
+def test_whoami_reports_off_mode(tmp_path, monkeypatch):
+    client, database = make_client(tmp_path)
+    monkeypatch.setattr(settings, "auth_mode", "off")
+
+    response = client.get("/api/v1/auth/whoami")
+
+    assert response.json() == {"mode": "off", "subject": None, "token_reason": None}

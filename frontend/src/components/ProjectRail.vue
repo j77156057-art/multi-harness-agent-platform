@@ -1,16 +1,21 @@
 <script setup lang="ts">
-// 左栏（R10 §22「项目/群组」）：列表 + 管理面的创建表单（human-console 卡）。
+// 左栏（R10 §22「项目/群组」）：列表 + 管理面的创建表单（human-console 卡）
+// + 认证面板（frontend-token 卡）：令牌只存本机，状态由 whoami 自省驱动。
 // 表单成功才清空并收起；失败保留输入，错误走 store 的 error 面。
 import { computed, ref } from 'vue'
-import type { GroupSummary, ProjectSummary } from '../api'
+import type { GroupSummary, ProjectSummary, WhoAmI } from '../api'
 
 const props = defineProps<{
   projects: ProjectSummary[]
   groups: GroupSummary[]
   selectedGroupId: string | null
   busy: boolean
+  auth: WhoAmI | null
+  hasToken: boolean
   createProject: (fields: { project_id: string; name: string }) => Promise<boolean>
   createGroup: (projectId: string, fields: { group_id: string; name: string }) => Promise<boolean>
+  setToken: (raw: string) => Promise<boolean>
+  clearToken: () => void
 }>()
 
 const emit = defineEmits<{ select: [groupId: string] }>()
@@ -62,6 +67,39 @@ async function submitGroup(projectId: string): Promise<void> {
     newGroupId.value = ''
     newGroupName.value = ''
     groupFormFor.value = null
+  }
+}
+
+// ---- 认证面板（frontend-token 卡）----
+const tokenDraft = ref('')
+
+const AUTH_LABEL: Record<string, string> = {
+  token_missing: '需要令牌',
+  token_invalid: '令牌无效',
+  token_revoked: '令牌已吊销',
+}
+
+const authLabel = computed(() => {
+  const auth = props.auth
+  if (auth === null) return '认证：未知'
+  if (auth.subject !== null) return `已认证为 ${auth.subject.type}:${auth.subject.id}`
+  if (auth.token_reason !== null) return AUTH_LABEL[auth.token_reason] ?? '令牌不可用'
+  return auth.mode === 'off' ? '认证：关闭（AP_AUTH_MODE=off）' : '需要令牌'
+})
+
+const authTone = computed(() => {
+  const auth = props.auth
+  if (auth?.subject != null) return 'tone-ok'
+  if (auth?.token_reason != null) return 'tone-warn'
+  return 'tone-muted'
+})
+
+async function submitToken(): Promise<void> {
+  const raw = tokenDraft.value.trim()
+  if (raw.length === 0 || props.busy) return
+  const ok = await props.setToken(raw)
+  if (ok) {
+    tokenDraft.value = ''
   }
 }
 </script>
@@ -131,6 +169,26 @@ async function submitGroup(projectId: string): Promise<void> {
       </label>
       <button type="submit" :disabled="!projectValid || busy">创建项目</button>
     </form>
+
+    <section class="auth-panel" aria-label="认证">
+      <p class="auth-status" :class="authTone">{{ authLabel }}</p>
+      <form class="rail-form" @submit.prevent="submitToken">
+        <label>
+          令牌（仅存本机）
+          <input
+            v-model="tokenDraft"
+            type="password"
+            name="auth_token"
+            placeholder="apt_…"
+            autocomplete="off"
+          />
+        </label>
+        <button type="submit" :disabled="tokenDraft.trim().length === 0 || busy">应用令牌</button>
+      </form>
+      <button v-if="hasToken" type="button" class="rail-add-project" @click="clearToken">
+        清除令牌
+      </button>
+    </section>
 
     <p class="rail-note">Harness 成员（下一片）：需要一个成员列表端点。</p>
   </aside>

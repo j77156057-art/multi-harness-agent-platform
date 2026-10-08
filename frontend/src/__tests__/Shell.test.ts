@@ -146,17 +146,22 @@ const ROUTES: Record<string, unknown> = {
     seq: 42,
     status: 'in_progress',
   },
+  '/api/v1/auth/whoami': {
+    mode: 'off',
+    subject: null,
+    token_reason: null,
+  },
 }
 
 // 前缀匹配按 key 长度降序，避免 /groups 抢在 /groups/G-1/tasks 前面。
 const KEYS = Object.keys(ROUTES).sort((a, b) => b.length - a.length)
 
-function stubFetch() {
+function stubFetch(overrides: Record<string, unknown> = {}) {
   const mock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input)
     for (const key of KEYS) {
       if (url.startsWith(key)) {
-        return jsonResponse(200, ROUTES[key])
+        return jsonResponse(200, { ...(ROUTES[key] as object), ...(overrides[key] as object) })
       }
     }
     return jsonResponse(404, { error: { code: 'resource.not_found', message: url } })
@@ -167,10 +172,11 @@ function stubFetch() {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  localStorage.clear() // 令牌持久化不跨测试泄漏
 })
 
-async function mountShell(initialPath: string) {
-  const mock = stubFetch()
+async function mountShell(initialPath: string, overrides: Record<string, unknown> = {}) {
+  const mock = stubFetch(overrides)
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push(initialPath)
   await router.isReady()
@@ -220,5 +226,48 @@ describe('Shell (route → store → three panes)', () => {
       decided_by: 'operator',
     })
     expect(wrapper.get('.banner').text()).toContain('已恢复 T-2')
+  })
+
+  it('shows the auth state from whoami and follows the subject as the operator', async () => {
+    const enforce = {
+      '/api/v1/auth/whoami': {
+        mode: 'enforce',
+        subject: { type: 'human', id: 'human-nine' },
+        token_reason: null,
+      },
+    }
+    const { wrapper } = await mountShell('/g/G-1/t/T-2', enforce)
+
+    expect(wrapper.get('.auth-status').text()).toBe('已认证为 human:human-nine')
+    expect((wrapper.get('[name="decided_by"]').element as HTMLInputElement).value).toBe(
+      'human-nine',
+    )
+  })
+
+  it('shows 需要令牌 in enforce mode without a token', async () => {
+    const { wrapper } = await mountShell('/g/G-1', {
+      '/api/v1/auth/whoami': { mode: 'enforce', subject: null, token_reason: 'token_missing' },
+    })
+
+    expect(wrapper.get('.auth-status').text()).toContain('需要令牌')
+  })
+
+  it('applies a pasted token: persisted, sent as bearer, state refreshed', async () => {
+    const { wrapper, mock } = await mountShell('/g/G-1')
+
+    await wrapper.get('[name="auth_token"]').setValue('apt_pasted_token')
+    await wrapper.get('.auth-panel form').trigger('submit')
+    await flushPromises()
+    await flushPromises()
+
+    expect(localStorage.getItem('ap.humanToken')).toBe('apt_pasted_token')
+    const whoamiCalls = mock.mock.calls.filter(
+      ([input]) => String(input) === '/api/v1/auth/whoami',
+    )
+    expect(whoamiCalls.length).toBeGreaterThanOrEqual(2)
+    const [, lastInit] = whoamiCalls[whoamiCalls.length - 1] ?? []
+    expect((lastInit?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer apt_pasted_token',
+    )
   })
 })

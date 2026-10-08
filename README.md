@@ -131,9 +131,15 @@ cd backend && ../.venv/Scripts/python.exe -m app.auth issue --type harness --id 
 # 请求携带：Authorization: Bearer apt_...
 ~~~
 
-> ⚠️ **enforce 之前必须先做前端 token 接线**：控制台（human-console）目前不带
-> 令牌，enforce 下管理/决策操作会被 403。在接线完成前，生产保持 `off`
-> （auth-layer 卡内已把这一先后顺序写成推广前置）。
+**切到 `enforce` 的步骤**（控制台已接线，frontend-token 卡）：
+① 签发人类令牌（`--type human --id <名字>`）；② 在控制台左栏「认证」面板
+粘贴并应用（面板显示「已认证为 …」，令牌只存本机 localStorage）；③ 设
+`AP_AUTH_MODE=enforce` 重启后端。清令牌/令牌无效时面板会给对应提示，写操作
+的拒绝原因显示在界面错误面（`auth.token_invalid` / `auth.permission_denied`）。
+
+> ⚠️ **全量 enforce 还差 harness 侧**：Adapter worker / 演练脚本 / 真实 adapter
+> 测试尚未携带令牌（它们仍在 off 模式跑），接线前请让它们继续连 off 实例
+> （frontend-token 卡内已声明）。
 
 ---
 

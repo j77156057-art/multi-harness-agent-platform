@@ -82,6 +82,7 @@ function render(props: Partial<InstanceType<typeof TaskPane>['$props']> = {}) {
       loading: false,
       error: null,
       busy: false,
+      operator: 'operator',
       humanAct: async () => true,
       ...props,
     },
@@ -314,6 +315,18 @@ describe('TaskPane human decision bar', () => {
     const merged = render({ selectedTask: taskWith('merged') })
     expect(merged.find('.decision-actions').exists()).toBe(false)
     expect(merged.get('.decision-none').text()).toContain('没有可用的人工动作')
+  })
+
+  it('follows the token subject for the operator field until hand-edited', async () => {
+    const wrapper = render({ selectedTask: taskWith('awaiting_human'), operator: 'human-nine' })
+
+    expect((wrapper.get('[name="decided_by"]').element as HTMLInputElement).value).toBe('human-nine')
+
+    await wrapper.get('[name="decided_by"]').setValue('typed-by-hand')
+    await wrapper.setProps({ operator: 'someone-else' })
+    expect((wrapper.get('[name="decided_by"]').element as HTMLInputElement).value).toBe(
+      'typed-by-hand',
+    )
   })
 
   it('disables every action while busy or without an operator', async () => {

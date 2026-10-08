@@ -3,6 +3,19 @@
 
 export const API_PREFIX = '/api/v1'
 
+// 主体令牌（frontend-token 卡）：模块级持有者，store 负责从 localStorage 装载/
+// 清除；所有请求在有令牌时带 Authorization: Bearer。故意不放 localStorage 读取
+// 逻辑在这里——持久化归 store，api 只管"发请求时带什么"。
+let authToken: string | null = null
+
+export function setApiToken(token: string | null): void {
+  authToken = token
+}
+
+export function getApiToken(): string | null {
+  return authToken
+}
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -16,10 +29,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(API_PREFIX + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (authToken !== null) {
+    headers.Authorization = `Bearer ${authToken}`
+  }
+  const response = await fetch(API_PREFIX + path, { headers, ...init })
   if (!response.ok) {
     let code = `http.${response.status}`
     let message = response.statusText
@@ -149,7 +163,17 @@ interface EventPage {
   has_more: boolean
 }
 
+// 只读自省（frontend-token 卡）：off / 已认证 / 需要令牌 / 令牌无效或吊销。
+export interface WhoAmI {
+  mode: string
+  subject: { type: string; id: string } | null
+  token_reason: string | null
+}
+
 export const api = {
+  whoami(): Promise<WhoAmI> {
+    return request('/auth/whoami')
+  },
   listProjects(): Promise<{ projects: ProjectSummary[] }> {
     return request('/projects')
   },

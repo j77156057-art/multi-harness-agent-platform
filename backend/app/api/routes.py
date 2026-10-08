@@ -15,13 +15,16 @@ from app.adapter.registry import HarnessRegistry, capabilities_from
 from app.api import schemas
 from app.api.auth_deps import (
     Principal,
+    bearer_token,
     bind_branch_subject,
     bind_declared,
     bind_task_owner,
     require_for,
 )
 from app.api.errors import ApiError
+from app.auth.tokens import TokenInvalid, TokenService
 from app.claim.service import ClaimRequest, ClaimService
+from app.config import settings
 from app.db.connection import Database
 from app.git.publish import PublishProxy
 from app.human.service import HumanOpsService
@@ -694,6 +697,27 @@ def review_submit(
 
 
 # -------------------------------------------------------------------- read
+
+
+@read.get("/auth/whoami")
+def auth_whoami(request: Request, database: DatabaseDep) -> dict[str, Any]:
+    """Read-only self-introspection for the console (frontend-token card).
+
+    Deliberately never refuses and never audits: it answers "who would I be if
+    I presented this token", so a browser probe on load must not manufacture
+    denial noise. ``token_reason`` carries the precise state for the badge.
+    """
+    if settings.auth_mode != "enforce":
+        return {"mode": settings.auth_mode, "subject": None, "token_reason": None}
+    try:
+        principal = TokenService(database).verify(bearer_token(request))
+    except TokenInvalid as exc:
+        return {"mode": settings.auth_mode, "subject": None, "token_reason": exc.reason}
+    return {
+        "mode": settings.auth_mode,
+        "subject": {"type": principal.subject_type, "id": principal.subject_id},
+        "token_reason": None,
+    }
 
 
 @read.get("/projects")
