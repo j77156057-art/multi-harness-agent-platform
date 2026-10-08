@@ -1,4 +1,4 @@
-### rework-loop：返工链 claim_for_revision 实现（🚧 doing）
+### rework-loop：返工链 claim_for_revision 实现（✅ done）
 
 ~~~text
 任务编号：rework-loop
@@ -75,5 +75,40 @@
      `CORE-REWORK-001`；报告 F1 行更新为"已实现（rework-loop）"
 test_id：CORE-REWORK-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 12:52
+commit：`af80d4e`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（119 files already formatted）
+  pytest      : 451 passed（本任务净增 8：test_rework_loop.py），exit 0
+  关键断言     : ①**全环回归**：verify 失败→changes_requested→（新
+                claim_request_id）claim→`claim_for_revision` 事件（payload
+                revised_from=T-1.a1）→claimed/a2/epoch2/新 Lease→start（新
+                worktree）→提交→verify 通过→review→merge（old attempt 行保持
+                历史）；②重放同 claim_request_id → 同 a2（不烧第三次）；
+                ③双 harness 并发抢返工 → 恰一胜者（epoch 恰 +1 一次）；
+                ④次数预算耗尽→`claim.attempt_budget_exhausted` 零状态写入，
+                `budget_override_by` 后放行；⑤资源被他人占→
+                `claim.resource_unavailable` 零写入（无事件/无 attempt/无
+                claimed 行）；⑥**自家旧持锁不自我阻塞**：旧 attempt 未释放的
+                resource_leases 不挡返工，授予同事务以 reason='revision' 释放、
+                新行归 a2；⑦budget 联动：返工也预占（a1 settled + a2 held）；
+                ⑧`GET /adapter/list_ready_tasks` 列出 changes_requested。
+  变异验证     : 注掉 changes_requested 分支 → 全环回归必红；恢复后 8/8 绿。
+  实机复核     : 演练实例（e2e-drill）T-CDX 实况：seq11 verify_code_failed →
+                卡住（F1 现场）→ 本实现后 seq97 `claim_for_revision`
+                （revised_from=T-CDX.a1、attempt T-CDX.a2、epoch 2、worktree
+                已配）——**死端消失**；该次 live 尝试随后被 relay 断流
+                （drill F13）导致的 CLI 失败中断，如实记录（完整返工到 merge
+                由 in-process 全环测试覆盖）。
+已知问题：
+  - **两处 R10 语义裁决**（范围声明内详述）：①返工 base 重新冻结于
+    integration head（不从失败 commit 续建）；②`resubmit` 字面边
+    （changes_requested→awaiting_review）不落实现——会绕过 §16 的 verify
+    receipt 门禁；返工完成走标准链。若要字面实现需随 R10-fix 重审 §16，另案。
+  - `REASSIGN` 边（人类指派新 owner）出范围：本仓无该操作面（另案）。
+  - 资源被占时返工任务停在 changes_requested，由 review-wait SLA 巡检兜底
+    升级；无 defer 边（queued 只能从 ready 家族进入）——如实声明。
 ~~~
