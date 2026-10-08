@@ -94,6 +94,20 @@ class Settings:
         # committed/limit 达到该百分比即开 warning 事故（含界）。
         self.budget_warn_percent: int = int(os.environ.get("AP_BUDGET_WARN_PERCENT", "80"))
 
+        # --- Buzz 单向桥（ADR-DEV-005；只写不读，Buzz 不参与任何状态判定）---
+        # 三项齐全才启用；三项全空=显式 no-op（同 alerts 先例）；**部分配置=拒绝**
+        # （改了一半静默退化最危险，桥在运行时报 BuzzConfigError，fail-closed）。
+        # key 文件 = 受控凭据（64 位 hex secp256k1 私钥）：不进库/不进事件/不进日志。
+        self.buzz_relay_ws: str | None = os.environ.get("AP_BUZZ_RELAY_WS") or None
+        self.buzz_channel: str | None = os.environ.get("AP_BUZZ_CHANNEL") or None
+        self.buzz_key_file: Path | None = (
+            Path(os.environ["AP_BUZZ_KEY_FILE"])
+            if os.environ.get("AP_BUZZ_KEY_FILE", "").strip()
+            else None
+        )
+        self.buzz_interval_seconds: int = int(os.environ.get("AP_BUZZ_INTERVAL", "10"))
+        self.buzz_timeout_seconds: int = int(os.environ.get("AP_BUZZ_TIMEOUT", "10"))
+
         # R10 §16
         self.verify_lease_seconds: int = int(os.environ.get("AP_VERIFY_LEASE", "1800"))  # 30 min
         self.review_lease_seconds: int = int(os.environ.get("AP_REVIEW_LEASE", "1200"))  # 20 min

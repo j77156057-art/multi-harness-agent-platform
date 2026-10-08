@@ -1,4 +1,4 @@
-### buzz-bridge：平台事件 → Buzz 频道（单向发布运行时）（🚧 doing）
+### buzz-bridge：平台事件 → Buzz 频道（单向发布运行时）（✅ done）
 
 ~~~text
 任务编号：buzz-bridge
@@ -80,5 +80,60 @@
      `INTEG-BUZZ-001`
 test_id：INTEG-BUZZ-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-09 03:35
+commit：见 git log main（本卡实现提交；登记 `ffb6d26`）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 529 passed（本任务净增 16，`test_buzz_bridge.py`），exit 0
+  交付物      : `migrations/013_buzz_cursors.sql`、`app/buzz/{__init__,nostr,
+                projection,client,bridge,__main__}.py`、`config.py` 的
+                `AP_BUZZ_*` 五项、`requirements.txt` 显式钉 websockets/coincurve、
+                README 一小节
+  测试要点     : 测试内真 WS relay（NIP-42 challenge → 强制 AUTH → 重算 id +
+                schnorr 验签 + `h` tag → 按 id 去重）跑全链；投影白名单对
+                §37.7 M/O/R 做集合关系断言（M=74/O=14/R=1，发布集 = M −
+                {escalation_reminder} + {permission_denied,
+                secret_scan_blocked}）；payload 含 "SECRET-XYZ" 的事件发布后
+                断言该值不出现在消息里；BIP340 官方向量 #0 逐字节（aux=32 零
+                字节，与 k 文件无关）；「relay 挂→游标不动→重启重试→重放同
+                id→relay 去重」闭环；强制 AUTH 有对照组（裸连接不发 AUTH 的
+                EVENT 被拒且不落账）；CLI 三态 + 部分配置/坏 key exit 2。
+  本地自建 relay 真验收（协调者确认通道；`backend/data/buzz-drill/`，
+  gitignored，脚本可复跑）：
+    ① 独立 relay 进程（`relay_server.py`，写 `relay-messages.jsonl` 留档）
+       + 真 CLI `python -m app.buzz`（`AP_DATA_DIR` 指向演练 scratch 库）；
+    ② 序列：relay 关 → `--once` **exit 1**（`ConnectionRefusedError`，
+       cursor 0、pending 4）；起 relay → `--check` exit 0（cursor 0、pending 4、
+       next 4 条）→ `--once` exit 0（published 4、cursor 6）→ `--once` exit 0
+       （scanned 0、published 0，纯 no-op）；
+    ③ 追加 1 条 submit_result → `--once` published 1（relay transcript 第 5 条）；
+    ④ 演练库把游标倒回 0（仅 scratch）→ `--once` 重放 5 条 → relay 逐条标
+       `duplicate=true`：transcript 10 行 EVENT = 5 唯一 id + 5 重复，
+       **显示效果恰好一次**；
+    ⑤ `relay-messages.jsonl` 中 5 条消息的 content 均无 "SECRET-XYZ" 泄露；
+       AUTH 事件 pubkey 一致、accepted=true。
+  演练所得      : 抓到并修掉一个真 bug——空批次分支 `scanned` 误报 1（改 0，
+                测试补断言）；另发现演练 relay 脚本在 Windows 上逐行
+                open/append 会撞瞬时文件锁（改长句柄 + flush；**非应用代码
+                bug**，桥本体的 1011 中断被游标层正确兜住——游标未动、
+                exit 1，恰是演练要证的行为）。
+已知问题/披露：
+  - **死信停靠表未建**（对 ADR 决策 6 的取舍）：源=事件流本身即队列，
+    "游标不动"即重试；积压在 `--check` 的 pending 里可见。若未来需要"放弃
+    积压/自动停靠"，另开卡。
+  - **NIP-10 e-tag 线程 v1 用平铺降级**（ADR 决策 4 的降级条款）：消息文本
+    自带 task_id 前缀；真实 Buzz relay 可达后补 e-tag。
+  - `created_at` 取**源事件时间**（非发布时刻）：同 seq 重放 → 同 id 同签名的
+    前提；显示时间是平台事实时间。
+  - ADR-DEV-005 状态仍为**提议**；本卡按已登记约束实现，状态翻转待协调者。
 ~~~
+
+## 结论
+
+Buzz 桥 v1 闭环：单一真相源不破（只写不读，结构上没有入站路径），
+显示层拿到的是**投影**而非事件转发，断链、重放、重复投递三个失败面都有
+对照验证。真实 Buzz relay 的实机验证仍需协调者给地址——那是本卡之外的
+最后一步（ADR 决策 9 的诚实缺口仍在）。

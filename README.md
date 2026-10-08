@@ -157,6 +157,32 @@ cd backend && ../.venv/Scripts/python.exe -m app.auth issue --type harness --id 
 
 ---
 
+## Buzz 单向桥（buzz-bridge，默认未配置即 no-op）
+
+按 [ADR-DEV-005](docs/adr/ADR-DEV-005-buzz-one-way-bridge.md) 实现：把平台事件
+**单向**发布到 Buzz 频道（kind:9 + `["h", channel]`，WS + NIP-42 AUTH，BIP340
+签名）。**Buzz 只是展示层**——桥不订阅、不回读，Buzz 侧任何状态都不进平台库、
+不参与状态判定（只写不读，结构上杜绝第二事实源）。
+
+~~~bash
+# 生成 agent 私钥（受控凭据文件：不进库/不进仓库/不进日志）
+python -c "import secrets; print(secrets.token_hex(32))" > ~/.ap-buzz-key.hex
+export AP_BUZZ_RELAY_WS=wss://relay.example          # Buzz relay
+export AP_BUZZ_CHANNEL=<频道 uuid>                    # NIP-29 group
+export AP_BUZZ_KEY_FILE=~/.ap-buzz-key.hex
+cd backend && ../.venv/Scripts/python.exe -m app.buzz --check   # 配置+游标+积压，exit 0/2
+../.venv/Scripts/python.exe -m app.buzz --once                  # 单轮发布，exit 0/1
+../.venv/Scripts/python.exe -m app.buzz --loop --interval 10
+~~~
+
+三项一起配才启用：**三项全空 = 显式 no-op（exit 0，不连 WS）**；只配一半 =
+拒绝（exit 2，fail-closed）。发布集 = §37.7 迁移事件 − `escalation_reminder`
++ `permission_denied`/`secret_scan_blocked`；消息是**字段白名单投影**（不含
+payload 任何内容）。游标 `buzz_cursors` 只在整批 OK 后推进；事件 id = 内容
+哈希（时间取源事件），重放同 id → relay 去重（至少一次 + 去重 ≈ 恰好一次）。
+
+---
+
 ## 目录结构
 
 ~~~text
