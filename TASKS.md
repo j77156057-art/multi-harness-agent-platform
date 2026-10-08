@@ -111,7 +111,7 @@
 | auth-layer | Qoder | R10-fix-12 | ✅ done（实现 521f7e9；token+身份绑定+矩阵执行，enforce 实机留档） | `agent/local/qoder/auth-layer/a1` | `DOC-AUTH-001` |
 | frontend-token | Qoder | auth-layer | ✅ done（实现 b26680a；Bearer+whoami+认证面板，enforce 实测） | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 | adapter-hardening | Qoder | e2e-harness-drill | ✅ done（实现 e68c48f；F3/F4/F9 清账，真实 CLI 抽查留档） | `agent/local/qoder/adapter-hardening/a1` | `MVP-ADAPTER-003` |
-| gate-summary-fix | OpenCode | — | 🟢 doing（`_run_gate` 取最后一行当摘要，门禁在结果后再打印东西时绿灯的证据会被吃掉） | `agent/local/opencode/gate-summary-fix/a1` | `MVP-PROCESS-003` |
+| gate-summary-fix | OpenCode | — | ✅ done（a1 = 45cb04a；负向验证做过两轮，第二轮按旧行为忠实退回才 2 条全红） | `agent/local/opencode/gate-summary-fix/a1` | `MVP-PROCESS-003` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -564,6 +564,93 @@ ruff 的 exit=1 **不是本次引入**，也不是我能修的边界问题 —�
 
 **我以为在固化环境，其实是在固化一个会掩盖问题的环境。** 真正的固化是让工具
 自己在任何环境下都正确 —— 那才是别人也能依赖的东西。
+~~~
+
+### gate-summary-fix：`_run_gate` 摘要必须是门禁自己说的结论（✅ done）
+
+~~~text
+任务编号：gate-summary-fix
+负责人 Harness：OpenCode
+开始时间：2026-10-09 01:30
+工作区：.worktrees/opencode/
+依赖任务：无（mergeguard-fix 的同源缺口——那次修的是续跑认错人，这次修的是
+         `_run_gate` 只看结果不看过程）
+真相源引用：tools/mergeguard/cli.py `_run_gate` / `_gate_summary`；
+            本仓库 2026-10-07 的实测：discipline 打印的 SyntaxWarning 落在
+            「结果:」行之后，merge 摘要变成那条警告
+允许修改目录：tools/mergeguard/**、backend/tests/**、TASKS.md、
+            docs/traceability.md、docs/claims/**
+禁止修改目录：backend/app/**、backend/migrations/**、docs/spec/**、tools/docstate/**
+交付分支：agent/local/opencode/gate-summary-fix/a1
+test_id：MVP-PROCESS-003
+当前状态：✅ done
+commit：a1 = `45cb04a`
+
+### 修的是什么
+
+`_run_gate()` 取输出**最后一行**当门禁摘要：
+
+    lines = [ln for ln in (proc.stdout + proc.stderr).splitlines() if ln.strip()]
+    tail = lines[-1] if lines else "(无输出)"
+    return proc.returncode == 0, f"{name}: {tail}"
+
+门禁在「结果」之后再打印任何东西——Python 3.13 的 SyntaxWarning、
+DeprecationWarning、库提示——都会插在结果行后面，于是摘要变成那条噪音，
+**真正的检查结果被吃掉**，而退出码仍是 0：门禁是绿的，绿灯的证据是错的。
+
+**这不是假想**：本仓库实测吃过一次。那次的具体形态已修（SyntaxWarning 的
+根源是 `task_id_from_filename` 的 docstring 少了 `r` 前缀），但**「门禁可能
+在任何时候打印任何东西」这件事本身没修掉**，所以取摘要的方式不能依赖它。
+
+### 修法
+
+认 `结果:` 这一行（docstate 与 discipline 都用它收尾，可带 `，N 项告警`）。
+取**最后一条**含它的行：门禁可能先打印旧摘要再打新摘要（重试、二次汇总），
+后面的才是最终结论。
+
+找不到时才退到最后一行，且**必须标注**「未找到摘要行」。回退本身是必要的
+（门禁崩溃、只打了一半、换了输出格式），但静默回退会把不可信的门禁自述
+显示成「门禁说了什么」——用户看到的就是这行字，两种情况的门禁自述强度
+完全不一样，不能混。
+
+用「包含」而非「以…开头」匹配：测试里的门禁替身打印的是
+`print("{name}: 结果: ...")`，行首有门禁名；生产里两道门禁都是裸的 `结果:`。
+
+### 写这条测试时自己摔的一次（比代码本身更值得记）
+
+第一个版本的断言是 `"结果: 1 项检查，0 项失败" in r.stdout`，**恒真**：
+`_install_gates` 会同时装 docstate 与 discipline 两道门禁，而 docstate 用的
+是正常 stub（打印 `结果: ...`）。于是负向验证（把 `_gate_summary` 退回旧
+取法）时这条用例照样绿——它压根没测到 discipline 的摘要取法。
+
+第二次负向验证仍只抓到两条中的一条，因为我只删了循环、留下了「未找到摘要行」
+标注——那不是旧代码的形态。第三次按旧行为**忠实**退回（取最后一行、完全无标注）
+才两条全红。
+
+**「用例会红」和「用例在测我以为的东西」是两件事，只有后者需要把负向验证
+做对。而做对的办法是逐行取目标对象（`_gate_line(stdout, gate)`），不是在
+整个输出里搜关键词。**
+
+另一次同类：新增的门禁替身忘了钉 UTF-8，中文按 cp936 输出被按 UTF-8 解成
+替换符——正是我自己在 stub 注释里写过的坑，自己又踩了一遍。
+
+### 验证结果
+
+  - test_merge_guard  45 passed（新增 2）
+  - pytest 全量       500 passed
+  - docstate          exit=0   90 项检查，0 项失败
+  - discipline        exit=0   44 项检查，0 项失败
+  - ruff check        2 条既有问题（F541 / E741，均在本任务允许目录外，本次不动）
+  - ruff format       本轮 0 处新增（顺手收掉一处自己引入的多余折行）
+
+**负向验证**：分两次做。第一次只把循环删掉（留下标注）→ 只红 1 条；第二次
+按旧行为忠实退回（取最后一行、完全无标注）→ **2 条全红**。
+
+### 范围外但同源的观察
+
+`_run_gate` 只跑 docstate + discipline 两道门禁；ruff 与 pytest 在
+`scripts.sh check` 里，**不在 mergeguard 的合并路径上**。也就是说：一次
+合并的绿灯并不代表 ruff/pytest 是绿的。这是另一个问题，本次不展开。
 ~~~
 
 ## 提交前自检

@@ -8,7 +8,7 @@
 | Harness | OpenCode |
 | 认领时间 | 2026-10-09 01:30 |
 | 分支 | `agent/local/opencode/gate-summary-fix/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（a1 = 45cb04a；四道门禁在 zero-env 下：docstate 90/0、discipline 44/0、pytest 500 passed） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `gate-summary-fix`。
 
@@ -51,3 +51,15 @@ discipline 打印的 SyntaxWarning 落在结果之后，摘要变成那条警告
 ## 变更记录
 
 - 2026-10-09：认领。
+## 变更记录
+
+- 2026-10-09 01:30：认领。
+- 2026-10-09：a1 = `45cb04a` 交付并自测通过；已提交待合。
+
+### 一段比代码更值得记的自伤
+
+第一个版本的断言是 `"结果: ..." in r.stdout`，**恒真**——`_install_gates` 同时装 docstate 与 discipline 两道门禁，docstate 用的是打印 `结果:` 的正常 stub。负向验证时这条用例照样绿。
+
+第二次负向验证仍只抓到两条中的一条（只删了循环、留下标注，不是旧代码的形态）。第三次**忠实**退回旧行为才 2 条全红。
+
+**「用例会红」和「用例在测我以为的东西」是两件事。**
