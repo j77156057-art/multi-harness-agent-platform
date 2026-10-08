@@ -111,6 +111,7 @@
 | auth-layer | Qoder | R10-fix-12 | ✅ done（实现 521f7e9；token+身份绑定+矩阵执行，enforce 实机留档） | `agent/local/qoder/auth-layer/a1` | `DOC-AUTH-001` |
 | frontend-token | Qoder | auth-layer | ✅ done（实现 b26680a；Bearer+whoami+认证面板，enforce 实测） | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 | adapter-hardening | Qoder | e2e-harness-drill | ✅ done（实现 e68c48f；F3/F4/F9 清账，真实 CLI 抽查留档） | `agent/local/qoder/adapter-hardening/a1` | `MVP-ADAPTER-003` |
+| gate-summary-fix | OpenCode | — | 🟢 doing（`_run_gate` 取最后一行当摘要，门禁在结果后再打印东西时绿灯的证据会被吃掉） | `agent/local/opencode/gate-summary-fix/a1` | `MVP-PROCESS-003` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -168,6 +169,7 @@
 <!-- MVP-06-verify → docs/claims/37-trae--MVP-06-verify.md -->
 <!-- MVP-10b-verify → docs/claims/46-trae--MVP-10b-verify.md -->
 <!-- claim-denum → docs/claims/49-opencode--claim-denum.md -->
+<!-- gate-summary-fix → docs/claims/opencode--gate-summary-fix.md -->
 
 
 ## 任务卡

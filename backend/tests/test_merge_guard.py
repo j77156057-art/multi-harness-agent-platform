@@ -130,6 +130,25 @@ if _flag.exists():
     sys.exit(1)
 print("discipline: 结果: 1 项检查，0 项失败")
 """
+#: 门禁在**结果行之后再打印东西**的替身。真实场景不是假想：Python 3.13 报
+#: 无效转义序列的 SyntaxWarning、DeprecationWarning、各种库的提示，都可能
+#: 落在结果行之后。旧版 `_run_gate` 取最后一行，于是摘要变成那条警告，
+#: **真正的检查结果被吃掉**，而退出码仍是 0 —— 门禁是绿的，绿灯的证据是错的。
+_GATE_NOISY = """
+import sys
+
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError, OSError):
+        pass
+
+print("[skip] rootworktree（测试夹具）")
+print("结果: 1 项检查，0 项失败")
+print('<string>:7: SyntaxWarning: invalid escape sequence "\\d"', file=sys.stderr)
+print("deprecation notice: something is deprecated", file=sys.stderr)
+sys.exit(0)
+"""
 
 
 def _install_gates(repo: Path, discipline_body: str | None = None) -> None:
@@ -713,6 +732,91 @@ def test_cli_resume_tolerates_unstaged_and_untracked_changes(repo_with_gates: Pa
     assert (repo_with_gates / "f.txt").read_text(
         encoding="utf-8"
     ) != "x", "未暂存改动绝不能被带进 merge commit"
+
+
+# ---------------------------------------------------------------------------
+# 摘要必须是门禁自己说的结论，不是它碰巧的最后一行输出
+# ---------------------------------------------------------------------------
+
+
+def _gate_line(stdout: str, gate: str) -> str:
+    """从 mergeguard 的输出里取出**指定门禁**那一行摘要。
+
+    `_run_gate` 的输出带门禁名前缀（`docstate: xxx` / `discipline: xxx`），
+    所以能精确定位。必须逐行取，不能把整个 stdout 当字符串搜 —— 本文件里
+    `_install_gates` 会同时装 docstate 与 discipline 两道门禁，其中 docstate
+    用的是**正常的** stub（`_GATE_OK`，打印 `结果: ...`），于是
+    「`结果: ...` in stdout」会因为 docstate 那行而**恒真**，压根没测到
+    discipline 的摘要取法。
+    """
+    for ln in stdout.splitlines():
+        if ln.strip().startswith(gate + ":"):
+            return ln
+    raise AssertionError(f"输出里找不到 {gate} 门的摘要行：{stdout[-400:]}")
+
+
+def test_gate_summary_is_the_gates_own_conclusion_not_its_last_line(
+    repo_with_gates: Path,
+):
+    """门禁在结果行**之后**再打印东西，摘要仍必须是结果行。
+
+    `_run_gate` 返回的那行文字就是「绿灯的证据」，会显示给决定是否合并的人看。
+    旧版取输出最后一行：Python 3.13 的 SyntaxWarning、DeprecationWarning、
+    各种库提示都会落在结果行之后，于是摘要变成那条噪音，**真正的检查结果
+    被吃掉**，而退出码仍是 0 —— 门禁是绿的，绿灯的证据是错的。
+
+    实测吃过：discipline 打印的 SyntaxWarning 出现在结果之后，摘要变成那条
+    警告。那个具体形态已经修掉（`SyntaxWarning` 的根源是 docstring 少了
+    `r` 前缀），但**「门禁可能在任何时候打印任何东西」这件事本身没修掉**，
+    所以取摘要的方式必须不依赖它。
+    """
+    _install_gates(repo_with_gates, discipline_body=_GATE_NOISY)
+    _commit_feature(repo_with_gates)
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 0, r.stdout + r.stderr
+
+    summary = _gate_line(r.stdout, "discipline")
+    # 摘要必须是结果行
+    assert "结果: 1 项检查，0 项失败" in summary, "摘要被结果行之后的输出吃掉了：" + summary
+    # 且噪音不得冒充门禁结论
+    assert "SyntaxWarning" not in summary, "警告被当成了门禁摘要：" + summary
+    assert "deprecation notice" not in summary, "其它行被当成了门禁摘要：" + summary
+    # docstate 那道照旧正常（改摘要逻辑不能顺手弄坏正常门禁）
+    assert "结果: 1 项检查，0 项失败" in _gate_line(r.stdout, "docstate")
+    # 豁免行照旧显示（这件事不能因为改摘要逻辑而被弄丢）
+    assert "[skip] rootworktree（测试夹具）" in r.stdout
+
+
+def test_gate_summary_marks_missing_summary_instead_of_silently_guessing(
+    repo_with_gates: Path,
+):
+    """门禁没说结论时，工具必须**标注**自己没拿到，不能把最后一行伪装成结论。
+
+    这条守的是 `_gate_summary` 的回退分支。回退本身是必要的（门禁崩溃、
+    只打了一半、换了输出格式），但静默回退会把「不可信的门禁自述」显示成
+    「门禁说了什么」—— 而用户看到的就是这行字。
+    """
+    _install_gates(
+        repo_with_gates,
+        discipline_body=(
+            "import sys\n"
+            "for _s in (sys.stdout, sys.stderr):\n"
+            "    try:\n"
+            "        _s.reconfigure(encoding='utf-8', errors='replace')\n"
+            "    except (AttributeError, ValueError, OSError):\n"
+            "        pass\n"
+            "print('我只打印了一半，没有结论行')\n"
+        ),
+    )
+    _commit_feature(repo_with_gates)
+
+    r = _cli(repo_with_gates, "merge", "feature", "--task-id", "T-1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    summary = _gate_line(r.stdout, "discipline")
+    assert "未找到摘要行" in summary, "没拿到门禁结论时必须明说，不能静默猜"
+    # 且要把实际看到的东西带出来，否则「未找到」本身没有排查价值
+    assert "我只打印了一半" in summary, "回退时必须把看到的最后一行一并显示"
 
 
 def test_cli_refuses_foreign_merge_head_even_with_our_record(repo_with_gates: Path):
