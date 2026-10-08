@@ -137,6 +137,7 @@ watch(
           <span class="event-seq">#{{ event.seq }}</span>
           <span class="event-name">{{ event.event_name }}</span>
           <span class="event-actor">{{ event.actor_id }}</span>
+          <span class="event-time">{{ event.created_at.slice(0, 19).replace('T', ' ') }}</span>
           <details v-if="Object.keys(event.payload).length > 0" class="event-payload">
             <summary>payload</summary>
             <pre>{{ JSON.stringify(event.payload, null, 2) }}</pre>

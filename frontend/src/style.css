@@ -120,10 +120,11 @@ button:disabled { color: var(--muted); cursor: not-allowed; }
 .thread-meta { margin: 0; color: var(--muted); font-size: 0.78rem; }
 .event-list { list-style: none; margin: 0; padding: 0; }
 .event {
-  display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem; align-items: baseline;
+  display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.5rem; align-items: baseline;
   padding: 0.25rem 0; border-bottom: 1px dotted var(--line);
 }
 .event-seq { color: var(--muted); font-size: 0.78rem; }
+.event-time { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
 .event-name { color: var(--accent); overflow-wrap: anywhere; }
 .event-actor { color: var(--muted); font-size: 0.78rem; }
 .event-payload { grid-column: 1 / -1; color: var(--muted); font-size: 0.78rem; }

@@ -103,6 +103,8 @@ describe('TaskPane', () => {
     expect(wrapper.text()).toContain('owner codex')
     expect(wrapper.text()).toContain('claim')
     expect(wrapper.text()).toContain('#4')
+    // 追溯：线程事件必须带时间戳（与群聊同款格式）。
+    expect(wrapper.get('.event-time').text()).toBe('2026-10-07 12:00:00')
     // 非空 payload 才有折叠块；空 payload 不渲染。
     expect(wrapper.findAll('.event-payload')).toHaveLength(1)
     expect(wrapper.get('.event-payload').text()).toContain('T-1.a1')
