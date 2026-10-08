@@ -146,3 +146,53 @@ button:disabled { color: var(--muted); cursor: not-allowed; }
 .diff-note { margin: 0.2rem 0; color: var(--muted); font-size: 0.78rem; }
 .diff-actions { margin: 0.2rem 0; }
 .diff-patch { margin: 0.3rem 0 0.2rem; padding: 0.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; overflow-x: auto; color: var(--ink); font-size: 0.78rem; }
+
+/* 人操作面（human-console 卡）：动作结果横幅、左栏创建表单、中栏方案区、
+   右栏决策条。配色沿用已断言的 token 对（ink/muted × bone/panel；bad × bone；
+   横幅底 panel-2 与 panel 同族近色，ink 对比只会更高）——不新增 token 对。 */
+.banner {
+  grid-column: 1 / -1;
+  margin: 0; padding: 0.4rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+
+.rail-form { display: flex; flex-direction: column; gap: 0.4rem; margin: 0.4rem 0 0.3rem; }
+.rail-form label,
+.decision-field {
+  display: flex; flex-direction: column; gap: 0.15rem;
+  font-size: 0.78rem; color: var(--muted);
+}
+.rail-form input, .rail-form textarea,
+.decision-field input, .decision-field textarea {
+  font: inherit; color: var(--ink); background: var(--bone);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0.3rem 0.45rem;
+}
+.rail-form textarea { resize: vertical; }
+.form-error { margin: 0; color: var(--bad); font-size: 0.78rem; }
+
+.rail-add-project, .rail-add-group {
+  width: 100%; text-align: left; border: none;
+  color: var(--muted); padding: 0.2rem 0.45rem; font-size: 0.8rem;
+}
+.rail-add-project { margin-top: 0.4rem; }
+
+.plan-card {
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 0.4rem 0.6rem; margin-bottom: 0.6rem;
+}
+.plan-card summary { cursor: pointer; font-size: 0.85rem; }
+.plan-decide { border-top: 1px solid var(--line); padding-top: 0.4rem; }
+.plan-actions { display: flex; gap: 0.4rem; margin: 0; }
+
+.decision-card {
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 0.5rem 0.6rem; margin-bottom: 0.7rem;
+}
+.decision-head { display: flex; justify-content: space-between; align-items: baseline; }
+.decision-head h3 { margin: 0 0 0.3rem; font-size: 0.85rem; }
+.decision-question { margin: 0.2rem 0 0.4rem; color: var(--ink); overflow-wrap: anywhere; }
+.decision-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.3rem 0 0; }
+.decision-none { margin: 0.2rem 0; color: var(--muted); font-size: 0.78rem; }

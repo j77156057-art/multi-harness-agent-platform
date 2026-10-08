@@ -97,13 +97,62 @@ const ROUTES: Record<string, unknown> = {
     next_seq: 4,
     has_more: false,
   },
+  // T-2：awaiting_human 任务 + 一次真实的人工决策回执（human-console 卡）。
+  '/api/v1/tasks/T-2': {
+    task_id: 'T-2',
+    group_id: 'G-1',
+    status: 'awaiting_human',
+    owner: 'codex',
+    current_attempt_id: 'T-2.a1',
+    current_epoch: 1,
+    waiting_since: '2026-10-07T12:00:00+00:00',
+    escalated_at: null,
+  },
+  '/api/v1/tasks/T-2/events': {
+    events: [
+      {
+        seq: 9,
+        event_name: 'human.question',
+        aggregate_type: 'task',
+        aggregate_id: 'T-2',
+        actor_type: 'harness',
+        actor_id: 'codex',
+        payload: { decision_id: 'dec-1', question: '契约要冻结吗？', scope: 'task' },
+        schema_version: 1,
+        created_at: '2026-10-07T12:00:00+00:00',
+      },
+    ],
+    next_seq: 9,
+    has_more: false,
+  },
+  '/api/v1/tasks/T-2/diff': {
+    task_id: 'T-2',
+    attempt_id: 'T-2.a1',
+    available: false,
+    reason: 'no attempt has published a commit',
+    base_commit: null,
+    head_commit: null,
+    branch: null,
+    files: [],
+    files_changed: 0,
+    insertions: 0,
+    deletions: 0,
+    patch: null,
+    truncated: false,
+  },
+  '/api/v1/human/resume': {
+    task_id: 'T-2',
+    event: 'human.resume',
+    seq: 42,
+    status: 'in_progress',
+  },
 }
 
 // 前缀匹配按 key 长度降序，避免 /groups 抢在 /groups/G-1/tasks 前面。
 const KEYS = Object.keys(ROUTES).sort((a, b) => b.length - a.length)
 
 function stubFetch() {
-  const mock = vi.fn(async (input: RequestInfo | URL) => {
+  const mock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     const url = String(input)
     for (const key of KEYS) {
       if (url.startsWith(key)) {
@@ -121,14 +170,14 @@ afterEach(() => {
 })
 
 async function mountShell(initialPath: string) {
-  stubFetch()
+  const mock = stubFetch()
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push(initialPath)
   await router.isReady()
   const wrapper = mount(Shell, { global: { plugins: [createPinia(), router] } })
   await flushPromises()
   await flushPromises()
-  return { wrapper, router }
+  return { wrapper, router, mock }
 }
 
 describe('Shell (route → store → three panes)', () => {
@@ -147,5 +196,29 @@ describe('Shell (route → store → three panes)', () => {
     expect(wrapper.text()).toContain('线程 · T-1')
     expect(wrapper.text()).toContain('claim')
     expect(wrapper.get('.diff-card').text()).toContain('src/app.py')
+  })
+
+  it('human decision: resume posts the action and shows the notice banner', async () => {
+    const { wrapper, mock } = await mountShell('/g/G-1/t/T-2')
+
+    expect(wrapper.get('.decision-question').text()).toContain('契约要冻结吗？')
+    const resume = wrapper
+      .findAll('.decision-actions button')
+      .find((button) => button.text() === '恢复工作')
+    expect(resume).toBeDefined()
+
+    await resume?.trigger('click')
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+
+    const call = mock.mock.calls.find(([input]) => String(input) === '/api/v1/human/resume')
+    expect(call).toBeDefined()
+    expect(call?.[1]?.method).toBe('POST')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      task_id: 'T-2',
+      decided_by: 'operator',
+    })
+    expect(wrapper.get('.banner').text()).toContain('已恢复 T-2')
   })
 })

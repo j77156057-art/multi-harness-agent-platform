@@ -1,7 +1,8 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { EventRecord, TaskDiff, TaskSummary } from '../api'
 import TaskPane from '../components/TaskPane.vue'
+import type { HumanAction } from '../stores/session'
 
 const tasks: TaskSummary[] = [
   {
@@ -80,9 +81,24 @@ function render(props: Partial<InstanceType<typeof TaskPane>['$props']> = {}) {
       diffLoading: false,
       loading: false,
       error: null,
+      busy: false,
+      humanAct: async () => true,
       ...props,
     },
   })
+}
+
+function taskWith(status: string): TaskSummary {
+  return {
+    task_id: 'T-1',
+    group_id: 'G-1',
+    status,
+    owner: 'codex',
+    current_attempt_id: 'T-1.a1',
+    current_epoch: 2,
+    waiting_since: null,
+    escalated_at: null,
+  }
 }
 
 describe('TaskPane', () => {
@@ -198,5 +214,120 @@ describe('TaskPane', () => {
     })
 
     expect(wrapper.get('.diff-head').text()).toContain('加载中')
+  })
+})
+
+describe('TaskPane human decision bar', () => {
+  const questionEvent: EventRecord = {
+    seq: 9,
+    event_name: 'human.question',
+    aggregate_type: 'task',
+    aggregate_id: 'T-1',
+    actor_type: 'harness',
+    actor_id: 'codex',
+    payload: { decision_id: 'dec-1', question: '契约要冻结吗？', scope: 'task' },
+    schema_version: 1,
+    created_at: '2026-10-08T09:00:00+00:00',
+  }
+
+  function buttonTexts(wrapper: ReturnType<typeof render>): string[] {
+    return wrapper.findAll('.decision-actions button').map((b) => b.text())
+  }
+
+  it('awaiting_human surfaces the open question and resume/reopen/cancel', () => {
+    const wrapper = render({
+      selectedTask: taskWith('awaiting_human'),
+      events: [questionEvent],
+    })
+
+    expect(wrapper.get('.decision-question').text()).toContain('契约要冻结吗？')
+    expect(buttonTexts(wrapper)).toEqual(['恢复工作', '重开', '取消任务'])
+  })
+
+  it('resume carries the answer only when one is typed', async () => {
+    const humanAct = vi.fn(async (_action: HumanAction): Promise<boolean> => true)
+    const wrapper = render({
+      selectedTask: taskWith('awaiting_human'),
+      events: [questionEvent],
+      humanAct,
+    })
+
+    await wrapper.get('.decision-actions button').trigger('click')
+    expect(humanAct).toHaveBeenCalledWith({
+      kind: 'resume',
+      taskId: 'T-1',
+      decided_by: 'operator',
+    })
+
+    await wrapper.get('[name="decision_answer"]').setValue('冻结 v1')
+    const buttons = wrapper.findAll('.decision-actions button')
+    await buttons[0]?.trigger('click')
+    expect(humanAct).toHaveBeenLastCalledWith({
+      kind: 'resume',
+      taskId: 'T-1',
+      decided_by: 'operator',
+      answer: '冻结 v1',
+    })
+  })
+
+  it('escalated offers release and adjudicate, never cancel', async () => {
+    const humanAct = vi.fn(async (_action: HumanAction): Promise<boolean> => true)
+    const wrapper = render({ selectedTask: taskWith('escalated'), humanAct })
+
+    expect(buttonTexts(wrapper)).toEqual(['释放', '裁决'])
+
+    const adjudicate = wrapper.findAll('.decision-actions button')[1]
+    expect(adjudicate?.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[name="adjudicate_question"]').setValue('选哪条路？')
+    await wrapper.get('[name="adjudicate_options"]').setValue('A, B')
+    await wrapper.findAll('.decision-actions button')[1]?.trigger('click')
+    expect(humanAct).toHaveBeenLastCalledWith({
+      kind: 'adjudicate',
+      taskId: 'T-1',
+      decided_by: 'operator',
+      question: '选哪条路？',
+      options: ['A', 'B'],
+    })
+  })
+
+  it('running states offer only cancel, with an optional reason', async () => {
+    const humanAct = vi.fn(async (_action: HumanAction): Promise<boolean> => true)
+    const wrapper = render({ selectedTask: taskWith('in_progress'), humanAct })
+
+    expect(buttonTexts(wrapper)).toEqual(['取消任务'])
+
+    await wrapper.get('[name="cancel_reason"]').setValue('方向已变')
+    await wrapper.get('.decision-actions button').trigger('click')
+    expect(humanAct).toHaveBeenLastCalledWith({
+      kind: 'cancel',
+      taskId: 'T-1',
+      decided_by: 'operator',
+      reason: '方向已变',
+    })
+  })
+
+  it('abandoned offers reopen only and merged offers nothing', () => {
+    const abandoned = render({ selectedTask: taskWith('abandoned') })
+    expect(buttonTexts(abandoned)).toEqual(['重开'])
+
+    const merged = render({ selectedTask: taskWith('merged') })
+    expect(merged.find('.decision-actions').exists()).toBe(false)
+    expect(merged.get('.decision-none').text()).toContain('没有可用的人工动作')
+  })
+
+  it('disables every action while busy or without an operator', async () => {
+    const wrapper = render({ selectedTask: taskWith('awaiting_human'), busy: true })
+
+    for (const button of wrapper.findAll('.decision-actions button')) {
+      expect(button.attributes('disabled')).toBeDefined()
+    }
+
+    await wrapper.get('[name="decided_by"]').setValue('  ')
+    const idle = render({ selectedTask: taskWith('awaiting_human') })
+    await idle.get('[name="decided_by"]').setValue('')
+    for (const button of idle.findAll('.decision-actions button')) {
+      expect(button.attributes('disabled')).toBeDefined()
+    }
   })
 })

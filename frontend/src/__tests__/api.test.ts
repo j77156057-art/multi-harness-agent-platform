@@ -99,4 +99,99 @@ describe('api client', () => {
     expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/tasks/T-1/events?since_seq=7')
     expect(page.next_seq).toBe(7)
   })
+
+  it('posts project and group creations on the management paths', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, { project_id: 'P-2' }),
+      jsonResponse(200, { group_id: 'G-2' }),
+    )
+
+    await api.createProject({ project_id: 'P 2', name: '项目二' })
+    await api.createGroup('P 2', { group_id: 'G-2', name: '群二' })
+
+    const [projectUrl, projectInit] = mock.mock.calls[0] ?? []
+    expect(projectUrl).toBe('/api/v1/projects')
+    expect(projectInit?.method).toBe('POST')
+    expect(JSON.parse(String(projectInit?.body))).toEqual({ project_id: 'P 2', name: '项目二' })
+
+    const [groupUrl, groupInit] = mock.mock.calls[1] ?? []
+    expect(groupUrl).toBe('/api/v1/projects/P%202/groups')
+    expect(JSON.parse(String(groupInit?.body))).toEqual({ group_id: 'G-2', name: '群二' })
+  })
+
+  it('creates a plan with the raw snapshot and decides it by id', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, { plan_id: 'PLAN-1', snapshot_id: 'snap-1', plan_hash: 'h' }),
+      jsonResponse(200, { plan_id: 'PLAN 1', ready: ['T-1'], waiting: [] }),
+      jsonResponse(200, { plan_id: 'PLAN 1', rejected: ['T-2'] }),
+    )
+
+    await api.createPlan('G-1', {
+      plan_id: 'PLAN-1',
+      snapshot: { tasks: [{ id: 'T-1' }] },
+    })
+    await api.approvePlan('PLAN 1', { decided_by: 'operator' })
+    await api.rejectPlan('PLAN 1', { decided_by: 'operator', reason: '范围太大' })
+
+    const [createUrl, createInit] = mock.mock.calls[0] ?? []
+    expect(createUrl).toBe('/api/v1/groups/G-1/plans')
+    expect(JSON.parse(String(createInit?.body))).toEqual({
+      plan_id: 'PLAN-1',
+      snapshot: { tasks: [{ id: 'T-1' }] },
+    })
+
+    expect(mock.mock.calls[1]?.[0]).toBe('/api/v1/plans/PLAN%201/approve')
+    expect(JSON.parse(String(mock.mock.calls[1]?.[1]?.body))).toEqual({ decided_by: 'operator' })
+
+    expect(mock.mock.calls[2]?.[0]).toBe('/api/v1/plans/PLAN%201/reject')
+    expect(JSON.parse(String(mock.mock.calls[2]?.[1]?.body))).toEqual({
+      decided_by: 'operator',
+      reason: '范围太大',
+    })
+  })
+
+  it('posts the five human decisions with task_id merged into the body', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, { task_id: 'T-1', event: 'human.resume', seq: 1, status: 'in_progress' }),
+      jsonResponse(200, { task_id: 'T-1', event: 'human.reopen', seq: 2, status: 'ready' }),
+      jsonResponse(200, { task_id: 'T-1', event: 'human.release', seq: 3, status: 'ready' }),
+      jsonResponse(200, { task_id: 'T-1', decision_id: 'dec-9', seq: 4 }),
+      jsonResponse(200, { task_id: 'T-1', event: 'human.cancel', seq: 5, status: 'cancelled' }),
+    )
+
+    await api.humanResume('T-1', { decided_by: 'operator', answer: '继续' })
+    await api.humanReopen('T-1', { decided_by: 'operator' })
+    await api.humanRelease('T-1', { decided_by: 'operator' })
+    await api.humanAdjudicate('T-1', {
+      decided_by: 'operator',
+      question: '选哪条路？',
+      options: ['A', 'B'],
+    })
+    await api.humanCancel('T-1', { decided_by: 'operator', reason: '方向已变' })
+
+    const urls = mock.mock.calls.map(([url]) => url)
+    expect(urls).toEqual([
+      '/api/v1/human/resume',
+      '/api/v1/human/reopen',
+      '/api/v1/human/release',
+      '/api/v1/human/adjudicate',
+      '/api/v1/human/cancel',
+    ])
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toEqual({
+      task_id: 'T-1',
+      decided_by: 'operator',
+      answer: '继续',
+    })
+    expect(JSON.parse(String(mock.mock.calls[3]?.[1]?.body))).toEqual({
+      task_id: 'T-1',
+      decided_by: 'operator',
+      question: '选哪条路？',
+      options: ['A', 'B'],
+    })
+    expect(JSON.parse(String(mock.mock.calls[4]?.[1]?.body))).toEqual({
+      task_id: 'T-1',
+      decided_by: 'operator',
+      reason: '方向已变',
+    })
+  })
 })

@@ -1,5 +1,6 @@
-// 会话状态：左栏（项目/群组）、中栏（群聊）、右栏（任务 + 线程）的加载与选择。
-// 组件保持纯渲染，编排全部落在这里，vitest 可以直接测 store 而不必挂 DOM。
+// 会话状态：左栏（项目/群组）、中栏（群聊）、右栏（任务 + 线程）的加载与选择，
+// 以及管理面/人工决策面的动作编排。组件保持纯渲染，编排全部落在这里，vitest
+// 可以直接测 store 而不必挂 DOM。
 import { defineStore } from 'pinia'
 import {
   api,
@@ -12,6 +13,19 @@ import {
   type TaskSummary,
 } from '../api'
 
+export type HumanAction =
+  | { kind: 'resume'; taskId: string; decided_by: string; answer?: string }
+  | { kind: 'reopen'; taskId: string; decided_by: string; answer?: string }
+  | { kind: 'release'; taskId: string; decided_by: string }
+  | {
+      kind: 'adjudicate'
+      taskId: string
+      decided_by: string
+      question: string
+      options?: string[]
+    }
+  | { kind: 'cancel'; taskId: string; decided_by: string; reason?: string }
+
 interface SessionState {
   projects: ProjectSummary[]
   groups: GroupSummary[]
@@ -20,6 +34,10 @@ interface SessionState {
   events: EventRecord[]
   diff: TaskDiff | null
   selectedTask: TaskSummary | null
+  selectedGroupId: string | null
+  // 动作结果的成功面（notice）与失败面（error）分开：动作成功不该看起来像没事
+  // 发生，动作失败也不该只靠列表里少了一行。
+  notice: string | null
   loading: Record<string, boolean>
   error: string | null
 }
@@ -33,6 +51,8 @@ export const useSession = defineStore('session', {
     events: [],
     diff: null,
     selectedTask: null,
+    selectedGroupId: null,
+    notice: null,
     loading: {},
     error: null,
   }),
@@ -61,6 +81,7 @@ export const useSession = defineStore('session', {
     },
     async selectGroup(groupId: string): Promise<void> {
       this.error = null
+      this.selectedGroupId = groupId
       this.selectedTask = null
       this.events = []
       this.diff = null
@@ -139,6 +160,165 @@ export const useSession = defineStore('session', {
       } catch (error) {
         this.error = describeError(error)
         return false
+      }
+    },
+    // 只刷新当前群组的任务列表：动作改的是任务状态，不该把选中线程/群聊重置。
+    async refreshTasks(): Promise<void> {
+      const groupId = this.selectedGroupId
+      if (groupId === null) {
+        return
+      }
+      try {
+        const { tasks } = await api.listTasks(groupId)
+        if (this.selectedGroupId === groupId) {
+          this.tasks = tasks
+        }
+      } catch (error) {
+        this.error = describeError(error)
+      }
+    },
+    async createProject(fields: { project_id: string; name: string }): Promise<boolean> {
+      this.error = null
+      this.notice = null
+      this.loading.act = true
+      try {
+        await api.createProject(fields)
+        await this.loadRail()
+        this.notice = `已创建项目 ${fields.project_id}`
+        return true
+      } catch (error) {
+        this.error = describeError(error)
+        return false
+      } finally {
+        this.loading.act = false
+      }
+    },
+    async createGroup(
+      projectId: string,
+      fields: { group_id: string; name: string },
+    ): Promise<string | null> {
+      this.error = null
+      this.notice = null
+      this.loading.act = true
+      try {
+        await api.createGroup(projectId, fields)
+        await this.loadRail()
+        this.notice = `已创建群组 ${fields.group_id}`
+        return fields.group_id
+      } catch (error) {
+        this.error = describeError(error)
+        return null
+      } finally {
+        this.loading.act = false
+      }
+    },
+    async createPlan(fields: {
+      plan_id: string
+      snapshot: Record<string, unknown>
+    }): Promise<boolean> {
+      const groupId = this.selectedGroupId
+      if (groupId === null) {
+        this.error = '先选择一个群组，计划属于群组'
+        return false
+      }
+      this.error = null
+      this.notice = null
+      this.loading.act = true
+      try {
+        const created = await api.createPlan(groupId, fields)
+        this.notice = `已创建计划 ${created.plan_id}（draft；审批通过后才生成 ready 任务）`
+        return true
+      } catch (error) {
+        this.error = describeError(error)
+        return false
+      } finally {
+        this.loading.act = false
+      }
+    },
+    async decidePlan(
+      planId: string,
+      approve: boolean,
+      fields: { decided_by: string; reason?: string },
+    ): Promise<boolean> {
+      this.error = null
+      this.notice = null
+      this.loading.act = true
+      try {
+        if (approve) {
+          const outcome = await api.approvePlan(planId, fields)
+          this.notice =
+            `计划 ${outcome.plan_id} 已批：${outcome.ready.length} 个 ready、` +
+            `${outcome.waiting.length} 个等待中`
+        } else {
+          const outcome = await api.rejectPlan(planId, fields)
+          this.notice = `计划 ${outcome.plan_id} 已驳回：${outcome.rejected.length} 个 draft 任务被拒`
+        }
+        await this.refreshTasks()
+        return true
+      } catch (error) {
+        this.error = describeError(error)
+        return false
+      } finally {
+        this.loading.act = false
+      }
+    },
+    // §18 五决策动词：动作合法性由后端守卫状态裁决（前端只按状态给按钮），
+    // 成功即刷新线程与任务列表，让事件流与状态徽章当场一致。
+    async humanAct(action: HumanAction): Promise<boolean> {
+      this.error = null
+      this.notice = null
+      this.loading.act = true
+      try {
+        switch (action.kind) {
+          case 'resume': {
+            const outcome = await api.humanResume(action.taskId, {
+              decided_by: action.decided_by,
+              ...(action.answer ? { answer: action.answer } : {}),
+            })
+            this.notice = `已恢复 ${outcome.task_id} → ${outcome.status}`
+            break
+          }
+          case 'reopen': {
+            const outcome = await api.humanReopen(action.taskId, {
+              decided_by: action.decided_by,
+              ...(action.answer ? { answer: action.answer } : {}),
+            })
+            this.notice = `已重开 ${outcome.task_id} → ${outcome.status}`
+            break
+          }
+          case 'release': {
+            const outcome = await api.humanRelease(action.taskId, {
+              decided_by: action.decided_by,
+            })
+            this.notice = `已释放 ${outcome.task_id} → ${outcome.status}`
+            break
+          }
+          case 'adjudicate': {
+            const outcome = await api.humanAdjudicate(action.taskId, {
+              decided_by: action.decided_by,
+              question: action.question,
+              ...(action.options !== undefined ? { options: action.options } : {}),
+            })
+            this.notice = `已裁决 ${outcome.task_id}（decision ${outcome.decision_id}）`
+            break
+          }
+          case 'cancel': {
+            const outcome = await api.humanCancel(action.taskId, {
+              decided_by: action.decided_by,
+              ...(action.reason ? { reason: action.reason } : {}),
+            })
+            this.notice = `已取消 ${outcome.task_id} → ${outcome.status}`
+            break
+          }
+        }
+        await this.openTask(action.taskId)
+        await this.refreshTasks()
+        return true
+      } catch (error) {
+        this.error = describeError(error)
+        return false
+      } finally {
+        this.loading.act = false
       }
     },
   },
