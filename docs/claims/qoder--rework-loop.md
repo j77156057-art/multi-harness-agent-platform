@@ -21,7 +21,7 @@
   不清），返工是死端。本卡实现返工闭环（claim_for_revision 路径 +
   list_ready_tasks 可发现性）。
 
-- 2026-10-08 12:52：完成。实现 `af80d4e`；全量门禁绿（pytest 451 passed，净增
+- 2026-10-08 12:48：完成。实现 `af80d4e`；全量门禁绿（pytest 451 passed，净增
   8；docstate 90/0、discipline 44/0、ruff 119 files）。变异验证（注掉分支必红）。
   实机复核：演练实例 T-CDX seq97 吃到 claim_for_revision（revised_from=
   T-CDX.a1、a2/epoch2）——F1 死端消失（后段被 relay 断流中断，如实记录）。
