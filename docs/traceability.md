@@ -26,6 +26,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `DOC-SCHEMA-001` | canonical schema 自洽：§8 唯一键引用的列已声明、§11 DDL 列已登记、§37.6 必要字段 | ✅ 有断言 | `tools/docstate` schema/schema-keys/schema-list 组 |
 | `DOC-TRACE-001` | test_id 无悬空：全文出现的 ID 必须落在阶段列表之一 | ✅ 有断言 | `tools/docstate` trace 组 |
 | `DOC-PLAN-001` | 计划 linter：拒绝环 / 非法引用 / 超规模 / 不可满足 evidence | ✅ 有断言 | `test_state_plan.py`（拒绝环、未注册 capability、`limits` 超规模、重复依赖边、glob 重复、`cmd` 判据缺 evidence source、未注册 evidence source、空白 evidence source；`human` 判据免 evidence source）。原实现 fail-open（`if source is not None` + `elif evidence_sources and ...`），由 `plan-evidence-failclosed` 改为 fail-closed |
+| `DOC-MIRROR-001` | 规范计数镜像：§37.7 实际集合与 `backend/app/spec.py` 的 `R10_ALLOWLIST_COUNTS` 逐键相等（含新增 `permission_denied` 后的 89/M74/O14/R1） | ✅ 有断言 | `test_spec_mirror.py`（用 docstate 的 `extract_allowlist` 解析文档实际值比对常量；注入验证：改常量即红）；R10-fix-12 |
 | `DOC-AUTH-001` | 权限矩阵一致性 | ⚠️ 仅声明 | **设计输入已落**（permission-matrix 卡：`docs/reports/permission-matrix-design-input.md`——R10 矩阵 7×11 逐行落点、Paperclip 21 键机制参照、三缺口〔403 审计事件名不在 88 项白名单→需 R10-fix；OS ACL 与单账户降级收口；help 协作者面〕、认证任务切片 A-D）；**实现仍待认证任务**（token/403/审计/ACL），验收尺=本矩阵逐格 |
 | `DOC-ADR-001` | ADR 清单完整 | ⚠️ 仅声明 | 未实现 |
 | `DOC-AO-001` | AO 能力对照表 | ⚠️ 仅声明 | 人工产出 `docs/ao-capability-audit.md`，无断言 |
