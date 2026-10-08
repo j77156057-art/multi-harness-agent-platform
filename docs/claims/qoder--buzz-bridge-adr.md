@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-09 02:20 |
 | 分支 | `agent/local/qoder/buzz-bridge-adr/a1` |
-| 状态 | 🚧 doing |
+| 状态 | ✅ done（交付 e1a839b；ADR 状态=提议，待协调者裁决） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `buzz-bridge-adr`。
 
@@ -21,3 +21,6 @@
   v1 平铺降级）、消息投影原则（不逐字转发 payload）、幂等（Nostr id=哈希）、
   配置默认（未配置显式 no-op）、回退条件与兼容性保证。本卡**零代码、零迁移**；
   实现另开卡（等本 ADR 裁决后）。
+- 2026-10-09 02:35：ADR 交付提交 `e1a839b`；docstate 90 / discipline 44 /
+  pytest 511 全绿；`MVP-ARCH-002` 登记进 traceability。状态 → done（ADR 本身
+  待协调者裁决转「已接受」）。

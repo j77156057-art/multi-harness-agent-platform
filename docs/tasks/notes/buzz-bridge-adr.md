@@ -1,4 +1,4 @@
-### buzz-bridge-adr：Buzz 单向桥的边界裁决（🚧 doing）
+### buzz-bridge-adr：Buzz 单向桥的边界裁决（✅ done）
 
 ~~~text
 任务编号：buzz-bridge-adr
@@ -46,5 +46,37 @@
      全绿（docstate + discipline；本卡零代码，pytest 计数不变）
 test_id：MVP-ARCH-002（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；ADR 状态=提议，待协调者裁决）
+完成时间：2026-10-09 02:35
+commit：`e1a839b`（交付提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（零代码，仅格式轮询）
+  pytest      : 513 passed（本卡零代码；较 rules-tighten 的 511 多 2 项是
+                并入 main 时吸收的 gate-summary-fix 测试），exit 0
+  交付物       : `docs/adr/ADR-DEV-005-buzz-one-way-bridge.md`——按 ADR-DEV-001/
+                003/004 先例格式；与 DEV-003 决策 4（闸）及 DEV-004（把
+                "Nostr relay 另立 ADR"的预留）的关系在背景与关联节写明；
+                wire 事实逐条标注报告节号（§1/§5），未证实清单（§7）在决策 9
+                单列并指定验证路径。
+  traceability : `MVP-ARCH-002` 已登记（⚠️ 仅声明——决策文档，无机械断言）
+已知问题：
+  - **ADR 状态=提议**：授权的是"平台事件发到第三方平台"这条数据出口，按
+    流程应由协调者确认后转「已接受」；在此之前不写桥代码；
+  - 实现未开工（另卡）：`buzz-cursors` 表、`app/buzz` 模块、最小真机验证
+    （countdown-bot 同款路径）、消息映射细表（默认发布/默认静默的精确集合）
+    都留给实现卡；
+  - 本机无目标 Buzz relay——实机验证需要协调者提供 relay 地址/频道/agent
+    身份（或确认用本地自建 relay 做验收）；
+  - 排障留痕：合流期间发现另一 agent 在**根工作区**留了未跟踪目录
+    `.workbuddy/`，使根侧 discipline 判红、挡住所有合并；经协调者确认按
+    "本地忽略"处理（`.git/info/exclude` 一行，未动其文件、未进仓库）。
+  - 排障留痕（二）：首轮全量门禁 1 红——`test_cli_once_runs_a_round` 的
+    verify 结果为 `status='error'`（驱动对未预期异常的设计标签）；单跑
+    3/3 绿、全量重跑绿——与早前"64 秒 179 红"同源的**机器级瞬时抖动**
+    （负载下的进程创建/文件锁，drill F12 家族）。运行时环对此**自愈**：
+    未落 receipt 的 verifying 任务下一轮仍是候选，自动重试；单轮断言的
+    测试仅暴露该瞬时性，不代表产品回归。留档：若再现，先看
+    `verify[0].detail` 的异常原文。
 ~~~
