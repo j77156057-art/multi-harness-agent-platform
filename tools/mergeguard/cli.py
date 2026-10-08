@@ -402,6 +402,9 @@ def _run_gate(name: str, args: list[str]) -> tuple[bool, str]:
     撞上自动维护），本工具会一直持有合并锁。所以上面 `_git` 的
     GIT_TIMEOUT_SECONDS 是给 git 用的，这里不给门禁用 —— 两者的
     「合理的慢」不是一个量级。
+
+    返回的第二个值是**门禁的自述摘要**，也就是「绿灯的证据」。它不能是
+    门禁碰巧的最后一行输出 —— 见下面 `_gate_summary`。
     """
     cmd = [sys.executable, *args]
     proc = subprocess.run(
@@ -418,8 +421,43 @@ def _run_gate(name: str, args: list[str]) -> tuple[bool, str]:
     for ln in lines:
         if ln.startswith("[skip]"):
             print("  " + ln)
-    tail = lines[-1] if lines else "(无输出)"
-    return proc.returncode == 0, f"{name}: {tail}"
+    return proc.returncode == 0, f"{name}: {_gate_summary(lines)}"
+
+
+#: 门禁摘要行的标记。docstate 与 discipline 都用这一行收尾：
+#:
+#:     结果: 90 项检查，0 项失败
+#:     结果: 44 项检查，0 项失败，1 项告警
+#:
+#: 之所以要**认这一行**而不是取最后一行输出：门禁在结果之后完全可能再打印
+#: 东西 —— Python 3.13 对无效转义序列的 SyntaxWarning、DeprecationWarning、
+#: `--json` 切换时的提示，都会插在结果行后面。
+#:
+#: 实测吃过：discipline 打印的 SyntaxWarning 落在结果之后，摘要变成那条警告，
+#: **真正的检查结果被吃掉**，而退出码仍是 0 —— 门禁是绿的，绿灯的证据是错的。
+#:
+#: 用「包含」而不是「以…开头」：测试里的门禁替身打印的是
+#: `print("{name}: 结果: 1 项检查，0 项失败")`，行首有门禁名；
+#: 生产里两道门禁都是裸的 `结果:`。两种都是合法的门禁自述。
+GATE_SUMMARY_MARK = "结果:"
+
+
+def _gate_summary(lines: list[str]) -> str:
+    """从门禁输出里挑出**门禁自己说出的结论**。
+
+    取**最后一条**含 `结果:` 的行：门禁可能先打印一段旧摘要再打新的
+    （重试、二次汇总），后面的才是最终结论。
+
+    找不到时退到最后一行，但**必须标注**「未找到摘要行」。这不是啰嗦：
+    两种情况的门禁自述强度完全不一样，混在一起显示等于把不可信的输出
+    伪装成门禁的结论。
+    """
+    for ln in reversed(lines):
+        if GATE_SUMMARY_MARK in ln:
+            return ln
+    if not lines:
+        return "(无输出)"
+    return "(未找到摘要行，最后一行: %s)" % lines[-1]
 
 
 def do_status() -> int:
