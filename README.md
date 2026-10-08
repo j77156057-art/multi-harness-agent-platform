@@ -60,6 +60,19 @@ python -m venv .venv
 cd backend && ../.venv/Scripts/python.exe -m app.main
 ~~~
 
+### Windows 一键启动（cmd / 双击 `start.bat`）
+
+~~~bat
+start.bat          rem 后端 → http://127.0.0.1:8848（等价 make dev）
+start.bat all      rem 后端 + 巡检循环 + 前端（三个窗口）
+start.bat workers  rem 只起巡检循环（app.scheduler --loop）
+start.bat frontend rem 只起前端（npm run dev）
+start.bat help     rem 用法
+~~~
+
+前置仍是一次性的（venv 与前端 `npm install`，见上一节）；缺 venv/依赖时
+`start.bat` 会打印修复命令并以 exit 2 退出。
+
 ### 有 make 的环境
 
 ~~~bash

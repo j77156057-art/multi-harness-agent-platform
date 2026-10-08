@@ -103,6 +103,7 @@
 | permission-matrix | Qoder | paperclip-buzz-source | ✅ done（实现 a968ac7；设计输入报告，403 审计名缺口） | `agent/local/qoder/permission-matrix/a1` | `DOC-AUTH-001` |
 | e2e-harness-drill | Qoder | diff-message | ✅ done（实现 0c6b40e；6 链真实 merged + 六项演练 + 前端追溯；附 alternates 修复） | `agent/local/qoder/e2e-harness-drill/a1` | `OPS-DRILL-001` |
 | rework-loop | Qoder | e2e-harness-drill | ✅ done（实现 af80d4e；claim_for_revision 返工闭环，变异验证） | `agent/local/qoder/rework-loop/a1` | `CORE-REWORK-001` |
+| start-bat | Qoder | — | ✅ done（实现 5520786；Windows 一键启动器，实测三模式） | `agent/local/qoder/start-bat/a1` | `MVP-PROCESS-002` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -233,6 +234,7 @@
 | permission-matrix | [卡](docs/tasks/notes/permission-matrix.md) | | |
 | e2e-harness-drill | [卡](docs/tasks/notes/e2e-harness-drill.md) | | |
 | rework-loop | [卡](docs/tasks/notes/rework-loop.md) | | |
+| start-bat | [卡](docs/tasks/notes/start-bat.md) | | |
 
 ## 共享文件改动声明
 
