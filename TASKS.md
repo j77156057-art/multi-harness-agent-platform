@@ -109,6 +109,7 @@
 | runtime-driver | Qoder | e2e-harness-drill | ✅ done（实现 4558a79；运行环 v1：--check/--once 走通 verify→merge，实机留档） | `agent/local/qoder/runtime-driver/a1` | `CORE-RUNTIME-001` |
 | R10-fix-12 | Qoder | permission-matrix | ✅ done（实现 55d3516；§37.7 登记 permission_denied，计数 88→89，镜像注入验证） | `agent/local/qoder/r10-fix-12/a1` | `DOC-MIRROR-001` |
 | auth-layer | Qoder | R10-fix-12 | ✅ done（实现 521f7e9；token+身份绑定+矩阵执行，enforce 实机留档） | `agent/local/qoder/auth-layer/a1` | `DOC-AUTH-001` |
+| frontend-token | Qoder | auth-layer | 🚧 doing | `agent/local/qoder/frontend-token/a1` | `MVP-UI-005` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -245,6 +246,7 @@
 | runtime-driver | [卡](docs/tasks/notes/runtime-driver.md) | | |
 | R10-fix-12 | [卡](docs/tasks/notes/R10-fix-12.md) | | |
 | auth-layer | [卡](docs/tasks/notes/auth-layer.md) | | |
+| frontend-token | [卡](docs/tasks/notes/frontend-token.md) | | |
 
 ## 共享文件改动声明
 
