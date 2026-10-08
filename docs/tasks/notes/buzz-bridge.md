@@ -80,9 +80,10 @@
      `INTEG-BUZZ-001`
 test_id：INTEG-BUZZ-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：done（作者完成，待合入；外部验收待认）
-完成时间：2026-10-09 03:35
-commit：见 git log main（本卡实现提交；登记 `ffb6d26`）
+当前状态：done（已合入 main）
+完成时间：2026-10-09 03:35（实现）；2026-10-09 03:52 合并（aad2b3f）
+commit：实现 `219ec4e`（登记 `ffb6d26`）；合并 `aad2b3f`（mergeguard 门禁全
+        绿）；合并后 main 全量门禁 `529 passed`
 验证结果：
   docstate    : 90 项检查，0 项失败
   discipline  : 44 项检查，0 项失败
@@ -129,6 +130,11 @@ commit：见 git log main（本卡实现提交；登记 `ffb6d26`）
   - `created_at` 取**源事件时间**（非发布时刻）：同 seq 重放 → 同 id 同签名的
     前提；显示时间是平台事实时间。
   - ADR-DEV-005 状态仍为**提议**；本卡按已登记约束实现，状态翻转待协调者。
+  - **依赖新增**：`coincurve==21.0.0` + `websockets==17.2`（requirements 已
+    钉）。合并后各 worktree 的既有 venv 需各跑一次
+    `pip install -r backend/requirements.txt`，否则 pytest 收集期
+    `ModuleNotFoundError: coincurve`（root venv 已代为更新；合并后 main 门禁
+    因此从红转绿的前后两跑都留档在案）。
 ~~~
 
 ## 结论

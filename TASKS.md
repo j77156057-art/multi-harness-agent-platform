@@ -116,7 +116,7 @@
 | rules-tighten | Qoder | adapter-hardening | ✅ done（实现 e2a4545；F5/F7/F11 收紧，测试 +13） | `agent/local/qoder/rules-tighten/a1` | `CORE-RULES-001` |
 | office-anim-proto | OpenCode | — | ✅ done（实现 2f7c555；已合入 d9a00ae。**行状态由 Qoder 代翻**：mergegate 组 6 要求「已合入 main 即须完成」，原行卡 🟢 doing 会让全场 discipline 转红；OpenCode 若继续集成请开新行/新卡） | `agent/local/opencode/office-anim-proto/a1` | `MVP-UI-006` |
 | buzz-bridge-adr | Qoder | paperclip-buzz-source | ✅ done（交付 e1a839b；ADR-DEV-005 提议，待裁决） | `agent/local/qoder/buzz-bridge-adr/a1` | `MVP-ARCH-002` |
-| buzz-bridge | Qoder | buzz-bridge-adr | ✅ done（ADR-DEV-005 运行时：只写不读；测试内真 WS relay + 本地自建 relay 真 CLI 验收留档） | `agent/local/qoder/buzz-bridge/a1` | `INTEG-BUZZ-001` |
+| buzz-bridge | Qoder | buzz-bridge-adr | ✅ done（实现 219ec4e，合并 aad2b3f；ADR-DEV-005 运行时：只写不读；测试内真 WS relay + 本地自建 relay 真 CLI 验收留档；**新增依赖 coincurve/websockets——各 venv 需 pip install -r backend/requirements.txt 一次**） | `agent/local/qoder/buzz-bridge/a1` | `INTEG-BUZZ-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
