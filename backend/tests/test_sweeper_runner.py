@@ -56,6 +56,7 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
         "merge_recovery",
         "drift",
         "budget",
+        "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
     ]
@@ -83,6 +84,7 @@ def test_the_runner_order_is_pinned():
         "merge_recovery",
         "drift",
         "budget",
+        "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
     ]
@@ -95,7 +97,7 @@ def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
     run_all_sweeps(database, now=future)
     second = run_all_sweeps(database, now=future)
 
-    assert [report.actions for report in second] == [0] * 14
+    assert [report.actions for report in second] == [0] * 15
     events = database.read(
         "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_expire'"
     )
