@@ -239,7 +239,8 @@ class CliHarnessWorker:
     the harness claims, the scheduler provisions the worktree, the harness
     works. ``on_claimed`` is where that hand-over happens -- it receives the
     claim item and returns the worktree path. Replayed claims skip it: the
-    worktree from the first, crashed run is still there.
+    worktree from the first, crashed run is still there, and since F9 the
+    replay response itself carries its path (``worktree_path``).
     """
 
     def __init__(
@@ -284,6 +285,11 @@ class CliHarnessWorker:
         item = self.take(task_id=task_id, claim_request_id=claim_request_id)
         if not item.get("replayed") and on_claimed is not None:
             self.worktree = Path(on_claimed(item))
+        if self.worktree is None and item.get("worktree_path"):
+            # F9 (adapter-hardening): the replay response carries the live
+            # worktree path, so a restarted process continues in the first
+            # run's workspace without a side channel.
+            self.worktree = Path(str(item["worktree_path"]))
         if self.worktree is None:
             raise RuntimeError("no worktree: pass one, or an on_claimed that provisions it")
 

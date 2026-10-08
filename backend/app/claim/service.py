@@ -110,6 +110,11 @@ class ClaimItem:
     queue_reason: str | None = None
     error_code: str | None = None
     replayed: bool = False
+    #: F9 (adapter-hardening): the attempt's worktree path once `start_task`
+    #: has provisioned it. A fresh claim predates the worktree (NULL); a
+    #: replay after a restart hands the path back so the harness does not need
+    #: a side channel to find its workspace.
+    worktree_path: str | None = None
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -126,6 +131,7 @@ class ClaimItem:
             "queue_reason": self.queue_reason,
             "error_code": self.error_code,
             "replayed": self.replayed,
+            "worktree_path": self.worktree_path,
         }
 
 
@@ -271,7 +277,10 @@ class ClaimService:
         rows = conn.execute(
             "SELECT tc.task_id, tc.attempt_id, tc.owner, tc.release_reason,"
             "       ta.attempt_no, ta.fencing_epoch, ta.base_commit, ta.base_locked_seq,"
-            "       l.lease_id, l.lease_until"
+            "       l.lease_id, l.lease_until,"
+            "       (SELECT w.path FROM workspaces w"
+            "         WHERE w.attempt_id = tc.attempt_id AND w.status = 'active'"
+            "         ORDER BY w.rowid DESC LIMIT 1) AS worktree_path"
             "  FROM task_claims tc"
             "  LEFT JOIN task_attempts ta ON ta.attempt_id = tc.attempt_id"
             "  LEFT JOIN leases l ON l.task_id = tc.task_id"
@@ -330,6 +339,14 @@ class ClaimService:
                     queue_reason=queue_reason,
                     error_code=error_code,
                     replayed=True,
+                    # F9 (adapter-hardening): a replayed claim hands the live
+                    # worktree back; a recycled one reads as NULL, not a stale
+                    # path the restarted harness would walk into.
+                    worktree_path=(
+                        str(row["worktree_path"])
+                        if has_attempt and row["worktree_path"] is not None
+                        else None
+                    ),
                 )
             )
         return tuple(items)

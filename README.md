@@ -78,6 +78,20 @@ start.bat help     rem 用法
 命令来自 `AP_RUNTIME_POLICY_FILE` 指向的人类维护策略（未设时用仓库
 `verify-profiles.json`），策略缺失=拒绝执行（exit 2）。
 
+### Harness CLI 环境要求（adapter-hardening，drill F3/F4）
+
+- **codex**：不在 PATH——把 `%LOCALAPPDATA%\OpenAI\Codex\bin` 加进 PATH。
+  Windows 上 codex 自带的 workspace-write 沙箱起不了 shell（F3，实测
+  `CreateProcessAsUserW failed: 2`），适配器默认改用 `--sandbox
+  danger-full-access`（POSIX 仍是 `--full-auto`）；`AP_CODEX_SANDBOX=
+  workspace-write|danger-full-access` 可显式覆盖，未知值拒绝启动。边界口径：
+  Windows 上 CLI 沙箱不在防线内——防线=loopback+Host 校验+令牌层，OS ACL
+  隔离属多账户阶段（适配器 docstring 有完整声明）。
+- **opencode**：Windows 上适配器经 `bash -lc 'exec "$0" "$@"'` 启动（F4：Python
+  直启会撞后台服务的 `Database is not empty and has no session table`）；经
+  `~/.config/opencode/opencode.json` 把 provider 指向本地中继。`AP_OPENCODE_
+  LAUNCH=direct|bash` 可覆盖；找不到 bash 时回落直启而不是失败。
+
 ### 有 make 的环境
 
 ~~~bash
