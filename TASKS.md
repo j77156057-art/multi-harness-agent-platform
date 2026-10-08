@@ -102,6 +102,7 @@
 | diff-message | Qoder | frontend-thread | ✅ done（实现 551321d；线程内 diff 卡，浏览器实测） | `agent/local/qoder/diff-message/a1` | `MVP-UI-002` |
 | permission-matrix | Qoder | paperclip-buzz-source | ✅ done（实现 a968ac7；设计输入报告，403 审计名缺口） | `agent/local/qoder/permission-matrix/a1` | `DOC-AUTH-001` |
 | e2e-harness-drill | Qoder | diff-message | ✅ done（实现 0c6b40e；6 链真实 merged + 六项演练 + 前端追溯；附 alternates 修复） | `agent/local/qoder/e2e-harness-drill/a1` | `OPS-DRILL-001` |
+| rework-loop | Qoder | e2e-harness-drill | 🚧 doing | `agent/local/qoder/rework-loop/a1` | `CORE-REWORK-001` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -231,6 +232,7 @@
 | diff-message | [卡](docs/tasks/notes/diff-message.md) | | |
 | permission-matrix | [卡](docs/tasks/notes/permission-matrix.md) | | |
 | e2e-harness-drill | [卡](docs/tasks/notes/e2e-harness-drill.md) | | |
+| rework-loop | [卡](docs/tasks/notes/rework-loop.md) | | |
 
 ## 共享文件改动声明
 
