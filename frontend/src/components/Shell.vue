@@ -3,7 +3,7 @@
 // 复用）。路由只承载"选中状态"，数据编排全走 session store；这里另接管理面与
 // 人工决策面的动作（human-console 卡），并通过 notice 横幅给出动作结果。
 import { storeToRefs } from 'pinia'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession, type HumanAction } from '../stores/session'
 import ChannelPane from './ChannelPane.vue'
@@ -13,8 +13,22 @@ import TaskPane from './TaskPane.vue'
 const store = useSession()
 const route = useRoute()
 const router = useRouter()
-const { projects, groups, tasks, messages, events, diff, selectedTask, notice, error, loading } =
-  storeToRefs(store)
+const {
+  projects,
+  groups,
+  tasks,
+  messages,
+  events,
+  diff,
+  selectedTask,
+  auth,
+  token,
+  notice,
+  error,
+  loading,
+} = storeToRefs(store)
+
+const operator = computed(() => store.operator)
 
 const selectedGroupId = ref<string | null>(null)
 
@@ -42,6 +56,9 @@ async function sync(): Promise<void> {
 }
 
 onMounted(async () => {
+  // 令牌先于一切请求恢复（enforce 下第一笔加载就要带上）。
+  store.initAuth()
+  await store.loadAuth()
   await store.loadRail()
   if (param('groupId') === null && store.firstGroupId !== null) {
     await router.replace(`/g/${store.firstGroupId}`)
@@ -118,6 +135,14 @@ async function onDecidePlan(
 async function onHumanAct(action: HumanAction): Promise<boolean> {
   return store.humanAct(action)
 }
+
+async function onSetToken(raw: string): Promise<boolean> {
+  return store.setToken(raw)
+}
+
+function onClearToken(): void {
+  store.clearToken()
+}
 </script>
 
 <template>
@@ -128,8 +153,12 @@ async function onHumanAct(action: HumanAction): Promise<boolean> {
       :groups="groups"
       :selected-group-id="selectedGroupId"
       :busy="loading.act === true"
+      :auth="auth"
+      :has-token="token !== null"
       :create-project="onCreateProject"
       :create-group="onCreateGroup"
+      :set-token="onSetToken"
+      :clear-token="onClearToken"
       @select="onSelectGroup"
     />
     <ChannelPane
@@ -138,6 +167,7 @@ async function onHumanAct(action: HumanAction): Promise<boolean> {
       :loading="loading.group === true"
       :error="error"
       :busy="loading.act === true"
+      :operator="operator"
       :create-plan="onCreatePlan"
       :decide-plan="onDecidePlan"
       @send="onSend"
@@ -151,6 +181,7 @@ async function onHumanAct(action: HumanAction): Promise<boolean> {
       :loading="loading.task === true || loading.group === true"
       :error="error"
       :busy="loading.act === true"
+      :operator="operator"
       :human-act="onHumanAct"
       @select="onSelectTask"
       @expand-diff="onExpandDiff"

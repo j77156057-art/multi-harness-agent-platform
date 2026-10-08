@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, api, describeError } from '../api'
+import { ApiError, api, describeError, setApiToken } from '../api'
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -10,6 +10,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  setApiToken(null) // 模块级令牌持有者要归位，测试间不泄漏
 })
 
 function stubFetch(...responses: Response[]) {
@@ -98,6 +99,21 @@ describe('api client', () => {
 
     expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/tasks/T-1/events?since_seq=7')
     expect(page.next_seq).toBe(7)
+  })
+
+  it('attaches the bearer token only when one is set', async () => {
+    const mock = stubFetch(jsonResponse(200, { projects: [] }), jsonResponse(200, { projects: [] }))
+
+    await api.listProjects()
+    const [, anonymous] = mock.mock.calls[0] ?? []
+    expect((anonymous?.headers as Record<string, string>).Authorization).toBeUndefined()
+
+    setApiToken('apt_token_1')
+    await api.listProjects()
+    const [, authenticated] = mock.mock.calls[1] ?? []
+    expect((authenticated?.headers as Record<string, string>).Authorization).toBe(
+      'Bearer apt_token_1',
+    )
   })
 
   it('posts project and group creations on the management paths', async () => {

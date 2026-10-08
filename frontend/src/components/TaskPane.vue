@@ -12,6 +12,7 @@ const props = defineProps<{
   loading: boolean
   error: string | null
   busy: boolean
+  operator: string
   humanAct: (action: HumanAction) => Promise<boolean>
 }>()
 
@@ -111,6 +112,18 @@ const answer = ref('')
 const cancelReason = ref('')
 const adjudicateQuestion = ref('')
 const adjudicateOptions = ref('')
+
+// 操作者跟随令牌主体（frontend-token 卡）：仅当字段还是默认/空值时同步——
+// 用户手填过的名字不覆盖。
+watch(
+  () => props.operator,
+  (value) => {
+    if (decidedBy.value.trim() === '' || decidedBy.value === 'operator') {
+      decidedBy.value = value
+    }
+  },
+  { immediate: true },
+)
 
 const operatorValid = computed(() => decidedBy.value.trim().length > 0)
 

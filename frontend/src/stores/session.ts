@@ -5,13 +5,18 @@ import { defineStore } from 'pinia'
 import {
   api,
   describeError,
+  setApiToken,
   type EventRecord,
   type GroupSummary,
   type MessageRecord,
   type ProjectSummary,
   type TaskDiff,
   type TaskSummary,
+  type WhoAmI,
 } from '../api'
+
+//: 令牌持久化键（frontend-token 卡）：只存本地，不上送任何日志。
+const TOKEN_STORAGE_KEY = 'ap.humanToken'
 
 export type HumanAction =
   | { kind: 'resume'; taskId: string; decided_by: string; answer?: string }
@@ -35,6 +40,10 @@ interface SessionState {
   diff: TaskDiff | null
   selectedTask: TaskSummary | null
   selectedGroupId: string | null
+  // 主体令牌与认证自省（frontend-token 卡）：enforce 下请求带 Bearer；
+  // off 下 whoami 报 mode=off，界面据此显示"认证：关闭"。
+  token: string | null
+  auth: WhoAmI | null
   // 动作结果的成功面（notice）与失败面（error）分开：动作成功不该看起来像没事
   // 发生，动作失败也不该只靠列表里少了一行。
   notice: string | null
@@ -52,6 +61,8 @@ export const useSession = defineStore('session', {
     diff: null,
     selectedTask: null,
     selectedGroupId: null,
+    token: null,
+    auth: null,
     notice: null,
     loading: {},
     error: null,
@@ -64,8 +75,60 @@ export const useSession = defineStore('session', {
     firstGroupId(state): string | null {
       return state.groups.length > 0 ? (state.groups[0]?.group_id ?? null) : null
     },
+    // 表单的操作者默认值：认到主体就用主体，认不到退回 operator（off 模式）。
+    operator(state): string {
+      return state.auth?.subject?.id ?? 'operator'
+    },
   },
   actions: {
+    // ---- 令牌（frontend-token 卡）----
+    initAuth(): void {
+      let stored: string | null = null
+      try {
+        stored = localStorage.getItem(TOKEN_STORAGE_KEY)
+      } catch {
+        // localStorage 不可用（隐私模式等）：令牌只在内存里，不报错。
+      }
+      this.token = stored
+      setApiToken(stored)
+    },
+    async loadAuth(): Promise<void> {
+      this.loading.auth = true
+      try {
+        this.auth = await api.whoami()
+      } catch (error) {
+        this.error = describeError(error)
+        this.auth = null
+      } finally {
+        this.loading.auth = false
+      }
+    },
+    async setToken(raw: string): Promise<boolean> {
+      const trimmed = raw.trim()
+      this.token = trimmed.length > 0 ? trimmed : null
+      try {
+        if (this.token === null) {
+          localStorage.removeItem(TOKEN_STORAGE_KEY)
+        } else {
+          localStorage.setItem(TOKEN_STORAGE_KEY, this.token)
+        }
+      } catch {
+        // 见 initAuth：持久化失败不阻断本次会话使用。
+      }
+      setApiToken(this.token)
+      await this.loadAuth()
+      return this.auth?.subject != null
+    },
+    clearToken(): void {
+      this.token = null
+      try {
+        localStorage.removeItem(TOKEN_STORAGE_KEY)
+      } catch {
+        // 同上。
+      }
+      setApiToken(null)
+      void this.loadAuth()
+    },
     async loadRail(): Promise<void> {
       this.error = null
       this.loading.rail = true

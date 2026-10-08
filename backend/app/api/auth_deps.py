@@ -35,7 +35,8 @@ def _database(request: Request) -> Database:
 DatabaseDep = Annotated[Database, Depends(_database)]
 
 
-def _bearer_token(request: Request) -> str | None:
+def bearer_token(request: Request) -> str | None:
+    """The presented bearer token, if any (shared with the whoami route)."""
     header = request.headers.get("authorization", "")
     parts = header.split(None, 1)
     if len(parts) == 2 and parts[0].lower() == "bearer":
@@ -84,14 +85,15 @@ def _refuse(
 ) -> NoReturn:
     # Audit first, then refuse: a refusal without a trace is what §17 forbids.
     _audit_denial(database=database, request=request, principal=principal, key=key, reason=reason)
-    raise ApiError(code, status, "permission denied", details={"permission": key})
+    message = "authentication required" if status == 401 else "permission denied"
+    raise ApiError(code, status, message, details={"permission": key})
 
 
 def _resolve(request: Request, database: Database, *, key: str) -> Principal | None:
     if settings.auth_mode != "enforce":
         return None
     try:
-        principal = TokenService(database).verify(_bearer_token(request))
+        principal = TokenService(database).verify(bearer_token(request))
     except TokenInvalid as exc:
         _refuse(
             database=database,

@@ -28,6 +28,22 @@ from tests.claim_support import make_database, seed_project, seed_task
 NOW = datetime.now(UTC)
 
 
+def _past_anchor(database, *, minutes: int, event_name: str) -> datetime:
+    """A sweep clock ``minutes`` past the anchor event's *real* time.
+
+    The rigs append anchors with the wall clock, so a module-level ``NOW``
+    quietly loses margin as the suite runs slower: the 2026-10-08 gate run
+    took 12m43s and the 40-minute merge call landed under the 30-minute lease
+    with no slack (``retried == []``). Deriving the clock from the anchor
+    keeps "past the deadline" assertions independent of import-to-test latency.
+    """
+    row = database.read(
+        "SELECT created_at FROM task_events WHERE aggregate_id = 'T-1' AND event_name = ?",
+        (event_name,),
+    )[0]
+    return datetime.fromisoformat(str(row["created_at"])) + timedelta(minutes=minutes)
+
+
 def _status(database, task_id: str = "T-1") -> str:
     return str(database.read("SELECT status FROM tasks WHERE task_id = ?", (task_id,))[0]["status"])
 
@@ -116,7 +132,9 @@ def test_verify_lease_waits_for_the_deadline(tmp_path):
 def test_verify_queue_timeout_escalates(tmp_path):
     database = _verifying_rig(tmp_path, job_status=STATUS_QUEUED)
 
-    report = sweep_verify_queue(database, NOW + timedelta(minutes=45))
+    report = sweep_verify_queue(
+        database, _past_anchor(database, minutes=45, event_name=EventKind.SUBMIT_RESULT.value)
+    )
 
     assert report.detail["escalated"] == ["T-1"]
     assert _status(database) == "escalated"
@@ -186,7 +204,9 @@ def test_merge_lease_expire_retries_before_escalating(tmp_path):
     """Defaults make both thresholds equal; the retry wins at the same moment."""
     database = _merging_rig(tmp_path)
 
-    report = sweep_merge_recovery(database, NOW + timedelta(minutes=40))
+    report = sweep_merge_recovery(
+        database, _past_anchor(database, minutes=40, event_name=EventKind.MERGE_START.value)
+    )
 
     assert report.detail["retried"] == ["T-1"]
     assert _status(database) == "approved"
@@ -198,7 +218,9 @@ def test_merge_timeout_fires_in_the_operator_window(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "merge_lease_seconds", 7200)
     database = _merging_rig(tmp_path)
 
-    report = sweep_merge_recovery(database, NOW + timedelta(minutes=45))
+    report = sweep_merge_recovery(
+        database, _past_anchor(database, minutes=45, event_name=EventKind.MERGE_START.value)
+    )
 
     assert report.detail["escalated"] == ["T-1"]
     assert _status(database) == "escalated"

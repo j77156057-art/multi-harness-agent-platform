@@ -25,6 +25,7 @@ function render(props: Partial<InstanceType<typeof ChannelPane>['$props']> = {})
       loading: false,
       error: null,
       busy: false,
+      operator: 'operator',
       createPlan: async () => true,
       decidePlan: async () => true,
       ...props,
@@ -152,5 +153,19 @@ describe('ChannelPane', () => {
     await wrapper.get('[name="plan_id"]').setValue('PLAN-1')
     await wrapper.get('[name="plan_decided_by"]').setValue('')
     expect(approve?.attributes('disabled')).toBeDefined()
+  })
+
+  it('follows the token subject until the operator field is hand-edited', async () => {
+    const wrapper = render({ operator: 'human-nine' })
+
+    expect(
+      (wrapper.get('[name="plan_decided_by"]').element as HTMLInputElement).value,
+    ).toBe('human-nine')
+
+    await wrapper.get('[name="plan_decided_by"]').setValue('my-own-name')
+    await wrapper.setProps({ operator: 'other-subject' })
+    expect(
+      (wrapper.get('[name="plan_decided_by"]').element as HTMLInputElement).value,
+    ).toBe('my-own-name')
   })
 })

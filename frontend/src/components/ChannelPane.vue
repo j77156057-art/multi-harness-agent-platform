@@ -2,7 +2,7 @@
 // 中栏（R10 §22「群聊/方案」）：群聊读/发 + 方案区（新建计划与审批，
 // human-console 卡）。计划快照是 JSON 文本，本地先 parse 再发请求——
 // 坏 JSON 不该变成一次网络往返。
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { MessageRecord } from '../api'
 
 const props = defineProps<{
@@ -11,6 +11,7 @@ const props = defineProps<{
   loading: boolean
   error: string | null
   busy: boolean
+  operator: string
   createPlan: (fields: {
     plan_id: string
     snapshot: Record<string, unknown>
@@ -52,6 +53,18 @@ const snapshotText = ref(SNAPSHOT_TEMPLATE)
 const snapshotError = ref<string | null>(null)
 const decidedBy = ref('operator')
 const rejectReason = ref('')
+
+// 操作者跟随令牌主体（frontend-token 卡）：仅当字段还是默认/空值时同步——
+// 用户手填过的名字不覆盖。
+watch(
+  () => props.operator,
+  (value) => {
+    if (decidedBy.value.trim() === '' || decidedBy.value === 'operator') {
+      decidedBy.value = value
+    }
+  },
+  { immediate: true },
+)
 
 function parseSnapshot(): Record<string, unknown> | null {
   snapshotError.value = null

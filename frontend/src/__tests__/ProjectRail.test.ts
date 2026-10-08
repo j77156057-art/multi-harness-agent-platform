@@ -21,8 +21,12 @@ function render(
       groups,
       selectedGroupId,
       busy: false,
+      auth: null,
+      hasToken: false,
       createProject: async () => true,
       createGroup: async () => true,
+      setToken: async () => false,
+      clearToken: () => undefined,
       ...overrides,
     },
   })
@@ -112,5 +116,54 @@ describe('ProjectRail', () => {
     await wrapper.get('[name="project_id"]').setValue('P-2')
     await wrapper.get('[name="project_name"]').setValue('项目二')
     expect(button?.attributes('disabled')).toBeDefined()
+  })
+
+  it('labels every auth state (frontend-token)', () => {
+    const label = (auth: InstanceType<typeof ProjectRail>['$props']['auth']) =>
+      render(null, { auth }).get('.auth-status').text()
+
+    expect(label(null)).toContain('未知')
+    expect(label({ mode: 'off', subject: null, token_reason: null })).toContain('关闭')
+    expect(
+      label({ mode: 'enforce', subject: { type: 'human', id: 'operator' }, token_reason: null }),
+    ).toBe('已认证为 human:operator')
+    expect(
+      label({ mode: 'enforce', subject: null, token_reason: 'token_missing' }),
+    ).toContain('需要令牌')
+    expect(
+      label({ mode: 'enforce', subject: null, token_reason: 'token_invalid' }),
+    ).toContain('令牌无效')
+    expect(
+      label({ mode: 'enforce', subject: null, token_reason: 'token_revoked' }),
+    ).toContain('已吊销')
+  })
+
+  it('applies a token and clears the draft on success', async () => {
+    const setToken = vi.fn(async (_raw: string) => true)
+    const wrapper = render(null, { setToken })
+
+    await wrapper.get('[name="auth_token"]').setValue('  apt_abc  ')
+    await wrapper.get('.auth-panel form').trigger('submit')
+
+    expect(setToken).toHaveBeenCalledWith('apt_abc')
+    expect((wrapper.get('[name="auth_token"]').element as HTMLInputElement).value).toBe('')
+  })
+
+  it('keeps the draft when the token is refused, and offers clear only with a stored token', async () => {
+    const refused = render(null, { setToken: async () => false })
+    await refused.get('[name="auth_token"]').setValue('apt_bad')
+    await refused.get('.auth-panel form').trigger('submit')
+    expect((refused.get('[name="auth_token"]').element as HTMLInputElement).value).toBe('apt_bad')
+    expect(refused.find('.auth-panel button[type="button"]').exists()).toBe(false)
+
+    const clearing = vi.fn()
+    const withToken = render(null, {
+      hasToken: true,
+      auth: { mode: 'enforce', subject: { type: 'human', id: 'x' }, token_reason: null },
+      clearToken: clearing,
+    })
+    const clearButton = withToken.findAll('button').find((b) => b.text() === '清除令牌')
+    await clearButton?.trigger('click')
+    expect(clearing).toHaveBeenCalledTimes(1)
   })
 })
