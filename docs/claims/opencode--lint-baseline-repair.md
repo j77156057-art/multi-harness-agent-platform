@@ -8,7 +8,7 @@
 | Harness | OpenCode |
 | 认领时间 | 2026-10-09 01:40 |
 | 分支 | `agent/local/opencode/lint-baseline-repair/a1` |
-| 状态 | 🟢 doing |
+| 状态 | ✅ done（a1 = ff0d47b；ruff check . = All checks passed!） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `lint-baseline-repair`。
 
@@ -60,3 +60,17 @@ tools/docstate/docstate.py:176         E741  ambiguous variable name `O`
 ## 变更记录
 
 - 2026-10-09 01:40：认领（用户授权扩目录）。
+## 变更记录
+
+- 2026-10-09 01:40：认领（用户授权扩目录）。
+- 2026-10-09：a1 = `ff0d47b` 交付。
+
+### 验证方式（值得复用的一句）
+
+改的是**门禁**，所以不能只看「门禁还跑得动」，要证明**输出没变**：
+改前先跑一遍存基线，改后再跑一遍，逐字节比对哈希。
+本轮基线一致；ruff check . 由 exit=1 变 All checks passed!；pytest 500 passed。
+
+### 顺带发现（未修）
+
+`docs/prep/MVP-08/mutation_test.py` 裸跑会 `UnicodeEncodeError`（打印子进程 stdout 而自己没钉 stdio 编码），与 win-utf8-stdio 那轮修的是同一缺陷类，当时只覆盖三个门禁入口、没覆盖这个 prep 脚本。`git stash` 确认崩溃在本次改动前就存在。未顺手修：本轮范围是 ruff lint。它不被任何门禁调用。
