@@ -1,4 +1,4 @@
-### human-console：前端人操作面——管理链 + §18 五决策动词（🚧 doing）
+### human-console：前端人操作面——管理链 + §18 五决策动词（✅ done）
 
 ~~~text
 任务编号：human-console
@@ -75,5 +75,58 @@
 test_id：MVP-UI-004（新登记，形态同 MVP-UI-001/002/003）
 测试命令：cd frontend && npm run typecheck && npm test && npm run build &&
           npm run check:contrast（+ 仓库侧 PYTHONUTF8=1 ./scripts.sh check）
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 13:47
+commit：`c771867`（实现提交；登记 `f2405df`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（format 120 文件）
+  pytest      : 455 passed，exit 0（本卡后端零改动，全量为回归）
+  前端四件     : ①`vue-tsc` 0 错；②vitest **46 passed / 6 文件**（api 契约
+                10 方法 path/method/body、ProjectRail 表单成功清空/失败保留/
+                建群归属、ChannelPane 计划 10 例〔含坏 JSON 本地拦截〕、
+                TaskPane 决策矩阵 15 例〔按键集按状态、答复/理由/选项载荷、
+                busy 与空操作者禁用、终态无动作〕、Shell 恢复编排+横幅、
+                对比度子进程）；③`vite build` 39 modules，dist JS 123.90KB
+                （gzip 46.33KB）/ CSS 6.41KB；④`check:contrast` **9 对 token
+                全 ≥4.5:1**（本卡仅加选择器，未动 token）。
+  浏览器实测   : 独立实例 127.0.0.1:8892（AP_DATA_DIR/AP_CANONICAL_REPO/
+                AP_WORKTREE_ROOT 全在 backend/data/hc-drill/，巡检器关；
+                协调者 8848 实例未接触）+ vite dev 5185（AP_BACKEND 代理）。
+                证据 `backend/data/hc-browser-evidence.md`（gitignored）：
+                - 管理链 5/5 全 UI：建项目 P-UI → 建群 G-UI（自动跳转）→
+                  建计划 PLAN-UI → 通过（横幅「2 个 ready、0 个等待中」，
+                  任务栏即时出现）→ 驳回 PLAN-UI-3（横幅「1 个 draft 任务
+                  被拒」，T-UI-4 → draft_rejected）；每步横幅与列表均更新。
+                - 决策链真状态：生产服务层种子 claim→start_task→ask_human
+                  把 T-UI-2 推到 awaiting_human；线程决策条显示
+                  「待答：契约要冻结吗？」（human.question 事件投影）与
+                  恢复/重开/取消三键；答复「冻结 v1」→ 恢复 → 横幅
+                  「已恢复 T-UI-2 → in_progress」+ 事件 #6 human.resume；
+                  T-UI-3 awaiting_human → 重开 → 横幅「已重开 → ready」+
+                  事件 #13；T-UI-1/T-UI-2 取消（带理由）→ cancelled。
+                - 独立 API 复核（curl 直连 8892）：终态 [T-UI-1 cancelled,
+                  T-UI-2 cancelled, T-UI-3 ready, T-UI-4 draft_rejected]；
+                  cancel payload 理由 UTF-8 完整；决策台账
+                  answer="冻结 v1：字段名不再变"、decided_seq=6（=resume
+                  事件 seq，§18 答复闭环）。
+                - 截图不可用（本机 in-app 浏览器界面隐藏，visible=false）：
+                  以无障碍树快照 + DOM 探针 + API 复核替代并如实披露；
+                  表单填写走 CDP 设值、按钮派发真实 click 事件。
+已知问题：
+  - **escalated 域两动词未真跑**：`释放`/`裁决` 的按键集与载荷在 vitest
+    矩阵 + api 契约测试里有断言，但真实 escalated 状态由巡检器编排
+    （block SLA / merge 超时 / review 等待），本卡未布线到真实实例——
+    留待 runtime-driver 接线或规则收紧时顺带补真跑。
+  - **plans 无读端点**：审批只能按 plan_id 手工输入（计划列表端点不存在，
+    如实留缺不发明 UI）；harness 成员列表同理（rail 注释保持）。
+  - 验证管线注意（非应用缺陷）：Windows 控制台 `curl | python` 以 GBK 解
+    stdin，会把 UTF-8 中文显示成乱码；首轮复核曾据此误判「原因串损坏」，
+    改「落文件 + 显式 UTF-8」后载荷全对（含 DB 直读复核）。已记入
+    hc-browser-evidence.md。
+  - 组件测试未入共享门禁（沿用 frontend-thread 卡记录的状态；本卡未动
+    scripts.sh）。
+  - 决策条表单不跨任务重置操作者名——有意（同机操作者通常不变）；
+    答复/理由/裁决字段成功即清空。
 ~~~
