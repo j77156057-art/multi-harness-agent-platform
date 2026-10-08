@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.adapter.protocol import HarnessRegistration
+from app.adapter.registry import HarnessRegistry
 from app.claim.service import ClaimRequest, ClaimService
 from app.db.connection import Database
 from app.git.publish import PublishProxy
@@ -24,6 +26,26 @@ from tests.claim_support import make_database, seed_project, seed_task
 HARNESS = "harness-1"
 REVIEWER = "reviewer-1"
 PROFILE = "flag-check"
+
+
+def register_harness(database: Database, harness_id: str, *, provider: str) -> None:
+    """A registry row with a chosen provider.
+
+    The review flow enforces cross_provider (rules-tighten, F5), so fixtures
+    that reach review need both sides registered and providers distinct.
+    """
+    HarnessRegistry(database).register(
+        HarnessRegistration(
+            harness_id=harness_id,
+            name=harness_id,
+            provider=provider,
+            adapter="test-cli",
+            adapter_version="1.0.0",
+            capabilities=("coding",),
+            registration_version="reg-001",
+        )
+    )
+
 
 #: Integration check: green while flag.txt is absent, red once the merge adds it.
 INTEGRATION_EXPECTS_ABSENT = [
@@ -132,6 +154,10 @@ def build_chain(
     assert base is not None
     seed_project(database, integration_commit=base)
     seed_task(database, task_id=task_id)
+    # Both sides of the review must be registry-known with distinct providers
+    # (rules-tighten F5); harness-1 owns, reviewer-1 reviews.
+    register_harness(database, HARNESS, provider="openai")
+    register_harness(database, REVIEWER, provider="anthropic")
     manager = WorktreeManager(database, repo, root=tmp_path / "wt")
     service = SchedulerService(database)
 

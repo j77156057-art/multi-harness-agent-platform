@@ -50,7 +50,7 @@ from app.tasks.service import SchedulerService
 from app.verify.worker import VerifyWorker
 from tests.api_support import bootstrap, make_client, publish_plan, verify_policy
 from tests.claim_support import make_database
-from tests.merge_support import PROFILE
+from tests.merge_support import PROFILE, register_harness
 from tests.merge_support import policy as merge_policy
 from tests.test_adapter import section_7_verbs
 
@@ -118,6 +118,9 @@ def build_rig(tmp_path: Path, case: HarnessCase) -> Rig:
     manager = WorktreeManager(database, repo, root=tmp_path / "wt")
     service = SchedulerService(database)
     HarnessRegistry(database).register(case.registration)
+    # rules-tighten F5: the reviewer face needs a registry row with a provider
+    # distinct from the case's own (openai / sst / anthropic).
+    register_harness(database, "r-1", provider="local")
     bootstrap(client)
     publish_plan(client, plan_id="PL-1", tasks=[{"id": "T-1"}])
     response = client.post("/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"})

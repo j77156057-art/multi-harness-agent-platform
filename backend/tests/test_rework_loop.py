@@ -38,7 +38,7 @@ from app.tasks.service import SchedulerService
 from app.verify.worker import VerifyWorker
 from tests.claim_support import count, hold_resource, make_database, seed_project, seed_task
 from tests.git_support import commit_in
-from tests.merge_support import CHECK_FLAG, PROFILE, build_chain, policy
+from tests.merge_support import CHECK_FLAG, PROFILE, build_chain, policy, register_harness
 
 LOOPBACK = "http://127.0.0.1"
 FAIL_COMMAND = ["python", "-c", "raise SystemExit(1)"]
@@ -58,6 +58,10 @@ def _event_names(database) -> list[str]:
 def _failed_chain(tmp_path: Path):
     """A first attempt whose verify fails -> the task parks in changes_requested."""
     chain = build_chain(tmp_path, verify_command=FAIL_COMMAND)
+    # rules-tighten F5: the rework owner (harness-2) and the reviewer
+    # (reviewer-2) must both be registry-known with distinct providers.
+    register_harness(chain.database, "harness-2", provider="openai")
+    register_harness(chain.database, "reviewer-2", provider="anthropic")
     assert _status(chain.database) == "changes_requested"
     return chain
 

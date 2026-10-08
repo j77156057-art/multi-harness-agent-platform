@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 from app.cli.main import EXIT_API_ERROR, EXIT_OK, main
 from app.db.connection import Database
 from tests.api_support import make_client, scheduler, worktree_manager
+from tests.merge_support import register_harness
 
 CLI_DIR = Path(__file__).resolve().parents[1] / "app" / "cli"
 
@@ -89,6 +90,10 @@ def test_operator_completes_a_task_chain_without_touching_the_database(tmp_path:
     断言里刻意**不出现任何 SQL**：人类操作员走的就是这条路径。
     """
     client, database = make_client(tmp_path)
+    # rules-tighten F5: the review face needs both sides registry-known with
+    # distinct providers; h-1 owns, r-1 reviews.
+    register_harness(database, "h-1", provider="openai")
+    register_harness(database, "r-1", provider="anthropic")
 
     _ok(client, "project-create", "P-1", "--name", "demo")
     _ok(client, "group-create", "G-1", "--project", "P-1", "--name", "group")

@@ -179,6 +179,7 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "merge_recovery",
         "drift",
         "budget",
+        "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
     ]
@@ -202,6 +203,7 @@ def test_the_runner_order_includes_the_new_sweeps():
         "merge_recovery",
         "drift",
         "budget",
+        "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
     ]
