@@ -105,6 +105,7 @@
 | rework-loop | Qoder | e2e-harness-drill | ✅ done（实现 af80d4e；claim_for_revision 返工闭环，变异验证） | `agent/local/qoder/rework-loop/a1` | `CORE-REWORK-001` |
 | start-bat | Qoder | — | ✅ done（实现 5520786；Windows 一键启动器，实测三模式） | `agent/local/qoder/start-bat/a1` | `MVP-PROCESS-002` |
 | landing-page | Qoder | start-bat | ✅ done（实现 a6237dc；根路径入口页 + favicon 204，实机 curl 留档） | `agent/local/qoder/landing-page/a1` | `MVP-UI-003` |
+| human-console | Qoder | frontend-thread | ✅ done（实现 c771867；管理链+五决策动词入三栏壳，浏览器实测） | `agent/local/qoder/human-console/a1` | `MVP-UI-004` |
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -237,6 +238,7 @@
 | rework-loop | [卡](docs/tasks/notes/rework-loop.md) | | |
 | start-bat | [卡](docs/tasks/notes/start-bat.md) | | |
 | landing-page | [卡](docs/tasks/notes/landing-page.md) | | |
+| human-console | [卡](docs/tasks/notes/human-console.md) | | |
 
 ## 共享文件改动声明
 

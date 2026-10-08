@@ -93,6 +93,31 @@ export interface NewMessage {
   body: string
 }
 
+// 决策动词的统一回执（/human/* 五操作 + resume/reopen 共享形状）。
+export interface HumanOutcome {
+  task_id: string
+  event: string
+  seq: number
+  status: string
+}
+
+export interface PlanCreated {
+  plan_id: string
+  snapshot_id: string
+  plan_hash: string
+}
+
+export interface PlanApproved {
+  plan_id: string
+  ready: string[]
+  waiting: string[]
+}
+
+export interface PlanRejected {
+  plan_id: string
+  rejected: string[]
+}
+
 export interface DiffFile {
   path: string
   insertions: number | null
@@ -163,6 +188,88 @@ export const api = {
     return request(`/groups/${encodeURIComponent(groupId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(message),
+    })
+  },
+
+  // ---- 管理面（management 路由；human-console 卡）----
+  createProject(body: { project_id: string; name: string }): Promise<{ project_id: string }> {
+    return request('/projects', { method: 'POST', body: JSON.stringify(body) })
+  },
+  createGroup(
+    projectId: string,
+    body: { group_id: string; name: string },
+  ): Promise<{ group_id: string }> {
+    return request(`/projects/${encodeURIComponent(projectId)}/groups`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+  createPlan(
+    groupId: string,
+    body: { plan_id: string; snapshot: Record<string, unknown> },
+  ): Promise<PlanCreated> {
+    return request(`/groups/${encodeURIComponent(groupId)}/plans`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+  approvePlan(
+    planId: string,
+    body: { decided_by: string; reason?: string },
+  ): Promise<PlanApproved> {
+    return request(`/plans/${encodeURIComponent(planId)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+  rejectPlan(
+    planId: string,
+    body: { decided_by: string; reason?: string },
+  ): Promise<PlanRejected> {
+    return request(`/plans/${encodeURIComponent(planId)}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+  },
+
+  // ---- §18 人工决策面（human 路由）----
+  humanResume(
+    taskId: string,
+    body: { decided_by: string; answer?: string },
+  ): Promise<HumanOutcome> {
+    return request('/human/resume', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanReopen(
+    taskId: string,
+    body: { decided_by: string; answer?: string },
+  ): Promise<HumanOutcome> {
+    return request('/human/reopen', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanRelease(taskId: string, body: { decided_by: string }): Promise<HumanOutcome> {
+    return request('/human/release', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanAdjudicate(
+    taskId: string,
+    body: { decided_by: string; question: string; options?: string[] },
+  ): Promise<{ task_id: string; decision_id: string; seq: number }> {
+    return request('/human/adjudicate', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanCancel(taskId: string, body: { decided_by: string; reason?: string }): Promise<HumanOutcome> {
+    return request('/human/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, ...body }),
     })
   },
 }

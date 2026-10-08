@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { EventRecord, TaskDiff, TaskSummary } from '../api'
+import type { HumanAction } from '../stores/session'
 
 const props = defineProps<{
   tasks: TaskSummary[]
@@ -10,6 +11,8 @@ const props = defineProps<{
   diffLoading: boolean
   loading: boolean
   error: string | null
+  busy: boolean
+  humanAct: (action: HumanAction) => Promise<boolean>
 }>()
 
 const emit = defineEmits<{ select: [taskId: string]; expandDiff: [] }>()
@@ -50,6 +53,106 @@ watch(
     }
   },
 )
+
+// ---- 人工决策条（human-console 卡）----
+// 动作集镜像后端 human/service.py 的状态守卫：非法状态不给按钮，后端仍是
+// 唯一裁判（前端 409 也照常展示）。escalated 在 _CANCEL_STATES 之外——不能取消。
+type DecisionAction = 'resume' | 'reopen' | 'release' | 'adjudicate' | 'cancel'
+
+const RESUME_STATES = new Set(['awaiting_human', 'plan_drift', 'impl_drift'])
+const REOPEN_STATES = new Set(['awaiting_human', 'plan_drift', 'impl_drift', 'abandoned'])
+const CANCEL_STATES = new Set([
+  'queued',
+  'draft',
+  'ready',
+  'claimed',
+  'in_progress',
+  'verifying',
+  'needs_help',
+  'blocked',
+  'changes_requested',
+  'plan_drift',
+  'impl_drift',
+  'awaiting_review',
+  'approved',
+  'merging',
+  'stale',
+  'reclaiming',
+  'awaiting_human',
+])
+
+const actions = computed<DecisionAction[]>(() => {
+  const status = props.selectedTask?.status
+  if (status === undefined) return []
+  const list: DecisionAction[] = []
+  if (RESUME_STATES.has(status)) list.push('resume')
+  if (REOPEN_STATES.has(status)) list.push('reopen')
+  if (status === 'escalated') list.push('release', 'adjudicate')
+  if (CANCEL_STATES.has(status)) list.push('cancel')
+  return list
+})
+
+// awaiting_human 的待答问题在事件投影里（human.question 的 payload），
+// 不新增读端点；options 不在事件里，答复走自由文本。
+const openQuestion = computed<string | null>(() => {
+  if (props.selectedTask?.status !== 'awaiting_human') return null
+  for (let i = props.events.length - 1; i >= 0; i -= 1) {
+    const event = props.events[i]
+    if (event?.event_name === 'human.question') {
+      const question = event.payload.question
+      return typeof question === 'string' ? question : null
+    }
+  }
+  return null
+})
+
+const decidedBy = ref('operator')
+const answer = ref('')
+const cancelReason = ref('')
+const adjudicateQuestion = ref('')
+const adjudicateOptions = ref('')
+
+const operatorValid = computed(() => decidedBy.value.trim().length > 0)
+
+async function submit(kind: DecisionAction): Promise<void> {
+  const task = props.selectedTask
+  if (task === null || props.busy || !operatorValid.value) return
+  const base = { taskId: task.task_id, decided_by: decidedBy.value.trim() }
+  let action: HumanAction
+  switch (kind) {
+    case 'resume':
+    case 'reopen': {
+      const trimmed = answer.value.trim()
+      action = { kind, ...base, ...(trimmed.length > 0 ? { answer: trimmed } : {}) }
+      break
+    }
+    case 'release':
+      action = { kind, ...base }
+      break
+    case 'adjudicate': {
+      const question = adjudicateQuestion.value.trim()
+      if (question.length === 0) return
+      const options = adjudicateOptions.value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0)
+      action = { kind, ...base, question, ...(options.length > 0 ? { options } : {}) }
+      break
+    }
+    case 'cancel': {
+      const trimmed = cancelReason.value.trim()
+      action = { kind, ...base, ...(trimmed.length > 0 ? { reason: trimmed } : {}) }
+      break
+    }
+  }
+  const ok = await props.humanAct(action)
+  if (ok) {
+    answer.value = ''
+    cancelReason.value = ''
+    adjudicateQuestion.value = ''
+    adjudicateOptions.value = ''
+  }
+}
 </script>
 
 <template>
@@ -83,6 +186,85 @@ watch(
           owner {{ selectedTask.owner ?? '—' }} · epoch {{ selectedTask.current_epoch }}
         </p>
       </header>
+
+      <section class="decision-card" aria-label="人工决策">
+        <header class="decision-head">
+          <h3>人工决策</h3>
+          <span class="status" :class="`tone-${tone(selectedTask.status)}`">
+            {{ selectedTask.status }}
+          </span>
+        </header>
+        <p v-if="openQuestion" class="decision-question">待答：{{ openQuestion }}</p>
+
+        <template v-if="actions.length > 0">
+          <label class="decision-field">
+            操作者
+            <input v-model="decidedBy" name="decided_by" placeholder="operator" />
+          </label>
+          <label v-if="actions.includes('resume') || actions.includes('reopen')" class="decision-field">
+            答复（resume/reopen 时随决定入台账；可空）
+            <textarea v-model="answer" name="decision_answer" rows="2"></textarea>
+          </label>
+          <template v-if="actions.includes('adjudicate')">
+            <label class="decision-field">
+              裁决问题
+              <input v-model="adjudicateQuestion" name="adjudicate_question" placeholder="把升级改写成一个问题" />
+            </label>
+            <label class="decision-field">
+              选项（逗号分隔；可空）
+              <input v-model="adjudicateOptions" name="adjudicate_options" placeholder="A, B" />
+            </label>
+          </template>
+          <label v-if="actions.includes('cancel')" class="decision-field">
+            取消理由（cancel 时记入事件）
+            <input v-model="cancelReason" name="cancel_reason" placeholder="可空" />
+          </label>
+
+          <p class="decision-actions">
+            <button
+              v-if="actions.includes('resume')"
+              type="button"
+              :disabled="busy || !operatorValid"
+              @click="submit('resume')"
+            >
+              恢复工作
+            </button>
+            <button
+              v-if="actions.includes('reopen')"
+              type="button"
+              :disabled="busy || !operatorValid"
+              @click="submit('reopen')"
+            >
+              重开
+            </button>
+            <button
+              v-if="actions.includes('release')"
+              type="button"
+              :disabled="busy || !operatorValid"
+              @click="submit('release')"
+            >
+              释放
+            </button>
+            <button
+              v-if="actions.includes('adjudicate')"
+              type="button"
+              :disabled="busy || !operatorValid || adjudicateQuestion.trim().length === 0"
+              @click="submit('adjudicate')"
+            >
+              裁决
+            </button>
+            <button
+              v-if="actions.includes('cancel')"
+              type="button"
+              :disabled="busy || !operatorValid"
+              @click="submit('cancel')"
+            >
+              取消任务
+            </button>
+          </p>
+        </template>
+        <p v-else class="decision-none">当前状态没有可用的人工动作（终态或由巡检器接管）。</p>
+      </section>
 
       <section class="diff-card" aria-label="任务差异">
         <header class="diff-head">
