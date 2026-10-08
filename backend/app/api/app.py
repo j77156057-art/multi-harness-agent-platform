@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from app.api import routes
 from app.api.errors import ApiError, envelope, install_error_handlers
@@ -15,6 +15,45 @@ from app.git.repo import CanonicalRepo
 from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT
 
 API_PREFIX = "/api/v1"
+
+#: The human entry page. Humans reach the API from a browser by port, so the
+#: root is the one address they will open first -- answering 404 there made a
+#: healthy server look broken (the coordinator hit exactly this). The console
+#: itself is the frontend on 5173; this page only lists the doors.
+_LANDING_HTML = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Agent 协作平台 · 入口</title>
+<style>
+  body { margin: 0; padding: 3rem 2rem; background: #faf8f5; color: #1a1a1a;
+         font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  h1 { font-size: 1.15rem; margin: 0 0 0.3rem; }
+  h1 span { color: #1a7f37; }
+  p { color: #5f5c56; margin: 0.2rem 0 1.2rem; }
+  ul { list-style: none; padding: 0; max-width: 46rem; }
+  li { padding: 0.55rem 0.8rem; border: 1px solid #d8d4cd; border-radius: 4px;
+       margin-bottom: 0.4rem; }
+  a { color: #1f5fbf; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { color: #5f5c56; }
+</style>
+</head>
+<body>
+<h1>Agent 协作平台 · 后端<span>已启动</span></h1>
+<p>R10 三栏控制台在前端（vite）：<code>start.bat all</code> 或
+   <code>cd frontend &amp;&amp; npm run dev</code> →
+   <a href="http://localhost:5173">http://localhost:5173</a></p>
+<ul>
+  <li><a href="/health">/health</a> — 存活与配置摘要</li>
+  <li><a href="/docs">/docs</a> — OpenAPI 交互文档（全部动词可在此试）</li>
+  <li><a href="/spec/status">/spec/status</a> — 规范一致性（90 项）</li>
+  <li><code>/api/v1/*</code> — REST API 前缀；示例
+      <a href="/api/v1/projects">/api/v1/projects</a></li>
+</ul>
+</body>
+</html>
+"""
 
 #: Hostnames accepted in the Host header. R10 §5 binds v1 to localhost; checking
 #: the header as well is what stops a DNS-rebinding page from driving the
@@ -67,5 +106,15 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     api.include_router(routes.review)
     api.include_router(routes.read)
     app.include_router(api)
+
+    @app.get("/", include_in_schema=False)
+    def landing() -> HTMLResponse:
+        """The human entry page (static; the console itself lives in the frontend)."""
+        return HTMLResponse(_LANDING_HTML)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        """Quiet 204 so browsers stop logging a 404 for an icon nobody needs."""
+        return Response(status_code=204)
 
     return app
