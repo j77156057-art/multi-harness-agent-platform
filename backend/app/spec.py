@@ -221,5 +221,6 @@ class EventKind(StrEnum):
 #: 迁移表边数（R10 §10 关键迁移表）。MVP 阶段实现子集，但必须记录总数以便核对
 R10_TRANSITION_EDGE_COUNT = 86
 
-#: R10 §37.7 集合大小。docstate 会核对规范侧，本处用于代码侧交叉验证
-R10_ALLOWLIST_COUNTS = {"M": 74, "O": 13, "R": 1, "UNION": 88, "LOOPS": 10}
+#: R10 §37.7 集合大小。docstate 会核对规范侧，本处用于代码侧交叉验证；
+#: test_spec_mirror.py（DOC-MIRROR-001）逐键比对本常量与规范实际解析值。
+R10_ALLOWLIST_COUNTS = {"M": 74, "O": 14, "R": 1, "UNION": 89, "LOOPS": 10}

@@ -6,7 +6,7 @@
 
 背景：R10 复审证明 R9 的 10 条"已闭环"修订全部真实落地，但 R9 自身仍有 6 处机械缺口
 （事件未登记 allowlist、声明数字与实际不符、关键迁移边被折行拆断等），只有脚本能发现。
-本工具把那 43 项断言固化为 CI 门禁（经 MVP-01 移植与 R10-fix-09 扩充，现为 88 项）。
+本工具把那 43 项断言固化为 CI 门禁（经 MVP-01 移植与 R10-fix-09 扩充，现为 90 项）。
 
 用法：
     python tools/docstate/docstate.py                    # 检查默认规范文件
@@ -38,11 +38,11 @@ merged cancelled""".split()) | PSEUDO_STATES
 
 ALLOWLIST_HEADINGS = [
     ("M", "迁移事件（M，74 项）："),
-    ("O", "观测事件（O，13 项）："),
+    ("O", "观测事件（O，14 项）："),
     ("R", "恢复事件（R，1 项）："),
 ]
 
-EXPECTED_COUNTS = {"M": 74, "O": 13, "R": 1, "UNION": 88, "LOOPS": 10}
+EXPECTED_COUNTS = {"M": 74, "O": 14, "R": 1, "UNION": 89, "LOOPS": 10}
 
 SKIP_CURRENT = {"正式状态", "正常流程", "关键迁移表", "硬规则", "边", "迁移表补充说明",
                 "current", "迁移表补充说明（R10：原 R9 把副作用写在 next 括号内，导致 next 不可机械判定；R10 全部移入本表，next 列只留单一状态）"}
@@ -380,8 +380,8 @@ def run(spec_path, verbose=False):
     # --- 组 10：阶段边界与通过条件 ---
     if "### 29.3 终审通过条件" in text:
         sec293 = text.split("### 29.3 终审通过条件")[1].split("### 29.4")[0]
-        r.chk("88" in sec293 and "allowlist" in sec293,
-              "§29.3 含 allowlist 封闭性断言（88 项）", "gates")
+        r.chk("89" in sec293 and "allowlist" in sec293,
+              "§29.3 含 allowlist 封闭性断言（89 项）", "gates")
     r.chk("### 29.6 R11 复审请求" in text, "含 §29.6 R11 复审请求", "gates")
     r.chk("## 38. R10 终审修订映射与增量规范" in text, "含 §38 R10 增量规范", "gates")
     r.chk("版本：0.3-R10" in text, "版本行为 0.3-R10", "gates")
