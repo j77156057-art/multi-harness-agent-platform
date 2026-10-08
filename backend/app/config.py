@@ -116,6 +116,16 @@ class Settings:
         # R10 §21：hotfix 抢占配额
         self.hotfix_preempt_per_30min: int = int(os.environ.get("AP_HOTFIX_PREEMPT", "3"))
 
+        # --- 运行环（runtime-driver；F6 运行环 v1）---
+        # 未设置时 RuntimeDriver 用仓库侧 verify-profiles.json（DEFAULT_POLICY_PATH）；
+        # 指向一个不存在的文件=拒绝执行（不猜命令，R10 §16）。
+        self.runtime_policy_file: Path | None = (
+            Path(os.environ["AP_RUNTIME_POLICY_FILE"])
+            if os.environ.get("AP_RUNTIME_POLICY_FILE", "").strip()
+            else None
+        )
+        self.runtime_interval_seconds: int = int(os.environ.get("AP_RUNTIME_INTERVAL", "10"))
+
         # --- Git（R10 §13）---
         self.canonical_repo: Path = Path(
             os.environ.get("AP_CANONICAL_REPO", str(PROJECT_ROOT / "canonical.git"))
