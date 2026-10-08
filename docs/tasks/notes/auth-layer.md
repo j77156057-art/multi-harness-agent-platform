@@ -1,4 +1,4 @@
-### auth-layer：主体令牌 + API 层权限矩阵执行（🚧 doing）
+### auth-layer：主体令牌 + API 层权限矩阵执行（✅ done）
 
 ~~~text
 任务编号：auth-layer
@@ -99,5 +99,45 @@
 test_id：DOC-AUTH-001（既有行由 ⚠️ 升 🟡：API 层矩阵有断言，OS ACL 部分明确
          未覆盖；无新 ID）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 16:12
+commit：`521f7e9`（实现提交；登记 `4f39574`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败（含 §38.10 与 §26 的既有断言）
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（130 文件格式过）
+  pytest      : 491 passed（本任务净增 18：test_auth_tokens 6 + test_auth_matrix 12），exit 0
+  测试矩阵     : 令牌生命周期（明文只回一次/库内仅 sha256/吊销即失效/未知与吊销
+                的 reason 可区分/未注册 harness 拒发/CLI 三命令与退出码）；
+                矩阵逐格（缺/坏/吊销→401、harness↔human 两面互斥 403、
+                身份绑定三态〔声明主体/任务 owner/分支段〕、拒绝恰一条
+                permission_denied 且零副作用、主体先于事实〔无令牌+未知计划
+                →401 而非 404；合法主体+未知计划→404〕、off 模式零行为变化且
+                不写审计、policy 键 resource:action 形状）。
+  实机 enforce : 独立实例 8894（AP_AUTH_MODE=enforce，独立数据目录，协调者
+                8848 未接触）。逐格：无令牌 401 / 坏令牌 401 / 人类令牌打
+                adapter 403 / 人类令牌管理链 200×4 / h-B 冒充 h-A 403（任务
+                未动）/ h-A 诚实 claim=claimed / h-B 对他人任务 heartbeat 403 /
+                本人 heartbeat 200 / harness 打 human 面 403 / decided_by
+                不符 403。审计 7 条拒绝=7 条事件（actor/permission/reason/path
+                齐全，序号与合法事件交错可追溯）；任务状态仅由合法 claim
+                改变、receipts=0。留档 `backend/data/auth-drill/evidence.md`。
+已知问题：
+  - **enforce 推广前置=前端 token 接线**（本卡未动 frontend）：控制台目前不带
+    human token，enforce 下管理/决策操作会 403；在接线完成前生产保持 off
+    （README 已用警示块写明）。
+  - **OS ACL 三账户**（报告切片 C）未做：ADR-DEV-002 单账户降级不变，
+    DOC-AUTH-001 留在 🟡 并把该缺口写在"由谁检查"列。
+  - 矩阵中无 HTTP 面的行（pin/unpin、delete_worktree、merge/integration
+    write）与 read_secret 无面：不发明端点，继续按报告缺口④口径声明；
+    进程面（sweeper/runtime/mergeguard/alerts）不经 HTTP token——按报告
+    §4.5 建议=调度中心自身主体，本卡不拦（如实记录）。
+  - 读族（projects/groups/tasks/events/diff）与群聊发言保持开放：§17 矩阵
+    不覆盖读族，加读层认证会连带前端，属后续卡。
+  - **次序分歧记录**：报告建议"先事实后主体"，本卡取"主体先于事实"并把它
+    钉死（不外泄资源存在性）——对已认证且合法的请求两者完全等价，卡内声明。
+  - "自己的 review lease / 自己的 attempt"仍由服务层事实校验承担（fencing/
+    lease owner），policy 表只到角色层；两层都不放宽。
+  - 验证管线坑（非应用）：Git Bash `curl -d` 带中文按 GBK 发出→400 body
+    解析错误；演练改 ASCII 载荷，应用侧 UTF-8 无问题（见 evidence.md）。
 ~~~

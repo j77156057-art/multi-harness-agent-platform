@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-08 15:35 |
 | 分支 | `agent/local/qoder/auth-layer/a1` |
-| 状态 | 🚧 doing |
+| 状态 | ✅ done（实现 521f7e9；待合入） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `auth-layer`。
 
@@ -21,3 +21,8 @@
   `permission_denied` 登记进 §37.7 O 集合——本卡是它的第一个生产者。
   v1 边界：`AP_AUTH_MODE=off`（默认，零行为变化）/`enforce`（矩阵生效）；
   前端 token 接线与三账户 ACL 不在本卡，enforce 推广前必须先做前端，如实披露。
+- 2026-10-08 16:12：实现完成并提交 `521f7e9`（迁移 012 + app/auth 四文件 +
+  api 接线 + 18 项测试 + README 认证段；DOC-AUTH-001 ⚠️→🟡）。全量门禁
+  491 passed；实机 8894 enforce：无/坏令牌 401、两面互斥 403、冒领与越权
+  403、审计恰一条且零副作用、合法链全通（留档 auth-drill/evidence.md）。
+  状态 → done。
