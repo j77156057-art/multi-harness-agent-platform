@@ -1,4 +1,4 @@
-### runtime-driver：Verify/Merge 接入正式运行环（🚧 doing）
+### runtime-driver：Verify/Merge 接入正式运行环（✅ done）
 
 ~~~text
 任务编号：runtime-driver
@@ -69,5 +69,49 @@
      `CORE-RUNTIME-001`
 test_id：CORE-RUNTIME-001（新登记）
 测试命令：PYTHONUTF8=1 ./scripts.sh check
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 14:34
+commit：`4558a79`（实现提交；登记 `ccf4589`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（format 已过）
+  pytest      : 470 passed（本任务净增 15 项：test_runtime_driver.py），exit 0
+  实测（8893  : 独立 AP_DATA_DIR/AP_CANONICAL_REPO/AP_WORKTREE_ROOT + 策略文件
+  独立实例）    data/runtime-drill/policy.json，巡检器关，协调者 8848 未接触：
+                - `chain.py prepare` 真链（计划带 verify_profile → 审批 → claim
+                  → start 真 worktree → commit rt.txt → publish → submit）停在
+                  **verifying**（commit f9db22a，integration 头 5ba8502）；
+                - `python -m app.runtime --check`（exit 0）只读打印策略
+                  （source/version/fingerprint/integration_profile/concurrent_
+                  verify=3）与候选（attempt/commit/base/profile/epoch 全取自
+                  真实状态）；跑后任务仍 verifying、receipts=0；
+                - `--once`（exit 0）→ verify passed → awaiting_review；
+                  verify_jobs 出现生产者行（status=passed，
+                  worker_id=verify-worker-1——sweep 的「无生产者」披露已闭）；
+                - review.claim/submit（外部主体路径）→ approved；
+                - `--once`（exit 0）→ merge **merged**（merge_commit
+                  f96d0c7a…），**integration 头 5ba8502 → f96d0c7**，health=green；
+                - 幂等：再跑 `--once` → `actions:0`；receipts=1、reviews=1 不变。
+                留档 `backend/data/runtime-drill/evidence.md`（gitignored）。
+  测试矩阵     : scan 四例（真实字段取材、快照缺 profile 拒绝、策略未登记拒绝、
+                已通过 receipt 跳过）；执行四例（真链到 awaiting_review、
+                失败落 changes_requested、双跑第二轮 0、并发上限 3 且第 4 个
+                留待下轮）；merge 三例（merged 且 integration 前进+reviews
+                计数不变、门禁拒绝作为 blocked 结果而非异常、每轮一个成功
+                写入且冲突以结果返回）；策略与 CLI 四例（round-trip 与三种
+                拒绝、--check 只读、策略缺失 exit 2、--once 真跑）。
+已知问题：
+  - `--loop` 与 `--once` 共用同一轮函数（差异仅 sleep+interval），实测未单跑
+    loop 常驻；调度频率属呼吸面，留待 start.bat 集成时一起看。
+  - merge 的「每轮一个成功写入」是 v1 背压（MAX_MERGES_PER_ROUND=1）；真正
+    的 merge queue（§21 容量/优先级/hotfix 抢占）仍是后续卡，配置项
+    merge_queue_max_length 目前无人消费——卡内已声明，不假装有队列。
+  - 完整 §16 作业生命周期（queued 生产者、worker 心跳、崩溃原地重排的 job
+    级语义）与 acceptance→verify 命令编译（F11）显式出范围；现有 verify_lease/
+    verify_queue/merge_recovery 巡检继续兜底（本卡的 verify_jobs 行仍是
+    running→终态一步写，不含心跳）。
+  - 集成检查 profile 未显式声明时回落 MergeWorker 既有约定（取 policy 首个
+    profile），--check 会打印解析后的名字而不是留隐式；建议生产策略文件显式
+    写 integration_profile。
 ~~~
