@@ -117,6 +117,26 @@ make clean      # 清缓存（不动 data/ 与 wt/）
 
 ---
 
+## 主体令牌与权限矩阵（auth-layer，默认关闭）
+
+R10 §17 的 API 层矩阵执行按开关启用：`AP_AUTH_MODE=off`（默认，零行为变化）
+或 `enforce`（adapter/review 面要 harness 令牌，human/管理面要人类令牌；
+声明的主体必须等于令牌主体；每次拒绝写恰一条 `permission_denied` 审计事件）。
+
+~~~bash
+# 签发（明文只打印一次；库内只有 sha256 哈希；harness 必须先在注册表）
+cd backend && ../.venv/Scripts/python.exe -m app.auth issue --type harness --id codex-1
+../.venv/Scripts/python.exe -m app.auth list
+../.venv/Scripts/python.exe -m app.auth revoke --token apt_...
+# 请求携带：Authorization: Bearer apt_...
+~~~
+
+> ⚠️ **enforce 之前必须先做前端 token 接线**：控制台（human-console）目前不带
+> 令牌，enforce 下管理/决策操作会被 403。在接线完成前，生产保持 `off`
+> （auth-layer 卡内已把这一先后顺序写成推广前置）。
+
+---
+
 ## 目录结构
 
 ~~~text
