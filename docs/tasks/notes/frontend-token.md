@@ -1,4 +1,4 @@
-### frontend-token：控制台令牌接线（enforce 推广前置）（🚧 doing）
+### frontend-token：控制台令牌接线（enforce 推广前置）（✅ done）
 
 ~~~text
 任务编号：frontend-token
@@ -64,5 +64,42 @@
 test_id：MVP-UI-005（新登记）
 测试命令：cd frontend && npm run typecheck && npm test && npm run build &&
           npm run check:contrast（+ 仓库侧 PYTHONUTF8=1 ./scripts.sh check）
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 16:36
+commit：`b26680a`（实现提交）+ `f6c345c`（伴随的测试去时序化，见下；登记
+        `1c58a00`；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed
+  pytest      : 493 passed（本任务净增 2：whoami 四态 + off 态），exit 0
+  前端四件     : typecheck 0 错；vitest **55 passed / 6 文件**（+9：api 头有无、
+                ProjectRail 面板四态/应用与拒收/清除按钮、Channel+Task 的
+                操作者跟随与手改不覆盖、Shell 的 whoami 徽标/需要令牌态/
+                持久化+Bearer 回放）；build 39 modules（JS 126.6KB gzip 47.2KB）；
+                contrast 9 对 ≥4.5:1（仅加选择器）。
+  实机 enforce : 8894 + vite 5186（同一 auth-drill 库）：首次加载面板
+                「需要令牌」→ 粘贴 CLI 签发的 human 令牌 → 「已认证为
+                human:operator」+ localStorage 落键；**带令牌建项目成功、
+                取消任务成功（操作者自动=主体）**；清除令牌 → 回「需要令牌」，
+                再建项目 → 错误面 `auth.token_invalid: permission denied`、
+                草稿保留、库内无新项目。留档
+                `backend/data/auth-drill/evidence-frontend.md`。
+  文案打磨     : 401 的静态 message 由「permission denied」改为
+                「authentication required」（403 不变）；重启实例复测报文
+                （D-8 口径不变：静态模板 + details 只带权限键）。
+已知问题：
+  - 门禁途中**发现并修掉一个负载敏感的既有测试**（非本卡引入）：
+    `test_sweeper_workers` 的三个"过截止线"断言依赖模块级 `NOW`（=导入时刻）
+    与锚点事件真实时钟的差值——`merge retry`（40min vs 30min 租约）余量只有
+    10min，套件慢跑 12m43s 时翻红；`_past_anchor()` 把时钟改从锚点事件
+    created_at 推算（`f6c345c`，产品代码零改动，单测文件全绿）。
+  - **harness 侧仍不带令牌**：CliHarnessWorker/演练脚本/真实 adapter 测试在
+    off 模式跑；全量 enforce 前需接线（另立卡，README 已警示）。
+  - 令牌轮换仅 CLI（revoke+issue），无界面轮换；登录/账号体系不在 v1。
+  - 读族与群聊发言保持开放（矩阵不覆盖），enforce 下控制台只读面照常。
+  - 令牌失效的**中途**感知：动作失败会走错误面（code 可见），但徽标要等下次
+    自省（加载/设置令牌）才刷新——记录为后续可选打磨。
+  - 浏览器为 in-app（隐藏），截图/指针不可用；证据=结构快照+DOM 探针+API
+    复核，同 human-console 卡披露口径。
 ~~~
