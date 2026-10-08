@@ -36,7 +36,14 @@ from app.claim.transitions import ConcurrentStateChange, apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
-from app.lease.service import LeaseGrant, grant_lease, parse_iso, reissue_lease_token, utc_now
+from app.lease.service import (
+    LeaseGrant,
+    grant_lease,
+    parse_iso,
+    reissue_lease_token,
+    release_attempt_resources,
+    utc_now,
+)
 from app.spec import OWNER_STATES, EventKind, TaskStatus
 
 OUTCOME_CLAIMED = "claimed"
@@ -67,6 +74,7 @@ class RejectCode(StrEnum):
     ALREADY_OWNED = "claim.already_owned"
     ATTEMPT_BUDGET_EXHAUSTED = "claim.attempt_budget_exhausted"
     TOKEN_BUDGET_EXHAUSTED = "claim.token_budget_exhausted"
+    RESOURCE_UNAVAILABLE = "claim.resource_unavailable"
     CONCURRENT_CLAIM = "claim.concurrent_claim"
     BATCH_ABORTED = "claim.batch_aborted"
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
@@ -459,6 +467,23 @@ class ClaimService:
             )
 
         status = TaskStatus(str(task["status"]))
+        if status is TaskStatus.CHANGES_REQUESTED:
+            # R10 §10 L449/L523: the rework loop. ``claim_for_revision`` creates
+            # a fresh attempt (attempt_no+1), epoch and lease under the same
+            # checks as a first claim -- without this branch a verify failure
+            # was a permanent dead end (the drill's F1: re-claiming hit
+            # ALREADY_OWNED because ``current_attempt_id`` stays set).
+            previous = task["current_attempt_id"]
+            return self._grant_claim(
+                conn,
+                request,
+                task,
+                task_id=task_id,
+                event=EventKind.CLAIM_FOR_REVISION,
+                guard_status=TaskStatus.CHANGES_REQUESTED,
+                required_attempt_id=None if previous is None else str(previous),
+                revised_from=None if previous is None else str(previous),
+            )
         if task["current_attempt_id"] is not None or status in OWNER_STATES:
             return ClaimItem(
                 task_id=task_id,
@@ -471,12 +496,42 @@ class ClaimService:
                 outcome=OUTCOME_REJECTED,
                 error_code=RejectCode.TASK_NOT_READY.value,
             )
+        return self._grant_claim(
+            conn,
+            request,
+            task,
+            task_id=task_id,
+            event=EventKind.CLAIM,
+            guard_status=TaskStatus.READY,
+            required_attempt_id=None,
+            revised_from=None,
+        )
+
+    def _grant_claim(
+        self,
+        conn: sqlite3.Connection,
+        request: ClaimRequest,
+        task: sqlite3.Row,
+        *,
+        task_id: str,
+        event: EventKind,
+        guard_status: TaskStatus,
+        required_attempt_id: str | None,
+        revised_from: str | None,
+    ) -> ClaimItem:
+        """The shared grant tail: checks, resources, event, takeover UPDATE.
+
+        ``guard_status``/``required_attempt_id`` are what distinguishes a first
+        claim (``ready``, no current attempt) from a revision
+        (``changes_requested``, the previous attempt still on the row): the
+        conditional UPDATE matches on them so the race guard is exact for both.
+        """
         budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
         overridden = task["budget_override_by"] is not None
         if not budget_left and not overridden:
             # R10 §10 defines attempt_budget_exhausted only out of stale and
-            # reclaiming, so there is no legal event to write from ready. The
-            # claim simply cannot fire; escalation happens in the sweeper.
+            # reclaiming, so there is no legal event to write here. The claim
+            # simply cannot fire; escalation happens in the sweeper.
             return ClaimItem(
                 task_id=task_id,
                 outcome=OUTCOME_REJECTED,
@@ -506,11 +561,33 @@ class ClaimService:
                     error_code=RejectCode.TOKEN_BUDGET_EXHAUSTED.value,
                 )
 
-        blocked = self._resource_blocker(conn, resources, moment)
+        blocked = self._resource_blocker(
+            conn, resources, moment, skip_attempt_id=required_attempt_id
+        )
         if blocked is not None:
-            return self._defer(
-                conn, request, task, task_id=task_id, reason=QUEUE_REASON_RESOURCE, moment=moment
+            if required_attempt_id is None:
+                return self._defer(
+                    conn,
+                    request,
+                    task,
+                    task_id=task_id,
+                    reason=QUEUE_REASON_RESOURCE,
+                    moment=moment,
+                )
+            # A revision has no defer edge (queued is entered from ready only);
+            # a blocked resource simply means this claim cannot fire. The task
+            # stays changes_requested and the review-wait SLA sweep is the
+            # safety net.
+            return ClaimItem(
+                task_id=task_id,
+                outcome=OUTCOME_REJECTED,
+                error_code=RejectCode.RESOURCE_UNAVAILABLE.value,
             )
+
+        if required_attempt_id is not None:
+            # The previous attempt's resource rows go back to the pool in the
+            # same transaction that grants the revision.
+            release_attempt_resources(conn, attempt_id=required_attempt_id, reason="revision")
 
         self._acquire_resources(
             conn,
@@ -521,18 +598,21 @@ class ClaimService:
         )
 
         base_commit = self._integration_head(conn, task_id)
+        payload = {
+            "claim_request_id": request.claim_request_id,
+            "attempt_id": attempt_id,
+            "attempt_no": attempt_no,
+            "fencing_epoch": fencing_epoch,
+        }
+        if revised_from is not None:
+            payload["revised_from"] = revised_from
         event = self.store.append(
-            event_name=EventKind.CLAIM.value,
+            event_name=event.value,
             aggregate_type="task",
             aggregate_id=task_id,
             actor_type="harness",
             actor_id=request.harness_id,
-            payload={
-                "claim_request_id": request.claim_request_id,
-                "attempt_id": attempt_id,
-                "attempt_no": attempt_no,
-                "fencing_epoch": fencing_epoch,
-            },
+            payload=payload,
             connection=conn,
         )
         # Step 5/6 of the R10 §11 order: freeze base_commit and increment the
@@ -545,6 +625,8 @@ class ClaimService:
             attempt_no=attempt_no,
             fencing_epoch=fencing_epoch,
             base_commit=base_commit,
+            guard_status=guard_status,
+            required_attempt_id=required_attempt_id,
         )
         # base_locked_seq is the seq of the event that locked the base, so it can
         # only be written once the claim event has a seq.
@@ -853,24 +935,39 @@ class ClaimService:
         attempt_no: int,
         fencing_epoch: int,
         base_commit: str | None,
+        guard_status: TaskStatus,
+        required_attempt_id: str | None,
     ) -> None:
-        """R10 §11 R8 guard, verbatim, with a rowcount == 1 assertion."""
+        """R10 §11 R8 guard, verbatim, with a rowcount == 1 assertion.
+
+        A first claim matches ``current_attempt_id IS NULL``; a revision
+        matches the exact previous attempt instead (``required_attempt_id``),
+        so two harnesses racing to rework the same task cannot both win.
+        """
+        attempt_guard = (
+            "current_attempt_id IS NULL"
+            if required_attempt_id is None
+            else "current_attempt_id = ?"
+        )
+        parameters: list[object] = [
+            TaskStatus.CLAIMED.value,
+            harness_id,
+            attempt_id,
+            fencing_epoch,
+            attempt_no,
+            base_commit,
+            task_id,
+            guard_status.value,
+        ]
+        if required_attempt_id is not None:
+            parameters.append(required_attempt_id)
         cursor = conn.execute(
             "UPDATE tasks"
             "   SET status = ?, owner = ?, current_attempt_id = ?, current_epoch = ?,"
             "       attempt_no = ?, base_commit = ?, queue_reason = NULL, waiting_since = NULL"
-            " WHERE task_id = ? AND status = ? AND current_attempt_id IS NULL"
+            f" WHERE task_id = ? AND status = ? AND {attempt_guard}"
             "   AND (attempt_no < max_attempts OR budget_override_by IS NOT NULL)",
-            (
-                TaskStatus.CLAIMED.value,
-                harness_id,
-                attempt_id,
-                fencing_epoch,
-                attempt_no,
-                base_commit,
-                task_id,
-                TaskStatus.READY.value,
-            ),
+            tuple(parameters),
         )
         if cursor.rowcount != 1:
             raise ConcurrentStateChange(
@@ -1025,15 +1122,32 @@ class ClaimService:
         return []
 
     def _resource_blocker(
-        self, conn: sqlite3.Connection, resources: list[str], moment: datetime
+        self,
+        conn: sqlite3.Connection,
+        resources: list[str],
+        moment: datetime,
+        *,
+        skip_attempt_id: str | None = None,
     ) -> str | None:
         cutoff = moment.isoformat()
         for resource_id in resources:
-            row = conn.execute(
-                "SELECT attempt_id FROM resource_leases"
-                " WHERE resource_id = ? AND released_at IS NULL AND lease_until > ?",
-                (resource_id, cutoff),
-            ).fetchone()
+            if skip_attempt_id is None:
+                row = conn.execute(
+                    "SELECT attempt_id FROM resource_leases"
+                    " WHERE resource_id = ? AND released_at IS NULL AND lease_until > ?",
+                    (resource_id, cutoff),
+                ).fetchone()
+            else:
+                # A revision must not be blocked by its own previous attempt's
+                # still-unreleased hold (release_lease only frees the dev lease;
+                # resource rows linger until their deadline). The grant below
+                # releases those rows as part of taking over.
+                row = conn.execute(
+                    "SELECT attempt_id FROM resource_leases"
+                    " WHERE resource_id = ? AND released_at IS NULL AND lease_until > ?"
+                    "   AND attempt_id != ?",
+                    (resource_id, cutoff, skip_attempt_id),
+                ).fetchone()
             if row is not None:
                 return resource_id
         return None
