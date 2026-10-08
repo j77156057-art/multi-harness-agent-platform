@@ -1,4 +1,4 @@
-### start-bat：Windows 一键启动器（🚧 doing）
+### start-bat：Windows 一键启动器（✅ done）
 
 ~~~text
 任务编号：start-bat
@@ -43,5 +43,30 @@
      README 入口行落地
 test_id：MVP-PROCESS-002（traceability 已有行；本卡为启动器封装）
 测试命令：PYTHONUTF8=1 ./scripts.sh check（+ 卡内 start.bat 实测记录）
-当前状态：doing
+当前状态：done（作者完成，待合入；外部验收待认）
+完成时间：2026-10-08 13:02
+commit：`5520786`（实现提交；合并提交见 git log main）
+验证结果：
+  docstate    : 90 项检查，0 项失败
+  discipline  : 44 项检查，0 项失败
+  ruff        : All checks passed（119 files already formatted）
+  pytest      : 451 passed（本卡无代码，计数不变），exit 0
+  start.bat 实测:
+    ① `cmd /c start.bat help` → 用法输出，**exit 0**；
+    ② **默认模式真起服务**：临时 AP_DATA_DIR 下 `cmd /c start.bat` →
+       uvicorn 起于 8848 → `GET /health` **200**（config.data_dir 确认为
+       临时目录，未碰共享 data/）→ 停止并清理；
+    ③ **workers 模式**：`PYTHONUNBUFFERED=1` 下同法起 `app.scheduler --loop`
+       → **14 行巡检 JSON**（expired_leases 等全家族一轮）→ 停止。
+  自查       : 按命令行精确识别并清理本卡启动的全部进程（未误杀 main 门禁的
+               pytest / 他人进程）；临时数据目录已删。
+已知问题：
+  - `all` / `frontend` 模式**未自动弹窗实测**（会打开三个真实窗口打扰操作者；
+    如实声明）：其命令内容逐行为本会话已验证命令（`app.main` /
+    `app.scheduler --loop` / `npm run dev`），start 语法经审阅。
+  - venv 缺失 / node_modules 缺失的提示分支仅代码审阅（不实际移走依赖实测）。
+  - 不预置 `alerts/liveness/budget/exporter` 的 `--loop` 窗口（help 里列出
+    命令）——避免四个黑窗；需要者自行开。
+  - start.bat **不在共享门禁覆盖内**（门禁不跑 bat；与前端组件测试同类的
+    记录缺口，如实声明）。
 ~~~
