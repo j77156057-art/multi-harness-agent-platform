@@ -24,10 +24,14 @@ from tests.api_support import (
     scheduler,
     worktree_manager,
 )
+from tests.merge_support import register_harness
 
 
 def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
     client, database = make_client(tmp_path)
+    # rules-tighten F5: both review sides registry-known, providers distinct.
+    register_harness(database, "harness-1", provider="openai")
+    register_harness(database, "harness-2", provider="anthropic")
     bootstrap(client)
 
     published = publish_plan(client, tasks=[{"id": "T-1"}, {"id": "T-2"}])
@@ -113,6 +117,8 @@ def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
 
 def test_approve_then_review_approval(tmp_path):
     client, database = make_client(tmp_path)
+    register_harness(database, "h1", provider="openai")
+    register_harness(database, "reviewer-1", provider="anthropic")
     bootstrap(client)
     publish_plan(client, plan_id="PL-3", tasks=[{"id": "T-9"}])
     client.post("/api/v1/plans/PL-3/approve", json={"decided_by": "human-1"})
