@@ -73,8 +73,15 @@ def test_worktree_uses_canonical_objects_through_alternates(tmp_path):
     item = seed_and_claim(fixture)
     worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
 
-    alternates = (worktree.gitdir / "objects" / "info" / "alternates").read_text(encoding="utf-8")
+    path = worktree.gitdir / "objects" / "info" / "alternates"
+    alternates = path.read_text(encoding="utf-8")
     assert alternates.strip() == str(fixture.repo.objects_dir)
+    # LF-only is load-bearing: git does not strip a trailing CR from an
+    # alternates entry, so a CRLF file makes every git command in the worktree
+    # fail with `object directory ... does not exist` (observed in the R8
+    # harness drill). The old `.strip()` assertion masked exactly this byte.
+    assert b"\r" not in path.read_bytes()
+    assert alternates.endswith("\n") and not alternates.endswith("\r\n")
     # The tree really is a separate writable directory, not the bare repository.
     assert not str(worktree.gitdir).startswith(str(fixture.repo.path))
 

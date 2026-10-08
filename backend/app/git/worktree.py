@@ -165,8 +165,12 @@ class WorktreeManager:
         alternates = gitdir / "objects" / "info" / "alternates"
         alternates.parent.mkdir(parents=True, exist_ok=True)
         # ADR-059: objects are read through the canonical store, which is what
-        # GIT-ACL-002 checks the boundary of.
-        alternates.write_text(str(self.repo.objects_dir) + "\n", encoding="utf-8")
+        # GIT-ACL-002 checks the boundary of. newline="\n" is load-bearing:
+        # git does not strip a trailing CR from an alternates entry, and the
+        # R8 harness drill observed every worktree git command failing with
+        # `object directory ... does not exist` while this file was CRLF
+        # (same treatment as the pre-receive hook).
+        alternates.write_text(str(self.repo.objects_dir) + "\n", encoding="utf-8", newline="\n")
         run_git("fetch", "--no-tags", str(self.repo.path), base_commit, cwd=path)
         run_git("checkout", "-b", branch, "FETCH_HEAD", cwd=path)
 
