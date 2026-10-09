@@ -8,7 +8,7 @@
 | Harness | Qoder |
 | 认领时间 | 2026-10-09 03:10 |
 | 分支 | `agent/local/qoder/buzz-bridge/a1` |
-| 状态 | ✅ done（实现 0e6e24b 待提交；本地自建 relay 真 CLI 验收留档） |
+| 状态 | ✅ done（实现 219ec4e；合并 aad2b3f；本地自建 relay 真 CLI 验收留档） |
 
 任务表对应行：`TASKS.md` → 「任务表」章节，搜 `buzz-bridge`。
 
@@ -31,3 +31,9 @@
   `relay-stdout.log`。演练中发现并修复一个真 bug（空批次 `scanned` 误报 1 →
   0，已补断言）；另确认一个演练脚本侧的 Windows 瞬时文件锁（改为长句柄，
   非应用 bug）。
+- 2026-10-09 03:55：合并已完成（aad2b3f，mergeguard 门禁全绿；合并后 main
+  全量门禁 529 passed）。**勘误**：本文件上一版写的"实现 0e6e24b"是占位符
+  （提交前写错，实际不存在该对象），已更正为 219ec4e。**依赖提醒**：本卡新增
+  `coincurve==21.0.0`/`websockets==17.2`（requirements 已钉）——各 worktree 的
+  既有 venv 需各跑一次 `pip install -r backend/requirements.txt`，否则 pytest
+  收集期报 `ModuleNotFoundError: coincurve`（root venv 已代为更新）。
