@@ -1,10 +1,17 @@
 extends Node2D
 class_name Worker
-## 一个拟人 harness：Q 版小人，全部程序化绘制。
+## 拟人 harness 的**人物部分**。
 ##
-## 关键设计：**同一套骨架 + 按状态改参数**，而不是每个状态各画一张。
-## 这样同一个角色跨状态长相一致；也预留了贴图插槽 head_texture，
-## 后续可直接换成 ComfyUI 生成的立绘而不动骨架。
+## 2.5D 架构：本脚本只画「人」，画进一个 SubViewport，
+## 再由 office3d.gd 把它当 `Sprite3D` billboard 贴进 3D 场景。
+## 桌子/地板/光照/阴影**不在本文件里** —— 它们是 3D 的。
+##
+## 这样分工的理由：
+## - 人物有 9 种状态、大量手绘细节，用 CanvasItem._draw() 最快；
+## - 而桌子地板需要的是真体积感与深度遮挡，只有 3D 能给；
+## - 关键是**深度测试自动让桌沿挡住角色下半身**，"坐在桌子后面"不用手写。
+##
+## 代价：角色是面片，斜看时会露怯。要更真就得换 VRM + .vrma 动画（另一件事）。
 
 const TAU: float = PI * 2.0
 
@@ -17,6 +24,41 @@ const STATE_DONE: String = "done"
 const STATE_HELPING: String = "helping"
 const STATE_STUCK: String = "stuck"
 const STATE_REVIEWING: String = "reviewing"
+
+## 状态对应的标签文案与颜色。
+##
+## 刻意做成「名字一行 + 状态一行、状态带色」：这是参考图
+## （Agent Office / Star Office UI 一类 2.5D 拟人办公室）的**标志性视觉**。
+## 只写状态不写名字，8 个人并排就看不出谁是谁；名字与状态同色，
+## 又分不出「她叫什么」和「她在干嘛」—— 所以分行、异色。
+const STATE_TEXT := {
+	STATE_IDLE: "IDLE",
+	STATE_TYPING: "CODING",
+	STATE_SNACK: "ON BREAK",
+	STATE_SNOOP: "ON BREAK",
+	STATE_SLEEP: "ON BREAK",
+	STATE_DONE: "DONE",
+	STATE_HELPING: "HELPING",
+	STATE_STUCK: "STUCK",
+	STATE_REVIEWING: "REVIEWING",
+}
+
+const STATE_COLOR := {
+	STATE_IDLE: Color("9aa5b1"),
+	STATE_TYPING: Color("3fbf8f"),
+	STATE_SNACK: Color("f0a03c"),
+	STATE_SNOOP: Color("f0a03c"),
+	STATE_SLEEP: Color("f0a03c"),
+	STATE_DONE: Color("3fbf8f"),
+	STATE_HELPING: Color("5b9cf5"),
+	STATE_STUCK: Color("ef5b6b"),
+	STATE_REVIEWING: Color("b07cf0"),
+}
+
+
+## 名牌与气泡相对头的偏移（向上为负）。
+const LABEL_DY: float = -74.0
+const BUBBLE_DY: float = -104.0
 
 var state: String = STATE_IDLE:
 	set(v):
@@ -31,34 +73,21 @@ var label_text: String = "":
 		queue_redraw()
 
 var spec: Dictionary = {}
-var desk_pos: Vector2 = Vector2.ZERO
 var mirror: bool = false
 var seed_off: float = 0.0
 
-#: 预留插槽：设了就用生成立绘当头，未设置则画程序化的头。
-var head_texture: Texture2D = null:
-	set(v):
-		head_texture = v
-		queue_redraw()
-
 var _t: float = 0.0
-
-var walk_target: Vector2 = Vector2.ZERO
-var walk_from: Vector2 = Vector2.ZERO
-var walk_t: float = -1.0
-var walk_dur: float = 1.2
-var _walking: bool = false
 
 var _skin: Color = Color("f7d9c4")
 var _hair: Color = Color("2f3550")
 var _cloth: Color = Color("37c2a8")
 var _vibe: String = ""
+var _name: String = ""
 
 
 func _ready() -> void:
 	seed_off = randf() * TAU
 	_sync_look()
-	position = desk_pos
 
 
 func _sync_look() -> void:
@@ -66,35 +95,29 @@ func _sync_look() -> void:
 	_hair = spec.get("hair", Color("2f3550"))
 	_cloth = spec.get("accent", Color("37c2a8"))
 	_vibe = String(spec.get("vibe", ""))
+	_name = String(spec.get("name", ""))
 
 
 func _process(delta: float) -> void:
 	_t += minf(delta, 0.05)
-	if _walking:
-		walk_t += delta / maxf(0.01, walk_dur)
-		if walk_t >= 1.0:
-			walk_t = 1.0
-			_walking = false
-		position = walk_from.lerp(walk_target, ease(walk_t, 0.35))
 	queue_redraw()
 
 
-func walk_to(target: Vector2, dur: float) -> void:
-	walk_from = position
-	walk_target = target
-	walk_dur = dur
-	walk_t = 0.0
-	_walking = true
+## 供外部设置状态。lbl 是「要额外强调的一句话」，
+## 传空表示没有 —— **不等于**不显示状态标签（状态标签由 _draw_plate 常驻画）。
+func set_state(s: String, lbl: String) -> void:
+	state = s
+	label_text = lbl
 
 
-func return_to_desk() -> void:
-	walk_to(desk_pos, 0.9)
+## 供 dump 工具识别「这是角色」。
+func is_worker() -> bool:
+	return true
 
 
 # ------------------------------------------------------------------ 绘制
 
 func _draw() -> void:
-	# 起身类状态抬高整个人
 	var lift: float = 0.0
 	var bob: float = sin(_t * 2.1 + seed_off) * 2.4
 	var lean: float = 0.0
@@ -113,18 +136,14 @@ func _draw() -> void:
 
 	var body_y: float = 22.0 + bob * 0.4
 
-	# 阴影（贴地，不随 lift 抬升）
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_circle(Vector2(0, 58.0 - lift), 26.0, Color(0, 0, 0, 0.10))
-
-	var mx: float = -1.0 if mirror else 1.0
-	draw_set_transform(Vector2(0, lift), 0.0, Vector2(mx, 1.0))
-
-	# 椅背
+	# 椅子
 	draw_colored_polygon(PackedVector2Array([
 		Vector2(-26, body_y + 4), Vector2(26, body_y + 4),
 		Vector2(26, body_y + 34), Vector2(-26, body_y + 34),
 	]), Color(0.35, 0.35, 0.42, 0.35))
+
+	var mx: float = -1.0 if mirror else 1.0
+	draw_set_transform(Vector2(0, lift), 0.0, Vector2(mx, 1.0))
 
 	# 躯干 + 衣领
 	draw_colored_polygon(PackedVector2Array([
@@ -136,16 +155,12 @@ func _draw() -> void:
 	]), Color(1, 1, 1, 0.85))
 
 	_draw_arms(body_y, bob)
-	_draw_head(hy(8.0 + bob), lean)
+	_draw_head(8.0 + bob, lean)
 
-	# 标签与工位道具：回到世界坐标单独画
+	# 名牌与气泡：回到本地 identity 单独画（字不能随镜像翻转）
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	_draw_plate()
 	_draw_bubble(lift)
-	_draw_desk_props()
-
-
-func hy(v: float) -> float:
-	return v
 
 
 func _draw_arms(body_y: float, bob: float) -> void:
@@ -176,7 +191,6 @@ func _draw_arms(body_y: float, bob: float) -> void:
 func _draw_head(head_y: float, lean: float) -> void:
 	draw_set_transform(Vector2(0, head_y), lean * 0.35, Vector2.ONE)
 
-	# 后发 + 脸 + 刘海
 	draw_circle(Vector2.ZERO, 21.0, _hair)
 	draw_circle(Vector2.ZERO, 17.5, _skin)
 	var fringe := PackedVector2Array()
@@ -185,10 +199,8 @@ func _draw_head(head_y: float, lean: float) -> void:
 		fringe.append(Vector2(cos(a), sin(a)) * 17.5)
 	draw_colored_polygon(fringe, _hair)
 
-	# 发饰：按角色区分辨识度
 	match _vibe:
 		"star":
-			# 五角星：10 个顶点（外 5 + 内 5），**共线会三角化失败**
 			var s := PackedVector2Array()
 			for i in range(10):
 				var rr: float = 8.0 if i % 2 == 0 else 3.4
@@ -273,27 +285,48 @@ func _draw_mouth() -> void:
 			_arc(Vector2(0, 3.4), 3.0, c, 1.5, 0.18 * PI, 0.82 * PI)
 
 
+## 名牌：**名字一行 + 状态一行**，状态带色。
+## 这是参考图（Agent Office 一类 2.5D 拟人办公室）的标志性视觉。
+func _draw_plate() -> void:
+	if _name.is_empty():
+		return
+	var f := ThemeDB.fallback_font
+	var size: float = 12.0
+	var st_txt: String = String(STATE_TEXT.get(state, "IDLE"))
+	var st_col: Color = STATE_COLOR.get(state, STATE_COLOR[STATE_IDLE])
+	var nw: float = f.get_string_size(_name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size).x
+	var sw: float = f.get_string_size(st_txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 10.0).x
+	var w: float = maxf(nw, sw) + 16.0
+	var h: float = 38.0
+	var r := Rect2(Vector2(-w / 2.0, LABEL_DY - h), Vector2(w, h))
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(1, 1, 1, 0.90)
+	bg.set_corner_radius_all(7)
+	bg.shadow_color = Color(0, 0, 0, 0.16)
+	bg.shadow_size = 4
+	draw_style_box(bg, r)
+	# 左缘一道状态色竖条：远看也能扫出谁在干嘛
+	draw_rect(Rect2(r.position + Vector2(0, 5), Vector2(3.0, h - 10)), st_col)
+	draw_string(f, r.position + Vector2(9.0, 16.0), _name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color("1f2430"))
+	draw_string(f, r.position + Vector2(9.0, 31.0), st_txt, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 10.0, st_col)
+
+
 func _draw_bubble(lift: float) -> void:
 	if label_text.is_empty():
 		return
 	var font := ThemeDB.fallback_font
 	var size: float = 11.0
 	var tw: float = font.get_string_size(label_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size).x
-	var on_top: bool = state in [STATE_DONE, STATE_HELPING, STATE_REVIEWING]
-	var by: float = -66.0 + (-6.0 if on_top else 0.0) - lift
+	var by: float = BUBBLE_DY - lift
 	var rect := Rect2(Vector2(-tw / 2.0 - 7.0, by - 11.0), Vector2(tw + 14.0, 20.0))
 	var fill: Color
 	match state:
 		STATE_STUCK: fill = Color("fee2e2")
 		STATE_DONE: fill = Color("dcfce7")
 		_: fill = Color(0.06, 0.09, 0.16, 0.82)
-	# 圆角要用 StyleBoxFlat + draw_style_box。
-	# 不要给 draw_rect 传第 4 个参数当圆角：那是 width，且 filled=true 时被忽略，
-	# 每帧还会刷一条 WARNING。
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = fill
 	sb.set_corner_radius_all(10)
-	sb.content_margin_left = 7.0
 	draw_style_box(sb, rect)
 	draw_string(font, rect.position + Vector2(0, 15.0), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, size, Color.WHITE)
 
@@ -307,35 +340,6 @@ func _draw_bubble(lift: float) -> void:
 		for i in range(4):
 			var a2: float = _t * 2.0 + float(i)
 			draw_circle(Vector2(cos(a2) * 26.0, by - 14.0 + sin(a2) * 10.0), 3.2 - float(i) * 0.5, Color(0.98, 0.8, 0.08, 0.9 - float(i) * 0.18))
-
-
-## 工位上的电脑与「输入代码」小动画。
-func _draw_desk_props() -> void:
-	var mx: float = -60.0
-	var my: float = 40.0
-	draw_rect(Rect2(Vector2(mx - 26, my - 18), Vector2(52, 34)), Color("2b2f3a"))
-	draw_rect(Rect2(Vector2(mx - 22, my - 14), Vector2(44, 26)), Color("101623"))
-	var phase: float = fmod(_t * 3.2, 1.0)
-	for i in range(5):
-		var on: bool = i < int(floor(phase * 5.0)) + 1
-		var wdt: float = maxf(4.0, 30.0 - float(i) * 3.2)
-		draw_rect(Rect2(Vector2(mx - 16, my - 9 + float(i) * 4.4), Vector2(wdt, 2.4)), _cloth if on else Color(0.47, 0.55, 0.67, 0.25))
-	draw_rect(Rect2(Vector2(mx - 5, my + 16), Vector2(10, 4)), Color("2b2f3a"))
-	draw_rect(Rect2(Vector2(mx - 12, my + 20), Vector2(24, 3)), Color("2b2f3a"))
-
-	# 名牌：不写这个的时候，8 个色块摆在一起**看不出谁是谁** ——
-	# 那是用户第一眼就会问的问题（实测被问到了）。
-	var name: String = String(spec.get("name", ""))
-	if name.is_empty():
-		return
-	var f := ThemeDB.fallback_font
-	var nw: float = f.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12.0).x
-	var nr := Rect2(Vector2(-nw / 2.0 - 8.0, my + 6.0), Vector2(nw + 16.0, 18.0))
-	var nbg := StyleBoxFlat.new()
-	nbg.bg_color = Color(1, 1, 1, 0.88)
-	nbg.set_corner_radius_all(4)
-	draw_style_box(nbg, nr)
-	draw_string(f, nr.position + Vector2(8.0, 13.0), name, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12.0, Color("374151"))
 
 
 # ------------------------------------------------------------------ 小工具
@@ -355,14 +359,3 @@ func _blob(center: Vector2, radii: Vector2, color: Color) -> void:
 		var a: float = TAU * float(i) / 24.0
 		pts.append(center + Vector2(cos(a) * radii.x, sin(a)) * radii.y)
 	draw_colored_polygon(pts, color)
-
-
-## 供外部设置状态的便捷入口。
-func set_state(s: String, lbl: String) -> void:
-	state = s
-	label_text = lbl
-
-
-## 供 dump 工具识别「这是角色」（角色是 Node2D + 脚本，从类名看不出来）。
-func is_worker() -> bool:
-	return true

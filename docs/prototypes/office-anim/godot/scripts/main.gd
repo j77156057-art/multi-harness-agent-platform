@@ -1,15 +1,14 @@
-extends Node2D
-## 主场景：左办公室 + 右手机群聊。
+extends Node3D
+## 主场景：2.5D 办公室（3D）+ 手机群聊（CanvasLayer  overlay）：左办公室 + 右手机群聊。
 ##
 ## 全部 UI 用代码搭（不写 .tscn 的 Control 树）—— 原型阶段改起来快，
 ## 且好处是这一份文件就能看清整个交互编排。定稿后再考虑搬进 .tscn
 ## 让非程序员也能在编辑器里摆。
 
 const Story := preload("res://scripts/story.gd")
-const WorkerScene := preload("res://scenes/worker.tscn")
+const Office3DScene := preload("res://scenes/office3d.tscn")
 
 # 布局：设计分辨率 1600x900。左侧办公室占 0~0.68，右侧手机占 0.68~1.0。
-const OFFICE_W := 1088.0
 const PHONE_X := 1088.0
 const PHONE_W := 512.0
 const VPH := 900.0
@@ -35,8 +34,7 @@ var holder := ""
 var states := {}
 var timer := 0.0
 var gap := 0.8
-var workers := {}
-var desks := {}
+var office: Office3D = null
 var rng := RandomNumberGenerator.new()
 
 # UI 控件
@@ -50,6 +48,7 @@ var _say: TextEdit
 var _tip: Label
 var _tip_panel: PanelContainer
 var _toasts: Array = []
+var _prev_states: Dictionary = {}
 
 
 func _ready() -> void:
@@ -97,47 +96,32 @@ func _apply_post_args() -> void:
 # ------------------------------------------------------------------ 办公室
 
 func _build_office() -> void:
-	# 地板与墙（画在 Node2D 上，置于所有角色之后）
-	var bg := Node2D.new()
-	bg.name = "Backdrop"
-	bg.set_script(preload("res://scripts/backdrop.gd"))
-	add_child(bg)
-
-	# 工位 + 角色
-	for i in range(Story.CHARACTERS.size()):
-		var c: Dictionary = Story.CHARACTERS[i]
-		var col := i % 4
-		var row := int(i / 4)
-		var dp := Vector2(150.0 + float(col) * 250.0, 400.0 + float(row) * 300.0)
-		desks[c["key"]] = dp
-
-		var w: Variant = WorkerScene.instantiate()
-		w.spec = c
-		w.desk_pos = dp
-		w.mirror = col >= 2
-		w.position = dp
-		# 放大 1.3 倍：不设 scale 时角色在设计稿里只占格子的约 1/6，
-		# 实测第一眼觉得「办公室空、人小」。格子间距 250×300 撑得住。
-		w.scale = Vector2(1.3, 1.3)
-		w.name = String(c["key"])
-		add_child(w)
-		workers[c["key"]] = w
+	# 2.5D：整个办公室是一个 Node3D 子树（正交相机 + 光照阴影 + 3D 桌子地板
+	# + 2D 角色面片）。角色代码一行没删，只是换了渲染目标（SubViewport）。
+	office = Office3DScene.instantiate()
+	office.name = "Office3D"
+	add_child(office)
 
 
 func _apply_states() -> void:
-	for key in workers:
-		var s: Dictionary = states.get(key, {"state": "idle", "label": ""})
-		var w: Variant = workers[key]
-		var ns := String(s["state"])
-		var lbl := String(s["label"])
-		# 走到别人工位去帮忙：只在状态**变成** helping 时走一次
-		if ns == "helping" and String(w.state) != "helping":
+	if office == null:
+		return
+	office.apply_states(states)
+
+	# 「走去帮忙」：这里只发**意图与终点**，真正的位移交给 3D 节点自己做。
+	# 不用计时器猜动画时长 —— Agentshire 在那里长出过幽灵 NPC / 工位撞车。
+	for key in states:
+		var s: Dictionary = states[key]
+		var ns := String(s.get("state", "idle"))
+		var prev: String = String(_prev_states.get(key, "idle"))
+		if ns == "helping" and prev != "helping":
 			var other: String = "trae" if String(key) != "trae" else "opencode"
-			var target: Vector2 = desks[other]
-			w.walk_to(target + Vector2(70, -10), 1.1)
-		elif ns != "helping" and String(w.state) == "helping":
-			w.return_to_desk()
-		w.set_state(ns, lbl)
+			var target: Vector3 = office.get_home(other)
+			target.x += 0.9          # 站到对方身侧，别重叠
+			office.walk_to(String(key), target, 1.1)
+		elif ns != "helping" and prev == "helping":
+			office.walk_to(String(key), office.get_home(String(key)), 0.9)
+	_prev_states = states.duplicate()
 
 
 # ------------------------------------------------------------------ 右侧手机
@@ -589,15 +573,14 @@ func _on_send() -> void:
 	_toast("管理员收到一条来自 群主 的信息")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if office != null:
+		# 屏幕上的「输入代码」小动画：纹理由 office 每帧写，
+		# 睡/摸鱼的角色格子自动息屏。
+		office.update_screens(states, office.get_clock())
 	if not playing:
 		return
-	timer += _delta
+	timer += delta
 	if timer >= gap:
 		timer = 0.0
 		tick()
-
-
-func _draw() -> void:
-	# 办公室区域底色：左侧一块，右侧留给手机 UI
-	draw_rect(Rect2(Vector2.ZERO, Vector2(OFFICE_W, VPH)), BG, true)
