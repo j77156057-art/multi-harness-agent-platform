@@ -117,6 +117,12 @@
 | office-anim-proto | OpenCode | — | ✅ done（实现 2f7c555；已合入 d9a00ae。**行状态由 Qoder 代翻**：mergegate 组 6 要求「已合入 main 即须完成」，原行卡 🟢 doing 会让全场 discipline 转红；OpenCode 若继续集成请开新行/新卡） | `agent/local/opencode/office-anim-proto/a1` | `MVP-UI-006` |
 | buzz-bridge-adr | Qoder | paperclip-buzz-source | ✅ done（交付 e1a839b；ADR-DEV-005 提议，待裁决） | `agent/local/qoder/buzz-bridge-adr/a1` | `MVP-ARCH-002` |
 | buzz-bridge | Qoder | buzz-bridge-adr | ✅ done（实现 219ec4e，合并 aad2b3f；ADR-DEV-005 运行时：只写不读；测试内真 WS relay + 本地自建 relay 真 CLI 验收留档；**新增依赖 coincurve/websockets——各 venv 需 pip install -r backend/requirements.txt 一次**） | `agent/local/qoder/buzz-bridge/a1` | `INTEG-BUZZ-001` |
+| ADMIN-01 | Codex（协调者指定；本人领取另记） | — | waiting（契约待冻结，尚未实施） | — | `DOC-TRACE-001` `DOC-SCHEMA-001` |
+| ADMIN-03 | WorkBuddy / workbuddy-admin03-a1 | ADMIN-01 | prep（本人回执已登记；契约冻结后重验才可实施） | `agent/admin/workbuddy/ADMIN-03/a1` | `MVP-PROCESS-001` `DOC-TRACE-001` |
+| ADMIN-03-register | Codex | — | ✅ done（仅串行登记，不实现管理员） | `agent/local/codex/ADMIN-03-register/a1` | `MVP-PROCESS-001` |
+
+以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
+ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
 
 ★ MVP-04 是瓶颈：同时挡住 MVP-05/06/07/11 四条线。建议配 2 个 AI
 （一人做 Claim/幂等，一人做 Lease/fencing/巡检器），在 MVP-02 落地后立即并行。
@@ -131,6 +137,9 @@
 > 两层职责划分见 R10 §11。
 
 ## 认领登记（R10 §0 总协调规则第 2 条）
+
+<!-- ADMIN-03 → docs/claims/workbuddy--ADMIN-03.md -->
+<!-- ADMIN-03-register → docs/claims/codex--ADMIN-03-register.md -->
 
 **本表只读**。每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md>`（迁移期也接受旧的 `<序号>-` 前缀，见 `docs/proposals/claim-denum.md`），
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
@@ -262,6 +271,8 @@
 | rules-tighten | [卡](docs/tasks/notes/rules-tighten.md) | | |
 | buzz-bridge-adr | [卡](docs/tasks/notes/buzz-bridge-adr.md) | | |
 | buzz-bridge | [卡](docs/tasks/notes/buzz-bridge.md) | | |
+| ADMIN-03 | [卡](docs/tasks/notes/ADMIN-03.md) | | |
+| ADMIN-03-register | [卡](docs/tasks/notes/ADMIN-03-register.md) | | |
 
 ## 共享文件改动声明
 
@@ -272,6 +283,7 @@
 
 | task_id | 改了什么 | commit |
 |---|---|---|
+| `ADMIN-03-register` | 协调者串行登记 ADMIN-03 的本人回执及等待依赖；不合入 prep 或实现 | 已完成，待 Merge Gate 合入，见本任务卡 |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
 | `fix-flaky-init` | 撤回 flaky 登记（只改 TASKS.md 登记，未动门禁本体） | `9d3d3ef` |
