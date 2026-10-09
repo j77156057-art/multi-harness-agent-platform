@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cdump3d9an001"]
+
+[ext_resource type="Script" path="res://tools/dump3d.gd" id="1_d3"]
+
+[node name="Dump3D" type="Node"]
+script = ExtResource("1_d3")

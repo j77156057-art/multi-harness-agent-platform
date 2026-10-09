@@ -16,12 +16,25 @@ const WorkerScene := preload("res://scenes/worker.tscn")
 
 const COLS := 4
 const ROWS := 2
-const DX := 2.7          # 列间距
+const DX := 2.2          # 列间距
 const DZ := 3.0          # 排间距
 const DESK_H := 1.05     # 桌面高
 const DESK_W := 2.2      # 桌面宽
 const DESK_D := 1.1      # 桌面深
-const CHAR_DZ := -0.45   # 角色站在桌的哪一侧（-Z = 远离相机 = 屏幕上方）
+const CHAR_DZ := -0.42   # 角色站在桌的哪一侧（-Z = 远离相机 = 屏幕上方）
+
+#: 相机看向的 X。手机面板覆盖 design x > 0.32（见 _build_camera 的算法），
+#: 所以办公室右缘必须 < 0.32。span=8.8 时 target_x ≤ -4.2。
+const FOCUS_X := -4.2
+#: 每面片的像素尺寸。220×300 的视口 → 约 1.5×2.0 世界单位，
+#: 与 1.05 高的桌子相比是「站在桌前」的比例。0.014 时面片高 4.2，
+#: 比桌子高 4 倍，实测完全失衡。
+const PIXEL := 0.0068
+#: 角色脚跟在 SubViewport 里的 y（含椅子底）。用来把面片**放在地上**：
+#: Sprite3D 以节点原点为中心，不补这个偏移角色就从地板中间长出来。
+const VP_W := 220
+const VP_H := 300
+const FEET_VP_Y := 252
 
 #: 8 块屏幕合成一张横向长条纹理，一帧只更新一次。
 const SCREEN_CELL_W := 96
@@ -52,10 +65,14 @@ func _build_camera() -> void:
 	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
 	# 正交 + size=9 → 视里竖向 9 个世界单位。屏幕 1600×900，故横向 16。
 	cam.size = 9.0
-	# 左栏占 68%：横向 [-8,8] 里左 68% 的中心在 -2.56，
-	# 把相机目标挪过去，办公室就落在左栏里（右侧留给手机 UI）。
-	var target := Vector3(-2.56, 0.7, 1.2)
-	cam.position = target + Vector3(0.0, 6.9, 7.4)
+	# 左栏占 68%：正交 size=9 + 屏幕 1600×900 → 横向 16 个世界单位，
+	# 相机居中时屏幕映射 design x = focus_x + (f-0.5)*16。
+	# 手机面板从屏幕 68% 开始 → design x > FOCUS_X + 0.18*16。
+	# 取 FOCUS_X=-4.2，则分界线在 -1.32，办公室右缘（-4.2+4.4=0.2）安全落在其左。
+	# **第一版取 -2.56，分界线在 0.32，第 4 列工位（x≈0.74）被手机面板压住**，
+	# 实测整列凭空消失。
+	var target := Vector3(FOCUS_X, 0.7, 1.2)
+	cam.position = target + Vector3(0.0, 6.6, 7.6)
 	add_child(cam)
 	# **必须在入树之后**才能转向：先 add_child 再 look_at 会报
 	# "Node not inside tree"。用 look_at_from_position 对该情形安全，
@@ -109,7 +126,7 @@ func _build_floor() -> void:
 	var mi := MeshInstance3D.new()
 	mi.mesh = plane
 	mi.material_override = mat
-	mi.position = Vector3(-2.56, 0, 2.5)
+	mi.position = Vector3(FOCUS_X, 0, 2.5)
 	add_child(mi)
 
 
@@ -132,7 +149,7 @@ func _build_walls() -> void:
 	wb.size = Vector3(24.0, 3.0, 0.25)
 	wb.material = wall
 	wm.mesh = wb
-	wm.position = Vector3(-2.56, 1.5, -1.7)
+	wm.position = Vector3(FOCUS_X, 1.5, -1.7)
 	add_child(wm)
 	# 踢脚线
 	var km := MeshInstance3D.new()
@@ -140,12 +157,12 @@ func _build_walls() -> void:
 	kb.size = Vector3(24.0, 0.18, 0.32)
 	kb.material = trim
 	km.mesh = kb
-	km.position = Vector3(-2.56, 0.09, -1.62)
+	km.position = Vector3(FOCUS_X, 0.09, -1.62)
 	add_child(km)
 
 	# 三扇窗
 	for i in range(3):
-		var cx := -7.0 + float(i) * 7.0
+		var cx := FOCUS_X - 7.0 + float(i) * 7.0
 		var fw := 2.2
 		var fh := 1.5
 		var fm := MeshInstance3D.new()
@@ -230,7 +247,7 @@ func _build_grid() -> void:
 		for c in range(COLS):
 			var spec: Dictionary = Story.CHARACTERS[r * COLS + c]
 			var key := String(spec["key"])
-			var p := Vector3(-2.56 + float(c - 1.5) * DX, 0.0, float(r) * DZ)
+			var p := Vector3(FOCUS_X + float(c - 1.5) * DX, 0.0, float(r) * DZ)
 			_build_desk(p, spec, _index_of(r, c))
 			_build_character(p, spec, r, c)
 
@@ -342,32 +359,30 @@ func _build_character(at: Vector3, spec: Dictionary, r: int, c: int) -> void:
 
 	var spr := Sprite3D.new()
 	spr.texture = vp.get_texture()
-	spr.pixel_size = 0.014
+	spr.pixel_size = PIXEL
 	spr.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	spr.position = at + Vector3(0, 0.0, CHAR_DZ)
-	spr.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	var sm := StandardMaterial3D.new()
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	sm.no_depth_test = false
-	spr.material_override = sm
+	# **不要 material_override。** Sprite3D 的 texture 属性由内置材质采样；
+	# 一旦覆盖材质而又忘了在其中设 albedo_texture，纹理就再也不被读，
+	# 角色整个不显示（实测过一次：视口里有 146/1850 个非透明点，画面里没人）。
 	spr.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	# 让**脚跟**落在地板上：面片以节点原点为中心，
+	# 所以要抬高 (FEET_VP_Y - VP_H/2) * PIXEL。
+	spr.position = at + Vector3(0.0, float(FEET_VP_Y - VP_H / 2) * PIXEL, CHAR_DZ)
 	add_child(spr)
 	characters[String(spec.get("key", ""))] = {"sprite": spr, "worker": w, "home": spr.position, "vp": vp}
 
 	# 接触阴影（贴地小圆）
 	var sh := MeshInstance3D.new()
 	var sq := QuadMesh.new()
-	sq.size = Vector2(1.05, 0.85)
+	sq.size = Vector2(0.78, 0.58)
 	var shm := StandardMaterial3D.new()
 	shm.albedo_texture = _shadow_tex
 	shm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	shm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	shm.no_depth_test = true
-	shm.render_priority = -1
+	# 不要 no_depth_test：它会穿过桌子画到前面去，糊成一团黑。
 	sh.mesh = sq
 	sh.material_override = shm
-	sh.position = at + Vector3(0, 0.012, CHAR_DZ)
+	sh.position = at + Vector3(0, 0.014, CHAR_DZ)
 	sh.rotation_degrees = Vector3(-90, 0, 0)
 	add_child(sh)
 	characters[String(spec.get("key", ""))]["shadow"] = sh
