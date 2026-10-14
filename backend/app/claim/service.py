@@ -36,6 +36,7 @@ from app.claim.transitions import ConcurrentStateChange, apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
+from app.git.repo import CanonicalRepo
 from app.lease.service import (
     LeaseGrant,
     grant_lease,
@@ -78,6 +79,7 @@ class RejectCode(StrEnum):
     CONCURRENT_CLAIM = "claim.concurrent_claim"
     BATCH_ABORTED = "claim.batch_aborted"
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
+    HARNESS_INELIGIBLE = "claim.harness_ineligible"
 
 
 class IdempotencyConflict(RuntimeError):
@@ -185,10 +187,65 @@ def canonical_payload_hash(
 class ClaimService:
     """Claim a batch of tasks atomically, with per-item results."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, repo: CanonicalRepo | None = None) -> None:
         self.database = database
+        self.repo = repo
         self.store = EventStore(database)
         self._conflict_detail: tuple[str, str] | None = None
+
+    @staticmethod
+    def eligibility(
+        conn: sqlite3.Connection, task: sqlite3.Row | dict, harness_id: str
+    ) -> tuple[str | None, str | None]:
+        snapshot = conn.execute(
+            "SELECT content_json FROM plan_snapshots WHERE snapshot_id = ?",
+            (task["plan_snapshot_id"],),
+        ).fetchone()
+        raw = json.loads(snapshot[0]) if snapshot else {}
+        item = next((x for x in raw.get("tasks", []) if x.get("id") == task["task_id"]), {})
+        targets = item.get("assigned_harness_ids", []) or json.loads(
+            task["assigned_harness_ids_json"]
+        )
+        if targets and harness_id not in targets:
+            return "wrong_target", None
+        if (item.get("require_human_assign") or task["require_human_assign"]) and not targets:
+            return "assignment_required", None
+        row = conn.execute("SELECT * FROM harnesses WHERE harness_id = ?", (harness_id,)).fetchone()
+        # Legacy auth-off drills remain explicitly legacy. Targeted work is
+        # always checked, and enforce mode never trusts an unregistered probe.
+        strict = settings.auth_mode == "enforce" or bool(targets) or bool(item.get("capabilities"))
+        if row is None or not row["registration_version"]:
+            return ("unregistered" if strict else None), None
+        registration = conn.execute(
+            "SELECT * FROM harness_registrations WHERE harness_id = ? AND registration_version = ?",
+            (harness_id, row["registration_version"]),
+        ).fetchone()
+        if registration is None:
+            return "registration_missing", None
+        if strict:
+            if row["status"] != "online":
+                return "offline_or_degraded", None
+            if not set(item.get("capabilities", [])).issubset(
+                json.loads(registration["capabilities_json"])
+            ):
+                return "capability_missing", None
+            probe = conn.execute(
+                "SELECT * FROM capability_probes WHERE harness_id = ? ORDER BY rowid DESC LIMIT 1",
+                (harness_id,),
+            ).fetchone()
+            if (
+                probe
+                and probe["registration_version"] == row["registration_version"]
+                and probe["degraded"]
+            ):
+                return "probe_degraded", None
+            running = conn.execute(
+                "SELECT COUNT(*) FROM leases WHERE owner = ? AND kind = 'development' AND released_at IS NULL AND lease_until > ?",
+                (harness_id, utc_now().isoformat()),
+            ).fetchone()[0]
+            if running >= registration["max_parallel_tasks"]:
+                return "parallel_limit", None
+        return None, str(row["registration_version"])
 
     def claim(self, request: ClaimRequest) -> ClaimResult:
         if not request.task_ids:
@@ -543,6 +600,13 @@ class ClaimService:
         (``changes_requested``, the previous attempt still on the row): the
         conditional UPDATE matches on them so the race guard is exact for both.
         """
+        refusal, registration_version = self.eligibility(conn, task, request.harness_id)
+        if refusal:
+            return ClaimItem(
+                task_id=task_id,
+                outcome=OUTCOME_REJECTED,
+                error_code=f"{RejectCode.HARNESS_INELIGIBLE.value}:{refusal}",
+            )
         budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
         overridden = task["budget_override_by"] is not None
         if not budget_left and not overridden:
@@ -614,12 +678,14 @@ class ClaimService:
             lease_until=lease_until,
         )
 
-        base_commit = self._integration_head(conn, task_id)
+        # R10 §11/§13: revisions retain the first claim's differential anchor.
+        base_commit = task["base_commit"] or self._integration_head(conn, task_id)
         payload = {
             "claim_request_id": request.claim_request_id,
             "attempt_id": attempt_id,
             "attempt_no": attempt_no,
             "fencing_epoch": fencing_epoch,
+            "registration_version": registration_version,
         }
         if revised_from is not None:
             payload["revised_from"] = revised_from
@@ -654,6 +720,10 @@ class ClaimService:
         )
         if cursor.rowcount != 1:
             raise ConcurrentStateChange(f"could not stamp base_locked_seq for {task_id}")
+        conn.execute(
+            "UPDATE tasks SET registration_version = ? WHERE task_id = ?",
+            (registration_version, task_id),
+        )
 
         conn.execute(
             "INSERT INTO task_attempts("
@@ -671,6 +741,10 @@ class ClaimService:
                 TaskStatus.CLAIMED.value,
                 moment.isoformat(),
             ),
+        )
+        conn.execute(
+            "UPDATE task_attempts SET registration_version = ? WHERE attempt_id = ?",
+            (registration_version, attempt_id),
         )
         lease: LeaseGrant = grant_lease(
             conn,
@@ -1196,6 +1270,13 @@ class ClaimService:
     # --------------------------------------------------------------- helpers
 
     def _integration_head(self, conn: sqlite3.Connection, task_id: str) -> str | None:
+        if self.repo is not None:
+            # integration_health is a health projection, not Git HEAD. It can
+            # be NULL before the first merge or lag a scheduler ref update.
+            head = self.repo.ref_commit(self.repo.integration_ref)
+            if head is None:
+                raise RuntimeError("canonical integration HEAD unavailable; claim refused")
+            return head
         row = conn.execute(
             "SELECT ih.integration_commit"
             "  FROM tasks t"

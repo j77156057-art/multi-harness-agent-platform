@@ -7,7 +7,7 @@ would be a second definition that drifts.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -33,12 +33,37 @@ class PlanDecision(BaseModel):
     reason: str | None = None
 
 
+class HarnessRegistrationRequest(BaseModel):
+    """The human-maintained R10 §6 registration record."""
+
+    registered_by: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    adapter: str = Field(min_length=1)
+    adapter_version: str = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    max_parallel_tasks: int = Field(default=1, ge=1)
+    status: Literal["online", "degraded", "offline"] = "online"
+    registration_version: str = Field(min_length=1)
+
+
 class ClaimRequestModel(BaseModel):
     claim_request_id: str = Field(min_length=1)
     harness_id: str = Field(min_length=1)
     task_ids: list[str] = Field(min_length=1)
     partial_allowed: bool = False
     payload_hash: str | None = None
+
+
+class FormalDispatchRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=200)
+    goal: str = Field(min_length=1, max_length=8000)
+    harness_id: str = Field(min_length=1, max_length=100)
+    decided_by: str = Field(min_length=1)
+    exclusive_paths: list[str] = Field(min_length=1, max_length=50)
+    acceptance: str = Field(min_length=1, max_length=4000)
 
 
 class HeartbeatRequest(BaseModel):

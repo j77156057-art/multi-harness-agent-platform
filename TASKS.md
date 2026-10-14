@@ -121,7 +121,7 @@
 | ADMIN-03 | WorkBuddy / workbuddy-admin03-a1 | ADMIN-01 | prep（本人回执已登记；契约冻结后重验才可实施） | `agent/admin/workbuddy/ADMIN-03/a1` | `MVP-PROCESS-001` `DOC-TRACE-001` |
 | ADMIN-03-register | Codex | — | ✅ done（仅串行登记，不实现管理员） | `agent/local/codex/ADMIN-03-register/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-REGISTER-01 | Codex | — | done（串行登记；非功能验收） | `agent/local/codex/FORMAL-DISPATCH-REGISTER-01/a1` | `MVP-PROCESS-001` |
-| FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | claimed（本机正式分派接通，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
+| FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -291,7 +291,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 |---|---|---|
 | `ADMIN-03-register` | 协调者串行登记 ADMIN-03 的本人回执及等待依赖；不合入 prep 或实现 | 已完成，待 Merge Gate 合入，见本任务卡 |
 | `FORMAL-DISPATCH-REGISTER-01` | 登记本机正式分派接通的 Codex 认领、路径和测试范围，保留 ADMIN-01/03 状态 | 本任务分支登记提交 |
-| `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 待实施 |
+| `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 已实施，见 docs/reports/formal-dispatch/ |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
 | `fix-flaky-init` | 撤回 flaky 登记（只改 TASKS.md 登记，未动门禁本体） | `9d3d3ef` |
