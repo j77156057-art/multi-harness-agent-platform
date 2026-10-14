@@ -122,6 +122,7 @@
 | ADMIN-03-register | Codex | — | ✅ done（仅串行登记，不实现管理员） | `agent/local/codex/ADMIN-03-register/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-REGISTER-01 | Codex | — | done（串行登记；非功能验收） | `agent/local/codex/FORMAL-DISPATCH-REGISTER-01/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
+| FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | doing（多 Harness 本机真实联调） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -144,6 +145,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- ADMIN-03-register → docs/claims/codex--ADMIN-03-register.md -->
 <!-- FORMAL-DISPATCH-REGISTER-01 → docs/claims/codex--FORMAL-DISPATCH-REGISTER-01.md -->
 <!-- FORMAL-DISPATCH-01 → docs/claims/codex--FORMAL-DISPATCH-01.md -->
+<!-- FORMAL-MULTI-HARNESS-01 → docs/claims/codex--FORMAL-MULTI-HARNESS-01.md -->
 
 **本表只读**。每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md>`（迁移期也接受旧的 `<序号>-` 前缀，见 `docs/proposals/claim-denum.md`），
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
