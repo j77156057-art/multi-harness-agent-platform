@@ -94,15 +94,16 @@ class ScopedRunner(SubprocessRunner):
                 path = path.rsplit(" -> ", 1)[1]
             path = path.replace("\\", "/")
             candidates = (
-                run_git("ls-files", "--others", "--exclude-standard", cwd=cwd)
-                .stdout.splitlines()
+                run_git("ls-files", "--others", "--exclude-standard", cwd=cwd).stdout.splitlines()
                 if path.endswith("/")
                 else [path]
             )
             for candidate in candidates:
                 candidate = candidate.replace("\\", "/")
                 if not candidate or not any(fnmatchcase(candidate, pattern) for pattern in paths):
-                    raise RuntimeError("platform commit refused: dirty path outside exclusive_paths")
+                    raise RuntimeError(
+                        "platform commit refused: dirty path outside exclusive_paths"
+                    )
                 changed_paths.append(candidate)
         run_git("add", "--", *sorted(set(changed_paths)), cwd=cwd)
         staged = run_git("diff", "--cached", "--name-only", cwd=cwd).stdout.splitlines()

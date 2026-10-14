@@ -41,10 +41,14 @@ def test_platform_commit_commits_only_the_exclusive_path(tmp_path: Path):
     (tmp_path / "docs" / "allowed.md").write_text("submitted", encoding="utf-8")
     runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
     import sys
+
     result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
     assert result.returncode == 0
     assert run_git("status", "--porcelain", cwd=tmp_path).stdout == ""
-    assert run_git("diff", "--name-only", f"{base}..HEAD", cwd=tmp_path).stdout.strip() == "docs/allowed.md"
+    assert (
+        run_git("diff", "--name-only", f"{base}..HEAD", cwd=tmp_path).stdout.strip()
+        == "docs/allowed.md"
+    )
 
 
 def test_platform_commit_rejects_an_out_of_scope_dirty_path(tmp_path: Path):
@@ -56,6 +60,7 @@ def test_platform_commit_rejects_an_out_of_scope_dirty_path(tmp_path: Path):
     (tmp_path / "outside.md").write_text("escape", encoding="utf-8")
     runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
     import sys
+
     with pytest.raises(RuntimeError, match="outside exclusive_paths"):
         runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
     assert run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip() == base
@@ -67,6 +72,7 @@ def test_platform_commit_rejects_empty_result(tmp_path: Path):
     base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
     runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
     import sys
+
     result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
     assert result.returncode == 1
     assert "empty or out-of-scope" in result.stderr
