@@ -11,7 +11,9 @@ from pathlib import Path
 import httpx
 
 from app.adapter.harnesses.cli import CliHarnessWorker, CliRunResult, SubprocessRunner
+from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.codex import CodexAdapter
+from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
@@ -19,6 +21,27 @@ from app.git.worktree import WorktreeManager
 from app.tasks.service import SchedulerService
 from app.verify.profile import VerifyPolicy
 from app.verify.worker import VerifyWorker
+
+
+ADAPTER_TYPES = {
+    "codex": CodexAdapter,
+    "claude-code": ClaudeCodeAdapter,
+    "opencode": OpenCodeAdapter,
+}
+
+
+def adapter_for_harness(client, harness_id: str):
+    """Build the real CLI adapter selected by the registered Harness identity.
+
+    A formal worker is launched once per Harness token. Selecting the adapter
+    from that explicit identity prevents a Claude/OpenCode token from silently
+    running the Codex command, which would make the platform receipt lie about
+    the executable that produced it.
+    """
+    adapter_type = ADAPTER_TYPES.get(harness_id)
+    if adapter_type is None:
+        raise ValueError(f"unsupported formal Harness: {harness_id}")
+    return adapter_type(client)
 
 
 class ScopedRunner(SubprocessRunner):
@@ -48,8 +71,8 @@ class ScopedRunner(SubprocessRunner):
         return result
 
 
-def run_one(client, database, repo, *, group: str, evidence: Path) -> bool:
-    adapter = CodexAdapter(client)
+def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Path) -> bool:
+    adapter = adapter_for_harness(client, harness_id)
     ready = adapter.list_ready_tasks(group_id=group, limit=1)["tasks"]
     if not ready:
         return False
@@ -153,6 +176,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8848")
     parser.add_argument("--token-file", type=Path, required=True)
+    parser.add_argument("--harness-id", required=True, choices=sorted(ADAPTER_TYPES))
     parser.add_argument("--group", required=True)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
@@ -171,6 +195,7 @@ def main():
                     client,
                     database,
                     repo,
+                    harness_id=args.harness_id,
                     group=args.group,
                     evidence=settings.data_dir / "formal-runs",
                 )
