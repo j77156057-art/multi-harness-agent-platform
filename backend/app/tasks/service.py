@@ -1471,11 +1471,43 @@ class SchedulerService:
 
     # ----------------------------------------------------------------- reads
 
+    def _add_task_title(self, task: dict[str, object]) -> dict[str, object]:
+        """Project the human-facing title stored in the immutable plan snapshot.
+
+        Task state is deliberately kept separate from plan content, but read
+        consumers still need a stable label to distinguish tasks in a queue.
+        """
+        snapshot_id = task.get("plan_snapshot_id")
+        if not snapshot_id:
+            return task
+        rows = self.database.read(
+            "SELECT content_json FROM plan_snapshots WHERE snapshot_id = ?",
+            (str(snapshot_id),),
+        )
+        if not rows:
+            return task
+        try:
+            snapshot = json.loads(str(rows[0]["content_json"]))
+        except (TypeError, ValueError, KeyError):
+            return task
+        specs = snapshot.get("tasks", []) if isinstance(snapshot, dict) else []
+        spec = next(
+            (
+                item
+                for item in specs
+                if isinstance(item, dict) and item.get("id") == task.get("task_id")
+            ),
+            None,
+        )
+        if isinstance(spec, dict) and isinstance(spec.get("title"), str) and spec["title"].strip():
+            task["title"] = spec["title"]
+        return task
+
     def get_task(self, task_id: str) -> dict[str, object]:
         rows = self.database.read("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
         if not rows:
             raise NotFound(f"unknown task: {task_id}")
-        return dict(rows[0])
+        return self._add_task_title(dict(rows[0]))
 
     def diff_for_task(
         self,
@@ -1585,7 +1617,7 @@ class SchedulerService:
                 "SELECT * FROM tasks WHERE group_id = ? AND status = ? ORDER BY task_id",
                 (group_id, status),
             )
-        return [dict(row) for row in rows]
+        return [self._add_task_title(dict(row)) for row in rows]
 
     def list_projects(self) -> list[dict]:
         """Every project, oldest first -- the frontend rail's top level."""

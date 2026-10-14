@@ -90,6 +90,18 @@ def test_atomic_dispatch_replay_and_conflict(env):
     )
 
 
+def test_task_reads_project_title_from_plan_snapshot(env):
+    task_id = env.client.post("/api/v1/groups/G/dispatch", json=body()).json()["task_id"]
+
+    detail = env.client.get(f"/api/v1/tasks/{task_id}")
+    assert detail.status_code == 200
+    assert detail.json()["title"] == "Write documentation"
+
+    listed = env.client.get("/api/v1/groups/G/tasks")
+    assert listed.status_code == 200
+    assert listed.json()["tasks"][0]["title"] == "Write documentation"
+
+
 def test_http_claim_freezes_actual_git_head_without_health_projection(env, tmp_path):
     repo = env.client.app.state.canonical_repo
     old = repo.ref_commit(repo.integration_ref)
