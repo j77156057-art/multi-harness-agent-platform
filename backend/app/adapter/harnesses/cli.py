@@ -105,6 +105,19 @@ class CliHarness(HttpAdapter):
     def command(self, work_order: str, worktree: Path) -> list[str]:
         raise NotImplementedError
 
+    def prepare_work_order(self, work_order: str, worktree: Path) -> str:
+        """Return the text passed to :meth:`command`.
+
+        Adapters whose platform launcher cannot safely carry arbitrary text may
+        persist the order in a short-lived transport file instead.  The worker
+        always calls :meth:`cleanup_work_order` after the child exits.
+        """
+        return work_order
+
+    def cleanup_work_order(self) -> None:
+        """Remove any temporary transport files created for the last command."""
+        return None
+
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {}
 
@@ -300,7 +313,8 @@ class CliHarnessWorker:
             base_commit=item.get("base_commit"),
             goal=goal,
         )
-        argv = self.adapter.command(work_order, self.worktree)
+        prepared_order = self.adapter.prepare_work_order(work_order, self.worktree)
+        argv = self.adapter.command(prepared_order, self.worktree)
 
         try:
             cli = self.runner.run(
@@ -313,6 +327,8 @@ class CliHarnessWorker:
         except HarnessTimeout as exc:
             self.adapter.abandon(task_id=task_id, reason=f"harness timeout: {exc}")
             raise
+        finally:
+            self.adapter.cleanup_work_order()
         if cli.returncode != 0:
             self.adapter.abandon(task_id=task_id, reason=f"harness CLI exited {cli.returncode}")
             raise CliFailed(task_id, cli)

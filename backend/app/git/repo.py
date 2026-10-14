@@ -13,10 +13,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
+from app.db.connection import _lock_file, _unlock_file
 from app.git.branch import is_integration_ref
 
 INTEGRATION_BRANCH = "integration"
@@ -122,16 +126,35 @@ class CanonicalRepo:
 
     def ensure(self) -> None:
         """Create the bare repository, seed ``integration`` and install the hook."""
-        if not (self.path / "HEAD").exists():
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            run_git("init", "--bare", "--initial-branch", INTEGRATION_BRANCH, str(self.path))
-            # The Merge Worker and the push proxy write refs/heads/<branch>
-            # here, and a long branch name can exceed Windows' MAX_PATH; the
-            # same extended-length-path switch as worktrees (R10 §14).
-            run_git("config", "core.longpaths", "true", cwd=self.path)
-        self.install_hook()
-        if self.ref_commit(self.integration_ref) is None:
-            self._seed_integration()
+        with self._ensure_lock():
+            if not (self.path / "HEAD").exists():
+                self.path.parent.mkdir(parents=True, exist_ok=True)
+                run_git("init", "--bare", "--initial-branch", INTEGRATION_BRANCH, str(self.path))
+                # The Merge Worker and the push proxy write refs/heads/<branch>
+                # here, and a long branch name can exceed Windows' MAX_PATH; the
+                # same extended-length-path switch as worktrees (R10 §14).
+                run_git("config", "core.longpaths", "true", cwd=self.path)
+            self.install_hook()
+            if self.ref_commit(self.integration_ref) is None:
+                self._seed_integration()
+
+    @contextmanager
+    def _ensure_lock(self) -> Iterator[None]:
+        """Serialize first-run repository creation across worker processes.
+
+        Several formal workers can start at once. Without a lock they all see
+        the empty bare repository and race through ``git init``/seed commit,
+        leaving ``HEAD.lock`` or the temporary seed repository behind.
+        """
+        lock_path = self.path.with_name(self.path.name + ".ensure.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = lock_path.open("a+b")
+        try:
+            _lock_file(handle)
+            yield
+        finally:
+            _unlock_file(handle)
+            handle.close()
 
     def _seed_integration(self) -> None:
         """Create the root commit ``integration`` starts from.
@@ -144,9 +167,10 @@ class CanonicalRepo:
         scheduler is supposed to be the exception that writes it from inside.
         This is that same path -- import objects, then ``update-ref``.
         """
-        work = self.path.parent / f".seed-{self.path.name}"
-        if work.exists():
-            shutil.rmtree(work)
+        # Keep the unique suffix, but use a deliberately short prefix: this
+        # directory is nested below the canonical path and Windows Git object
+        # names can otherwise exceed MAX_PATH in the deep-root regression.
+        work = Path(tempfile.mkdtemp(prefix=".s-", dir=self.path.parent))
         try:
             run_git("init", "--initial-branch", INTEGRATION_BRANCH, str(work))
             readme = work / "README.md"
