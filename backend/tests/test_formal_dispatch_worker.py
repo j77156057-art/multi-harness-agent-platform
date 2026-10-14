@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from app.adapter.formal_worker import ScopedRunner
 from app.adapter.verify_artifact import verify
 from app.git.repo import run_git
@@ -29,3 +31,42 @@ def test_structural_gate_requires_nonempty_allowed_artifact(tmp_path: Path):
     assert not verify(tmp_path, ["docs/output.md"])
     output.write_text("Human review still required", encoding="utf-8")
     assert verify(tmp_path, ["docs/output.md"])
+
+
+def test_platform_commit_commits_only_the_exclusive_path(tmp_path: Path):
+    run_git("init", str(tmp_path))
+    run_git("commit", "--allow-empty", "-m", "seed", cwd=tmp_path)
+    base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "allowed.md").write_text("submitted", encoding="utf-8")
+    runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
+    import sys
+    result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
+    assert result.returncode == 0
+    assert run_git("status", "--porcelain", cwd=tmp_path).stdout == ""
+    assert run_git("diff", "--name-only", f"{base}..HEAD", cwd=tmp_path).stdout.strip() == "docs/allowed.md"
+
+
+def test_platform_commit_rejects_an_out_of_scope_dirty_path(tmp_path: Path):
+    run_git("init", str(tmp_path))
+    run_git("commit", "--allow-empty", "-m", "seed", cwd=tmp_path)
+    base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "allowed.md").write_text("submitted", encoding="utf-8")
+    (tmp_path / "outside.md").write_text("escape", encoding="utf-8")
+    runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
+    import sys
+    with pytest.raises(RuntimeError, match="outside exclusive_paths"):
+        runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
+    assert run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip() == base
+
+
+def test_platform_commit_rejects_empty_result(tmp_path: Path):
+    run_git("init", str(tmp_path))
+    run_git("commit", "--allow-empty", "-m", "seed", cwd=tmp_path)
+    base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
+    runner = ScopedRunner({"exclusive_paths": ["docs/allowed.md"]}, base, platform_commit=True)
+    import sys
+    result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
+    assert result.returncode == 1
+    assert "empty or out-of-scope" in result.stderr

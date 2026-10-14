@@ -45,14 +45,25 @@ def adapter_for_harness(client, harness_id: str):
 
 
 class ScopedRunner(SubprocessRunner):
-    def __init__(self, spec: dict, base: str):
+    def __init__(
+        self,
+        spec: dict,
+        base: str,
+        *,
+        platform_commit: bool = False,
+        commit_message: str = "chore(formal): submit harness deliverable",
+    ):
         super().__init__()
         self.spec, self.base = spec, base
+        self.platform_commit = platform_commit
+        self.commit_message = commit_message
 
     def run(self, argv, *, cwd, **kwargs):
         result = super().run(argv, cwd=cwd, **kwargs)
         if result.returncode:
             return result
+        if self.platform_commit:
+            self._commit_uncommitted_scope(cwd)
         changed = run_git("diff", "--name-only", f"{self.base}..HEAD", cwd=cwd).stdout.splitlines()
         paths = self.spec["exclusive_paths"]
         dirty = run_git("status", "--porcelain", cwd=cwd).stdout.strip()
@@ -69,6 +80,38 @@ class ScopedRunner(SubprocessRunner):
                 result.duration_seconds,
             )
         return result
+
+    def _commit_uncommitted_scope(self, cwd: Path) -> None:
+        """Submit an authorized Claude result without granting Claude Git access."""
+        status = run_git("status", "--porcelain", cwd=cwd).stdout.splitlines()
+        if not status:
+            return
+        paths = self.spec["exclusive_paths"]
+        changed_paths: list[str] = []
+        for line in status:
+            path = line[3:].strip()
+            if " -> " in path:
+                path = path.rsplit(" -> ", 1)[1]
+            path = path.replace("\\", "/")
+            candidates = (
+                run_git("ls-files", "--others", "--exclude-standard", cwd=cwd)
+                .stdout.splitlines()
+                if path.endswith("/")
+                else [path]
+            )
+            for candidate in candidates:
+                candidate = candidate.replace("\\", "/")
+                if not candidate or not any(fnmatchcase(candidate, pattern) for pattern in paths):
+                    raise RuntimeError("platform commit refused: dirty path outside exclusive_paths")
+                changed_paths.append(candidate)
+        run_git("add", "--", *sorted(set(changed_paths)), cwd=cwd)
+        staged = run_git("diff", "--cached", "--name-only", cwd=cwd).stdout.splitlines()
+        if not staged or any(
+            not any(fnmatchcase(path.replace("\\", "/"), pattern) for pattern in paths)
+            for path in staged
+        ):
+            raise RuntimeError("platform commit refused: staged path outside exclusive_paths")
+        run_git("commit", "-m", self.commit_message, cwd=cwd)
 
 
 def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Path) -> bool:
@@ -93,13 +136,26 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
         )
         return Path(result["worktree_path"])
 
-    scoped_runner = ScopedRunner(spec, service.repo_head(manager))
+    scoped_runner = ScopedRunner(
+        spec,
+        service.repo_head(manager),
+        platform_commit=harness_id == "claude-code",
+        commit_message=f"chore({task['task_id']}): submit Claude deliverable"
+        if harness_id == "claude-code"
+        else "chore(formal): submit harness deliverable",
+    )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
     goal = (
         "Use ONLY the immutable approved task below. This workspace may contain only a seed README; "
         "there is no separate TASKS.md requirement if absent. Create a nonempty committed deliverable "
         "strictly inside exclusive_paths; do not read or modify other projects. "
-        "Do not change branch, install software or push. Task specification: "
+        "Do not change branch, install software or push. "
+        + (
+            "Do not run git add or git commit; the platform will submit your files after checking scope. "
+            if harness_id == "claude-code"
+            else "Commit the deliverable on the current branch. "
+        )
+        + "Task specification: "
         + json.dumps(spec, ensure_ascii=False)
     )
     evidence.mkdir(parents=True, exist_ok=True)
