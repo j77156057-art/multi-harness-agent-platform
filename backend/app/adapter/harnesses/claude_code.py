@@ -52,8 +52,17 @@ class ClaudeCodeAdapter(CliHarness):
         self.permission_mode = permission_mode
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
+        argv = ["claude"]
+        git_pointer = worktree / ".git"
+        if git_pointer.is_file():
+            pointer = git_pointer.read_text(encoding="utf-8").strip()
+            if pointer.startswith("gitdir:"):
+                git_dir = Path(pointer.partition(":")[2].strip())
+                if not git_dir.is_absolute():
+                    git_dir = (worktree / git_dir).resolve()
+                argv.extend(["--add-dir", str(git_dir)])
         return [
-            "claude",
+            *argv,
             "-p",
             "--output-format",
             "json",
