@@ -38,6 +38,21 @@ def test_formal_worker_rejects_unknown_cli_instead_of_falling_back():
         adapter_for_harness(SimpleNamespace(), "not-registered")
 
 
+def test_claude_adapter_allows_only_the_attempt_gitdir(tmp_path):
+    worktree = tmp_path / "attempt"
+    git_dir = tmp_path / "attempt.git"
+    worktree.mkdir()
+    git_dir.mkdir()
+    (worktree / ".git").write_text("gitdir: ../attempt.git\n", encoding="utf-8")
+    adapter = ClaudeCodeAdapter(SimpleNamespace())
+
+    command = adapter.command("work order", worktree)
+
+    assert command[:3] == ["claude", "--add-dir", str(git_dir.resolve())]
+    assert "--dangerously-skip-permissions" not in command
+    assert command[-1] == "work order"
+
+
 def test_windowsapps_bash_uses_cmd_shim_for_opencode(tmp_path):
     adapter = OpenCodeAdapter(
         SimpleNamespace(),

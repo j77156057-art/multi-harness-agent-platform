@@ -21,6 +21,6 @@ test_id：MVP-API-001、MVP-ADAPTER-003
   与日志留档。若发现适配器/worker 缺陷，先以回归测试钉死，再做最小修复并重跑全套。
 测试命令：./scripts.sh check；backend/.venv/Scripts/python.exe -m pytest backend/tests/test_formal_multi_harness*.py；
   真实 CLI 流程按 docs/reports/formal-multi-harness/README.md 复跑
-当前状态：doing
-已知边界：本轮只证明本机 loopback API 与本机已登录 CLI；不声称公网、手机、生产或模型质量验收。
+当前状态：blocked（Codex 与 OpenCode 已有真实成功回执；Claude Code 可生成限定文件，但 linked worktree Git 操作需要人工批准，等待权限裁决）
+已知边界：本轮只证明本机 loopback API 与本机已登录 CLI；不声称公网、手机、生产或模型质量验收。OpenCode/Codex 成功与失败证据位于 gitignored `data/formal-runs/`；人工批准的 Claude Git 命令尚未取得。
 ~~~
