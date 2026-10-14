@@ -122,7 +122,7 @@
 | ADMIN-03-register | Codex | — | ✅ done（仅串行登记，不实现管理员） | `agent/local/codex/ADMIN-03-register/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-REGISTER-01 | Codex | — | done（串行登记；非功能验收） | `agent/local/codex/FORMAL-DISPATCH-REGISTER-01/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
-| FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | doing（多 Harness 本机真实联调） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
+| FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | blocked（Codex/OpenCode 真实链路通过；Claude Code 被 linked worktree Git 安全策略阻塞，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
