@@ -110,23 +110,44 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
             timeout_seconds=600,
             goal=goal,
         )
-    except CliFailed as exc:
-        (evidence / f"{task['task_id']}.failure.json").write_text(
-            json.dumps(
+    except Exception as exc:
+        recycled: dict[str, object] = {"status": "not_attempted"}
+        attempt_id = captured.get("attempt_id")
+        if attempt_id:
+            try:
+                adapter.abandon(
+                    task_id=task["task_id"],
+                    reason=f"formal worker error: {type(exc).__name__}",
+                )
+            except Exception:
+                # CliFailed and HarnessTimeout already abandon inside the
+                # worker; a second abandon is harmlessly ignored here.
+                pass
+            try:
+                manager.archive_and_recycle(attempt_id=str(attempt_id))
+                recycled = {"status": "archived"}
+            except Exception as cleanup_error:  # pragma: no cover - defensive evidence path
+                recycled = {"status": "failed", "error": type(cleanup_error).__name__}
+        failure = {
+            "task_id": task["task_id"],
+            "harness_id": harness_id,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+            "workspace_recycle": recycled,
+            "scope": "real local CLI failure; attempt was abandoned by the worker",
+        }
+        if isinstance(exc, CliFailed):
+            failure.update(
                 {
-                    "task_id": task["task_id"],
-                    "harness_id": harness_id,
                     "cli_returncode": exc.result.returncode,
                     "argv": exc.result.argv,
                     "stdout": exc.result.stdout,
                     "stderr": exc.result.stderr,
                     "duration_seconds": exc.result.duration_seconds,
-                    "scope": "real local CLI failure; attempt was abandoned by the worker",
-                },
-                ensure_ascii=False,
-                indent=2,
-            ),
-            encoding="utf-8",
+                }
+            )
+        (evidence / f"{task['task_id']}.failure.json").write_text(
+            json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         raise
     (evidence / f"{task['task_id']}.json").write_text(
@@ -209,6 +230,7 @@ def main():
         settings.worktree_root = args.worktree_root
     database, repo = Database(), CanonicalRepo.from_settings()
     repo.ensure()
+    last_no_ready_report = 0.0
     with httpx.Client(
         base_url=args.url,
         headers={"Authorization": "Bearer " + args.token_file.read_text().strip()},
@@ -216,7 +238,7 @@ def main():
     ) as client:
         while True:
             try:
-                run_one(
+                completed = run_one(
                     client,
                     database,
                     repo,
@@ -224,6 +246,23 @@ def main():
                     group=args.group,
                     evidence=settings.data_dir / "formal-runs",
                 )
+                if not completed:
+                    now = time.monotonic()
+                    if args.once or now - last_no_ready_report >= 30:
+                        print(
+                            json.dumps(
+                                {
+                                    "status": "no_ready_task",
+                                    "harness_id": args.harness_id,
+                                    "group": args.group,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                        last_no_ready_report = now
+                else:
+                    last_no_ready_report = 0.0
             except Exception as exc:
                 # Never log bodies/tokens. State is still whatever the API says.
                 print(json.dumps({"worker_error": type(exc).__name__}), flush=True)

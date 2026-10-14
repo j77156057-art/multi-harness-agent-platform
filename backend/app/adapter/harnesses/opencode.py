@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -73,6 +74,42 @@ class OpenCodeAdapter(CliHarness):
         # no bash" (how the tests pin the fallback without faking the machine).
         self.platform = platform if platform is not None else os.name
         self.bash_path = shutil.which("bash") if bash_path is None else (bash_path or None)
+        self._work_order_bundle: Path | None = None
+
+    def _needs_cmd_transport_file(self) -> bool:
+        return (
+            self.platform == "nt"
+            and self.bash_path is not None
+            and Path(self.bash_path).name.lower() == "bash.exe"
+            and "windowsapps" in str(self.bash_path).lower()
+        )
+
+    def prepare_work_order(self, work_order: str, worktree: Path) -> str:
+        """Move arbitrary text out of ``cmd /c`` when WindowsApps bash is used.
+
+        ``cmd.exe`` does not preserve newlines, quotes, or metacharacters in a
+        single ``/c`` argument.  OpenCode can attach a file, so the command
+        line carries only a fixed sentence and a generated script path.
+        """
+        if not self._needs_cmd_transport_file():
+            return work_order
+        bundle = Path(tempfile.mkdtemp(prefix="agent-platform-opencode-"))
+        (bundle / "work-order.txt").write_text(work_order, encoding="utf-8", newline="\n")
+        (bundle / "run.cmd").write_text(
+            "@echo off\r\n"
+            'opencode run --format json --auto --file "%~dp0work-order.txt" '
+            '"Read and follow the attached work order exactly."\r\n'
+            "exit /b %errorlevel%\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+        self._work_order_bundle = bundle
+        return "Read and follow the attached work order exactly."
+
+    def cleanup_work_order(self) -> None:
+        bundle, self._work_order_bundle = self._work_order_bundle, None
+        if bundle is not None:
+            shutil.rmtree(bundle, ignore_errors=True)
 
     def use_shell_shim(self) -> bool:
         """Effective launcher: the setting, or the platform default (drill F4)."""
@@ -84,6 +121,12 @@ class OpenCodeAdapter(CliHarness):
         return self.platform == "nt" and self.bash_path is not None
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
+        if self._work_order_bundle is not None:
+            script = self._work_order_bundle / "run.cmd"
+            # Keep the script path as its own argv item.  Passing a quoted
+            # ``call \"path\"`` string through Python's Windows quoting makes
+            # cmd.exe see the backslashes as literal command text.
+            return ["cmd.exe", "/d", "/s", "/c", "call", str(script)]
         argv = ["opencode", "run", "--format", "json", "--auto", work_order]
         if self.use_shell_shim():
             # The WindowsApps ``bash.exe`` alias is a WSL launcher that drops
@@ -94,6 +137,9 @@ class OpenCodeAdapter(CliHarness):
             if self.platform == "nt" and self.bash_path:
                 bash_path = Path(self.bash_path)
                 if bash_path.name.lower() == "bash.exe" and "windowsapps" in str(bash_path).lower():
+                    # Arbitrary work orders are prepared as an attached file
+                    # by ``prepare_work_order``.  Keep this fallback for
+                    # callers that invoke ``command`` directly.
                     return ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
             # $0 = opencode, $@ = the remaining argv: the exe's parent becomes
             # this shell instead of the Python worker (see the module docstring).

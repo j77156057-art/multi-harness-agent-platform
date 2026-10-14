@@ -14,10 +14,10 @@ import os
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
-from contextlib import contextmanager
-from pathlib import Path
 from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
 
 from app.config import settings
 from app.db.connection import _lock_file, _unlock_file
@@ -167,7 +167,10 @@ class CanonicalRepo:
         scheduler is supposed to be the exception that writes it from inside.
         This is that same path -- import objects, then ``update-ref``.
         """
-        work = Path(tempfile.mkdtemp(prefix=f".seed-{self.path.name}-", dir=self.path.parent))
+        # Keep the unique suffix, but use a deliberately short prefix: this
+        # directory is nested below the canonical path and Windows Git object
+        # names can otherwise exceed MAX_PATH in the deep-root regression.
+        work = Path(tempfile.mkdtemp(prefix=".s-", dir=self.path.parent))
         try:
             run_git("init", "--initial-branch", INTEGRATION_BRANCH, str(work))
             readme = work / "README.md"
