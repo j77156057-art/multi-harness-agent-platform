@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import time
 from fnmatch import fnmatchcase
@@ -114,15 +115,11 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
         recycled: dict[str, object] = {"status": "not_attempted"}
         attempt_id = captured.get("attempt_id")
         if attempt_id:
-            try:
+            with contextlib.suppress(Exception):
                 adapter.abandon(
                     task_id=task["task_id"],
                     reason=f"formal worker error: {type(exc).__name__}",
                 )
-            except Exception:
-                # CliFailed and HarnessTimeout already abandon inside the
-                # worker; a second abandon is harmlessly ignored here.
-                pass
             try:
                 manager.archive_and_recycle(attempt_id=str(attempt_id))
                 recycled = {"status": "archived"}
