@@ -10,8 +10,8 @@ from pathlib import Path
 
 import httpx
 
-from app.adapter.harnesses.cli import CliHarnessWorker, CliRunResult, SubprocessRunner
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
+from app.adapter.harnesses.cli import CliFailed, CliHarnessWorker, CliRunResult, SubprocessRunner
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.config import settings
@@ -21,7 +21,6 @@ from app.git.worktree import WorktreeManager
 from app.tasks.service import SchedulerService
 from app.verify.profile import VerifyPolicy
 from app.verify.worker import VerifyWorker
-
 
 ADAPTER_TYPES = {
     "codex": CodexAdapter,
@@ -102,14 +101,34 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
         "Do not change branch, install software or push. Task specification: "
         + json.dumps(spec, ensure_ascii=False)
     )
-    outcome = worker.work_on(
-        task_id=task["task_id"],
-        claim_request_id=f"formal-{task['task_id']}-a{int(task['attempt_no'])+1}",
-        on_claimed=provision,
-        timeout_seconds=600,
-        goal=goal,
-    )
     evidence.mkdir(parents=True, exist_ok=True)
+    try:
+        outcome = worker.work_on(
+            task_id=task["task_id"],
+            claim_request_id=f"formal-{task['task_id']}-a{int(task['attempt_no'])+1}",
+            on_claimed=provision,
+            timeout_seconds=600,
+            goal=goal,
+        )
+    except CliFailed as exc:
+        (evidence / f"{task['task_id']}.failure.json").write_text(
+            json.dumps(
+                {
+                    "task_id": task["task_id"],
+                    "harness_id": harness_id,
+                    "cli_returncode": exc.result.returncode,
+                    "argv": exc.result.argv,
+                    "stdout": exc.result.stdout,
+                    "stderr": exc.result.stderr,
+                    "duration_seconds": exc.result.duration_seconds,
+                    "scope": "real local CLI failure; attempt was abandoned by the worker",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise
     (evidence / f"{task['task_id']}.json").write_text(
         json.dumps(
             {
@@ -122,7 +141,7 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
                 "duration_seconds": outcome.cli.duration_seconds,
                 "publish": outcome.publish,
                 "submit": outcome.submit,
-                "scope": "real local Codex execution; structural verification; human acceptance pending",
+                "scope": f"real local {harness_id} execution; structural verification; human acceptance pending",
             },
             ensure_ascii=False,
             indent=2,
@@ -178,10 +197,16 @@ def main():
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--harness-id", required=True, choices=sorted(ADAPTER_TYPES))
     parser.add_argument("--group", required=True)
+    parser.add_argument("--canonical-repo", type=Path)
+    parser.add_argument("--worktree-root", type=Path)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if settings.auth_mode != "enforce":
         raise SystemExit("formal worker requires enforce authentication")
+    if args.canonical_repo is not None:
+        settings.canonical_repo = args.canonical_repo
+    if args.worktree_root is not None:
+        settings.worktree_root = args.worktree_root
     database, repo = Database(), CanonicalRepo.from_settings()
     repo.ensure()
     with httpx.Client(

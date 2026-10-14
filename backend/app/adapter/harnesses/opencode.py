@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,15 @@ class OpenCodeAdapter(CliHarness):
     def command(self, work_order: str, worktree: Path) -> list[str]:
         argv = ["opencode", "run", "--format", "json", "--auto", work_order]
         if self.use_shell_shim():
+            # The WindowsApps ``bash.exe`` alias is a WSL launcher that drops
+            # argv after ``-c``.  That turns the documented ``$0/$@`` shim into
+            # ``/bin/bash: : No such file or directory``.  Use cmd.exe for
+            # that launcher while retaining the bash recipe for real POSIX/Git
+            # Bash installations and the existing adapter contract tests.
+            if self.platform == "nt" and self.bash_path:
+                bash_path = Path(self.bash_path)
+                if bash_path.name.lower() == "bash.exe" and "windowsapps" in str(bash_path).lower():
+                    return ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
             # $0 = opencode, $@ = the remaining argv: the exe's parent becomes
             # this shell instead of the Python worker (see the module docstring).
             return ["bash", "-lc", 'exec "$0" "$@"', *argv]

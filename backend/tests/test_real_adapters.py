@@ -487,7 +487,9 @@ def test_each_adapter_completes_claim_to_merged_over_http(case, tmp_path):
     assert runner.ticks and runner.ticks[0].get("lease_until"), "heartbeat must land"
     expected_head = adapter.binary
     if isinstance(adapter, OpenCodeAdapter) and adapter.use_shell_shim():
-        expected_head = "bash"  # F4: the Windows launcher replaces the parent
+        # WindowsApps' WSL alias drops argv after ``-c``; production uses
+        # cmd.exe there, while a real POSIX/Git Bash install still uses bash.
+        expected_head = "cmd.exe" if runner.argv[0].lower() == "cmd.exe" else "bash"
     assert runner.argv[0] == expected_head
     assert outcome.changed_files == ["flag.txt"]
     assert outcome.parsed["session_id"]

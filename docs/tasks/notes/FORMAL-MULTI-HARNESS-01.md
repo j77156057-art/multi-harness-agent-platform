@@ -7,7 +7,8 @@
 依赖任务：FORMAL-DISPATCH-01（✅）
 工作区：.worktrees/codex/
 真相源引用：R10 §6/§7/§9/§11/§13/§17；AGENTS.md §1/§3/§5b
-允许修改目录：backend/app/adapter/**、backend/tests/test_formal_multi_harness*.py、
+允许修改目录：backend/app/adapter/**、backend/app/git/repo.py、backend/tests/test_formal_multi_harness*.py、
+  backend/tests/test_real_adapters.py、
   docs/reports/formal-multi-harness/**、本任务卡/claim、TASKS.md、docs/traceability.md；
   运行期证据写入 data/formal-multi-harness/（gitignored）
 禁止修改目录：docs/spec/**、历史封印交付、frontend/**、其他 Harness worktree、生产素材；
