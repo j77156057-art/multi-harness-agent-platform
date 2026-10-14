@@ -59,6 +59,7 @@ POLICY: dict[str, frozenset[str]] = {
     "plan:submit": frozenset({HUMAN}),
     "plan:approve": frozenset({HUMAN}),
     "plan:reject": frozenset({HUMAN}),
+    "harness:register": frozenset({HUMAN}),
     "project:create": frozenset({HUMAN}),
     "group:create": frozenset({HUMAN}),
     "task:resume": frozenset({HUMAN}),

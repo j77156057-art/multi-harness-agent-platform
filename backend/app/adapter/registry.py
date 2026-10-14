@@ -24,16 +24,62 @@ from app.adapter.protocol import HarnessRegistration
 from app.db.connection import Database
 
 
+class RegistrationConflict(ValueError):
+    """A registration version cannot be reused for different data."""
+
+
 class HarnessRegistry:
     def __init__(self, database: Database) -> None:
         self.database = database
 
     # ----------------------------------------------------------- registration
 
-    def register(self, registration: HarnessRegistration) -> dict[str, Any]:
+    def register(
+        self, registration: HarnessRegistration, *, registered_by: str | None = None
+    ) -> dict[str, Any]:
         """Record a registration, keeping the previous versions."""
         now = datetime.now(UTC).isoformat()
+        if registration.max_parallel_tasks < 1 or registration.status not in {
+            "online",
+            "degraded",
+            "offline",
+        }:
+            raise ValueError("invalid registration capacity or status")
         with self.database.transaction() as conn:
+            existing = conn.execute(
+                "SELECT * FROM harness_registrations WHERE harness_id = ? "
+                "AND registration_version = ?",
+                (registration.harness_id, registration.registration_version),
+            ).fetchone()
+            if existing is not None:
+                current = conn.execute(
+                    "SELECT registration_version FROM harnesses WHERE harness_id = ?",
+                    (registration.harness_id,),
+                ).fetchone()
+                same = (
+                    str(existing["provider"]) == registration.provider
+                    and str(existing["adapter"]) == registration.adapter
+                    and str(existing["adapter_version"]) == registration.adapter_version
+                    and json.loads(str(existing["capabilities_json"]))
+                    == list(registration.capabilities)
+                    and int(existing["max_parallel_tasks"]) == registration.max_parallel_tasks
+                    and str(existing["status"]) == registration.status
+                    and existing["name"] == registration.name
+                )
+                if (
+                    not same
+                    or current is None
+                    or str(current["registration_version"]) != registration.registration_version
+                ):
+                    raise RegistrationConflict(
+                        f"registration version already exists for {registration.harness_id}"
+                    )
+                return {
+                    "harness_id": registration.harness_id,
+                    "registration_version": registration.registration_version,
+                    "registration_id": str(existing["registration_id"]),
+                    "replayed": True,
+                }
             conn.execute(
                 "INSERT INTO harnesses(harness_id, provider, adapter, status,"
                 " registration_version, capabilities_json, created_at)"
@@ -62,8 +108,8 @@ class HarnessRegistry:
             conn.execute(
                 "INSERT OR IGNORE INTO harness_registrations(registration_id, harness_id,"
                 " registration_version, provider, adapter, adapter_version,"
-                " capabilities_json, max_parallel_tasks, status, created_at)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " capabilities_json, max_parallel_tasks, status, created_at, name, registered_by)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     registration_id,
                     registration.harness_id,
@@ -75,6 +121,8 @@ class HarnessRegistry:
                     registration.max_parallel_tasks,
                     registration.status,
                     now,
+                    registration.name,
+                    registered_by,
                 ),
             )
             if previous is not None and str(previous["registration_version"]) != (
@@ -88,6 +136,7 @@ class HarnessRegistry:
             "harness_id": registration.harness_id,
             "registration_version": registration.registration_version,
             "registration_id": registration_id,
+            "replayed": False,
         }
 
     def current(self, harness_id: str) -> dict[str, Any] | None:
@@ -101,6 +150,22 @@ class HarnessRegistry:
             (harness_id, registration_version),
         )
         return dict(rows[0]) if rows else None
+
+    def listing(self) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for row in self.database.read(
+                "SELECT h.harness_id, h.provider, h.adapter, h.status, h.registration_version,"
+                " h.capabilities_json, r.name, r.adapter_version, r.max_parallel_tasks,"
+                " (SELECT COUNT(*) FROM leases l WHERE l.owner = h.harness_id"
+                " AND l.kind = 'development' AND l.released_at IS NULL"
+                " AND l.lease_until > ?) AS running_tasks"
+                " FROM harnesses h LEFT JOIN harness_registrations r ON"
+                " r.harness_id = h.harness_id AND r.registration_version = h.registration_version"
+                " ORDER BY h.harness_id",
+                (datetime.now(UTC).isoformat(),),
+            )
+        ]
 
     # ------------------------------------------------------------------ probe
 

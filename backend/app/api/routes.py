@@ -11,7 +11,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.adapter.registry import HarnessRegistry, capabilities_from
+from app.adapter.dispatch import dispatch, eligible_tasks
+from app.adapter.protocol import HarnessRegistration
+from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
 from app.api import schemas
 from app.api.auth_deps import (
     Principal,
@@ -143,6 +145,64 @@ def reject_plan(
     return {"plan_id": plan_id, "rejected": rejected}
 
 
+@management.post("/harnesses")
+def register_harness(
+    body: schemas.HarnessRegistrationRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """Register a Harness through the administrator face (R10 §6/§17).
+
+    Runtime probes remain informational. Only this human-maintained registry
+    authorises a Harness to claim work, and each registration version is kept
+    so a task can recover the version pinned at Claim time.
+    """
+    bind_declared(
+        principal,
+        body.registered_by,
+        key="harness:register",
+        database=database,
+        request=request,
+    )
+    registration = HarnessRegistration(
+        harness_id=body.harness_id,
+        name=body.name,
+        provider=body.provider,
+        adapter=body.adapter,
+        adapter_version=body.adapter_version,
+        capabilities=tuple(body.capabilities),
+        max_parallel_tasks=body.max_parallel_tasks,
+        status=body.status,
+        registration_version=body.registration_version,
+    )
+    try:
+        result = HarnessRegistry(database).register(registration, registered_by=body.registered_by)
+    except RegistrationConflict as exc:
+        raise ApiError("registration.conflict", 409, str(exc)) from exc
+    return result
+
+
+@management.get("/harnesses")
+def list_harnesses(database: DatabaseDep, _principal: _guard("harness:register")):
+    return {"harnesses": HarnessRegistry(database).listing()}
+
+
+@management.post("/groups/{group_id}/dispatch")
+def formal_dispatch(
+    group_id: str,
+    body: schemas.FormalDispatchRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("plan:approve"),
+):
+    bind_declared(
+        principal, body.decided_by, key="plan:approve", database=database, request=request
+    )
+    return dispatch(service, group_id=group_id, **body.model_dump())
+
+
 # ----------------------------------------------------------------- adapter
 
 
@@ -238,6 +298,11 @@ def list_ready_tasks(
             422,
             "visibility=redacted is not implemented; R10 §17 defines redaction",
         )
+    if _principal is not None:
+        rows = eligible_tasks(
+            database, harness_id=_principal.subject_id, group_id=group_id, limit=limit
+        )
+        return {"visibility": visibility, "count": len(rows), "tasks": rows}
     # changes_requested is claimable too (R10 §10 claim_for_revision, L449) --
     # a rework the pull model cannot see would stay a dead end.
     sql = "SELECT * FROM tasks WHERE status IN (?, ?)"
@@ -267,7 +332,20 @@ def read_context(
     if not database.read("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,)):
         raise NotFound(f"unknown task: {task_id}")
     page = _event_page(service, since_seq=since_seq, limit=200, task_id=task_id)
-    return {"task_id": task_id, **page}
+    task = service.get_task(task_id)
+    snapshots = database.read(
+        "SELECT content_json FROM plan_snapshots WHERE snapshot_id = ?", (task["plan_snapshot_id"],)
+    )
+    import json
+
+    spec = (
+        next(
+            (x for x in json.loads(snapshots[0][0]).get("tasks", []) if x.get("id") == task_id), {}
+        )
+        if snapshots
+        else {}
+    )
+    return {"task_id": task_id, "task": task, "spec": spec, **page}
 
 
 @adapter.post("/claim")
@@ -279,7 +357,7 @@ def claim(
     principal: _guard("task:claim"),
 ):
     bind_declared(principal, body.harness_id, key="task:claim", database=database, request=request)
-    result = ClaimService(database).claim(
+    result = ClaimService(database, request.app.state.canonical_repo).claim(
         ClaimRequest(
             claim_request_id=body.claim_request_id,
             harness_id=body.harness_id,
@@ -737,6 +815,33 @@ def list_groups(
 @read.get("/tasks/{task_id}")
 def get_task(task_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.get_task(task_id)
+
+
+@read.get("/tasks/{task_id}/verification")
+def task_verification(task_id: str, service: SchedulerDep, database: DatabaseDep):
+    task = service.get_task(task_id)
+    rows = database.read(
+        "SELECT receipt_json FROM verification_receipts WHERE task_id = ? "
+        "AND attempt_id = ? ORDER BY rowid DESC LIMIT 1",
+        (task_id, task["current_attempt_id"]),
+    )
+    if not rows:
+        return {"verification": None}
+    import json
+
+    receipt = json.loads(rows[0][0])
+    fields = (
+        "receipt_id",
+        "receipt_hash",
+        "status",
+        "base_commit",
+        "commit",
+        "baseline_exit_code",
+        "head_exit_code",
+        "failure_reason",
+        "verify_profile",
+    )
+    return {"verification": {key: receipt.get(key) for key in fields}}
 
 
 @read.get("/groups/{group_id}/tasks")

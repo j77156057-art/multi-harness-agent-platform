@@ -208,6 +208,23 @@ class SchedulerService:
         validation = PlanValidator().validate(spec)
         if not validation.ok:
             raise InvalidInput("; ".join(validation.errors))
+        for item in raw.get("tasks", ()):
+            targets = item.get("assigned_harness_ids", [])
+            if not isinstance(targets, list) or any(
+                not isinstance(x, str) or not x for x in targets
+            ):
+                raise InvalidInput("assigned_harness_ids must be a list of identifiers")
+            if item.get("require_human_assign", False) and not targets:
+                raise InvalidInput("human assignment requires a target Harness")
+            for target in targets:
+                member = conn.execute(
+                    "SELECT * FROM harnesses WHERE harness_id = ?", (target,)
+                ).fetchone()
+                if member is None or not member["registration_version"]:
+                    raise InvalidInput("assigned Harness has no registration")
+                required = set(item.get("capabilities", []))
+                if not required.issubset(json.loads(member["capabilities_json"])):
+                    raise InvalidInput("assigned Harness lacks required capabilities")
 
         snapshot_id = f"snap-{uuid.uuid4().hex}"
         plan_hash = _hash(raw)
@@ -226,12 +243,23 @@ class SchedulerService:
         # R10 §10 gives `draft` both an approve and a reject edge, so a plan
         # rejected before approval still has state to move.
         for task in spec.tasks:
+            if conn.execute("SELECT 1 FROM tasks WHERE task_id = ?", (task.task_id,)).fetchone():
+                raise Conflict("task id already exists")
             self._materialise_task(
                 conn,
                 task_id=task.task_id,
                 group_id=group_id,
                 snapshot_id=snapshot_id,
                 depends_on=list(task.depends_on),
+            )
+            item = next(x for x in raw["tasks"] if str(x.get("id", "")).strip() == task.task_id)
+            conn.execute(
+                "UPDATE tasks SET assigned_harness_ids_json = ?, require_human_assign = ? WHERE task_id = ?",
+                (
+                    _canonical(item.get("assigned_harness_ids", [])),
+                    int(bool(item.get("require_human_assign", False))),
+                    task.task_id,
+                ),
             )
         return snapshot_id, plan_hash
 

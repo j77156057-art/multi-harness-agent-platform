@@ -146,6 +146,13 @@ mint、随事件负载落库），split 走 §13 fence + `command_idempotency` �
 
 ## 相关
 
+### FORMAL-DISPATCH-01 本机实跑补充
+
+- `MVP-API-001` / `DOC-AUTH-001`：test_formal_dispatch.py 覆盖管理员注册身份、版本历史/幂等/冲突、指定成员分派、非法路径事务回滚、probe 不授予注册。
+- `CORE-CLAIM-001` / `CORE-CLAIM-002`：指定成员过滤/拒领、容量/离线拒绝、领取重放与心跳、attempt 注册版本、Git HEAD 冻结且健康投影 NULL 不丢基线。
+- `MVP-ADAPTER-001`：test_formal_dispatch_worker.py 覆盖真实 Git 越界提交拒绝与非空产物门禁。现场真实 Codex CLI 任务 FD-aec39028dacb9e7d，经 HTTP 领取/心跳/publish/submit、scheduler worktree 与 Verify 到 awaiting_review。
+- 前端本地网关 HTTP 安全 10 项、真实浏览器 7 项；证据与效力边界见 docs/reports/formal-dispatch/。这是作者自检，不是独立审批；未声称其他 Harness 或生产项目已接通。
+
 - 检查 ID 的唯一真相源是 `docs/spec/0.3-R10.md` §26（阶段落点）与 §37.7（事件 allowlist）
 - 本文件不得新增 R10 未登记的 ID 形态；新增须先改 R10 正文并升 `schema_version`
 - 哪些约束真的会被门禁红掉，见 `docs/dev-convention.md` 的「约束的强制程度」
