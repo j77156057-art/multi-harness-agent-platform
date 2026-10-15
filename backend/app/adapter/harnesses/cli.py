@@ -87,6 +87,7 @@ class CliRunner(Protocol):
         timeout_seconds: float | None,
         on_tick: Any = None,
         tick_interval_seconds: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> CliRunResult: ...
 
 
@@ -118,6 +119,10 @@ class CliHarness(HttpAdapter):
         """Remove any temporary transport files created for the last command."""
         return None
 
+    def process_environment(self) -> dict[str, str] | None:
+        """Optional environment for the child CLI process."""
+        return None
+
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {}
 
@@ -140,6 +145,7 @@ class SubprocessRunner:
         timeout_seconds: float | None,
         on_tick: Any = None,
         tick_interval_seconds: float | None = None,
+        env: dict[str, str] | None = None,
     ) -> CliRunResult:
         started = time.monotonic()
         spawn_kwargs: dict[str, Any] = {}
@@ -155,6 +161,7 @@ class SubprocessRunner:
                     stdin=subprocess.DEVNULL,
                     stdout=out,
                     stderr=err,
+                    env=env,
                     **spawn_kwargs,
                 )
             except FileNotFoundError as exc:
@@ -317,13 +324,17 @@ class CliHarnessWorker:
         argv = self.adapter.command(prepared_order, self.worktree)
 
         try:
-            cli = self.runner.run(
-                argv,
-                cwd=self.worktree,
-                timeout_seconds=timeout_seconds,
-                on_tick=self._tick(task_id),
-                tick_interval_seconds=float(self.heartbeat_seconds),
-            )
+            runner_kwargs = {
+                "argv": argv,
+                "cwd": self.worktree,
+                "timeout_seconds": timeout_seconds,
+                "on_tick": self._tick(task_id),
+                "tick_interval_seconds": float(self.heartbeat_seconds),
+            }
+            environment = self.adapter.process_environment()
+            if environment is not None:
+                runner_kwargs["env"] = environment
+            cli = self.runner.run(**runner_kwargs)
         except HarnessTimeout as exc:
             self.adapter.abandon(task_id=task_id, reason=f"harness timeout: {exc}")
             raise

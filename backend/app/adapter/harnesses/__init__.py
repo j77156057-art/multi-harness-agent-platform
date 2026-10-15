@@ -22,11 +22,13 @@ from app.adapter.harnesses.cli import (
 )
 from app.adapter.harnesses.codex import CODEX_REGISTRATION, CodexAdapter
 from app.adapter.harnesses.opencode import OPENCODE_REGISTRATION, OpenCodeAdapter
+from app.adapter.harnesses.pi import PI_REGISTRATION, PiAdapter
 
 __all__ = [
     "CLAUDE_CODE_REGISTRATION",
     "CODEX_REGISTRATION",
     "OPENCODE_REGISTRATION",
+    "PI_REGISTRATION",
     "ClaudeCodeAdapter",
     "CliFailed",
     "CliHarness",
@@ -38,6 +40,7 @@ __all__ = [
     "HarnessLeaseLost",
     "HarnessTimeout",
     "OpenCodeAdapter",
+    "PiAdapter",
     "SubprocessRunner",
     "WorkOutcome",
     "WorkRefused",
