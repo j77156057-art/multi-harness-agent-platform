@@ -69,10 +69,16 @@ class PiAdapter(CliHarness):
         executable = shutil.which(self.binary) or self.binary
         if self._work_order_file is None:
             raise RuntimeError("Pi work order was not prepared")
+        shell_tool = "powershell" if os.name == "nt" else "bash"
+        shell_note = (
+            " On Windows use the powershell tool for Git commands; bash is unavailable."
+            if os.name == "nt"
+            else " Use the bash tool for Git commands."
+        )
         return [executable, "--approve", "--model", self.model, "--tools",
-                "read,bash,edit,write", "--no-extensions", "--no-skills",
+                f"read,{shell_tool},edit,write", "--no-extensions", "--no-skills",
                 "--no-context-files", "--no-session", "--print", "@" + str(self._work_order_file),
-                work_order]
+                work_order + shell_note]
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {"model": self.model, "provider": "ollama", "final_message": stdout.strip()}
