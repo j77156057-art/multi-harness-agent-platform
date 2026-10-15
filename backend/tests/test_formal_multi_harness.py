@@ -12,6 +12,7 @@ from app.adapter.formal_worker import adapter_for_harness
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
+from app.adapter.harnesses.pi import PiAdapter
 from app.git.repo import CanonicalRepo
 
 
@@ -25,6 +26,7 @@ def _ensure_repo(path: str) -> None:
         ("codex", CodexAdapter),
         ("claude-code", ClaudeCodeAdapter),
         ("opencode", OpenCodeAdapter),
+        ("pi", PiAdapter),
     ],
 )
 def test_formal_worker_selects_the_matching_cli(harness_id, adapter_type):
@@ -36,6 +38,19 @@ def test_formal_worker_selects_the_matching_cli(harness_id, adapter_type):
 def test_formal_worker_rejects_unknown_cli_instead_of_falling_back():
     with pytest.raises(ValueError, match="unsupported formal Harness"):
         adapter_for_harness(SimpleNamespace(), "not-registered")
+
+
+def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
+    adapter = PiAdapter(SimpleNamespace(), config_root=tmp_path / "pi-config")
+    command = adapter.command("make the file", tmp_path)
+    environment = adapter.process_environment()
+    assert Path(command[0]).stem.lower() == "pi"
+    assert command[1:4] == ["--approve", "--model", "ollama/qwen3:8b"]
+    assert "--tools" in command and "read,bash,edit,write" in command
+    assert environment["PI_CODING_AGENT_DIR"] == str(tmp_path / "pi-config")
+    assert (tmp_path / "pi-config" / "models.json").exists()
+    assert environment["PI_CODING_AGENT_DIR"] != str(Path.home() / ".pi" / "agent")
+    adapter.cleanup_work_order()
 
 
 def test_claude_adapter_allows_only_the_attempt_gitdir(tmp_path):

@@ -15,6 +15,7 @@ from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.cli import CliFailed, CliHarnessWorker, CliRunResult, SubprocessRunner
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
+from app.adapter.harnesses.pi import PiAdapter
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
@@ -27,6 +28,7 @@ ADAPTER_TYPES = {
     "codex": CodexAdapter,
     "claude-code": ClaudeCodeAdapter,
     "opencode": OpenCodeAdapter,
+    "pi": PiAdapter,
 }
 
 
