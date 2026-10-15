@@ -47,7 +47,10 @@ def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
     environment = adapter.process_environment()
     assert Path(command[0]).stem.lower() == "pi"
     assert command[1:4] == ["--approve", "--model", "ollama/qwen3:8b"]
-    assert "--tools" in command and "read,bash,edit,write" in command
+    assert "--tools" in command and command[command.index("--tools") + 1] in {
+        "read,bash,edit,write",
+        "read,powershell,edit,write",
+    }
     assert any(item.startswith("@") for item in command)
     assert environment["PI_CODING_AGENT_DIR"] == str(tmp_path / "pi-config")
     assert (tmp_path / "pi-config" / "models.json").exists()
