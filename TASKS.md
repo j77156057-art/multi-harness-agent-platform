@@ -123,6 +123,7 @@
 | FORMAL-DISPATCH-REGISTER-01 | Codex | — | done（串行登记；非功能验收） | `agent/local/codex/FORMAL-DISPATCH-REGISTER-01/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 | FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | done（Codex/OpenCode/Claude Code 均真实领取、提交并 verify 通过；Claude 由平台在 exclusive_paths 检查后代为提交，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
+| FORMAL-PI-ADAPTER-01 | Codex（协调）；新增成员 Pi CLI + 本机 Ollama | FORMAL-MULTI-HARNESS-01 | doing（CLI 已安装；本机模型认证与适配器验证中） | `agent/local/pi/FORMAL-PI-ADAPTER-01/a1` | `MVP-ADAPTER-002` `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -146,6 +147,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- FORMAL-DISPATCH-REGISTER-01 → docs/claims/codex--FORMAL-DISPATCH-REGISTER-01.md -->
 <!-- FORMAL-DISPATCH-01 → docs/claims/codex--FORMAL-DISPATCH-01.md -->
 <!-- FORMAL-MULTI-HARNESS-01 → docs/claims/codex--FORMAL-MULTI-HARNESS-01.md -->
+<!-- FORMAL-PI-ADAPTER-01 → docs/claims/codex--FORMAL-PI-ADAPTER-01.md -->
 
 **本表只读**。每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md>`（迁移期也接受旧的 `<序号>-` 前缀，见 `docs/proposals/claim-denum.md`），
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
