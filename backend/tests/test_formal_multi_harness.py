@@ -42,11 +42,13 @@ def test_formal_worker_rejects_unknown_cli_instead_of_falling_back():
 
 def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
     adapter = PiAdapter(SimpleNamespace(), config_root=tmp_path / "pi-config")
-    command = adapter.command("make the file", tmp_path)
+    prepared = adapter.prepare_work_order("make the file", tmp_path)
+    command = adapter.command(prepared, tmp_path)
     environment = adapter.process_environment()
     assert Path(command[0]).stem.lower() == "pi"
     assert command[1:4] == ["--approve", "--model", "ollama/qwen3:8b"]
     assert "--tools" in command and "read,bash,edit,write" in command
+    assert any(item.startswith("@") for item in command)
     assert environment["PI_CODING_AGENT_DIR"] == str(tmp_path / "pi-config")
     assert (tmp_path / "pi-config" / "models.json").exists()
     assert environment["PI_CODING_AGENT_DIR"] != str(Path.home() / ".pi" / "agent")

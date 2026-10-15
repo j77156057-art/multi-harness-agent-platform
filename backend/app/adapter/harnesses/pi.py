@@ -32,6 +32,7 @@ class PiAdapter(CliHarness):
         )
         self.config_root = Path(config_root) if config_root is not None else None
         self._attempt_dir: Path | None = None
+        self._work_order_file: Path | None = None
 
     def _ensure_attempt_config(self) -> Path:
         if self._attempt_dir is not None:
@@ -51,8 +52,10 @@ class PiAdapter(CliHarness):
         return root
 
     def prepare_work_order(self, work_order: str, worktree: Path) -> str:
-        self._ensure_attempt_config()
-        return work_order
+        root = self._ensure_attempt_config()
+        self._work_order_file = root / "work-order.md"
+        self._work_order_file.write_text(work_order, encoding="utf-8", newline="\n")
+        return "Follow the attached approved work order. Use the available tools to implement it."
 
     def process_environment(self) -> dict[str, str]:
         root = self._ensure_attempt_config()
@@ -64,14 +67,18 @@ class PiAdapter(CliHarness):
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         executable = shutil.which(self.binary) or self.binary
+        if self._work_order_file is None:
+            raise RuntimeError("Pi work order was not prepared")
         return [executable, "--approve", "--model", self.model, "--tools",
                 "read,bash,edit,write", "--no-extensions", "--no-skills",
-                "--no-context-files", "--no-session", "--print", work_order]
+                "--no-context-files", "--no-session", "--print", "@" + str(self._work_order_file),
+                work_order]
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {"model": self.model, "provider": "ollama", "final_message": stdout.strip()}
 
     def cleanup_work_order(self) -> None:
         root, self._attempt_dir = self._attempt_dir, None
+        self._work_order_file = None
         if root is not None and self.config_root is None:
             shutil.rmtree(root, ignore_errors=True)
