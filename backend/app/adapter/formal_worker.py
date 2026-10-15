@@ -142,9 +142,11 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
     scoped_runner = ScopedRunner(
         spec,
         service.repo_head(manager),
-        platform_commit=harness_id == "claude-code",
+        platform_commit=harness_id in {"claude-code", "pi"},
         commit_message=f"chore({task['task_id']}): submit Claude deliverable"
         if harness_id == "claude-code"
+        else f"chore({task['task_id']}): submit Pi deliverable"
+        if harness_id == "pi"
         else "chore(formal): submit harness deliverable",
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
@@ -154,7 +156,9 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
         "strictly inside exclusive_paths; do not read or modify other projects. "
         "Do not change branch, install software or push. "
         + (
-            "Do not run git add or git commit; the platform will submit your files after checking scope. "
+            "Only write files inside exclusive_paths. Do not run shell commands or Git; the platform will validate scope and create the commit. "
+            if harness_id == "pi"
+            else "Do not run git add or git commit; the platform will submit your files after checking scope. "
             if harness_id == "claude-code"
             else "Commit the deliverable on the current branch. "
         )
