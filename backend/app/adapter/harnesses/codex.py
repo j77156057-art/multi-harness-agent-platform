@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -64,9 +65,21 @@ class CodexAdapter(CliHarness):
     binary = "codex"
 
     def __init__(
-        self, client: Any, *, prefix: str = "/api/v1", platform: str | None = None
+        self,
+        client: Any,
+        *,
+        prefix: str = "/api/v1",
+        platform: str | None = None,
+        harness_id: str = "codex",
+        display_name: str | None = None,
     ) -> None:
-        super().__init__(client, CODEX_REGISTRATION, prefix=prefix)
+        registration = replace(
+            CODEX_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("Codex CLI" if harness_id == "codex" else f"Codex CLI · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
         # Injectable so the argv tests can pin both platform branches in-process.
         self.platform = platform if platform is not None else os.name
 

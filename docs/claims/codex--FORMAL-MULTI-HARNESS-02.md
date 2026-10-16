@@ -19,6 +19,9 @@
 - 增加 human review 权限键与 live lease、reviewed commit 绑定。
 - 前端任务线程在 `awaiting_review` 显示“管理员审核”，支持领取审核、通过和要求修改。
 - 新增后端端到端测试，三家 Harness 各跑一条独立任务并由管理员逐项批准。
+- 增量补齐同一 Harness 多窗口：注册 `base-member-<slot>` / `base-window-<slot>`
+  实例，复用对应 CLI adapter 但在注册、Claim、心跳、提交和审核链路中保留独立实例 ID；
+  正式前端提供注册窗口入口并在注册后刷新成员选择器。
 
 ## 边界
 

@@ -21,6 +21,7 @@ traceability.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -47,8 +48,16 @@ class ClaudeCodeAdapter(CliHarness):
         *,
         prefix: str = "/api/v1",
         permission_mode: str = "acceptEdits",
+        harness_id: str = "claude-code",
+        display_name: str | None = None,
     ) -> None:
-        super().__init__(client, CLAUDE_CODE_REGISTRATION, prefix=prefix)
+        registration = replace(
+            CLAUDE_CODE_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("Claude Code" if harness_id == "claude-code" else f"Claude Code · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
         self.permission_mode = permission_mode
 
     def command(self, work_order: str, worktree: Path) -> list[str]:

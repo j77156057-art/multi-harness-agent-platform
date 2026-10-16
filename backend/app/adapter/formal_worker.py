@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import re
 import time
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -33,6 +34,28 @@ ADAPTER_TYPES = {
     "codebuddy": CodeBuddyAdapter,
 }
 
+_INSTANCE_RE = re.compile(
+    r"^(?P<base>codex|claude-code|opencode|qoder|codebuddy)"
+    r"-(?P<kind>member|window)-(?P<slot>[A-Za-z0-9][A-Za-z0-9_-]{0,31})$"
+)
+
+
+def base_harness_id(harness_id: str) -> str:
+    """Resolve a registered window identity to its explicit CLI adapter.
+
+    Only the two documented instance forms are accepted.  This keeps a typo
+    or an unregistered provider from silently selecting a different CLI.
+    """
+    if harness_id in ADAPTER_TYPES:
+        return harness_id
+    match = _INSTANCE_RE.fullmatch(harness_id)
+    if match and match.group("base") in ADAPTER_TYPES:
+        return match.group("base")
+    raise ValueError(
+        "unsupported formal Harness instance: "
+        f"{harness_id}; use a registered base ID or <base>-member-<slot>"
+    )
+
 
 def adapter_for_harness(client, harness_id: str):
     """Build the real CLI adapter selected by the registered Harness identity.
@@ -42,10 +65,9 @@ def adapter_for_harness(client, harness_id: str):
     running the Codex command, which would make the platform receipt lie about
     the executable that produced it.
     """
-    adapter_type = ADAPTER_TYPES.get(harness_id)
-    if adapter_type is None:
-        raise ValueError(f"unsupported formal Harness: {harness_id}")
-    return adapter_type(client)
+    base_id = base_harness_id(harness_id)
+    adapter_type = ADAPTER_TYPES[base_id]
+    return adapter_type(client, harness_id=harness_id)
 
 
 class ScopedRunner(SubprocessRunner):
@@ -144,9 +166,9 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
     scoped_runner = ScopedRunner(
         spec,
         service.repo_head(manager),
-        platform_commit=harness_id == "claude-code",
+        platform_commit=isinstance(adapter, ClaudeCodeAdapter),
         commit_message=f"chore({task['task_id']}): submit Claude deliverable"
-        if harness_id == "claude-code"
+        if isinstance(adapter, ClaudeCodeAdapter)
         else "chore(formal): submit harness deliverable",
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
@@ -274,12 +296,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:8848")
     parser.add_argument("--token-file", type=Path, required=True)
-    parser.add_argument("--harness-id", required=True, choices=sorted(ADAPTER_TYPES))
+    parser.add_argument(
+        "--harness-id",
+        required=True,
+        help="registered base ID or explicit window ID such as codex-member-1",
+    )
     parser.add_argument("--group", required=True)
     parser.add_argument("--canonical-repo", type=Path)
     parser.add_argument("--worktree-root", type=Path)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
+    base_harness_id(args.harness_id)
     if settings.auth_mode != "enforce":
         raise SystemExit("formal worker requires enforce authentication")
     if args.canonical_repo is not None:

@@ -39,6 +39,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -67,8 +68,16 @@ class OpenCodeAdapter(CliHarness):
         prefix: str = "/api/v1",
         platform: str | None = None,
         bash_path: str | None = None,
+        harness_id: str = "opencode",
+        display_name: str | None = None,
     ) -> None:
-        super().__init__(client, OPENCODE_REGISTRATION, prefix=prefix)
+        registration = replace(
+            OPENCODE_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("OpenCode" if harness_id == "opencode" else f"OpenCode · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
         # Injectable for the argv tests; production defaults read the host.
         # ``bash_path=None`` probes the host; an empty string means "there is
         # no bash" (how the tests pin the fallback without faking the machine).

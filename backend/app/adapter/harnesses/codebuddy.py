@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -32,8 +33,21 @@ def _codebuddy_binary() -> str:
 class CodeBuddyAdapter(CliHarness):
     binary = "codebuddy"
 
-    def __init__(self, client: Any, *, prefix: str = "/api/v1") -> None:
-        super().__init__(client, CODEBUDDY_REGISTRATION, prefix=prefix)
+    def __init__(
+        self,
+        client: Any,
+        *,
+        prefix: str = "/api/v1",
+        harness_id: str = "codebuddy",
+        display_name: str | None = None,
+    ) -> None:
+        registration = replace(
+            CODEBUDDY_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("CodeBuddy" if harness_id == "codebuddy" else f"CodeBuddy · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         return [

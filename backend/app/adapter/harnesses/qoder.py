@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -39,8 +40,21 @@ def _qoder_binary() -> str:
 class QoderAdapter(CliHarness):
     binary = "qoderclicn"
 
-    def __init__(self, client: Any, *, prefix: str = "/api/v1") -> None:
-        super().__init__(client, QODER_REGISTRATION, prefix=prefix)
+    def __init__(
+        self,
+        client: Any,
+        *,
+        prefix: str = "/api/v1",
+        harness_id: str = "qoder",
+        display_name: str | None = None,
+    ) -> None:
+        registration = replace(
+            QODER_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("Qoder CLI CN" if harness_id == "qoder" else f"Qoder CLI CN · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         return [
