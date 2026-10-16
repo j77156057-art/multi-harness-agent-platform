@@ -27,15 +27,19 @@ import pytest
 
 from app.adapter.harnesses import (
     CLAUDE_CODE_REGISTRATION,
+    CODEBUDDY_REGISTRATION,
     CODEX_REGISTRATION,
     OPENCODE_REGISTRATION,
+    QODER_REGISTRATION,
     ClaudeCodeAdapter,
     CliHarnessWorker,
     CliRunResult,
     CliUnavailable,
+    CodeBuddyAdapter,
     CodexAdapter,
     HarnessTimeout,
     OpenCodeAdapter,
+    QoderAdapter,
     SubprocessRunner,
     WorkRefused,
 )
@@ -57,6 +61,8 @@ from tests.test_adapter import section_7_verbs
 CODEX_OUT = '{"type":"session.created","session_id":"cx-1"}\n{"msg":"done: flag.txt"}\n'
 CLAUDE_OUT = '{"session_id":"cc-1","result":"done: flag.txt","total_cost_usd":0.012}'
 OPENCODE_OUT = '{"session_id":"oc-1","text":"done: flag.txt"}'
+QODER_OUT = '{"session_id":"qo-1","result":"done: flag.txt"}'
+CODEBUDDY_OUT = '{"session_id":"cb-1","result":"done: flag.txt"}'
 
 
 @dataclass(frozen=True)
@@ -93,11 +99,29 @@ OPENCODE_CASE = HarnessCase(
     stdout=OPENCODE_OUT,
     session_id="oc-1",
 )
+QODER_CASE = HarnessCase(
+    name="qoder",
+    cls=QoderAdapter,
+    registration=QODER_REGISTRATION,
+    flags=["-p", "--output-format", "json", "--dangerously-skip-permissions", "-w"],
+    stdout=QODER_OUT,
+    session_id="qo-1",
+)
+CODEBUDDY_CASE = HarnessCase(
+    name="codebuddy",
+    cls=CodeBuddyAdapter,
+    registration=CODEBUDDY_REGISTRATION,
+    flags=["-p", "--output-format", "json", "--permission-mode", "bypassPermissions"],
+    stdout=CODEBUDDY_OUT,
+    session_id="cb-1",
+)
 
 CASES = [
     pytest.param(CODEX_CASE, id="codex"),
     pytest.param(CLAUDE_CASE, id="claude-code"),
     pytest.param(OPENCODE_CASE, id="opencode"),
+    pytest.param(QODER_CASE, id="qoder"),
+    pytest.param(CODEBUDDY_CASE, id="codebuddy"),
 ]
 
 
@@ -314,7 +338,18 @@ def test_each_cli_contract_is_pinned(case, tmp_path):
     """The argv is the integration fact: assert it verbatim, flag by flag."""
     adapter = new_adapter(case, platform="posix")
     order = "do the thing"
-    assert adapter.command(order, tmp_path) == [adapter.binary, *case.flags, order]
+    command = adapter.command(order, tmp_path)
+    if case.name in {"qoder", "codebuddy"}:
+        # These adapters resolve the installed executable so a worker started
+        # before a PATH refresh can still use the local CLI installation.
+        assert Path(command[0]).stem.lower() in {case.name, "qoderclicn", "qodercn", "cbc"}
+        if case.name == "qoder":
+            assert command[1:-2] == case.flags
+        else:
+            assert command[1:-2] == [*case.flags, "--add-dir"]
+        assert command[-2:] == [str(tmp_path), order]
+    else:
+        assert command == [adapter.binary, *case.flags, order]
     parsed = adapter.parse_output(case.stdout)
     assert parsed.get("session_id") == case.session_id
     assert parsed["final_message"] == "done: flag.txt"
@@ -490,7 +525,10 @@ def test_each_adapter_completes_claim_to_merged_over_http(case, tmp_path):
         # WindowsApps' WSL alias drops argv after ``-c``; production uses
         # cmd.exe there, while a real POSIX/Git Bash install still uses bash.
         expected_head = "cmd.exe" if runner.argv[0].lower() == "cmd.exe" else "bash"
-    assert runner.argv[0] == expected_head
+    if case.name in {"qoder", "codebuddy"}:
+        assert Path(runner.argv[0]).stem.lower() in {case.name, "qoderclicn", "qodercn", "cbc"}
+    else:
+        assert runner.argv[0] == expected_head
     assert outcome.changed_files == ["flag.txt"]
     assert outcome.parsed["session_id"]
     assert status_of(rig) == "verifying"

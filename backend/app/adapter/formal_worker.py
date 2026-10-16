@@ -13,8 +13,10 @@ import httpx
 
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.cli import CliFailed, CliHarnessWorker, CliRunResult, SubprocessRunner
+from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
+from app.adapter.harnesses.qoder import QoderAdapter
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
@@ -27,6 +29,8 @@ ADAPTER_TYPES = {
     "codex": CodexAdapter,
     "claude-code": ClaudeCodeAdapter,
     "opencode": OpenCodeAdapter,
+    "qoder": QoderAdapter,
+    "codebuddy": CodeBuddyAdapter,
 }
 
 

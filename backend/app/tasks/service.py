@@ -898,7 +898,9 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- review
 
-    def _assert_review_policy(self, *, task: sqlite3.Row, owner: str, reviewer: str) -> None:
+    def _assert_review_policy(
+        self, *, task: sqlite3.Row, owner: str, reviewer: str, reviewer_kind: str
+    ) -> None:
         """R10 §21 review_policy enforcement (rules-tighten, drill F5).
 
         ``cross_provider`` is the only policy v1 produces; anything else is
@@ -915,6 +917,10 @@ class SchedulerService:
                 f"review policy {policy!r} is not implemented",
                 code="review.policy_unknown",
             )
+        if reviewer_kind == "human":
+            return
+        if reviewer_kind != "harness":
+            raise Conflict("unknown reviewer kind", code="review.reviewer_unknown")
         registry = HarnessRegistry(self.database)
         owner_row = registry.current(owner)
         reviewer_row = registry.current(reviewer)
@@ -940,6 +946,7 @@ class SchedulerService:
         reviewer_harness_id: str,
         review_id: str | None = None,
         lease_seconds: int | None = None,
+        reviewer_kind: str = "harness",
     ) -> dict[str, object]:
         """R10 §21 ``review.claim``: take the review lease for one attempt.
 
@@ -968,12 +975,17 @@ class SchedulerService:
             # In MVP the development owner *is* the harness id (MVP-04 sets
             # tasks.owner to harness_id), so this one comparison covers both
             # "the owner reviews itself" and "the same harness reviews itself".
-            if reviewer_harness_id == owner:
+            if reviewer_kind == "harness" and reviewer_harness_id == owner:
                 raise Conflict(
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
-            self._assert_review_policy(task=task, owner=owner, reviewer=reviewer_harness_id)
+            self._assert_review_policy(
+                task=task,
+                owner=owner,
+                reviewer=reviewer_harness_id,
+                reviewer_kind=reviewer_kind,
+            )
 
             existing = conn.execute(
                 "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
@@ -1008,12 +1020,13 @@ class SchedulerService:
                 "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                 " reviewer_provider, status, lease_until, fencing_epoch, reviewed_commit,"
                 " verdict, findings_hash, review_revision, created_seq)"
-                " VALUES (?, ?, ?, ?, 'unknown', 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
+                " VALUES (?, ?, ?, ?, ?, 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
                 (
                     new_id,
                     task_id,
                     attempt_id,
                     reviewer_harness_id,
+                    "human" if reviewer_kind == "human" else "unknown",
                     lease_until,
                     int(task["current_epoch"]),
                     reviewed_commit,
@@ -1037,6 +1050,8 @@ class SchedulerService:
         review_revision: int,
         findings: list[dict[str, object]],
         review_id: str | None = None,
+        reviewer_kind: str = "harness",
+        require_lease: bool = False,
     ) -> dict[str, object]:
         """Record a reviewer verdict.
 
@@ -1062,7 +1077,7 @@ class SchedulerService:
                 findings=scan_findings,
                 aggregate_type="task",
                 aggregate_id=task_id,
-                actor_type="harness",
+                actor_type=reviewer_kind,
                 actor_id=reviewer_harness_id or "unknown",
                 task_id=task_id,
                 attempt_id=attempt_id,
@@ -1089,13 +1104,16 @@ class SchedulerService:
             ).fetchone()
             if attempt is None:
                 raise NotFound(f"unknown attempt: {attempt_id}")
-            if str(attempt["owner"]) == reviewer_harness_id:
+            if reviewer_kind == "harness" and str(attempt["owner"]) == reviewer_harness_id:
                 raise Conflict(
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
             self._assert_review_policy(
-                task=task, owner=str(attempt["owner"]), reviewer=reviewer_harness_id
+                task=task,
+                owner=str(attempt["owner"]),
+                reviewer=reviewer_harness_id,
+                reviewer_kind=reviewer_kind,
             )
             held = (
                 conn.execute(
@@ -1105,6 +1123,17 @@ class SchedulerService:
                 if review_id is not None
                 else None
             )
+            if require_lease and (held is None or str(held["status"]) != "claimed"):
+                raise Conflict("a live review lease is required", code="review.lease_required")
+            if (
+                held is not None
+                and str(held["status"]) == "claimed"
+                and str(held["reviewed_commit"]) != reviewed_commit
+            ):
+                raise Conflict(
+                    "reviewed commit differs from the claimed commit",
+                    code="review.commit_mismatch",
+                )
             if held is not None and held["status"] == "claimed":
                 deadline = held["lease_until"]
                 if deadline is not None and parse_iso(str(deadline)) <= datetime.now(UTC):
@@ -1160,7 +1189,7 @@ class SchedulerService:
                         task_id,
                         attempt_id,
                         reviewer_harness_id,
-                        "unknown",
+                        "human" if reviewer_kind == "human" else "unknown",
                         int(task["current_epoch"]),
                         reviewed_commit,
                         verdict,
@@ -1184,7 +1213,7 @@ class SchedulerService:
                 event_name=event.value,
                 aggregate_type="task",
                 aggregate_id=task_id,
-                actor_type="harness",
+                actor_type=reviewer_kind,
                 actor_id=reviewer_harness_id,
                 payload={
                     "review_id": review_id,

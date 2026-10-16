@@ -26,6 +26,7 @@ const {
   notice,
   error,
   loading,
+  reviewClaim,
 } = storeToRefs(store)
 
 const operator = computed(() => store.operator)
@@ -183,6 +184,7 @@ function onClearToken(): void {
       :busy="loading.act === true"
       :operator="operator"
       :human-act="onHumanAct"
+      :review-claim="reviewClaim"
       @select="onSelectTask"
       @expand-diff="onExpandDiff"
     />

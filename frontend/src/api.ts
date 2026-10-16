@@ -115,6 +115,22 @@ export interface HumanOutcome {
   status: string
 }
 
+export interface ReviewClaim {
+  review_id: string
+  reviewed_commit: string
+  lease_until: string
+  reused: boolean
+}
+
+export interface ReviewOutcome {
+  review_id: string
+  task_id: string
+  verdict: string
+  event: string
+  seq: number
+  replayed?: boolean
+}
+
 export interface PlanCreated {
   plan_id: string
   snapshot_id: string
@@ -294,6 +310,32 @@ export const api = {
     return request('/human/cancel', {
       method: 'POST',
       body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanReviewClaim(
+    taskId: string,
+    attemptId: string,
+    body: { decided_by: string; review_id?: string },
+  ): Promise<ReviewClaim> {
+    return request('/human/review/claim', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, attempt_id: attemptId, ...body }),
+    })
+  },
+  humanReviewSubmit(
+    taskId: string,
+    attemptId: string,
+    body: {
+      decided_by: string
+      review_id: string
+      verdict: 'approve' | 'request_changes'
+      reviewed_commit: string
+      findings?: Record<string, unknown>[]
+    },
+  ): Promise<ReviewOutcome> {
+    return request('/human/review/submit', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, attempt_id: attemptId, ...body }),
     })
   },
 }

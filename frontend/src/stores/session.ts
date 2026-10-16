@@ -30,6 +30,17 @@ export type HumanAction =
       options?: string[]
     }
   | { kind: 'cancel'; taskId: string; decided_by: string; reason?: string }
+  | { kind: 'review_claim'; taskId: string; attemptId: string; decided_by: string }
+  | {
+      kind: 'review_submit'
+      taskId: string
+      attemptId: string
+      decided_by: string
+      review_id: string
+      reviewed_commit: string
+      verdict: 'approve' | 'request_changes'
+      findings?: Record<string, unknown>[]
+    }
 
 interface SessionState {
   projects: ProjectSummary[]
@@ -49,6 +60,7 @@ interface SessionState {
   notice: string | null
   loading: Record<string, boolean>
   error: string | null
+  reviewClaim: { taskId: string; reviewId: string; reviewedCommit: string } | null
 }
 
 export const useSession = defineStore('session', {
@@ -66,6 +78,7 @@ export const useSession = defineStore('session', {
     notice: null,
     loading: {},
     error: null,
+    reviewClaim: null,
   }),
   getters: {
     groupsOf(state) {
@@ -371,6 +384,30 @@ export const useSession = defineStore('session', {
               ...(action.reason ? { reason: action.reason } : {}),
             })
             this.notice = `已取消 ${outcome.task_id} → ${outcome.status}`
+            break
+          }
+          case 'review_claim': {
+            const outcome = await api.humanReviewClaim(action.taskId, action.attemptId, {
+              decided_by: action.decided_by,
+            })
+            this.reviewClaim = {
+              taskId: action.taskId,
+              reviewId: outcome.review_id,
+              reviewedCommit: outcome.reviewed_commit,
+            }
+            this.notice = `已领取审核 ${outcome.review_id}`
+            break
+          }
+          case 'review_submit': {
+            const outcome = await api.humanReviewSubmit(action.taskId, action.attemptId, {
+              decided_by: action.decided_by,
+              review_id: action.review_id,
+              reviewed_commit: action.reviewed_commit,
+              verdict: action.verdict,
+              ...(action.findings !== undefined ? { findings: action.findings } : {}),
+            })
+            this.notice = `审核已提交：${outcome.verdict}`
+            this.reviewClaim = null
             break
           }
         }

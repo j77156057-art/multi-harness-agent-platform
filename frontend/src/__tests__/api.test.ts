@@ -210,4 +210,40 @@ describe('api client', () => {
       reason: '方向已变',
     })
   })
+
+  it('uses the administrator review claim and submit endpoints', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, {
+        review_id: 'rv-1',
+        reviewed_commit: 'a'.repeat(40),
+        lease_until: '2026-10-15T01:00:00Z',
+        reused: false,
+      }),
+      jsonResponse(200, {
+        review_id: 'rv-1',
+        task_id: 'T-1',
+        verdict: 'approve',
+        event: 'approve',
+        seq: 9,
+      }),
+    )
+
+    await api.humanReviewClaim('T-1', 'T-1.a1', { decided_by: 'admin' })
+    await api.humanReviewSubmit('T-1', 'T-1.a1', {
+      decided_by: 'admin',
+      review_id: 'rv-1',
+      verdict: 'approve',
+      reviewed_commit: 'a'.repeat(40),
+    })
+
+    expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/human/review/claim')
+    expect(mock.mock.calls[1]?.[0]).toBe('/api/v1/human/review/submit')
+    expect(JSON.parse(String(mock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      task_id: 'T-1',
+      attempt_id: 'T-1.a1',
+      decided_by: 'admin',
+      review_id: 'rv-1',
+      verdict: 'approve',
+    })
+  })
 })

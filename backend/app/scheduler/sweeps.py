@@ -1270,14 +1270,24 @@ def sweep_worktree_recycle(
         return SweepReport("worktree_recycle", 0, {"recycled": [], "skipped": []})
     manager = WorktreeManager(database, repo or CanonicalRepo.from_settings())
     recycled: list[str] = []
+    reconciled_missing: list[str] = []
     skipped: list[dict[str, str]] = []
     for row in rows:
         attempt_id = str(row["attempt_id"])
         try:
+            if manager.reconcile_missing_workspace(attempt_id=attempt_id):
+                reconciled_missing.append(attempt_id)
+                continue
             manager.archive_and_recycle(attempt_id=attempt_id)
             recycled.append(attempt_id)
         except WorktreeError as exc:
             skipped.append({"attempt_id": attempt_id, "reason": str(exc)})
     return SweepReport(
-        "worktree_recycle", len(recycled), {"recycled": recycled, "skipped": skipped}
+        "worktree_recycle",
+        len(recycled) + len(reconciled_missing),
+        {
+            "recycled": recycled,
+            "reconciled_missing": reconciled_missing,
+            "skipped": skipped,
+        },
     )

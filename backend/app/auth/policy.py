@@ -55,6 +55,9 @@ POLICY: dict[str, frozenset[str]] = {
     # --- R10 §17 review face (Reviewer is a harness subject) ---
     "review:claim": frozenset({HARNESS}),
     "review:submit": frozenset({HARNESS}),
+    # R10 §17 also permits the human administrator/owner to submit reviews.
+    "review:human_claim": frozenset({HUMAN}),
+    "review:human_submit": frozenset({HUMAN}),
     # --- R10 §17 human face (人类管理员/负责人; Planner folded in) ---
     "plan:submit": frozenset({HUMAN}),
     "plan:approve": frozenset({HUMAN}),

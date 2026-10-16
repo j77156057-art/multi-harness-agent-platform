@@ -131,6 +131,24 @@ class ReviewClaimRequest(BaseModel):
     review_id: str | None = None
 
 
+class HumanReviewClaimRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    decided_by: str = Field(min_length=1)
+    review_id: str | None = None
+
+
+class HumanReviewSubmitRequest(BaseModel):
+    task_id: str
+    attempt_id: str
+    decided_by: str = Field(min_length=1)
+    review_id: str = Field(min_length=1)
+    verdict: Literal["approve", "request_changes"]
+    reviewed_commit: str = Field(min_length=1)
+    review_revision: int = Field(default=1, ge=1)
+    findings: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ProbeRequest(BaseModel):
     harness_id: str
     adapter: str

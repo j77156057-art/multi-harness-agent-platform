@@ -774,6 +774,59 @@ def review_submit(
     )
 
 
+@human.post("/review/claim")
+def human_review_claim(
+    body: schemas.HumanReviewClaimRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("review:human_claim"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal,
+        body.decided_by,
+        key="review:human_claim",
+        database=database,
+        request=request,
+    )
+    return service.review_claim(
+        task_id=body.task_id,
+        attempt_id=body.attempt_id,
+        reviewer_harness_id=body.decided_by,
+        review_id=body.review_id,
+        reviewer_kind="human",
+    )
+
+
+@human.post("/review/submit")
+def human_review_submit(
+    body: schemas.HumanReviewSubmitRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("review:human_submit"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal,
+        body.decided_by,
+        key="review:human_submit",
+        database=database,
+        request=request,
+    )
+    return service.submit_review(
+        task_id=body.task_id,
+        attempt_id=body.attempt_id,
+        reviewer_harness_id=body.decided_by,
+        verdict=body.verdict,
+        reviewed_commit=body.reviewed_commit,
+        review_revision=body.review_revision,
+        findings=body.findings,
+        review_id=body.review_id,
+        reviewer_kind="human",
+        require_lease=True,
+    )
+
+
 # -------------------------------------------------------------------- read
 
 

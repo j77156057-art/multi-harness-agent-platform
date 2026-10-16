@@ -89,6 +89,8 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-ARCH-001` | Paperclip/Buzz 借鉴边界：R10 为唯一业务真相源，两域借鉴点对照 + 事件名映射 | ⚠️ 仅声明 | `docs/adr/ADR-DEV-003-paperclip-buzz-adoption.md`（**决策文件即交付物**；内容不作机械断言——按本表图例属"仅声明"，约束力由后续借鉴类任务在 scope 声明中引用它承担）。**源码核实修订（2026-10-08，paperclip-buzz-source）**：`docs/reports/paperclip-buzz-source-review.md`（两仓 commit-定版快照逐文件证据；11 事件名三方对照；勘误 addendum 已写入 ADR 第三节） |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
+| `MVP-ADMIN-REVIEW-001` | 管理员派发三个独立 Harness 任务并逐项审核：三方提交均经 Verify，管理员 review lease + approve 后任务进入 `approved`；Harness 不能调用管理员审核面 | ✅ 有断言 | `backend/tests/test_admin_multi_harness_review.py`：隔离数据库、真实临时 Git worktree、Codex/OpenCode/Claude 三个注册 Harness 各自 claim/submit，管理员 human token 逐项 review claim/submit，断言三条 `approve` 事件为 `actor_type=human` 且 Harness 冒充返回 403；前端 API 契约由 `frontend/src/__tests__/api.test.ts` 覆盖 |
+
 ## 现状小结
 
 **31 个已登记的 ID 里，15 个有断言，2 个部分有断言，14 个仅是名字。**
