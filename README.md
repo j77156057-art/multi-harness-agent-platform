@@ -108,7 +108,7 @@ make dev
 |---|---|
 | <http://127.0.0.1:8848/> | 入口页（常用链接 + 前端地址） |
 | <http://127.0.0.1:8848/health> | 存活 + 配置摘要 |
-| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（90 项） |
+| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（98 项） |
 | <http://127.0.0.1:8848/docs> | OpenAPI 交互文档 |
 
 启动时会自动跑规范检查；**不通过会拒绝启动**（`AP_CHECK_SPEC=0` 可临时跳过，
@@ -119,7 +119,7 @@ make dev
 ## 常用命令
 
 ~~~bash
-make docstate   # 只跑规范一致性检查（90 项断言）
+make docstate   # 只跑规范一致性检查（98 项断言）
 make test       # pytest
 make lint       # ruff check + format --check
 make fmt        # ruff 自动修复 + 格式化
@@ -227,9 +227,9 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 
 | 门禁 | 数量 | 作用 |
 |---|---|---|
-| `docstate` | 90 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
+| `docstate` | 98 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
 | `discipline` | 42 项断言 | 协作纪律：`TASKS.md` 与 `docs/claims/` 互相覆盖、任务卡有 test_id 与真相源引用、已完成卡有 commit 与验证证据、**依赖图无环且与任务清单一致、关键路径长度由依赖图算出**、认领文件序号唯一连续、文档声明的断言数与实际相符、**已合入 main 的任务必须已登记/已完成/证据完整（git 历史反向核对，浅克隆 fail-closed）**、**未合入 main 但已开工的分支，其认领必须已登记（否则开工前后都无处登记）** |
-| `test_spec_mirror.py` | 11 项 | 代码侧枚举与 R10 正文的交叉验证 |
+| `test_spec_mirror.py` | 17 项 | 代码侧枚举与 R10 正文的交叉验证 |
 | `test_database_events.py` | 9 项 | 事件只追加、并发定序、失败不留孤儿事件、迁移幂等 |
 | `ruff` | check + format | 代码风格 |
 

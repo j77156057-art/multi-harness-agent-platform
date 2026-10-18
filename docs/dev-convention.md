@@ -26,7 +26,7 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 
 | 约束 | 由谁检查 |
 |---|---|
-| R10 自身不自洽 | `tools/docstate` 90 项（CI + 应用启动） |
+| R10 自身不自洽 | `tools/docstate` 98 项（CI + 应用启动） |
 | `app/spec.py` 的状态/事件超出 R10 集合 | `test_spec_mirror.py` 11 项 |
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
@@ -136,7 +136,7 @@ MVP 只实现部分状态，这是**允许的**，但必须在 `docs/state-proje
 
 ## H-2 规范检查器是门禁，不是工具
 
-`tools/docstate/docstate.py` 对 R10 跑 90 项机械断言。CI 与应用启动都会跑它。
+`tools/docstate/docstate.py` 对 R10 跑 98 项机械断言。CI 与应用启动都会跑它。
 
 ```bash
 make check          # docstate + pytest + ruff

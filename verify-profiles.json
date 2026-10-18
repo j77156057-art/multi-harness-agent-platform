@@ -8,7 +8,12 @@
     "",
     "命令用 argv 数组而不是 shell 字符串：shell 字符串会让 allowlist 变成建议。",
     "",
-    "新增根或 profile 必须由人类改本文件；Planner 与 Harness 只能选择已登记的 profile 与参数。"
+    "新增根或 profile 必须由人类改本文件；Planner 与 Harness 只能选择已登记的 profile 与参数。",
+    "",
+    "本机补充：profile 的 command[0] 必须能解析到带测试依赖的解释器。本机 `python`/`python3`",
+    "从 Python 进程里 spawn 时解析到 venv 的基础解释器（pyvenv.cfg 的 home 指向 harness 自带的",
+    "python，没有 venv 的 site-packages），因此 backend-default 钉住 venv 自己的绝对解释器；",
+    "该绝对路径同时登记进 command_roots。"
   ],
   "version": "1",
   "command_roots": [
@@ -19,11 +24,12 @@
     "node",
     "go",
     "cargo",
-    "make"
+    "make",
+    "D:\\study\\tools\\agent\\new agent\\.worktrees\\codex\\.venv\\Scripts\\python.exe"
   ],
   "profiles": {
     "backend-default": {
-      "command": ["python", "-m", "pytest", "-q"],
+      "command": ["D:\\study\\tools\\agent\\new agent\\.worktrees\\codex\\.venv\\Scripts\\python.exe", "-m", "pytest", "-q"],
       "timeout_seconds": 1800,
       "max_verify_attempts": 2,
       "allow_network": false,

@@ -124,6 +124,9 @@
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 | FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | done（Codex/OpenCode/Claude Code 均真实领取、提交并 verify 通过；Claude 由平台在 exclusive_paths 检查后代为提交，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
 | FORMAL-MULTI-HARNESS-02 | Codex | FORMAL-MULTI-HARNESS-01 | claimed（管理员 token 真实派发三 Harness、逐项审核闭环；待 Merge Gate） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-ADMIN-REVIEW-001` |
+| R10-fix-13 | OpenCode | auth-layer | doing（Stage A 规范登记 + Stage B 服务/状态机/路由/权限已完成并自测绿；Stage C 与 Claim 门禁强度待定） | `agent/local/opencode/R10-fix-13/a1` | `DOC-STATE-001` `DOC-MIRROR-001` |
+| codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
+| review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -194,6 +197,9 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- gate-summary-fix → docs/claims/opencode--gate-summary-fix.md -->
 <!-- lint-baseline-repair → docs/claims/opencode--lint-baseline-repair.md -->
 <!-- office-anim-proto → docs/claims/opencode--office-anim-proto.md -->
+<!-- R10-fix-13 → docs/claims/opencode--R10-fix-13.md -->
+<!-- codebuddy-cli-channel → docs/claims/opencode--codebuddy-cli-channel.md -->
+<!-- review-provider-record → docs/claims/opencode--review-provider-record.md -->
 
 
 
@@ -283,6 +289,9 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | ADMIN-03-register | [卡](docs/tasks/notes/ADMIN-03-register.md) | | |
 | FORMAL-DISPATCH-REGISTER-01 | [卡](docs/tasks/notes/FORMAL-DISPATCH-REGISTER-01.md) | | |
 | FORMAL-DISPATCH-01 | [卡](docs/tasks/notes/FORMAL-DISPATCH-01.md) | | |
+| R10-fix-13 | [卡](docs/tasks/notes/R10-fix-13.md) | | |
+| codebuddy-cli-channel | [卡](docs/tasks/notes/codebuddy-cli-channel.md) | | |
+| review-provider-record | [卡](docs/tasks/notes/review-provider-record.md) | | |
 
 ## 共享文件改动声明
 
@@ -296,6 +305,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | `ADMIN-03-register` | 协调者串行登记 ADMIN-03 的本人回执及等待依赖；不合入 prep 或实现 | 已完成，待 Merge Gate 合入，见本任务卡 |
 | `FORMAL-DISPATCH-REGISTER-01` | 登记本机正式分派接通的 Codex 认领、路径和测试范围，保留 ADMIN-01/03 状态 | 本任务分支登记提交 |
 | `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 已实施，见 docs/reports/formal-dispatch/ |
+| `R10-fix-13` | 规范 §37.7（A 类别 + 计数 107）/§39（新章）/§8/§17/§29.3/§38.11；`tools/docstate` 增 A 与 `[allocation]` 组；`README.md`、`docs/dev-convention.md` 断言数 90 → 98 | 未提交，见任务卡与认领文件 |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
 | `fix-flaky-init` | 撤回 flaky 登记（只改 TASKS.md 登记，未动门禁本体） | `9d3d3ef` |
