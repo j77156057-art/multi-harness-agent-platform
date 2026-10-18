@@ -1,0 +1,14 @@
+-- R10 §21 / §10: a `request_changes` verdict must be actionable.
+--
+-- `reviews` already stores `findings_hash` -- the integrity anchor the spec
+-- names -- but the text itself was dropped on the floor. The reviewer's
+-- findings were therefore unreadable twice over: the operator could not read
+-- back what it had written, and a reworking harness could not learn what to
+-- fix, so `claim_for_revision` re-ran the identical goal and the review loop
+-- could never converge (it only burned the attempt budget).
+--
+-- Persisting the reviewed findings verbatim closes that loop: the review row
+-- keeps them, `read_context` serves the latest completed review, and the
+-- formal worker appends them to the rework goal. `findings_hash` is unchanged
+-- and stays the anchor -- this column is the payload it hashes.
+ALTER TABLE reviews ADD COLUMN findings_json TEXT;

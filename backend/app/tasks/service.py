@@ -103,6 +103,37 @@ def _hash(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
 
 
+def _findings_json(findings: list[dict[str, object]]) -> str | None:
+    """The findings payload ``findings_hash`` anchors.
+
+    ``None`` for an empty list keeps "no findings" distinguishable from "not
+    yet recorded" the same way the hash column already does.
+    """
+    return json.dumps(findings, ensure_ascii=False, sort_keys=True) if findings else None
+
+
+def _reviewer_provider(
+    conn: sqlite3.Connection, *, reviewer_harness_id: str, reviewer_kind: str
+) -> str:
+    """The registry's provider for this reviewer -- not a self-declaration.
+
+    Both insert paths used to write the literal ``"unknown"``, which made every
+    harness review indistinguishable in the audit trail even though the
+    registry knew the provider: the live administrator review
+    ``rv-1fb66923834e4b4eb0ec10fa1db8f209`` (office-admin, qoder) was recorded
+    as ``unknown``. The query runs on the caller's connection because both call
+    sites are inside a write transaction.
+    """
+    if reviewer_kind == "human":
+        return "human"
+    row = conn.execute(
+        "SELECT provider FROM harnesses WHERE harness_id = ?", (reviewer_harness_id,)
+    ).fetchone()
+    if row is None or not row["provider"]:
+        return "unknown"
+    return str(row["provider"])
+
+
 @dataclass(frozen=True, slots=True)
 class PlanOutcome:
     plan_id: str
@@ -987,16 +1018,27 @@ class SchedulerService:
                 reviewer_kind=reviewer_kind,
             )
 
-            existing = conn.execute(
+            # A previous claim for this (task, attempt, reviewer) is always
+            # taken over, never re-inserted: the unique key is
+            # (task, attempt, reviewer, review_revision), so a second INSERT for
+            # the same tuple looks like a duplicate revision. A live lease is
+            # reused as-is; every other row falls through to the receipt check
+            # and is revived below.
+            prior = conn.execute(
                 "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
-                " AND reviewer_harness_id = ? AND status = 'claimed'",
+                " AND reviewer_harness_id = ? ORDER BY review_revision DESC LIMIT 1",
                 (task_id, attempt_id, reviewer_harness_id),
             ).fetchone()
-            if existing is not None:
+            if (
+                prior is not None
+                and str(prior["status"]) == "claimed"
+                and prior["lease_until"] is not None
+                and parse_iso(str(prior["lease_until"])) > datetime.now(UTC)
+            ):
                 return {
-                    "review_id": str(existing["review_id"]),
-                    "reviewed_commit": existing["reviewed_commit"],
-                    "lease_until": existing["lease_until"],
+                    "review_id": str(prior["review_id"]),
+                    "reviewed_commit": prior["reviewed_commit"],
+                    "lease_until": prior["lease_until"],
                     "reused": True,
                 }
 
@@ -1012,10 +1054,41 @@ class SchedulerService:
                 )
             moment = datetime.now(UTC)
             reviewed_commit = str(receipt["commit"])
-            new_id = review_id or f"rv-{uuid.uuid4().hex}"
             lease_until = iso(
                 moment + timedelta(seconds=lease_seconds or settings.review_lease_seconds)
             )
+            if prior is not None:
+                if str(prior["status"]) not in {"claimed", "expired"}:
+                    raise Conflict(
+                        f"{task_id} already has a {prior['status']} review for"
+                        f" {attempt_id} by {reviewer_harness_id}",
+                        code="review.already_decided",
+                    )
+                # A claim whose lease ran out is revived instead of re-inserted.
+                # The lease sweep marks the row ``expired`` so that "the next
+                # reviewer claim starts clean" (its own docstring); that only
+                # works if the next claim takes the same row -- and therefore
+                # the same review_revision -- again.
+                conn.execute(
+                    "UPDATE reviews SET status = 'claimed', lease_until = ?,"
+                    " reviewed_commit = ?, fencing_epoch = ?, verdict = NULL,"
+                    " findings_hash = NULL, findings_json = NULL, completed_seq = NULL"
+                    " WHERE review_id = ?",
+                    (
+                        lease_until,
+                        reviewed_commit,
+                        int(task["current_epoch"]),
+                        str(prior["review_id"]),
+                    ),
+                )
+                return {
+                    "review_id": str(prior["review_id"]),
+                    "reviewed_commit": reviewed_commit,
+                    "lease_until": lease_until,
+                    "reused": True,
+                }
+
+            new_id = review_id or f"rv-{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                 " reviewer_provider, status, lease_until, fencing_epoch, reviewed_commit,"
@@ -1026,7 +1099,11 @@ class SchedulerService:
                     task_id,
                     attempt_id,
                     reviewer_harness_id,
-                    "human" if reviewer_kind == "human" else "unknown",
+                    _reviewer_provider(
+                        conn,
+                        reviewer_harness_id=reviewer_harness_id,
+                        reviewer_kind=reviewer_kind,
+                    ),
                     lease_until,
                     int(task["current_epoch"]),
                     reviewed_commit,
@@ -1168,10 +1245,12 @@ class SchedulerService:
                 review_id = str(existing["review_id"])
                 conn.execute(
                     "UPDATE reviews SET status = 'completed', verdict = ?, findings_hash = ?,"
-                    " reviewed_commit = ?, fencing_epoch = ? WHERE review_id = ?",
+                    " findings_json = ?, reviewed_commit = ?, fencing_epoch = ?"
+                    " WHERE review_id = ?",
                     (
                         verdict,
                         _hash(findings),
+                        _findings_json(findings),
                         reviewed_commit,
                         int(task["current_epoch"]),
                         review_id,
@@ -1182,18 +1261,23 @@ class SchedulerService:
                 conn.execute(
                     "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                     " reviewer_provider, status, fencing_epoch, reviewed_commit, verdict,"
-                    " findings_hash, review_revision, created_seq)"
-                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, NULL)",
+                    " findings_hash, findings_json, review_revision, created_seq)"
+                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, NULL)",
                     (
                         review_id,
                         task_id,
                         attempt_id,
                         reviewer_harness_id,
-                        "human" if reviewer_kind == "human" else "unknown",
+                        _reviewer_provider(
+                            conn,
+                            reviewer_harness_id=reviewer_harness_id,
+                            reviewer_kind=reviewer_kind,
+                        ),
                         int(task["current_epoch"]),
                         reviewed_commit,
                         verdict,
                         _hash(findings),
+                        _findings_json(findings),
                         review_revision,
                     ),
                 )
@@ -1222,6 +1306,14 @@ class SchedulerService:
                     "findings_hash": _hash(findings),
                 },
                 connection=conn,
+            )
+            # Anchor the review row to the event that completed it. The column
+            # exists for exactly this and was never written, so "the latest
+            # review for this task" had no defined order -- and the replay path
+            # above returned ``completed_seq: null`` as its ``seq``.
+            conn.execute(
+                "UPDATE reviews SET completed_seq = ? WHERE review_id = ?",
+                (record.seq, review_id),
             )
             apply_transition(
                 conn,
