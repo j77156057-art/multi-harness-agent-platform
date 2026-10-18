@@ -74,6 +74,11 @@ export interface TaskSummary {
   current_epoch: number
   waiting_since: string | null
   escalated_at: string | null
+  // R10 §8 budget-override reads: the release control needs to know whether
+  // the task has spent its attempts and whether a human already overrode it.
+  attempt_no?: number
+  max_attempts?: number
+  budget_override_by?: string | null
   [key: string]: unknown
 }
 
@@ -113,6 +118,22 @@ export interface HumanOutcome {
   event: string
   seq: number
   status: string
+}
+
+export interface ReviewClaim {
+  review_id: string
+  reviewed_commit: string
+  lease_until: string
+  reused: boolean
+}
+
+export interface ReviewOutcome {
+  review_id: string
+  task_id: string
+  verdict: string
+  event: string
+  seq: number
+  replayed?: boolean
 }
 
 export interface PlanCreated {
@@ -275,7 +296,10 @@ export const api = {
       body: JSON.stringify({ task_id: taskId, ...body }),
     })
   },
-  humanRelease(taskId: string, body: { decided_by: string }): Promise<HumanOutcome> {
+  humanRelease(
+    taskId: string,
+    body: { decided_by: string; budget_override?: boolean; reason?: string },
+  ): Promise<HumanOutcome> {
     return request('/human/release', {
       method: 'POST',
       body: JSON.stringify({ task_id: taskId, ...body }),
@@ -294,6 +318,32 @@ export const api = {
     return request('/human/cancel', {
       method: 'POST',
       body: JSON.stringify({ task_id: taskId, ...body }),
+    })
+  },
+  humanReviewClaim(
+    taskId: string,
+    attemptId: string,
+    body: { decided_by: string; review_id?: string },
+  ): Promise<ReviewClaim> {
+    return request('/human/review/claim', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, attempt_id: attemptId, ...body }),
+    })
+  },
+  humanReviewSubmit(
+    taskId: string,
+    attemptId: string,
+    body: {
+      decided_by: string
+      review_id: string
+      verdict: 'approve' | 'request_changes'
+      reviewed_commit: string
+      findings?: Record<string, unknown>[]
+    },
+  ): Promise<ReviewOutcome> {
+    return request('/human/review/submit', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: taskId, attempt_id: attemptId, ...body }),
     })
   },
 }

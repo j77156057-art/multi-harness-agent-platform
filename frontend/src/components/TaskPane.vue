@@ -14,6 +14,7 @@ const props = defineProps<{
   busy: boolean
   operator: string
   humanAct: (action: HumanAction) => Promise<boolean>
+  reviewClaim?: { taskId: string; reviewId: string; reviewedCommit: string } | null
 }>()
 
 const emit = defineEmits<{ select: [taskId: string]; expandDiff: [] }>()
@@ -93,6 +94,38 @@ const actions = computed<DecisionAction[]>(() => {
   return list
 })
 
+// R10 §8: a plain release is refused once attempt_no >= max_attempts unless
+// a human already overrode the budget. The control asks for the override
+// explicitly instead of letting the operator discover it through a 409.
+const releaseNeedsOverride = computed(() => {
+  const task = props.selectedTask
+  if (task === null || task.status !== 'escalated') return false
+  if (task.budget_override_by != null) return false
+  const used = Number(task.attempt_no ?? 0)
+  const limit = Number(task.max_attempts ?? 0)
+  return limit > 0 && used >= limit
+})
+const releaseBlocked = computed(() => releaseNeedsOverride.value && !budgetOverride.value)
+
+const reviewFindings = ref('')
+const reviewVerdict = ref<'approve' | 'request_changes'>('approve')
+const reviewLease = computed(
+  () => props.reviewClaim?.taskId === props.selectedTask?.task_id,
+)
+const reviewId = computed(() => props.reviewClaim?.reviewId ?? '')
+const reviewCommit = ref('')
+watch(
+  () => props.reviewClaim,
+  (claim) => {
+    reviewCommit.value =
+      claim != null && claim.taskId === props.selectedTask?.task_id ? claim.reviewedCommit : ''
+  },
+  { immediate: true },
+)
+const reviewAvailable = computed(
+  () => props.selectedTask?.status === 'awaiting_review' && props.selectedTask.current_attempt_id !== null,
+)
+
 // awaiting_human 的待答问题在事件投影里（human.question 的 payload），
 // 不新增读端点；options 不在事件里，答复走自由文本。
 const openQuestion = computed<string | null>(() => {
@@ -110,6 +143,8 @@ const openQuestion = computed<string | null>(() => {
 const decidedBy = ref('operator')
 const answer = ref('')
 const cancelReason = ref('')
+const releaseReason = ref('')
+const budgetOverride = ref(false)
 const adjudicateQuestion = ref('')
 const adjudicateOptions = ref('')
 
@@ -127,6 +162,14 @@ watch(
 
 const operatorValid = computed(() => decidedBy.value.trim().length > 0)
 
+watch(
+  () => props.selectedTask?.task_id,
+  () => {
+    budgetOverride.value = false
+    releaseReason.value = ''
+  },
+)
+
 async function submit(kind: DecisionAction): Promise<void> {
   const task = props.selectedTask
   if (task === null || props.busy || !operatorValid.value) return
@@ -139,9 +182,16 @@ async function submit(kind: DecisionAction): Promise<void> {
       action = { kind, ...base, ...(trimmed.length > 0 ? { answer: trimmed } : {}) }
       break
     }
-    case 'release':
-      action = { kind, ...base }
+    case 'release': {
+      const trimmed = releaseReason.value.trim()
+      action = {
+        kind,
+        ...base,
+        ...(budgetOverride.value ? { budget_override: true } : {}),
+        ...(trimmed.length > 0 ? { reason: trimmed } : {}),
+      }
       break
+    }
     case 'adjudicate': {
       const question = adjudicateQuestion.value.trim()
       if (question.length === 0) return
@@ -162,9 +212,48 @@ async function submit(kind: DecisionAction): Promise<void> {
   if (ok) {
     answer.value = ''
     cancelReason.value = ''
+    releaseReason.value = ''
+    budgetOverride.value = false
     adjudicateQuestion.value = ''
     adjudicateOptions.value = ''
   }
+}
+
+async function claimReview(): Promise<void> {
+  const task = props.selectedTask
+  if (task === null || task.current_attempt_id === null || props.busy || !operatorValid.value) return
+  const ok = await props.humanAct({
+    kind: 'review_claim',
+    taskId: task.task_id,
+    attemptId: task.current_attempt_id,
+    decided_by: decidedBy.value.trim(),
+  })
+  if (ok) {
+    reviewCommit.value = ''
+  }
+}
+
+async function submitReview(): Promise<void> {
+  const task = props.selectedTask
+  if (
+    task === null ||
+    task.current_attempt_id === null ||
+    props.busy ||
+    !operatorValid.value ||
+    reviewId.value.trim() === '' ||
+    reviewCommit.value.trim() === ''
+  ) return
+  const findings = reviewFindings.value.trim()
+  await props.humanAct({
+    kind: 'review_submit',
+    taskId: task.task_id,
+    attemptId: task.current_attempt_id,
+    decided_by: decidedBy.value.trim(),
+    review_id: reviewId.value.trim(),
+    reviewed_commit: reviewCommit.value.trim(),
+    verdict: reviewVerdict.value,
+    ...(findings.length > 0 ? { findings: [{ severity: 'note', message: findings }] } : {}),
+  })
 }
 </script>
 
@@ -232,6 +321,20 @@ async function submit(kind: DecisionAction): Promise<void> {
             取消理由（cancel 时记入事件）
             <input v-model="cancelReason" name="cancel_reason" placeholder="可空" />
           </label>
+          <template v-if="actions.includes('release')">
+            <label v-if="releaseNeedsOverride" class="decision-field">
+              <input v-model="budgetOverride" name="budget_override" type="checkbox" />
+              预算已耗尽（{{ selectedTask.attempt_no ?? 0 }}/{{ selectedTask.max_attempts ?? 0 }}）：
+              放行需携带 attempt_budget_override
+            </label>
+            <p v-else-if="selectedTask.budget_override_by" class="decision-hint">
+              预算已由 {{ selectedTask.budget_override_by }} 覆盖
+            </p>
+            <label class="decision-field">
+              放行理由（写入决策行，可空）
+              <input v-model="releaseReason" name="release_reason" placeholder="可空" />
+            </label>
+          </template>
 
           <p class="decision-actions">
             <button
@@ -253,7 +356,7 @@ async function submit(kind: DecisionAction): Promise<void> {
             <button
               v-if="actions.includes('release')"
               type="button"
-              :disabled="busy || !operatorValid"
+              :disabled="busy || !operatorValid || releaseBlocked"
               @click="submit('release')"
             >
               释放
@@ -277,6 +380,39 @@ async function submit(kind: DecisionAction): Promise<void> {
           </p>
         </template>
         <p v-else class="decision-none">当前状态没有可用的人工动作（终态或由巡检器接管）。</p>
+      </section>
+
+      <section v-if="reviewAvailable" class="decision-card" aria-label="管理员审核">
+        <header class="decision-head">
+          <h3>管理员审核</h3>
+          <span class="status tone-accent">{{ reviewLease ? '已领取' : '待领取' }}</span>
+        </header>
+        <p class="decision-note">三个 Harness 的提交都在这里由管理员逐项审核。</p>
+        <label class="decision-field">
+          审核 ID
+          <input :value="reviewId" name="review_id" placeholder="领取后自动填写" disabled />
+        </label>
+        <label class="decision-field">
+          reviewed commit
+          <input v-model="reviewCommit" name="reviewed_commit" placeholder="提交的 commit" />
+        </label>
+        <label class="decision-field">
+          审核意见
+          <textarea v-model="reviewFindings" name="review_findings" rows="2" placeholder="可空"></textarea>
+        </label>
+        <p class="decision-actions">
+          <button v-if="!reviewLease" type="button" :disabled="busy || !operatorValid" @click="claimReview">
+            领取审核
+          </button>
+          <template v-else>
+            <button type="button" :disabled="busy || reviewCommit.trim().length === 0" @click="reviewVerdict = 'approve'; submitReview()">
+              审核通过
+            </button>
+            <button type="button" :disabled="busy || reviewCommit.trim().length === 0" @click="reviewVerdict = 'request_changes'; submitReview()">
+              要求修改
+            </button>
+          </template>
+        </p>
       </section>
 
       <section class="diff-card" aria-label="任务差异">

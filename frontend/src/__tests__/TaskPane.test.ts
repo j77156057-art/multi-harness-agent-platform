@@ -292,6 +292,34 @@ describe('TaskPane human decision bar', () => {
     })
   })
 
+  it('an over-budget escalated task requires the release override', async () => {
+    const humanAct = vi.fn(async (_action: HumanAction): Promise<boolean> => true)
+    const task: TaskSummary = {
+      ...taskWith('escalated'),
+      attempt_no: 3,
+      max_attempts: 3,
+      budget_override_by: null,
+    }
+    const wrapper = render({ selectedTask: task, humanAct })
+
+    const release = wrapper.findAll('.decision-actions button')[0]
+    expect(release?.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[name="budget_override"]').exists()).toBe(true)
+
+    await wrapper.get('[name="budget_override"]').setValue(true)
+    expect(release?.attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[name="release_reason"]').setValue('owner approved')
+    await release?.trigger('click')
+    expect(humanAct).toHaveBeenLastCalledWith({
+      kind: 'release',
+      taskId: 'T-1',
+      decided_by: 'operator',
+      budget_override: true,
+      reason: 'owner approved',
+    })
+  })
+
   it('running states offer only cancel, with an optional reason', async () => {
     const humanAct = vi.fn(async (_action: HumanAction): Promise<boolean> => true)
     const wrapper = render({ selectedTask: taskWith('in_progress'), humanAct })

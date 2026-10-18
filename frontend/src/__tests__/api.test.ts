@@ -210,4 +210,66 @@ describe('api client', () => {
       reason: '方向已变',
     })
   })
+
+  it('posts the budget override with the release decision', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, {
+        task_id: 'T-1',
+        event: 'human.release',
+        seq: 3,
+        status: 'ready',
+        budget_override_by: 'operator',
+      }),
+    )
+
+    await api.humanRelease('T-1', {
+      decided_by: 'operator',
+      budget_override: true,
+      reason: 'owner approved',
+    })
+
+    expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/human/release')
+    expect(JSON.parse(String(mock.mock.calls[0]?.[1]?.body))).toEqual({
+      task_id: 'T-1',
+      decided_by: 'operator',
+      budget_override: true,
+      reason: 'owner approved',
+    })
+  })
+
+  it('uses the administrator review claim and submit endpoints', async () => {
+    const mock = stubFetch(
+      jsonResponse(200, {
+        review_id: 'rv-1',
+        reviewed_commit: 'a'.repeat(40),
+        lease_until: '2026-10-15T01:00:00Z',
+        reused: false,
+      }),
+      jsonResponse(200, {
+        review_id: 'rv-1',
+        task_id: 'T-1',
+        verdict: 'approve',
+        event: 'approve',
+        seq: 9,
+      }),
+    )
+
+    await api.humanReviewClaim('T-1', 'T-1.a1', { decided_by: 'admin' })
+    await api.humanReviewSubmit('T-1', 'T-1.a1', {
+      decided_by: 'admin',
+      review_id: 'rv-1',
+      verdict: 'approve',
+      reviewed_commit: 'a'.repeat(40),
+    })
+
+    expect(mock.mock.calls[0]?.[0]).toBe('/api/v1/human/review/claim')
+    expect(mock.mock.calls[1]?.[0]).toBe('/api/v1/human/review/submit')
+    expect(JSON.parse(String(mock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      task_id: 'T-1',
+      attempt_id: 'T-1.a1',
+      decided_by: 'admin',
+      review_id: 'rv-1',
+      verdict: 'approve',
+    })
+  })
 })
