@@ -20,7 +20,10 @@ def test_scoped_runner_rejects_committed_outside_path(tmp_path):
     import sys
 
     result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
-    assert result.returncode == 1 and "out-of-scope" in result.stderr
+    # The refusal text is the operator-facing message for a scope escape; it
+    # changed from "out-of-scope" to "out of scope" when the gate started
+    # accepting files below a scoped directory (app/adapter/scope.py).
+    assert result.returncode == 1 and "out of scope" in result.stderr
 
 
 def test_structural_gate_requires_nonempty_allowed_artifact(tmp_path: Path):
@@ -75,4 +78,6 @@ def test_platform_commit_rejects_empty_result(tmp_path: Path):
 
     result = runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
     assert result.returncode == 1
-    assert "empty or out-of-scope" in result.stderr
+    # "nothing committed" and "committed outside the scope" are distinct
+    # refusals now; this test is about the empty one.
+    assert "no committed change" in result.stderr
