@@ -7,7 +7,6 @@ import contextlib
 import json
 import re
 import time
-from fnmatch import fnmatchcase
 from pathlib import Path
 
 import httpx
@@ -18,6 +17,7 @@ from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
+from app.adapter.scope import path_in_scope
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
@@ -93,16 +93,23 @@ class ScopedRunner(SubprocessRunner):
         changed = run_git("diff", "--name-only", f"{self.base}..HEAD", cwd=cwd).stdout.splitlines()
         paths = self.spec["exclusive_paths"]
         dirty = run_git("status", "--porcelain", cwd=cwd).stdout.strip()
-        if (
-            dirty
-            or not changed
-            or any(not any(fnmatchcase(p, pattern) for pattern in paths) for p in changed)
-        ):
+        # Name the condition that fired. The old single sentence ("dirty, empty
+        # or out-of-scope") made a scope-rule bug look like a member mistake and
+        # cost a full re-run to tell the two apart.
+        reasons: list[str] = []
+        if dirty:
+            reasons.append("uncommitted changes: " + "; ".join(dirty.splitlines()[:3]))
+        if not changed:
+            reasons.append(f"no committed change against base {self.base}")
+        out_of_scope = [p for p in changed if not path_in_scope(p, paths)]
+        if out_of_scope:
+            reasons.append("out of scope: " + ", ".join(out_of_scope[:3]))
+        if reasons:
             return CliRunResult(
                 result.argv,
                 1,
                 result.stdout,
-                result.stderr + "\nRefused: dirty, empty or out-of-scope result.\n",
+                result.stderr + "\nRefused: " + "; ".join(reasons) + "\n",
                 result.duration_seconds,
             )
         return result
@@ -126,19 +133,56 @@ class ScopedRunner(SubprocessRunner):
             )
             for candidate in candidates:
                 candidate = candidate.replace("\\", "/")
-                if not candidate or not any(fnmatchcase(candidate, pattern) for pattern in paths):
+                if not candidate or not path_in_scope(candidate, paths):
                     raise RuntimeError(
                         "platform commit refused: dirty path outside exclusive_paths"
                     )
                 changed_paths.append(candidate)
         run_git("add", "--", *sorted(set(changed_paths)), cwd=cwd)
         staged = run_git("diff", "--cached", "--name-only", cwd=cwd).stdout.splitlines()
-        if not staged or any(
-            not any(fnmatchcase(path.replace("\\", "/"), pattern) for pattern in paths)
-            for path in staged
-        ):
+        if not staged or any(not path_in_scope(path, paths) for path in staged):
             raise RuntimeError("platform commit refused: staged path outside exclusive_paths")
         run_git("commit", "-m", self.commit_message, cwd=cwd)
+
+
+def build_goal(
+    spec: dict[str, object],
+    *,
+    harness_id: str,
+    review: dict[str, object] | None = None,
+) -> str:
+    """The CLI goal for one attempt, carrying the findings when it is a rework.
+
+    R10 §10 ``claim_for_revision`` makes a ``changes_requested`` task claimable
+    again, but this goal used to be built from ``spec`` alone. A rework then
+    repeated the previous deliverable verbatim: the reviewer's findings were
+    only ever stored as a hash, so nothing downstream could act on them and the
+    review loop could not converge -- it just burned the attempt budget. The
+    findings are now recorded on the review row, served by ``read_context`` and
+    appended here verbatim.
+    """
+    goal = (
+        "Use ONLY the immutable approved task below. This workspace may contain only a seed README; "
+        "there is no separate TASKS.md requirement if absent. Create a nonempty committed deliverable "
+        "strictly inside exclusive_paths; do not read or modify other projects. "
+        "Do not change branch, install software or push. "
+        + (
+            "Do not run git add or git commit; the platform will submit your files after checking scope. "
+            if harness_id == "claude-code"
+            else "Commit the deliverable on the current branch. "
+        )
+        + "Task specification: "
+        + json.dumps(spec, ensure_ascii=False)
+    )
+    findings = (review or {}).get("findings") or []
+    if (review or {}).get("verdict") == "request_changes" and findings:
+        goal += (
+            "\nThis attempt is a REWORK: a reviewer requested changes on the previous submission. "
+            "Address every finding below; do not resubmit the previous deliverable unchanged. "
+            f"Reviewer findings (verbatim, from review {(review or {}).get('review_id')}): "
+            + json.dumps(findings, ensure_ascii=False)
+        )
+    return goal
 
 
 def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Path) -> bool:
@@ -147,7 +191,9 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
     if not ready:
         return False
     task = ready[0]
-    spec = adapter.read_context(task_id=task["task_id"])["spec"]
+    context = adapter.read_context(task_id=task["task_id"])
+    spec = context["spec"]
+    review = context.get("review") or {}
     manager = WorktreeManager(database, repo)
     service = SchedulerService(database)
     captured = {}
@@ -172,26 +218,14 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
         else "chore(formal): submit harness deliverable",
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
-    goal = (
-        "Use ONLY the immutable approved task below. This workspace may contain only a seed README; "
-        "there is no separate TASKS.md requirement if absent. Create a nonempty committed deliverable "
-        "strictly inside exclusive_paths; do not read or modify other projects. "
-        "Do not change branch, install software or push. "
-        + (
-            "Do not run git add or git commit; the platform will submit your files after checking scope. "
-            if harness_id == "claude-code"
-            else "Commit the deliverable on the current branch. "
-        )
-        + "Task specification: "
-        + json.dumps(spec, ensure_ascii=False)
-    )
+    goal = build_goal(spec, harness_id=harness_id, review=review)
     evidence.mkdir(parents=True, exist_ok=True)
     try:
         outcome = worker.work_on(
             task_id=task["task_id"],
             claim_request_id=f"formal-{task['task_id']}-a{int(task['attempt_no'])+1}",
             on_claimed=provision,
-            timeout_seconds=600,
+            timeout_seconds=1800,
             goal=goal,
         )
     except Exception as exc:

@@ -104,6 +104,7 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     api.include_router(routes.adapter)
     api.include_router(routes.human)
     api.include_router(routes.review)
+    api.include_router(routes.allocation)
     api.include_router(routes.read)
     app.include_router(api)
 

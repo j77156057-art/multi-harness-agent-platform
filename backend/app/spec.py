@@ -223,4 +223,47 @@ R10_TRANSITION_EDGE_COUNT = 86
 
 #: R10 §37.7 集合大小。docstate 会核对规范侧，本处用于代码侧交叉验证；
 #: test_spec_mirror.py（DOC-MIRROR-001）逐键比对本常量与规范实际解析值。
-R10_ALLOWLIST_COUNTS = {"M": 74, "O": 14, "R": 1, "UNION": 89, "LOOPS": 10}
+R10_ALLOWLIST_COUNTS = {"M": 74, "O": 14, "R": 1, "A": 18, "UNION": 107, "LOOPS": 10}
+
+
+class AllocationEvent(StrEnum):
+    """R10 §37.7 **A 集合**（分配事件）—— R10-fix-13 新增的第四个类别。
+
+    与 M 同构：每条边必须唯一决定 `next`；区别是它驱动 §39 的分配/传阅状态，
+    **不得改写 `tasks.status`**（封闭规则 6）。这里逐项镜像，禁止凭印象新增。
+    """
+
+    # 传阅（方案层）
+    CIRCULATION_OPENED = "circulation.opened"
+    CIRCULATION_REVIEW_SUBMITTED = "circulation.review_submitted"
+    CIRCULATION_ROUND_CLOSED = "circulation.round_closed"
+    CIRCULATION_REVISED = "circulation.revised"
+    CIRCULATION_COMPLETED = "circulation.completed"
+    CIRCULATION_CANCELLED = "circulation.cancelled"
+
+    # 分配（任务层）
+    ALLOCATION_OPENED = "allocation.opened"
+    ALLOCATION_CLOSED = "allocation.closed"
+    ALLOCATION_MATERIAL_REQUESTED = "allocation.material_requested"
+    ALLOCATION_DECISION_MADE = "allocation.decision_made"
+    ALLOCATION_DECISION_DEFERRED = "allocation.decision_deferred"
+    APPLICATION_SUBMITTED = "application.submitted"
+    APPLICATION_UPDATED = "application.updated"
+    APPLICATION_WITHDRAWN = "application.withdrawn"
+    ASSIGNMENT_INVITED = "assignment.invited"
+    ASSIGNMENT_ACCEPTED = "assignment.accepted"
+    ASSIGNMENT_DECLINED = "assignment.declined"
+    ASSIGNMENT_REVOKED = "assignment.revoked"
+
+
+#: R10 §39：传阅状态机的状态集合（分配状态与 tasks.status 分开定义，§117）。
+#: 没有 `draft`：传阅轮是被"开启"出来的（`absent --circulation.opened--> circulating`），
+#: 管理员在此之前自己起草方案，那不是平台状态。留一个没有入边的 `draft` 只会让人
+#: 以为存在一个可观测的起草阶段。
+CIRCULATION_STATES = frozenset({"circulating", "revising", "completed", "cancelled"})
+
+#: R10 §39：分配状态机的状态集合
+ALLOCATION_STATES = frozenset({"opened", "closed", "decided", "cancelled"})
+
+#: R10 §39：创建边专用伪状态（不是可达状态，与 §10 的 child_created 同款）
+ALLOCATION_PSEUDO_STATES = frozenset({"absent"})

@@ -37,6 +37,24 @@ def _qoder_binary() -> str:
     return str(candidate) if candidate.exists() else "qoderclicn"
 
 
+def qoder_command(work_order: str, worktree: Path) -> list[str]:
+    """The one unattended argv contract for the Qoder CN CLI.
+
+    Module-level so a second caller (the admin harness's refine call) reuses the
+    exact argv the worker uses instead of keeping a drifting copy.
+    """
+    return [
+        _qoder_binary(),
+        "-p",
+        "--output-format",
+        "json",
+        "--dangerously-skip-permissions",
+        "-w",
+        str(worktree),
+        work_order,
+    ]
+
+
 class QoderAdapter(CliHarness):
     binary = "qoderclicn"
 
@@ -57,16 +75,7 @@ class QoderAdapter(CliHarness):
         super().__init__(client, registration, prefix=prefix)
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
-        return [
-            _qoder_binary(),
-            "-p",
-            "--output-format",
-            "json",
-            "--dangerously-skip-permissions",
-            "-w",
-            str(worktree),
-            work_order,
-        ]
+        return qoder_command(work_order, worktree)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}

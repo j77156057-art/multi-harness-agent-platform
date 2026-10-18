@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.adapter.dispatch import dispatch, eligible_tasks
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
+from app.admin.service import AdminService
+from app.allocation.service import AllocationService
 from app.api import schemas
 from app.api.auth_deps import (
     Principal,
@@ -65,10 +67,17 @@ def _human(database: DatabaseDep) -> HumanOpsService:
 
 HumanDep = Annotated[HumanOpsService, Depends(_human)]
 
+
+def _allocation(database: Database) -> AllocationService:
+    """§39 分配与传阅服务。按请求构造：它只带 database 和一张不可变迁移表。"""
+    return AllocationService(database)
+
+
 management = APIRouter(tags=["management"])
 adapter = APIRouter(prefix="/adapter", tags=["adapter"])
 review = APIRouter(prefix="/review", tags=["review"])
 human = APIRouter(prefix="/human", tags=["human"])
+allocation = APIRouter(prefix="/allocation", tags=["allocation"])
 read = APIRouter(tags=["read"])
 
 
@@ -345,7 +354,30 @@ def read_context(
         if snapshots
         else {}
     )
-    return {"task_id": task_id, "task": task, "spec": spec, **page}
+    # R10 §10 ``claim_for_revision``: a rework needs the reviewer's findings, not
+    # only their hash. The review row is the record of the review, so serving it
+    # here is still "the event log and nothing else private" -- without it the
+    # reworking harness re-runs the identical goal and the loop cannot converge.
+    latest = database.read(
+        "SELECT review_id, verdict, reviewer_harness_id, findings_json, completed_seq"
+        " FROM reviews WHERE task_id = ? AND status = 'completed'"
+        " ORDER BY completed_seq DESC, review_id DESC LIMIT 1",
+        (task_id,),
+    )
+    review = (
+        {
+            "review_id": str(latest[0]["review_id"]),
+            "verdict": latest[0]["verdict"],
+            "reviewer_harness_id": latest[0]["reviewer_harness_id"],
+            "findings": json.loads(latest[0]["findings_json"])
+            if latest[0]["findings_json"]
+            else [],
+            "completed_seq": latest[0]["completed_seq"],
+        }
+        if latest
+        else None
+    )
+    return {"task_id": task_id, "task": task, "spec": spec, "review": review, **page}
 
 
 @adapter.post("/claim")
@@ -825,6 +857,439 @@ def human_review_submit(
         reviewer_kind="human",
         require_lease=True,
     )
+
+
+# --------------------------------------------------- allocation 分配与传阅
+
+
+@allocation.post("/circulation/open")
+def open_circulation(
+    body: schemas.CirculationOpenRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:start"),
+) -> dict[str, Any]:
+    """R10 §39 ``circulation.opened``: publish the plan draft and this round's reviewers.
+
+    This is the step the owner asked for in plain language: the admin finishes a plan,
+    then it is passed to *other* harnesses to review before anyone is assigned work.
+    """
+    bind_declared(
+        principal, body.opened_by, key="circulation:start", database=database, request=request
+    )
+    return _allocation(database).open_circulation(
+        group_id=body.group_id,
+        plan_id=body.plan_id,
+        plan_snapshot_id=body.plan_snapshot_id,
+        reviewer_harness_ids=body.reviewer_harness_ids,
+        opened_by=body.opened_by,
+        deadline_at=body.deadline_at,
+    )
+
+
+@allocation.post("/circulation/review")
+def submit_circulation_review(
+    body: schemas.CirculationReviewRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:review"),
+) -> dict[str, Any]:
+    """R10 §39 ``circulation.review_submitted``: a named reviewer gives this round's opinion."""
+    bind_declared(
+        principal, body.harness_id, key="circulation:review", database=database, request=request
+    )
+    return _allocation(database).submit_circulation_review(
+        circulation_id=body.circulation_id,
+        harness_id=body.harness_id,
+        body=body.body,
+        material_hash=body.material_hash,
+    )
+
+
+@allocation.post("/circulation/close")
+def close_circulation(
+    body: schemas.CirculationRoundRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:close"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="circulation:close", database=database, request=request
+    )
+    return _allocation(database).close_circulation_round(
+        circulation_id=body.circulation_id, closed_by=body.harness_id
+    )
+
+
+@allocation.post("/circulation/revise")
+def revise_circulation(
+    body: schemas.CirculationRoundRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:revise"),
+) -> dict[str, Any]:
+    """R10 §39 ``circulation.revised``: fold this round's opinions in, open the next round."""
+    bind_declared(
+        principal, body.harness_id, key="circulation:revise", database=database, request=request
+    )
+    return _allocation(database).revise_circulation(
+        circulation_id=body.circulation_id,
+        revised_by=body.harness_id,
+        reviewer_harness_ids=body.reviewer_harness_ids,
+    )
+
+
+@allocation.post("/circulation/complete")
+def complete_circulation(
+    body: schemas.CirculationRoundRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:complete"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="circulation:complete", database=database, request=request
+    )
+    return _allocation(database).complete_circulation(
+        circulation_id=body.circulation_id, completed_by=body.harness_id
+    )
+
+
+@allocation.post("/circulation/cancel")
+def cancel_circulation(
+    body: schemas.CirculationRoundRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("circulation:complete"),
+) -> dict[str, Any]:
+    """Void the plan: in-flight circulation and unexecuted allocations lapse together."""
+    bind_declared(
+        principal, body.harness_id, key="circulation:complete", database=database, request=request
+    )
+    return _allocation(database).cancel_circulation(
+        circulation_id=body.circulation_id, cancelled_by=body.harness_id, reason=body.reason
+    )
+
+
+@allocation.post("/round/open")
+def open_allocation_round(
+    body: schemas.AllocationOpenRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:open"),
+) -> dict[str, Any]:
+    """Open an allocation round. §39 硬规则 1 (hard gate): the snapshot must have a
+    completed circulation round first -- an unreviewed plan is refused, not warned."""
+    bind_declared(
+        principal, body.opened_by, key="allocation:open", database=database, request=request
+    )
+    return _allocation(database).open_allocation_round(
+        group_id=body.group_id,
+        plan_snapshot_id=body.plan_snapshot_id,
+        opened_by=body.opened_by,
+        deadline_at=body.deadline_at,
+    )
+
+
+@allocation.post("/round/close")
+def close_allocation_round(
+    body: schemas.AllocationRoundRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:close"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="allocation:close", database=database, request=request
+    )
+    return _allocation(database).close_allocation_round(
+        round_id=body.round_id, closed_by=body.harness_id
+    )
+
+
+@allocation.post("/application")
+def submit_application(
+    body: schemas.ApplicationSubmitRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:submit"),
+) -> dict[str, Any]:
+    """R10 §39 ``application.submitted``: "I want these tasks", plus one material version.
+
+    §39 硬规则 2: this creates no owner, attempt, lease or worktree. Applying is not claiming.
+    """
+    bind_declared(
+        principal, body.harness_id, key="allocation:submit", database=database, request=request
+    )
+    return _allocation(database).submit_application(
+        round_id=body.round_id,
+        harness_id=body.harness_id,
+        task_ids=body.task_ids,
+        reason=body.reason,
+        body=body.body,
+        instance_id=body.instance_id,
+    )
+
+
+@allocation.post("/application/update")
+def update_application(
+    body: schemas.ApplicationUpdateRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:submit"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="allocation:submit", database=database, request=request
+    )
+    return _allocation(database).update_application(
+        application_id=body.application_id,
+        harness_id=body.harness_id,
+        expected_revision=body.expected_revision,
+        reason=body.reason,
+        body=body.body,
+        task_ids=body.task_ids,
+    )
+
+
+@allocation.post("/application/withdraw")
+def withdraw_application(
+    body: schemas.ApplicationWithdrawRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:submit"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="allocation:submit", database=database, request=request
+    )
+    return _allocation(database).withdraw_application(
+        application_id=body.application_id, harness_id=body.harness_id
+    )
+
+
+@allocation.post("/material/request")
+def request_material(
+    body: schemas.AllocationMaterialRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:material"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.requested_by, key="allocation:material", database=database, request=request
+    )
+    return _allocation(database).request_material(
+        round_id=body.round_id,
+        task_id=body.task_id,
+        requested_by=body.requested_by,
+        reason=body.reason,
+    )
+
+
+@allocation.post("/decision")
+def decide_allocation(
+    body: schemas.AllocationDecisionRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:decide"),
+) -> dict[str, Any]:
+    """R10 §39 ``allocation.decision_made``: pick a candidate for one task.
+
+    §39 硬规则 3 (回避) lives in the service: a decider who competes for this task is
+    refused, and the refusal says to hand it to the group owner -- not to pick someone else.
+    """
+    bind_declared(
+        principal, body.decided_by, key="allocation:decide", database=database, request=request
+    )
+    return _allocation(database).decide(
+        round_id=body.round_id,
+        task_id=body.task_id,
+        application_id=body.application_id,
+        decided_by=body.decided_by,
+        expected_revision=body.expected_revision,
+        reason=body.reason,
+        compared_harness_ids=body.compared_harness_ids,
+    )
+
+
+@allocation.post("/decision/defer")
+def defer_allocation(
+    body: schemas.AllocationDeferRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:decide"),
+) -> dict[str, Any]:
+    """R10 §39 ``allocation.decision_deferred``: decide *not* to assign yet, and say why."""
+    bind_declared(
+        principal, body.decided_by, key="allocation:decide", database=database, request=request
+    )
+    return _allocation(database).defer_decision(
+        round_id=body.round_id,
+        task_id=body.task_id,
+        decided_by=body.decided_by,
+        reason=body.reason,
+    )
+
+
+@allocation.post("/invite")
+def invite_assignment(
+    body: schemas.AssignmentInviteRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("allocation:decide"),
+) -> dict[str, Any]:
+    """R10 §39 ``assignment.invited``: hand an (unapplied-for) task to a named harness."""
+    bind_declared(
+        principal, body.invited_by, key="allocation:decide", database=database, request=request
+    )
+    return _allocation(database).invite(
+        round_id=body.round_id,
+        task_id=body.task_id,
+        harness_id=body.harness_id,
+        invited_by=body.invited_by,
+        reason=body.reason,
+    )
+
+
+@allocation.post("/accept")
+def accept_assignment(
+    body: schemas.AssignmentResolveRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("assignment:accept"),
+) -> dict[str, Any]:
+    """R10 §39 ``assignment.accepted``: the *selected harness itself* confirms it takes the task."""
+    bind_declared(
+        principal, body.harness_id, key="assignment:accept", database=database, request=request
+    )
+    return _allocation(database).accept_assignment(
+        allocation_id=body.allocation_id, harness_id=body.harness_id
+    )
+
+
+@allocation.post("/decline")
+def decline_assignment(
+    body: schemas.AssignmentResolveRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("assignment:decline"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.harness_id, key="assignment:decline", database=database, request=request
+    )
+    return _allocation(database).decline_assignment(
+        allocation_id=body.allocation_id, harness_id=body.harness_id
+    )
+
+
+@allocation.post("/revoke")
+def revoke_assignment(
+    body: schemas.AssignmentRevokeRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("assignment:revoke"),
+) -> dict[str, Any]:
+    """R10 §39 ``assignment.revoked``: §17 gives the owner (and the delegated admin) this
+    control -- but only over an assignment nobody has claimed yet."""
+    bind_declared(
+        principal, body.revoked_by, key="assignment:revoke", database=database, request=request
+    )
+    return _allocation(database).revoke_assignment(
+        allocation_id=body.allocation_id,
+        expected_revision=body.expected_revision,
+        revoked_by=body.revoked_by,
+        reason=body.reason,
+    )
+
+
+@allocation.get("/authorization")
+def read_claim_authorization(
+    database: DatabaseDep,
+    request: Request,
+    task_id: str,
+    harness_id: str,
+    expected_revision: int | None = None,
+    principal: _guard("claim:authorized") = None,  # noqa: RUF013 - FastAPI Depends 占位
+) -> dict[str, Any]:
+    """R10 §39 硬规则 2 / §17 ``claim:authorized``: is there an authorization to claim this?
+
+    ``{"authorized": false}`` is a 200, not a 403: "you have no authorization" is an answer,
+    and the caller (adapter/UI) decides how to phrase it. A *stale* ``expected_revision``
+    is refused, because that is "working from an outdated authorization".
+    """
+    bind_declared(principal, harness_id, key="claim:authorized", database=database, request=request)
+    authorization = _allocation(database).claim_authorization(
+        task_id=task_id, harness_id=harness_id, expected_revision=expected_revision
+    )
+    return {"authorized": authorization is not None, "allocation": authorization}
+
+
+@read.get("/allocation/candidates")
+def list_allocation_candidates(
+    database: DatabaseDep, round_id: str, task_id: str
+) -> dict[str, Any]:
+    """Read the frozen candidate set for one task (the decision screen's input).
+
+    Read-only and deliberately open like the other ``/read`` endpoints: it shows what the
+    admin already published, and the decision itself still needs ``allocation:decide``.
+    """
+    return {"candidates": _allocation(database).list_candidates(round_id=round_id, task_id=task_id)}
+
+
+# --------------------------------------------------------------- admin harness
+
+
+@adapter.post("/admin/refine")
+def admin_refine(
+    body: schemas.AdminRefineRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("admin:refine"),
+) -> dict[str, Any]:
+    """Turn the group owner's natural-language requirement into task specs.
+
+    The refinement itself is the admin harness's own model call; this route only
+    carries it and leaves the exchange in the group conversation. It deliberately
+    does NOT dispatch: writing task state is ``plan:approve``, a separate
+    decision with its own permission key.
+
+    Responds with ``status: "ok"`` (validated specs) or ``status: "needs_owner"``
+    (the admin asked the owner instead of guessing). The second is a normal 200:
+    refusing to guess is the required behaviour, not a server error.
+    """
+    admin_id = _admin_subject(principal)
+    if HarnessRegistry(database).current(admin_id) is None:
+        raise ApiError(
+            "admin.not_registered",
+            409,
+            f"administrator harness {admin_id!r} is not in the registry;"
+            " register it before it can refine requirements",
+        )
+    if not database.read("SELECT 1 FROM groups WHERE group_id = ?", (body.group_id,)):
+        raise ApiError("group.not_found", 404, "unknown group")
+    return AdminService(database, harness_id=admin_id).refine(
+        requirement=body.requirement,
+        group_id=body.group_id,
+        max_tasks=body.max_tasks,
+        answers=body.answers,
+    )
+
+
+def _admin_subject(principal: Principal | None) -> str:
+    """Who the refinement is attributed to.
+
+    Under ``AP_AUTH_MODE=enforce`` the guard has already proven the caller is a
+    harness whose id is in ``AP_ADMIN_SUBJECTS``, so the token decides. With auth
+    off there is no principal to read; the first configured admin subject is the
+    only defensible stand-in, and an unconfigured deployment is refused rather
+    than attributed to a made-up identity.
+    """
+    if principal is not None:
+        return principal.subject_id
+    configured = sorted(settings.admin_subjects)
+    if not configured:
+        raise ApiError(
+            "admin.not_configured",
+            503,
+            "no administrator harness configured: set AP_ADMIN_SUBJECTS",
+        )
+    return configured[0]
 
 
 # -------------------------------------------------------------------- read

@@ -160,6 +160,38 @@ class Settings:
         if self.auth_mode not in {"off", "enforce"}:
             raise ValueError(f"AP_AUTH_MODE must be 'off' or 'enforce', got {self.auth_mode!r}")
 
+        # --- 分配授权门禁（R10 §39 硬规则 2；群主 2026-10-17 选定"分群开关"）---
+        # §39 硬规则 2 的字面口径是"只有已 accepted 的分配才构成 §11 Claim 的授权"。
+        # 全局强制会让存量任务全部不可领取（见 R10-FIX-13-DRAFT §10），所以按**群**开关：
+        # 列在这里的 group_id 强制"先有分配才能 Claim"，其余群保持既有行为。
+        # 默认空 = 一个群都不强制（零行为变化，不猜）；空值不等于放宽规则，
+        # 规则本身仍在，只是没有群被纳入强制范围——纳入哪个群是显式配置。
+        self.allocation_required_groups: frozenset[str] = frozenset(
+            item.strip()
+            for item in os.environ.get("AP_ALLOCATION_REQUIRED_GROUPS", "").split(",")
+            if item.strip()
+        )
+
+        # --- 管理员 Harness（admin-harness；R10 §17 人类管理员侧的 harness 化）---
+        # 平台只有 human/harness 两种主体，主体类型无法区分"管理员 harness"与
+        # "普通成员 harness"。管理员身份因此用**受配置的主体白名单**表达：只有列在
+        # AP_ADMIN_SUBJECTS 里的 harness 主体才能调用 §17 中本属人类管理员的那几项
+        # 权限（见 app/auth/policy.py 的 ADMIN_HARNESS_KEYS）。
+        # 默认空 = 没有任何 harness 拥有管理员权限（fail-closed，不猜）。
+        self.admin_subjects: frozenset[str] = frozenset(
+            item.strip()
+            for item in os.environ.get("AP_ADMIN_SUBJECTS", "").split(",")
+            if item.strip()
+        )
+        # 细化是一次真实的模型调用，落在一个独立空目录里（不是任何任务的
+        # worktree），免得管理员的模型动到成员的工作区。
+        self.admin_scratch_dir: Path = Path(
+            os.environ.get("AP_ADMIN_SCRATCH", str(self.data_dir / "admin-scratch"))
+        )
+        self.admin_refine_timeout_seconds: int = int(
+            os.environ.get("AP_ADMIN_REFINE_TIMEOUT", "600")
+        )
+
         # --- Harness CLI（adapter-hardening；drill F3/F4）---
         # codex 沙箱：auto=按平台（nt→danger-full-access：Windows 上 codex 自带
         # 的 workspace-write 沙箱起不了 shell，drill F3 实证；posix→--full-auto）。
@@ -180,7 +212,7 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         """创建运行期目录。幂等。"""
-        for d in (self.data_dir, self.worktree_root, self.export_dir):
+        for d in (self.data_dir, self.worktree_root, self.export_dir, self.admin_scratch_dir):
             d.mkdir(parents=True, exist_ok=True)
 
     def summary(self) -> dict[str, object]:
@@ -193,6 +225,10 @@ class Settings:
             "check_spec_on_startup": self.check_spec_on_startup,
             "insecure_single_account": self.insecure_single_account,
             "auth_mode": self.auth_mode,
+            # 主体 id 不是凭据；打印出来才能从启动日志判断管理员接线是否生效。
+            "admin_subjects": sorted(self.admin_subjects),
+            # 哪个群真的开着"先分配才能 Claim"的门禁，也从启动日志就能看出来。
+            "allocation_required_groups": sorted(self.allocation_required_groups),
         }
 
 

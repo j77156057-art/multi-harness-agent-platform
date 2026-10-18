@@ -157,6 +157,23 @@ class ProbeRequest(BaseModel):
     host_mode: str | None = None
 
 
+class AdminRefineRequest(BaseModel):
+    """管理员 harness 的细化入参（``admin:refine``）。
+
+    ``group_id`` 只是事件的归属，用来回答"这条要求是哪个群提出的"；细化本身
+    不改任何任务状态——写状态仍然走 ``plan:approve``。
+
+    ``answers`` 是"管理员不肯猜、先问群主"那条路径的回合：管理员上一轮把问题
+    发进群对话，群主用大白话回答，回答原样回灌给模型。没有它，回合就只能靠
+    前端拼字符串，管理员问过什么、群主答过什么在平台里就查不到了。
+    """
+
+    group_id: str = Field(min_length=1)
+    requirement: str = Field(min_length=1, max_length=4000)
+    max_tasks: int = Field(default=3, ge=1, le=8)
+    answers: list[str] = Field(default_factory=list, max_length=8)
+
+
 class AskHumanRequest(BaseModel):
     task_id: str
     attempt_id: str
@@ -209,3 +226,118 @@ class HumanCancelRequest(BaseModel):
     task_id: str
     decided_by: str = Field(min_length=1)
     reason: str = ""
+
+
+# ------------------------------------------------- R10 §39 分配与传阅（R10-fix-13）
+#
+# 这一组刻意把"谁在做"放进请求体（`opened_by` / `harness_id` / `decided_by`），
+# 理由和 `ReviewClaimRequest.reviewer_harness_id` 一样：加性部署（`AP_AUTH_MODE=off`）
+# 下没有 principal 可读，请求体是唯一的身份来源；开启 enforce 后路由用
+# `bind_declared` 把请求体与 token 主体绑死，冒用他人 id 会 403。
+
+
+class CirculationOpenRequest(BaseModel):
+    group_id: str = Field(min_length=1)
+    plan_id: str = Field(min_length=1)
+    plan_snapshot_id: str = Field(min_length=1)
+    reviewer_harness_ids: list[str] = Field(min_length=1)
+    opened_by: str = Field(min_length=1)
+    deadline_at: str | None = None
+
+
+class CirculationReviewRequest(BaseModel):
+    circulation_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    body: str = Field(min_length=1)
+    material_hash: str | None = None
+
+
+class CirculationRoundRequest(BaseModel):
+    circulation_id: str = Field(min_length=1)
+    #: 收轮/定稿/作废的经办人（管理员 harness）。
+    harness_id: str = Field(min_length=1)
+    #: 修订时可以换下一轮的传阅名单；不传则沿用本轮名单。
+    reviewer_harness_ids: list[str] | None = None
+    #: 作废必须给理由（§39 要求这几条边留理由）。
+    reason: str = ""
+
+
+class AllocationOpenRequest(BaseModel):
+    group_id: str = Field(min_length=1)
+    plan_snapshot_id: str = Field(min_length=1)
+    opened_by: str = Field(min_length=1)
+    deadline_at: str | None = None
+
+
+class AllocationRoundRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    reason: str = ""
+
+
+class ApplicationSubmitRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    task_ids: list[str] = Field(min_length=1)
+    reason: str = ""
+    body: str = ""
+    instance_id: str | None = None
+
+
+class ApplicationUpdateRequest(BaseModel):
+    application_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    #: 乐观锁版本（§39 硬规则 4）。
+    expected_revision: int = Field(ge=1)
+    reason: str | None = None
+    body: str | None = None
+    task_ids: list[str] | None = None
+
+
+class ApplicationWithdrawRequest(BaseModel):
+    application_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+
+
+class AllocationDecisionRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    application_id: str = Field(min_length=1)
+    decided_by: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
+    reason: str = ""
+    compared_harness_ids: list[str] | None = None
+
+
+class AllocationDeferRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    decided_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class AllocationMaterialRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    requested_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class AssignmentInviteRequest(BaseModel):
+    round_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+    invited_by: str = Field(min_length=1)
+    reason: str = ""
+
+
+class AssignmentResolveRequest(BaseModel):
+    allocation_id: str = Field(min_length=1)
+    harness_id: str = Field(min_length=1)
+
+
+class AssignmentRevokeRequest(BaseModel):
+    allocation_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
+    revoked_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
