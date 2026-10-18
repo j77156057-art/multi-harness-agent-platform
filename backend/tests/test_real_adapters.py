@@ -17,6 +17,7 @@ What is real here and what is substituted, stated plainly:
 from __future__ import annotations
 
 import inspect
+import json
 import sys
 import time
 from dataclasses import dataclass
@@ -193,6 +194,7 @@ class ScriptedRunner:
         self.timeout = timeout
         self.ticks: list[dict[str, Any]] = []
         self.argv: list[str] = []
+        self.stdin_text: str | None = None
 
     def run(
         self,
@@ -202,8 +204,10 @@ class ScriptedRunner:
         timeout_seconds: float | None,
         on_tick: Any = None,
         tick_interval_seconds: float | None = None,
+        stdin_text: str | None = None,
     ) -> CliRunResult:
         self.argv = list(argv)
+        self.stdin_text = stdin_text
         if self.timeout:
             raise HarnessTimeout("scripted deadline reached")
         if on_tick is not None:
@@ -345,14 +349,216 @@ def test_each_cli_contract_is_pinned(case, tmp_path):
         assert Path(command[0]).stem.lower() in {case.name, "qoderclicn", "qodercn", "cbc"}
         if case.name == "qoder":
             assert command[1:-2] == case.flags
+            assert command[-2:] == [str(tmp_path), order]
         else:
-            assert command[1:-2] == [*case.flags, "--add-dir"]
-        assert command[-2:] == [str(tmp_path), order]
+            # CodeBuddy takes the order on stdin, so its argv is flags plus the
+            # worktree path -- no positional at all (a positional multi-line
+            # order is truncated at the first newline by the real CLI).
+            assert command[1:-2] == case.flags
+            assert command[-2:] == ["--add-dir", str(tmp_path)]
     else:
         assert command == [adapter.binary, *case.flags, order]
     parsed = adapter.parse_output(case.stdout)
     assert parsed.get("session_id") == case.session_id
     assert parsed["final_message"] == "done: flag.txt"
+
+
+#: The CodeBuddy CLI's own argument grammar, as far as the adapter uses it.
+#: Kept here as data because the bug being pinned is *about* arity: `--add-dir`
+#: takes `<directories...>`, so it consumes every following non-flag token.
+_CODEBUDDY_BOOL_FLAGS = {"-p"}
+_CODEBUDDY_VALUE_FLAGS = {"--output-format", "--permission-mode"}
+_CODEBUDDY_VARIADIC_FLAGS = {"--add-dir"}
+
+
+def split_cli_argv(tokens):
+    """Replay a CLI argument grammar into (positionals, add_dir_directories)."""
+    positionals: list[str] = []
+    directories: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in _CODEBUDDY_BOOL_FLAGS:
+            index += 1
+        elif token in _CODEBUDDY_VALUE_FLAGS:
+            index += 2
+        elif token in _CODEBUDDY_VARIADIC_FLAGS:
+            index += 1
+            while index < len(tokens) and not tokens[index].startswith("-"):
+                directories.append(tokens[index])
+                index += 1
+        elif token.startswith("-"):
+            raise AssertionError(f"argv carries a flag this test does not know: {token}")
+        else:
+            positionals.append(token)
+            index += 1
+    return positionals, directories
+
+
+def test_codebuddy_argv_carries_no_prompt_and_the_order_goes_on_stdin(tmp_path):
+    """Regression for FD-8438d596ff9225e6: the CLI saw only the first line.
+
+    The real CLI truncates a *multi-line positional* prompt at the first newline
+    (its transcript contained `<user_query>Line1 alpha</user_query>` for a
+    four-line prompt), so the model never saw the task specification and
+    refused to invent one — an attempt burned for a defect in our argv.
+    CodeBuddy's pipe mode preserves the text, therefore:
+
+    * the argv must contain **no positional at all** (nothing can be swallowed
+      by the variadic ``--add-dir``, and nothing can be truncated), and
+    * the adapter must declare ``prompt_via_stdin`` so the worker pipes the
+      whole order in.
+
+    The paired test below proves the assertion can fail on a positional argv.
+    """
+    from app.adapter.harnesses.codebuddy import CodeBuddyAdapter, codebuddy_command
+
+    command = codebuddy_command(tmp_path)
+
+    positionals, directories = split_cli_argv(command[1:])
+    assert (
+        positionals == []
+    ), "no positional prompt: a positional one is truncated at the first newline"
+    assert directories == [str(tmp_path)], "--add-dir must see exactly the worktree"
+    assert CodeBuddyAdapter.prompt_via_stdin is True
+
+
+def test_a_multiline_positional_would_lose_everything_after_line_one(tmp_path):
+    """The stdin test only proves something if argv prompting really breaks.
+
+    This reconstructs the shape that failed and asserts the *reason*: a
+    newline-bearing positional cannot be the transport for a work order, so the
+    adapter must not use one.
+    """
+    from app.adapter.harnesses.codebuddy import _codebuddy_binary
+
+    order = "line one\nline two\nline three"
+    positional_argv = [
+        _codebuddy_binary(),
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "bypassPermissions",
+        order,
+        "--add-dir",
+        str(tmp_path),
+    ]
+
+    positionals, directories = split_cli_argv(positional_argv[1:])
+    # The flag parser itself would keep the newline, which is exactly why the
+    # defect was invisible here and only showed up in the CLI's own transcript;
+    # what this test pins is that the prompt is a *positional* at all, i.e. the
+    # transport the real CLI truncates.
+    assert positionals == [order]
+    assert (
+        "\n" in positionals[0]
+    ), "a positional order is multi-line: the real CLI keeps only line one"
+    assert directories == [str(tmp_path)]
+
+
+def test_the_variadic_replay_fails_on_the_old_argv(tmp_path):
+    """The test above only proves something if it can fail on the broken order.
+
+    The pre-fix argv is reconstructed here verbatim and must be rejected --
+    otherwise `split_cli_argv` would be a test that agrees with anything.
+    """
+    from app.adapter.harnesses.codebuddy import _codebuddy_binary
+
+    order = "do the thing"
+    broken = [
+        _codebuddy_binary(),
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--add-dir",
+        str(tmp_path),
+        order,
+    ]
+
+    positionals, directories = split_cli_argv(broken[1:])
+    assert positionals == [], "the broken order really does lose the prompt"
+    assert directories == [str(tmp_path), order], "and it really does eat it as a directory"
+
+
+#: Trimmed from a **real** CodeBuddy CLI transcript for `--output-format json`:
+#: the answer arrives inside one pretty-printed JSON array, not one object per
+#: line. Field names and nesting are kept as captured.
+CODEBUDDY_ARRAY_TRANSCRIPT = json.dumps(
+    [
+        {
+            "type": "message",
+            "role": "user",
+            "status": "completed",
+            "content": [
+                {
+                    "type": "input_text",
+                    "text": '<system-reminder data-role="memory"><memory>\n'
+                    "# auto memory\n\nYou have a persistent, file-based memory system.\n"
+                    "</memory></system-reminder>\n\n"
+                    "<user_query>Reply with exactly OK and do not modify any file.</user_query>",
+                }
+            ],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{"type": "output_text", "text": "OK"}],
+        },
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "OK",
+            "session_id": "01a148f2-7e2f-746e-8b0e-b2de3c8444e3",
+            "duration_ms": 4151,
+            "num_turns": 3,
+        },
+    ],
+    indent=2,
+)
+
+
+def test_codebuddy_reads_the_pretty_printed_array_transcript():
+    """Second real defect on the same channel: the answer must be the answer.
+
+    Parsing line by line never saw the `result` object, so `final_message` fell
+    back to the raw tail -- the adapter reported a slice of JSON syntax as the
+    harness's message and lost `session_id` entirely.
+    """
+    adapter = CodeBuddyAdapter(client=None)
+    parsed = adapter.parse_output(CODEBUDDY_ARRAY_TRANSCRIPT)
+    assert parsed["final_message"] == "OK"
+    assert parsed["session_id"] == "01a148f2-7e2f-746e-8b0e-b2de3c8444e3"
+
+
+def test_the_array_transcript_really_is_not_line_delimited():
+    """Why the fix was needed at all: no single line of it carries the result."""
+    lines = CODEBUDDY_ARRAY_TRANSCRIPT.splitlines()
+    assert len(lines) > 5, "the fixture must actually be multi-line"
+
+    per_line: list[Any] = []
+    for line in lines:
+        try:
+            per_line.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    assert not [
+        payload
+        for payload in per_line
+        if isinstance(payload, dict) and payload.get("result") == "OK"
+    ], "if a single line carried the result, this fixture would not pin the bug"
+
+
+def test_codebuddy_still_reads_one_object_per_line():
+    """The other shape stays working: accepting both is the contract."""
+    adapter = CodeBuddyAdapter(client=None)
+    parsed = adapter.parse_output('{"session_id":"cb-1","result":"done: flag.txt"}')
+    assert parsed["final_message"] == "done: flag.txt"
+    assert parsed["session_id"] == "cb-1"
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -655,6 +861,40 @@ def test_a_restarted_adapter_recovers_its_attempt(case, tmp_path):
     ), "recovery continues attempt 1; it does not start attempt 2"
 
 
+@pytest.mark.parametrize("case", CASES)
+def test_each_adapter_delivers_the_work_order_on_the_channel_its_cli_reads(case, tmp_path):
+    """The order reaches the CLI intact: argv for most, stdin for CodeBuddy.
+
+    CodeBuddy keeps only the first line of a multi-line positional prompt
+    (measured against the real binary: a four-line prompt arrived as
+    ``<user_query>Line1 alpha</user_query>``), so its order travels through the
+    pipe. Every other adapter keeps the argv contract, and a runner written
+    against the older signature must still work for those.
+    """
+    rig = build_rig(tmp_path, case)
+    adapter = adapter_for(rig)
+    claimed = adapter.claim(claim_request_id="cr-channel", task_ids=["T-1"])
+    worktree = provision(rig, claimed["items"][0])
+
+    runner = ScriptedRunner(files={"flag.txt": "ok\n"}, stdout=case.stdout)
+    worker = CliHarnessWorker(adapter, worktree=worktree, runner=runner)
+    worker.work_on(task_id="T-1", claim_request_id="cr-channel")
+
+    if case.cls.prompt_via_stdin:
+        assert runner.stdin_text, "the order must travel on stdin for this CLI"
+        assert "T-1" in runner.stdin_text
+        assert "\n" in runner.stdin_text, "the whole multi-line order, not only line one"
+        assert all(
+            "T-1" not in argument for argument in runner.argv[1:]
+        ), "no positional prompt to truncate"
+    else:
+        # Not every argv-only harness puts the order in argv (opencode passes it
+        # through its prepared transport file), so the property pinned here is
+        # the transport boundary: no pipe unless the CLI needs one.
+        assert runner.stdin_text is None, "argv-only harnesses must not be piped to"
+        assert case.cls.prompt_via_stdin is False
+
+
 def test_a_worker_refuses_a_task_owned_by_someone_else(tmp_path):
     rig = build_rig(tmp_path, CODEX_CASE)
     owner = adapter_for(rig)
@@ -695,6 +935,42 @@ def test_the_subprocess_runner_reports_a_missing_binary(tmp_path):
             cwd=tmp_path,
             timeout_seconds=1,
         )
+
+
+def test_the_subprocess_runner_pipes_the_whole_multi_line_prompt(tmp_path):
+    """Regression for FD-8438d596ff9225e6 at the transport layer.
+
+    CodeBuddy keeps only the first line of a positional prompt, so the order is
+    piped in. This asserts the runner really delivers every byte to the child's
+    stdin (a newline-free argv could still be paired with a truncated pipe).
+    """
+    reader = tmp_path / "reader.py"
+    reader.write_text(
+        "import pathlib, sys\n"
+        "stdin = sys.stdin.read()\n"
+        "pathlib.Path('order.txt').write_text(stdin, encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    order = "line one\nline two\n\nline four — 中文"
+    result = SubprocessRunner(poll_seconds=0.05).run(
+        [sys.executable, str(reader)],
+        cwd=tmp_path,
+        timeout_seconds=30,
+        stdin_text=order,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "order.txt").read_text(encoding="utf-8") == order
+
+
+def test_the_subprocess_runner_still_gives_devnull_without_a_prompt(tmp_path):
+    """No prompt means no pipe: a CLI that reads stdin must see EOF, not hang."""
+    result = SubprocessRunner(poll_seconds=0.05).run(
+        [sys.executable, "-c", "import sys; print(len(sys.stdin.read()))"],
+        cwd=tmp_path,
+        timeout_seconds=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0"
 
 
 def test_the_subprocess_runner_kills_the_whole_process_tree(tmp_path):

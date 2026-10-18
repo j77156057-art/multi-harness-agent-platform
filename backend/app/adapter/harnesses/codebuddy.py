@@ -30,8 +30,79 @@ def _codebuddy_binary() -> str:
     return shutil.which("codebuddy") or shutil.which("cbc") or "codebuddy"
 
 
+def codebuddy_command(worktree: Path) -> list[str]:
+    """The one unattended argv contract for the CodeBuddy CLI.
+
+    Module-level for the same reason as `qoder_command`: a second caller reuses
+    the exact argv the worker uses instead of keeping a drifting copy.
+
+    **The work order is not in this argv.** Two separate CLI defects were
+    measured against the real binary:
+
+    * ``--add-dir`` is variadic (``--add-dir <directories...>``), so anything
+      positional written after it is swallowed as another directory — the CLI
+      then ran with an empty prompt and returned ``"result": ""``
+      (``data/formal-runs/FD-d5c10f46dae09e42.failure.json``).
+    * A *multi-line positional* prompt is truncated at the first newline. With
+      a four-line prompt the CLI's own transcript contained only
+      ``<user_query>Line1 alpha</user_query>``; the model therefore never saw
+      the task specification and correctly refused to invent one
+      (``data/formal-runs/FD-8438d596ff9225e6.failure.json``).
+
+    CodeBuddy's documented pipe mode (``-p`` is "useful for pipes") preserves
+    newlines, so the order goes on stdin and the argv stays path-only. That also
+    keeps the argv short, away from the Windows command-line length limit.
+    """
+    return [
+        _codebuddy_binary(),
+        "-p",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "bypassPermissions",
+        "--add-dir",
+        str(worktree),
+    ]
+
+
+def _iter_json_payloads(stdout: str):
+    """Yield the JSON objects a CodeBuddy transcript contains.
+
+    The CLI is not NDJSON-stable across modes/versions: the installation here
+    prints **one pretty-printed JSON array** covering the whole session, while
+    other invocations stream one object per line. Splitting on lines first made
+    the array form fall through to the raw-text fallback, so `final_message`
+    became a tail of JSON syntax instead of the answer -- and `session_id` was
+    never captured.
+    """
+    text = (stdout or "").strip()
+    if text:
+        try:
+            document = json.loads(text)
+        except json.JSONDecodeError:
+            document = None
+        if isinstance(document, dict):
+            yield document
+            return
+        if isinstance(document, list):
+            for item in document:
+                if isinstance(item, dict):
+                    yield item
+            return
+
+    for line in (stdout or "").splitlines():
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            yield payload
+
+
 class CodeBuddyAdapter(CliHarness):
     binary = "codebuddy"
+    #: The order travels on stdin (see :func:`codebuddy_command`).
+    prompt_via_stdin = True
 
     def __init__(
         self,
@@ -50,27 +121,12 @@ class CodeBuddyAdapter(CliHarness):
         super().__init__(client, registration, prefix=prefix)
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
-        return [
-            _codebuddy_binary(),
-            "-p",
-            "--output-format",
-            "json",
-            "--permission-mode",
-            "bypassPermissions",
-            "--add-dir",
-            str(worktree),
-            work_order,
-        ]
+        # `work_order` is deliberately unused: it goes on stdin (prompt_via_stdin).
+        return codebuddy_command(worktree)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}
-        for line in stdout.splitlines():
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(payload, dict):
-                continue
+        for payload in _iter_json_payloads(stdout):
             for key in ("session_id", "sessionId", "conversation_id"):
                 if isinstance(payload.get(key), str) and payload[key]:
                     parsed.setdefault("session_id", payload[key])

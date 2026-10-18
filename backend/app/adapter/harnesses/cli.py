@@ -87,6 +87,7 @@ class CliRunner(Protocol):
         timeout_seconds: float | None,
         on_tick: Any = None,
         tick_interval_seconds: float | None = None,
+        stdin_text: str | None = None,
     ) -> CliRunResult: ...
 
 
@@ -101,6 +102,12 @@ class CliHarness(HttpAdapter):
     """
 
     binary: str = ""
+
+    #: True when this CLI must receive the work order on stdin instead of argv.
+    #: CodeBuddy keeps only the first line of a positional prompt (measured: the
+    #: CLI put ``<user_query>Line1 alpha</user_query>`` in its transcript for a
+    #: four-line prompt), so its order travels through the pipe.
+    prompt_via_stdin: bool = False
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         raise NotImplementedError
@@ -140,7 +147,17 @@ class SubprocessRunner:
         timeout_seconds: float | None,
         on_tick: Any = None,
         tick_interval_seconds: float | None = None,
+        stdin_text: str | None = None,
     ) -> CliRunResult:
+        """Run one CLI child.
+
+        ``stdin_text`` exists because some CLIs (CodeBuddy) only keep the *first
+        line* of a positional prompt: everything after the first ``\\n`` is
+        dropped before the model sees it. Those CLIs read a piped prompt instead
+        (``-p`` with stdin), which preserves the whole work order. When
+        ``stdin_text`` is None the child still gets ``DEVNULL`` so no CLI can
+        block waiting for input.
+        """
         started = time.monotonic()
         spawn_kwargs: dict[str, Any] = {}
         if os.name != "nt":
@@ -152,13 +169,22 @@ class SubprocessRunner:
                 process = subprocess.Popen(
                     argv,
                     cwd=cwd,
-                    stdin=subprocess.DEVNULL,
+                    stdin=subprocess.PIPE if stdin_text is not None else subprocess.DEVNULL,
                     stdout=out,
                     stderr=err,
                     **spawn_kwargs,
                 )
             except FileNotFoundError as exc:
                 raise CliUnavailable(f"{argv[0]}: not found on PATH") from exc
+            if stdin_text is not None:
+                try:
+                    process.stdin.write(stdin_text.encode("utf-8"))
+                    process.stdin.close()
+                except (BrokenPipeError, OSError):
+                    # The CLI exited before reading its prompt; the exit code
+                    # and stderr below are the real diagnosis.
+                    with contextlib.suppress(Exception):
+                        process.stdin.close()
 
             deadline = started + timeout_seconds if timeout_seconds else None
             next_tick = (
@@ -316,6 +342,12 @@ class CliHarnessWorker:
         prepared_order = self.adapter.prepare_work_order(work_order, self.worktree)
         argv = self.adapter.command(prepared_order, self.worktree)
 
+        # Only mention stdin when this adapter actually uses it: the keyword is
+        # additive on the protocol, and a third-party runner written against the
+        # older signature must keep working for every argv-only harness.
+        run_kwargs: dict[str, Any] = {}
+        if self.adapter.prompt_via_stdin:
+            run_kwargs["stdin_text"] = prepared_order
         try:
             cli = self.runner.run(
                 argv,
@@ -323,6 +355,7 @@ class CliHarnessWorker:
                 timeout_seconds=timeout_seconds,
                 on_tick=self._tick(task_id),
                 tick_interval_seconds=float(self.heartbeat_seconds),
+                **run_kwargs,
             )
         except HarnessTimeout as exc:
             self.adapter.abandon(task_id=task_id, reason=f"harness timeout: {exc}")
@@ -427,6 +460,18 @@ class CliHarnessWorker:
         lines.append(
             "Read the task card for this task in TASKS.md (or docs/claims/) and do the work. "
             "Commit your changes on the current branch. Do not try to push anywhere."
+        )
+        lines.append(
+            "Before writing anything, check what already exists: when your channel has network "
+            "access, use it to consult official documentation, upstream repositories and prior "
+            "art -- including the rest of this repository -- and reuse or adapt a proven approach "
+            "instead of rebuilding it from scratch. Working in isolation and reinventing an "
+            "existing wheel is a defect, not diligence."
+        )
+        lines.append(
+            "If the goal is ambiguous, or you cannot tell which approach the group owner wants, "
+            "do not guess: state the open question in your report and stop short of inventing a "
+            "requirement nobody asked for."
         )
         return "\n".join(lines)
 
