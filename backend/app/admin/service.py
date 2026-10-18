@@ -18,13 +18,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.adapter.formal_worker import ADAPTER_TYPES, base_harness_id
 from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
     HarnessTimeout,
     SubprocessRunner,
 )
-from app.adapter.harnesses.qoder import qoder_command
 from app.config import settings
 from app.db.connection import Database
 from app.tasks.service import SchedulerService
@@ -133,28 +133,19 @@ def _questions(payload: dict[str, Any]) -> list[str]:
     return [str(item).strip() for item in raw if str(item).strip()]
 
 
-def _answer_text(stdout: str) -> str:
+def _answer_text(adapter: Any, stdout: str) -> str:
     """Pull the model's message out of the CLI's JSON-line envelope.
 
-    ``qoderclicn --output-format json`` prints one object per line with the
-    answer under ``result``/``text``/``message``/``content`` -- the same keys the
-    worker adapter reads. Falls back to the raw stdout so a CLI that changes its
-    envelope still gets a chance to parse, and fails loudly if neither works.
+    Parsing belongs to the adapter, not to this module: the envelope differs per
+    CLI (``qoderclicn --output-format json`` prints ``result``/``text``/... lines;
+    other CLIs answer in plain text). Keeping a copy here would make the refine
+    call read one channel's envelope for every channel. Falls back to the raw
+    stdout so a CLI that changes its envelope still gets a chance to parse.
     """
-    collected: list[str] = []
-    for line in stdout.splitlines():
-        try:
-            payload = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        for key in ("result", "text", "message", "content"):
-            value = payload.get(key)
-            if isinstance(value, str) and value.strip():
-                collected.append(value)
-    if collected:
-        return "\n".join(collected)
+    parsed = adapter.parse_output(stdout)
+    message = parsed.get("final_message") if isinstance(parsed, dict) else None
+    if isinstance(message, str) and message.strip():
+        return message
     return stdout
 
 
@@ -224,7 +215,15 @@ class AdminService:
             text, group_id=group_id, max_tasks=max_tasks, members=members, answers=replies
         )
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
-        argv = qoder_command(prompt, self.scratch_dir)
+        # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
+        # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
+        # "看起来能用"的默认通道 —— 那会让回执里的 `model.adapter` 说谎。
+        adapter, base = self._model_channel()
+        work_order = adapter.prepare_work_order(prompt, self.scratch_dir)
+        argv = adapter.command(work_order, self.scratch_dir)
+        # CodeBuddy 这类 CLI 只保留位置参数的第一行，长 prompt 必须走 stdin
+        # （与 worker 同一条规矩）；否则细化提示词会被截成一句话，模型看不到规则。
+        via_stdin = bool(getattr(adapter, "prompt_via_stdin", False))
         started = time.monotonic()
         try:
             run = self.runner.run(
@@ -233,17 +232,20 @@ class AdminService:
                 timeout_seconds=float(self.timeout_seconds),
                 on_tick=None,
                 tick_interval_seconds=None,
+                stdin_text=prompt if via_stdin else None,
             )
         except CliUnavailable as exc:
             raise AdminHarnessError(f"admin harness CLI unavailable: {exc}") from exc
         except HarnessTimeout as exc:
             raise AdminHarnessError(f"admin harness refine timed out: {exc}") from exc
+        finally:
+            adapter.cleanup_work_order()
         if run.returncode != 0:
             raise AdminHarnessError(
                 f"admin harness refine exited {run.returncode}: {run.stderr.strip()[-400:]}"
             )
 
-        payload = extract_json_object(_answer_text(run.stdout))
+        payload = extract_json_object(_answer_text(adapter, run.stdout))
         questions = _questions(payload)
         result: dict[str, Any] = {
             "harness_id": self.harness_id,
@@ -251,7 +253,11 @@ class AdminService:
             "requirement": text,
             "answers": replies,
             "model": {
-                "adapter": "qoderclicn-print",
+                # 回执里的适配器名沿用注册面那一份（`qoderclicn-print` 等），
+                # 这样老回执与新的按身份选择通道之后仍可比较。
+                "adapter": getattr(getattr(adapter, "registration", None), "adapter", None)
+                or getattr(adapter, "binary", base),
+                "channel": base,
                 "duration_seconds": round(time.monotonic() - started, 1),
             },
         }
@@ -273,6 +279,41 @@ class AdminService:
         return result
 
     # --------------------------------------------------------------- internals
+
+    def _model_channel(self) -> tuple[Any, str]:
+        """Which CLI answers the refinement -- decided by the admin's identity.
+
+        The refinement used to hard-wire ``qoder_command``: the administrator was
+        a qoder harness *by accident*, and choosing a different administrator
+        would still have run the qoder CLI while the receipt claimed that was
+        the model channel. Resolving through the same adapter table the worker
+        uses keeps one executable per registered identity and fails closed when
+        the identity is not a registered base harness or window.
+        """
+        try:
+            base = base_harness_id(self.harness_id)
+        except ValueError as exc:
+            raise AdminHarnessError(
+                f"administrator {self.harness_id!r} has no registered CLI channel: {exc}"
+            ) from exc
+        pinned = getattr(settings, "admin_model_channel", "auto")
+        if pinned and pinned != "auto":
+            if base not in ADAPTER_TYPES:
+                raise AdminHarnessError(
+                    f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
+                )
+            # 身份必须能解析（上面那句），但通道可以被显式钉到另一条 CLI：这是
+            # "管理员窗口的 CLI 不在本机"时的部署选择，不是猜。
+            base = pinned
+        adapter_type = ADAPTER_TYPES.get(base)
+        if adapter_type is None:
+            raise AdminHarnessError(
+                f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
+            )
+        # No client: the refine call needs the argv contract and the output
+        # parser, not the HTTP surface.
+        adapter = adapter_type(None, harness_id=self.harness_id)
+        return adapter, base
 
     def _prompt(
         self,

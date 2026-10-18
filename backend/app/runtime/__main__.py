@@ -39,8 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    repo = CanonicalRepo.from_settings()
     try:
-        policy = load_runtime_policy(settings.runtime_policy_file)
+        policy = load_runtime_policy(settings.runtime_policy_file, repo=repo)
     except RuntimePolicyError as exc:
         _emit({"refused": str(exc)})
         return 2
@@ -50,7 +51,6 @@ def main(argv: list[str] | None = None) -> int:
         _emit({"refused": f"no database at {database.path}; run `python -m app.db` first"})
         return 2
 
-    repo = CanonicalRepo.from_settings()
     driver = RuntimeDriver(database, repo, policy)
 
     if args.check:
@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "policy": {
                     "source": str(policy.source) if policy.source is not None else None,
+                    "repo_source": policy.repo_source,
                     "version": policy.verify.version,
                     "fingerprint": policy.verify.fingerprint(),
                     "profiles": sorted(policy.verify.profiles),

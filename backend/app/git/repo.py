@@ -204,6 +204,18 @@ class CanonicalRepo:
         proc = run_git("cat-file", "-e", f"{commit}^{{commit}}", cwd=self.path, check=False)
         return proc.returncode == 0
 
+    def read_file(self, ref: str, path: str) -> str | None:
+        """Read a blob from ``ref``'s tree, or return ``None`` when absent.
+
+        The runtime policy lives in the repository it governs, so the runtime
+        reads it from ``integration`` instead of assuming the platform checkout
+        is the project under test.
+        """
+        proc = run_git("show", f"{ref}:{path}", cwd=self.path, check=False)
+        if proc.returncode != 0:
+            return None
+        return proc.stdout
+
     def update_ref(self, ref: str, commit: str) -> None:
         """Point ``ref`` at ``commit``. Scheduler-internal, so no hook runs."""
         run_git("update-ref", ref, commit, cwd=self.path)

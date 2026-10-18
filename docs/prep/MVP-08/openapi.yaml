@@ -923,6 +923,14 @@ paths:
         name `attempt_budget_override` is the same concept recorded in
         `task_decisions`, NOT a second tasks column.
 
+        Implementation note (2026-10-19): the live API exposes the override on
+        `POST /human/release` as `{"budget_override": true, "reason": "..."}`.
+        A plain release is refused while the task is over budget; the
+        `human.release` event carries `attempt_budget_override` and the
+        decision row records the rationale. The unified
+        `/tasks/{task_id}/decisions` route in this prep document is not
+        implemented.
+
         Human wait timeout never auto-approves and never auto-cancels (R10 §13).
       parameters:
         - name: task_id

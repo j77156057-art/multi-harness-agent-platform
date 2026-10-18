@@ -286,6 +286,63 @@ def test_release_refuses_a_task_that_is_not_escalated(tmp_path):
     assert _event_names(database) == []
 
 
+def _exhaust_budget(database) -> None:
+    with database.transaction() as conn:
+        conn.execute("UPDATE tasks SET attempt_no = 3, max_attempts = 3 WHERE task_id = 'T-1'")
+
+
+def test_release_refuses_to_bypass_an_exhausted_budget_without_the_override(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+    _exhaust_budget(database)
+
+    with pytest.raises(Conflict, match="budget_override"):
+        _service(database).release(task_id="T-1", decided_by="ops")
+
+    row = _task(database)
+    assert row["status"] == "escalated"
+    assert row["budget_override_by"] is None
+    assert _event_names(database) == []
+
+
+def test_release_with_the_budget_override_records_the_decision(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+    _exhaust_budget(database)
+
+    result = _service(database).release(
+        task_id="T-1",
+        decided_by="ops",
+        budget_override=True,
+        reason="approved by the owner",
+    )
+
+    row = _task(database)
+    assert row["status"] == "ready"
+    assert row["budget_override_by"] == "ops"
+    assert result["budget_override_by"] == "ops"
+    (decision,) = _decisions(database)
+    assert decision["scope"] == "budget_override"
+    assert decision["actor"] == "ops"
+    assert decision["question"] == "attempt budget override"
+    assert decision["answer"] == "approved by the owner"
+    assert decision["decided_seq"] is not None
+    (event,) = database.read(
+        "SELECT payload_json FROM task_events WHERE event_name = 'human.release'"
+    )
+    payload = json.loads(event["payload_json"])
+    assert payload["attempt_budget_override"] is True
+    assert payload["budget_override_by"] == "ops"
+
+
+def test_budget_override_is_refused_before_the_budget_is_exhausted(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+
+    with pytest.raises(Conflict, match="attempt budget"):
+        _service(database).release(task_id="T-1", decided_by="ops", budget_override=True)
+
+    assert _task(database)["status"] == "escalated"
+    assert _event_names(database) == []
+
+
 # ----------------------------------------------------------------- adjudicate
 
 
@@ -551,6 +608,40 @@ def test_the_human_surface_over_http(tmp_path):
     refused = client.post("/api/v1/human/release", json={"task_id": "T-1", "decided_by": "ops"})
     assert refused.status_code == 409
     assert refused.json()["error"]["code"] == "request.conflict"
+
+
+def test_human_release_carries_the_budget_override_over_http(tmp_path):
+    client, database, _adapter, _context = _http_rig(tmp_path)
+    with database.transaction() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'escalated', attempt_no = 3, max_attempts = 3,"
+            " owner = NULL, current_attempt_id = NULL, escalated_at = ? WHERE task_id = 'T-1'",
+            (NOW.isoformat(),),
+        )
+        conn.execute(
+            "UPDATE leases SET released_at = ? WHERE task_id = 'T-1' AND released_at IS NULL",
+            (NOW.isoformat(),),
+        )
+
+    refused = client.post("/api/v1/human/release", json={"task_id": "T-1", "decided_by": "ops"})
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "request.conflict"
+
+    released = client.post(
+        "/api/v1/human/release",
+        json={
+            "task_id": "T-1",
+            "decided_by": "ops",
+            "budget_override": True,
+            "reason": "approved by the owner",
+        },
+    )
+    assert released.status_code == 200, released.text
+    assert released.json()["budget_override_by"] == "ops"
+    assert _task(database)["budget_override_by"] == "ops"
+    (decision,) = _decisions(database)
+    assert decision["scope"] == "budget_override"
+    assert decision["answer"] == "approved by the owner"
 
 
 # ------------------------------------------------------------------- CLI e2e

@@ -11,8 +11,12 @@ without a model: tests inject a scripted runner, production uses
 adapter's ``command()``, because "how to invoke codex/claude/opencode" is
 exactly the integration fact a per-harness adapter exists to own.
 
-A timed-out CLI is killed and the attempt is abandoned, not submitted: a
-partial commit must not reach review on its own.
+A timed-out CLI is killed; the attempt and its worktree are kept (R10-fix-15):
+within the lease the same harness replays its claim and resumes in the same
+worktree. A partial commit still never reaches review on its own -- the run
+just does not destroy the work that was already on disk. The kill also carries
+the child's partial stdout/stderr so the failure evidence can show where it
+stopped.
 """
 
 from __future__ import annotations
@@ -34,7 +38,38 @@ from app.git.repo import run_git
 
 
 class HarnessTimeout(RuntimeError):
-    """The CLI exceeded its deadline and was killed."""
+    """The CLI exceeded its deadline and was killed.
+
+    The child's partial stdout/stderr is carried along: a 30-60 minute run that
+    dies at the deadline is expensive, and without the transcript the only fact
+    left is "it timed out". The worker writes these tails into its failure
+    evidence so the next attempt can see where the CLI stopped.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        duration_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.duration_seconds = duration_seconds
+
+
+def _tail(handle: Any, limit: int = 4000) -> str:
+    """Best-effort read of what a killed child already wrote to its temp file."""
+    try:
+        handle.flush()
+        handle.seek(0)
+        data = handle.read()
+    except (OSError, ValueError):
+        return ""
+    text = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+    return text[-limit:]
 
 
 class CliUnavailable(RuntimeError):
@@ -198,7 +233,12 @@ class SubprocessRunner:
                 if moments and now >= min(moments):
                     if deadline is not None and now >= deadline:
                         _kill(process)
-                        raise HarnessTimeout(f"{argv[0]} exceeded {timeout_seconds:.0f}s")
+                        raise HarnessTimeout(
+                            f"{argv[0]} exceeded {timeout_seconds:.0f}s",
+                            stdout=_tail(out),
+                            stderr=_tail(err),
+                            duration_seconds=time.monotonic() - started,
+                        )
                     next_tick = now + float(tick_interval_seconds or 1)
                     try:
                         on_tick()
@@ -357,8 +397,10 @@ class CliHarnessWorker:
                 tick_interval_seconds=float(self.heartbeat_seconds),
                 **run_kwargs,
             )
-        except HarnessTimeout as exc:
-            self.adapter.abandon(task_id=task_id, reason=f"harness timeout: {exc}")
+        except HarnessTimeout:
+            # 超时不再 abandon：attempt 与工作区都保留，租约内用同一个
+            # claim_request_id 重跑会 replay 回同一个 worktree 继续（R10-fix-15）。
+            # 半成品仍然不提交；租约过期后由现有 stale/reclaiming sweep 接管。
             raise
         finally:
             self.adapter.cleanup_work_order()

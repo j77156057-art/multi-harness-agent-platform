@@ -176,7 +176,9 @@ def test_a_published_commit_resets_the_zero_commit_windows(tmp_path):
 
 
 def test_a_stale_lease_reads_critical(tmp_path):
-    _database, _now, reading = _reading(tmp_path, renewal_age_minutes=20)
+    # The silence has to outlive the lease TTL, whatever that TTL is set to.
+    stale_minutes = settings.lease_seconds // 60 + 5
+    _database, _now, reading = _reading(tmp_path, renewal_age_minutes=stale_minutes)
 
     assert reading.state == SILENCE_CRITICAL
     assert "lease expired" in reading.reason

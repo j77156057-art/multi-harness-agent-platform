@@ -747,21 +747,38 @@ def test_each_adapter_completes_claim_to_merged_over_http(case, tmp_path):
 
 
 @pytest.mark.parametrize("case", CASES)
-def test_each_adapter_abandons_a_timed_out_cli(case, tmp_path):
-    """§25: a timeout is loss of contact -- abandon, never submit."""
+def test_each_adapter_keeps_a_timed_out_attempt_for_replay(case, tmp_path):
+    """R10-fix-15: a timeout keeps the attempt and worktree -- never the commit.
+
+    Loss of contact still stops the half-written work from being submitted, but
+    the attempt is no longer destroyed: within the lease the same harness
+    replays its claim and continues in the same workspace.
+    """
     rig = build_rig(tmp_path, case)
     adapter = adapter_for(rig)
     runner = ScriptedRunner(timeout=True)
     worker = CliHarnessWorker(adapter, runner=runner)
+    claim_id = f"cr-timeout-{case.name}"
 
     with pytest.raises(HarnessTimeout):
         worker.work_on(
             task_id="T-1",
-            claim_request_id=f"cr-timeout-{case.name}",
+            claim_request_id=claim_id,
             on_claimed=lambda item: provision(rig, item),
         )
-    assert status_of(rig) == "abandoned"
-    assert "T-1" not in adapter.attempts, "the harness forgets the attempt it lost"
+    assert status_of(rig) == "in_progress", "the attempt is kept, not abandoned"
+    assert "T-1" in adapter.attempts, "the harness still owns the attempt"
+    assert worker.worktree is not None and Path(worker.worktree).exists()
+    assert status_of(rig) != "verifying", "a timed-out CLI never submits"
+
+    # The process restarts knowing only the persisted claim_request_id; the
+    # replay reissues the lease and hands back the same worktree (F9).
+    adapter2 = adapter_for(rig)
+    replayed = adapter2.claim(claim_request_id=claim_id, task_ids=["T-1"])["items"][0]
+    assert replayed["replayed"] is True
+    assert replayed["attempt_id"] == adapter.attempts["T-1"].attempt_id
+    assert Path(replayed["worktree_path"]) == Path(worker.worktree)
+    assert replayed["lease_token"], "the resumed run gets a live lease token"
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -926,6 +943,53 @@ def test_the_subprocess_runner_kills_at_the_deadline(tmp_path):
     elapsed = time.monotonic() - started
     assert elapsed < 15, "kill must not wait for the child"
     assert ticks, "the tick callback fires while the child runs"
+
+
+def test_the_subprocess_runner_keeps_partial_output_on_timeout(tmp_path):
+    """A deadline kill keeps what the CLI printed, not just "timed out".
+
+    The 30-60 minute attempts are the expensive ones; the failure evidence is
+    the only place an operator can see where the CLI stopped.
+    """
+    runner = SubprocessRunner(poll_seconds=0.05)
+    with pytest.raises(HarnessTimeout) as caught:
+        runner.run(
+            [
+                sys.executable,
+                "-u",
+                "-c",
+                "import sys, time\n"
+                "print('editing scripts/verify-opening-host.mjs')\n"
+                "print('warning: eslint config missing', file=sys.stderr)\n"
+                "time.sleep(30)\n",
+            ],
+            cwd=tmp_path,
+            timeout_seconds=0.8,
+        )
+    exc = caught.value
+    assert "editing scripts/verify-opening-host.mjs" in exc.stdout
+    assert "eslint config missing" in exc.stderr
+    assert exc.duration_seconds is not None
+    assert exc.duration_seconds >= 0.5
+
+
+def test_the_harness_timeout_is_configurable(monkeypatch):
+    """CLI flag > env > default; a non-positive value never disables the deadline."""
+    from app.adapter.formal_worker import resolve_timeout_seconds
+
+    assert resolve_timeout_seconds(42) == 42
+    assert resolve_timeout_seconds(0) == 3600.0
+    assert resolve_timeout_seconds(-1) == 3600.0
+
+    import app.adapter.formal_worker as worker_module
+
+    monkeypatch.setattr(worker_module.settings, "harness_timeout_seconds", 600)
+    assert resolve_timeout_seconds() == 600
+
+    monkeypatch.setenv("AP_HARNESS_TIMEOUT_SECONDS", "5400")
+    from app.config import Settings
+
+    assert Settings().harness_timeout_seconds == 5400
 
 
 def test_the_subprocess_runner_reports_a_missing_binary(tmp_path):

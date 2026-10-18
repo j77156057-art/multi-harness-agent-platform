@@ -18,7 +18,7 @@ import pytest
 
 from app.config import settings
 from app.db.connection import Database
-from app.git.repo import run_git
+from app.git.repo import CanonicalRepo, run_git
 from app.runtime import __main__ as runtime_cli
 from app.runtime.driver import (
     RuntimeDriver,
@@ -410,6 +410,81 @@ def test_policy_file_round_trip_and_refusals(tmp_path):
     )
     with pytest.raises(RuntimePolicyError, match="ghost"):
         load_runtime_policy(unknown)
+
+
+def _commit_repo_policy(work, repo: CanonicalRepo) -> None:
+    run_git("add", "verify-profiles.json", cwd=work)
+    run_git(
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "repo policy",
+        cwd=work,
+    )
+    commit = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    repo.import_objects(work, commit)
+    repo.update_ref(repo.integration_ref, commit)
+
+
+def test_repo_policy_follows_the_repository(tmp_path):
+    """A repo carries its own verify profiles; the platform keeps the roots.
+
+    The merge gate used to run the platform's ``backend-default`` (pytest) for
+    every project, so a JavaScript repository could never merge. The profiles
+    now come from the repository under test, while the command-root allowlist
+    stays human-maintained in the platform policy.
+    """
+    platform = tmp_path / "policy.json"
+    platform.write_text(
+        json.dumps(
+            {
+                "command_roots": ["python"],
+                "profiles": {PROFILE: {"command": CHECK_FLAG}},
+                "integration_profile": PROFILE,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = CanonicalRepo(tmp_path / "canonical.git")
+    run_git("init", "--bare", "--initial-branch", "integration", str(repo.path))
+    work = tmp_path / "work"
+    run_git("init", "--initial-branch", "integration", str(work))
+    policy_file = work / "verify-profiles.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "profiles": {"office-preview": {"command": CHECK_FLAG}},
+                "integration_profile": "office-preview",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_repo_policy(work, repo)
+
+    loaded = load_runtime_policy(platform, repo=repo)
+    assert loaded.repo_source == "integration:verify-profiles.json"
+    assert loaded.effective_integration_profile() == "office-preview"
+    # The repo adds a profile; the platform's profiles and roots stay.
+    assert set(loaded.verify.profiles) == {PROFILE, "office-preview"}
+    assert loaded.verify.command_roots == frozenset({"python"})
+
+    # A repo may name a command, never widen the human allowlist.
+    policy_file.write_text(
+        json.dumps(
+            {
+                "profiles": {"office-preview": {"command": ["bash", "-c", "true"]}},
+                "integration_profile": "office-preview",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_repo_policy(work, repo)
+    with pytest.raises(RuntimePolicyError, match="allowlist"):
+        load_runtime_policy(platform, repo=repo)
 
 
 # ---------------------------------------------------------------------- CLI

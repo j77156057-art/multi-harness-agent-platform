@@ -296,12 +296,19 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- plans
 
-    def approve_plan(self, *, plan_id: str, decided_by: str) -> PlanOutcome:
-        """Human approval. Tasks move to ready, or ready_waiting_deps.
+    def approve_plan(
+        self, *, plan_id: str, decided_by: str, decided_by_type: str = "human"
+    ) -> PlanOutcome:
+        """Approve a plan. Tasks move to ready, or ready_waiting_deps.
 
         The server picks the edge: R10 §10 has separate events for "approved with
         everything merged" and "approved with an unmet upstream", so clients must
         not choose one.
+
+        ``decided_by_type`` is the *real* subject type of the decision maker. It
+        must not be defaulted to ``human`` when the caller is an administrator
+        harness: the audit trail would then say a human approved a plan that a
+        harness actually approved.
         """
         with self.database.transaction() as conn:
             plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
@@ -332,7 +339,11 @@ class SchedulerService:
                 if str(row["status"]) != TaskStatus.DRAFT.value:
                     raise Conflict(f"task {task_id} is {row['status']}, not draft")
                 event = self._approve_one(
-                    conn, task_id=task_id, depends_on=depends_on, decided_by=decided_by
+                    conn,
+                    task_id=task_id,
+                    depends_on=depends_on,
+                    decided_by=decided_by,
+                    decided_by_type=decided_by_type,
                 )
                 if event is EventKind.PLAN_APPROVE:
                     ready.append(task_id)
@@ -386,6 +397,7 @@ class SchedulerService:
         task_id: str,
         depends_on: list[str],
         decided_by: str,
+        decided_by_type: str = "human",
     ) -> EventKind:
         unmet: list[str] = []
         for upstream in depends_on:
@@ -397,7 +409,7 @@ class SchedulerService:
             event_name=event.value,
             aggregate_type="task",
             aggregate_id=task_id,
-            actor_type="human",
+            actor_type=decided_by_type,
             actor_id=decided_by,
             payload={"plan_dependencies_unmet": unmet},
             connection=conn,
@@ -412,7 +424,17 @@ class SchedulerService:
         )
         return event
 
-    def reject_plan(self, *, plan_id: str, decided_by: str, reason: str) -> list[str]:
+    def reject_plan(
+        self,
+        *,
+        plan_id: str,
+        decided_by: str,
+        reason: str,
+        decided_by_type: str = "human",
+    ) -> list[str]:
+        """Reject a plan. ``decided_by_type`` is the real subject type (see
+        :meth:`approve_plan`): an administrator harness must not be recorded as
+        a human."""
         with self.database.transaction() as conn:
             plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
             if plan is None:
@@ -437,7 +459,7 @@ class SchedulerService:
                     event_name=EventKind.PLAN_REJECT.value,
                     aggregate_type="task",
                     aggregate_id=task_id,
-                    actor_type="human",
+                    actor_type=decided_by_type,
                     actor_id=decided_by,
                     payload={"reason": reason},
                     connection=conn,

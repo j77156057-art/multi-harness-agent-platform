@@ -12,7 +12,13 @@ from pathlib import Path
 import httpx
 
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
-from app.adapter.harnesses.cli import CliFailed, CliHarnessWorker, CliRunResult, SubprocessRunner
+from app.adapter.harnesses.cli import (
+    CliFailed,
+    CliHarnessWorker,
+    CliRunResult,
+    HarnessTimeout,
+    SubprocessRunner,
+)
 from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
@@ -185,7 +191,31 @@ def build_goal(
     return goal
 
 
-def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Path) -> bool:
+def resolve_timeout_seconds(explicit: float | None = None) -> float:
+    """The member CLI deadline: CLI flag > AP_HARNESS_TIMEOUT_SECONDS > default.
+
+    A non-positive value is treated as "misconfigured" and falls back to the
+    built-in default rather than disabling the deadline: an unbounded CLI run
+    would hold a worktree slot and a lease forever.
+    """
+    value = explicit if explicit is not None else settings.harness_timeout_seconds
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 3600.0
+    return seconds if seconds > 0 else 3600.0
+
+
+def run_one(
+    client,
+    database,
+    repo,
+    *,
+    harness_id: str,
+    group: str,
+    evidence: Path,
+    timeout_seconds: float | None = None,
+) -> bool:
     adapter = adapter_for_harness(client, harness_id)
     ready = adapter.list_ready_tasks(group_id=group, limit=1)["tasks"]
     if not ready:
@@ -220,14 +250,42 @@ def run_one(client, database, repo, *, harness_id: str, group: str, evidence: Pa
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
     goal = build_goal(spec, harness_id=harness_id, review=review)
     evidence.mkdir(parents=True, exist_ok=True)
+    claim_request_id = f"formal-{task['task_id']}-a{int(task['attempt_no'])+1}"
     try:
         outcome = worker.work_on(
             task_id=task["task_id"],
-            claim_request_id=f"formal-{task['task_id']}-a{int(task['attempt_no'])+1}",
+            claim_request_id=claim_request_id,
             on_claimed=provision,
-            timeout_seconds=1800,
+            timeout_seconds=resolve_timeout_seconds(timeout_seconds),
             goal=goal,
         )
+    except HarnessTimeout as exc:
+        # R10-fix-15: a deadline kill keeps the attempt and its worktree. Within
+        # the lease a rerun with the same claim_request_id replays the claim and
+        # continues in the same workspace; after the lease the existing
+        # stale/reclaiming sweep takes over. Partial work is still never submitted.
+        failure = {
+            "task_id": task["task_id"],
+            "harness_id": harness_id,
+            "error_type": "HarnessTimeout",
+            "error": str(exc),
+            "timeout_seconds": resolve_timeout_seconds(timeout_seconds),
+            "duration_seconds": exc.duration_seconds,
+            "stdout_tail": exc.stdout,
+            "stderr_tail": exc.stderr,
+            "workspace_recycle": {"status": "preserved"},
+            "resumable": {
+                "claim_request_id": claim_request_id,
+                "attempt_id": captured.get("attempt_id"),
+                "worktree": str(scoped_runner.worktree) if scoped_runner.worktree else None,
+                "lease_until": captured.get("lease_until"),
+            },
+            "scope": "real local CLI timeout; attempt and workspace kept for replay within the lease",
+        }
+        (evidence / f"{task['task_id']}.failure.json").write_text(
+            json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        raise
     except Exception as exc:
         recycled: dict[str, object] = {"status": "not_attempted"}
         attempt_id = captured.get("attempt_id")
@@ -339,6 +397,12 @@ def main():
     parser.add_argument("--canonical-repo", type=Path)
     parser.add_argument("--worktree-root", type=Path)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=None,
+        help="member CLI deadline for one attempt (default: AP_HARNESS_TIMEOUT_SECONDS, else 3600)",
+    )
     args = parser.parse_args()
     base_harness_id(args.harness_id)
     if settings.auth_mode != "enforce":
@@ -364,6 +428,7 @@ def main():
                     harness_id=args.harness_id,
                     group=args.group,
                     evidence=settings.data_dir / "formal-runs",
+                    timeout_seconds=args.timeout_seconds,
                 )
                 if not completed:
                     now = time.monotonic()

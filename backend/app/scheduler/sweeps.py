@@ -1251,6 +1251,12 @@ def sweep_worktree_recycle(
     remove). A failed archive leaves the tree in place for a human and is
     reported as skipped rather than retried blind.
 
+    ``escalated`` is included because a merge-gate failure parks the task for a
+    human: no worker will touch that attempt again, and without this the
+    workspace sits at the global cap until someone recycles it by hand. A
+    human ``release`` moves the task back to ``ready`` and the next claim
+    provisions a fresh attempt, so archiving here cannot strand a live run.
+
     Deliberately does NOT touch the current attempt of a live task: a
     restarted harness may still replay-claim it (F9), and the stale/reclaiming
     window keeps its workspace until a successor attempt exists -- which this
@@ -1261,7 +1267,7 @@ def sweep_worktree_recycle(
     rows = database.read(
         "SELECT w.attempt_id FROM workspaces w JOIN tasks t ON t.task_id = w.task_id"
         " WHERE w.status = 'active'"
-        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested')"
+        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested', 'escalated')"
         "        OR (t.current_attempt_id IS NOT NULL"
         "            AND w.attempt_id != t.current_attempt_id))"
         " ORDER BY w.rowid"

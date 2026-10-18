@@ -18,6 +18,11 @@ cancel      queued                            ``queue_cancel`` → cancelled
             the table's other cancel states   ``cancel`` → cancelled
 =========== =================================  ==================================
 
+``release`` of a task whose ``attempt_no`` has reached ``max_attempts`` must
+carry the R10 §8 ``attempt_budget_override``; a plain release is refused so the
+task cannot loop back to ``ready`` and fail the same claim guard. The release
+event records the override; the decision row keeps the rationale.
+
 Lease semantics are the §18 literal: entering ``awaiting_human`` releases the
 development lease (the owner clock pauses); ``resume`` re-issues one for the
 *same* attempt and epoch -- no new attempt, no epoch bump. Drift states may
@@ -257,12 +262,45 @@ class HumanOpsService:
                 "status": nxt.value,
             }
 
-    def release(self, *, task_id: str, decided_by: str) -> dict[str, object]:
+    def release(
+        self,
+        *,
+        task_id: str,
+        decided_by: str,
+        budget_override: bool = False,
+        reason: str = "",
+    ) -> dict[str, object]:
+        """``escalated -> ready``; a budget-exhausted task needs the override.
+
+        R10 §8 / R8-08 is deliberately strict: once ``attempt_no`` has reached
+        ``max_attempts`` a plain release would just send the task back to
+        ``ready`` where the next claim is refused by the same budget guard.
+        The human must therefore carry ``attempt_budget_override``; the release
+        event records it and the decision row keeps the rationale.
+        """
         with self.database.transaction() as conn:
             task = self._task(conn, task_id)
             status = TaskStatus(str(task["status"]))
             if status is not TaskStatus.ESCALATED:
                 raise Conflict(f"{task_id} is {status.value}; release needs escalated")
+            exhausted = int(task["attempt_no"]) >= int(task["max_attempts"])
+            existing_override = task["budget_override_by"]
+            if budget_override and not exhausted:
+                raise Conflict(
+                    f"{task_id} has used {task['attempt_no']} of {task['max_attempts']} attempts;"
+                    " budget_override only applies after the attempt budget is exhausted"
+                )
+            if exhausted and existing_override is None and not budget_override:
+                raise Conflict(
+                    f"{task_id} is over its attempt budget; release requires budget_override"
+                    " (R10 §8 attempt_budget_override)"
+                )
+            payload: dict[str, object] = {"decided_by": decided_by}
+            if reason:
+                payload["reason"] = reason
+            if budget_override:
+                payload["attempt_budget_override"] = True
+                payload["budget_override_by"] = existing_override or decided_by
             record, nxt = self._transition(
                 conn,
                 task,
@@ -270,18 +308,35 @@ class HumanOpsService:
                 event=EventKind.HUMAN_RELEASE,
                 actor_type="human",
                 actor_id=decided_by,
-                payload={"decided_by": decided_by},
+                payload=payload,
                 extra_sets={
                     "waiting_since": None,
                     "next_reminder_at": None,
                     "escalated_at": None,
                 },
             )
+            override_by = existing_override
+            if budget_override:
+                if existing_override is None:
+                    conn.execute(
+                        "UPDATE tasks SET budget_override_by = ? WHERE task_id = ?",
+                        (decided_by, task_id),
+                    )
+                    override_by = decided_by
+                self._record_budget_override(
+                    conn,
+                    task_id=task_id,
+                    attempt_id=task["current_attempt_id"],
+                    decided_by=decided_by,
+                    reason=reason,
+                    decided_seq=record.seq,
+                )
             return {
                 "task_id": task_id,
                 "event": record.event_name,
                 "seq": record.seq,
                 "status": nxt.value,
+                "budget_override_by": override_by,
             }
 
     def adjudicate(
@@ -408,6 +463,38 @@ class HumanOpsService:
             state_seq=record.seq,
         )
         return record, nxt
+
+    @staticmethod
+    def _record_budget_override(
+        conn: sqlite3.Connection,
+        *,
+        task_id: str,
+        attempt_id: object,
+        decided_by: str,
+        reason: str,
+        decided_seq: int,
+    ) -> None:
+        """Write the override decision once; ``human.release`` is the event audit."""
+        already = conn.execute(
+            "SELECT 1 FROM task_decisions WHERE task_id = ? AND scope = 'budget_override'",
+            (task_id,),
+        ).fetchone()
+        if already is not None:
+            return
+        conn.execute(
+            "INSERT INTO task_decisions(decision_id, task_id, attempt_id, actor, question,"
+            " options_json, answer, scope, expires_at, decided_seq, superseded_by)"
+            " VALUES (?, ?, ?, ?, ?, '[]', ?, 'budget_override', NULL, ?, NULL)",
+            (
+                f"dec-{uuid.uuid4().hex}",
+                task_id,
+                None if attempt_id is None else str(attempt_id),
+                decided_by,
+                "attempt budget override",
+                reason or "approved",
+                decided_seq,
+            ),
+        )
 
     def _open_decision(
         self,

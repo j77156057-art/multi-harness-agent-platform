@@ -62,6 +62,10 @@ class RuntimePolicy:
     verify: VerifyPolicy
     integration_profile: str | None
     source: Path | None
+    #: Where the profiles came from when the repository carried its own
+    #: ``verify-profiles.json`` (``integration:verify-profiles.json``). The
+    #: command-root allowlist still comes from ``source``.
+    repo_source: str | None = None
 
     def effective_integration_profile(self) -> str | None:
         """The profile the merge worker will actually run.
@@ -87,13 +91,53 @@ class RuntimePolicy:
         )
 
 
-def load_runtime_policy(path: Path | str | None) -> RuntimePolicy:
+def _repo_policy_mapping(
+    repo: CanonicalRepo, base: VerifyPolicy
+) -> tuple[dict[str, object], object] | None:
+    """Read ``verify-profiles.json`` from the repository's ``integration``.
+
+    A repository that carries the file governs its own verify profiles; the
+    platform file keeps the command-root allowlist, so a repo can name a
+    command but not widen what may run (R10 §16). A present-but-unusable file
+    is a refusal, never a silent fallback to the platform's profiles.
+    """
+    relative = "verify-profiles.json"
+    text = repo.read_file(repo.integration_ref, relative)
+    if text is None:
+        return None
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimePolicyError(
+            f"repository policy {relative} (integration) is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(raw, Mapping):
+        raise RuntimePolicyError(f"repository policy {relative} must be a JSON object")
+    profiles = raw.get("profiles")
+    if not isinstance(profiles, Mapping) or not profiles:
+        raise RuntimePolicyError(
+            f"repository policy {relative} must declare at least one profile"
+        )
+    merged = base.as_mapping()
+    base_profiles = dict(merged["profiles"])  # type: ignore[arg-type]
+    merged["profiles"] = {**base_profiles, **dict(profiles)}
+    merged["version"] = str(raw.get("version", base.version))
+    return merged, raw.get("integration_profile")
+
+
+def load_runtime_policy(path: Path | str | None, repo: CanonicalRepo | None = None) -> RuntimePolicy:
     """Load the policy the runtime obeys, refusing loudly when it cannot.
 
     ``AP_RUNTIME_POLICY_FILE`` wins; unset means the repo-side
     ``verify-profiles.json`` (the human-maintained allowlist). A configured
     path that does not exist is a refusal, not a fallback -- guessing a
     command is exactly what R10 §16 says must not happen.
+
+    The platform file is the allowlist of command roots. When ``repo`` is
+    given and its ``integration`` tree carries ``verify-profiles.json``, that
+    file supplies the profiles and ``integration_profile``: the policy follows
+    the repository under test instead of assuming every project is the Python
+    backend this platform was first built for.
     """
     resolved = Path(path) if path is not None else DEFAULT_POLICY_PATH
     if not resolved.exists():
@@ -113,12 +157,30 @@ def load_runtime_policy(path: Path | str | None) -> RuntimePolicy:
         raise RuntimePolicyError(f"runtime policy is unusable: {exc}") from exc
     name = raw.get("integration_profile")
     integration = str(name).strip() if name else None
+    repo_source: str | None = None
+    if repo is not None:
+        found = _repo_policy_mapping(repo, policy)
+        if found is not None:
+            mapping, repo_integration = found
+            try:
+                policy = VerifyPolicy.from_mapping(mapping)
+            except VerifyPolicyError as exc:
+                raise RuntimePolicyError(f"repository policy is unusable: {exc}") from exc
+            repo_source = "integration:verify-profiles.json"
+            integration = (
+                str(repo_integration).strip() if repo_integration else integration
+            )
     if integration is not None and integration not in policy.profiles:
         raise RuntimePolicyError(
             f"integration_profile {integration!r} is not a declared profile; "
             f"registered: {sorted(policy.profiles)}"
         )
-    return RuntimePolicy(verify=policy, integration_profile=integration, source=resolved)
+    return RuntimePolicy(
+        verify=policy,
+        integration_profile=integration,
+        source=resolved,
+        repo_source=repo_source,
+    )
 
 
 @dataclass(frozen=True, slots=True)

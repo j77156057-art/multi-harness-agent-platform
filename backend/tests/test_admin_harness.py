@@ -55,8 +55,19 @@ class ScriptedRunner:
     stderr: str = ""
     calls: list[dict] = field(default_factory=list)
 
-    def run(self, argv, *, cwd, timeout_seconds, on_tick=None, tick_interval_seconds=None):
-        self.calls.append({"argv": list(argv), "cwd": Path(cwd), "timeout": timeout_seconds})
+    def run(
+        self,
+        argv,
+        *,
+        cwd,
+        timeout_seconds,
+        on_tick=None,
+        tick_interval_seconds=None,
+        stdin_text=None,
+    ):
+        self.calls.append(
+            {"argv": list(argv), "cwd": Path(cwd), "timeout": timeout_seconds, "stdin": stdin_text}
+        )
         return CliRunResult(
             argv=list(argv),
             returncode=self.returncode,
@@ -67,18 +78,15 @@ class ScriptedRunner:
 
 
 def _envelope(payload: dict) -> str:
-    """One CLI JSON line, the way ``qoderclicn --output-format json`` emits it."""
-    return json.dumps({"result": json.dumps(payload, ensure_ascii=False)})
+    """One CLI JSON line for either envelope shape.
 
-
-def _service(chain, runner, *, admin: str = ADMIN, scratch: Path | None = None) -> AdminService:
-    return AdminService(
-        chain.database,
-        harness_id=admin,
-        runner=runner,
-        scratch_dir=scratch or chain.tmp_path / "admin-scratch",
-        timeout_seconds=30,
-    )
+    ``qoderclicn --output-format json`` answers under ``result``; codex's JSONL
+    stream answers under ``msg``. The refine call must parse *each channel's own*
+    envelope, so the fixture carries both keys -- with one key, one of the
+    channels would look like it produced nothing.
+    """
+    text = json.dumps(payload, ensure_ascii=False)
+    return json.dumps({"result": text, "msg": text})
 
 
 def _admin_chain(tmp_path):
@@ -87,6 +95,26 @@ def _admin_chain(tmp_path):
     register_harness(chain.database, ADMIN, provider="qoder")
     register_harness(chain.database, MEMBER, provider="qoder")
     return chain
+
+
+#: 管理员 Harness 必须是一个**窗口身份**（R10-fix-15）：细化通道由身份解析，
+#: `office-admin` 这类模型身份解析不出 CLI，会 fail closed。权限面的测试仍用
+#: `ADMIN`（身份与通道是两件事），调用模型的测试用下面这个真实窗口。
+ADMIN_WINDOW = "qoder-window-admin"
+
+
+def _refine_service(
+    chain, runner, *, admin: str = ADMIN_WINDOW, scratch: Path | None = None
+) -> AdminService:
+    """细化服务的夹具：默认管理员是一个注册过的窗口，且通道固定为 qoder。"""
+    register_harness(chain.database, admin, provider="qoder")
+    return AdminService(
+        chain.database,
+        harness_id=admin,
+        runner=runner,
+        scratch_dir=scratch or chain.tmp_path / "admin-scratch",
+        timeout_seconds=30,
+    )
 
 
 # ------------------------------------------------------------------ 权限矩阵
@@ -118,7 +146,7 @@ def test_empty_allowlist_gives_no_harness_admin_rights(monkeypatch):
 def test_allowlist_does_not_invent_permissions(monkeypatch):
     """A configured admin must not gain keys the matrix never registered."""
     monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN}))
-    decision = _decide("harness", ADMIN, "task:cancel", settings.admin_subjects)
+    decision = _decide("harness", ADMIN, "task:reopen", settings.admin_subjects)
     assert not decision.allowed and decision.reason == "role_not_allowed"
     unknown = _decide("harness", ADMIN, "admin:nonexistent", settings.admin_subjects)
     assert not unknown.allowed and unknown.reason == "unknown_permission"
@@ -181,7 +209,7 @@ def test_admin_harness_may_review_but_only_when_allowlisted(monkeypatch):
     # 白名单清空时管理员自己的管理员私有键拿不到（fail-closed 默认）。
     # review:claim 不在此列：它是 §17 给所有 harness 的行，清空白名单不会改动矩阵。
     monkeypatch.setattr(settings, "admin_subjects", frozenset())
-    for key in ("admin:refine", "plan:approve", "allocation:decide"):
+    for key in ("admin:refine", "plan:approve", "allocation:decide", "plan:reject"):
         empty = _decide("harness", ADMIN, key, settings.admin_subjects)
         assert not empty.allowed and empty.reason == "role_not_allowed", key
     assert _decide("harness", ADMIN, "review:claim", settings.admin_subjects).allowed
@@ -193,13 +221,13 @@ def test_admin_harness_may_review_but_only_when_allowlisted(monkeypatch):
 def test_refine_returns_validated_specs_and_records_the_event(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
-    result = _service(chain, runner).refine(
+    result = _refine_service(chain, runner).refine(
         requirement="帮我加一份启动说明", group_id=DEFAULT_GROUP
     )
 
     assert [task["harness_id"] for task in result["tasks"]] == [MEMBER]
     assert result["requirement"] == "帮我加一份启动说明"
-    assert result["harness_id"] == ADMIN
+    assert result["harness_id"] == ADMIN_WINDOW
     # The requirement really went to the CLI as one argv element.
     assert "帮我加一份启动说明" in runner.calls[0]["argv"][-1]
 
@@ -207,7 +235,7 @@ def test_refine_returns_validated_specs_and_records_the_event(tmp_path):
         "SELECT sender_type, sender_id, body FROM task_messages WHERE group_id = ?",
         (DEFAULT_GROUP,),
     )
-    assert (receipt["sender_type"], receipt["sender_id"]) == ("harness", ADMIN)
+    assert (receipt["sender_type"], receipt["sender_id"]) == ("harness", ADMIN_WINDOW)
     assert "帮我加一份启动说明" in receipt["body"]
     assert "补一份启动说明" in receipt["body"] and MEMBER in receipt["body"]
 
@@ -221,7 +249,9 @@ def test_refine_asks_the_owner_instead_of_guessing(tmp_path):
     chain = _admin_chain(tmp_path)
     asked = {"questions": ["交付物要中文还是英文？", "要不要连线上文档中心取数据？"]}
     runner = ScriptedRunner(stdout=_envelope(asked))
-    result = _service(chain, runner).refine(requirement="顺手加个说明", group_id=DEFAULT_GROUP)
+    result = _refine_service(chain, runner).refine(
+        requirement="顺手加个说明", group_id=DEFAULT_GROUP
+    )
 
     assert result["status"] == "needs_owner"
     assert result["questions"] == asked["questions"]
@@ -230,7 +260,7 @@ def test_refine_asks_the_owner_instead_of_guessing(tmp_path):
     (receipt,) = chain.database.read(
         "SELECT sender_id, body FROM task_messages WHERE group_id = ?", (DEFAULT_GROUP,)
     )
-    assert receipt["sender_id"] == ADMIN
+    assert receipt["sender_id"] == ADMIN_WINDOW
     assert asked["questions"][0] in receipt["body"]
 
 
@@ -238,14 +268,71 @@ def test_asking_wins_over_a_half_guessed_spec(tmp_path):
     """Both keys at once is the dangerous case: the spec rests on an assumption."""
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope({**SPEC, "questions": ["谁的账号？"]}))
-    result = _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    result = _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
     assert result["status"] == "needs_owner" and result["tasks"] == []
+
+
+# ----------------------------------------------------- 模型通道跟着管理员身份走
+
+
+def test_refine_uses_the_channels_of_the_administrator_identity(tmp_path, monkeypatch):
+    """细化走哪条 CLI，由"管理员是谁"决定，不是写死的 qoder。
+
+    这里钉两件事：命令行的第一段是可执行文件（每种 CLI 不同），回执里的
+    ``model.adapter`` / ``model.channel`` 就是实际用的那条 —— 换成 codex 管理员
+    时不能再报 qoder。
+    """
+    chain = _admin_chain(tmp_path)
+    # 通道解析只看身份形状（<base>-window-<slot>），不需要注册：注册是派单面的事。
+    admin = "codex-window-1"
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner, admin=admin).refine(
+        requirement="x", group_id=DEFAULT_GROUP
+    )
+
+    argv = runner.calls[0]["argv"]
+    assert argv and "qoder" not in Path(argv[0]).name.lower(), argv[0]
+    assert result["model"]["channel"] == "codex"
+    assert result["model"]["adapter"] != "qoderclicn-print"
+
+
+def test_refine_refuses_an_identity_with_no_registered_channel(tmp_path):
+    """没人认识的 id 不能借"默认通道"混过去：fail closed。"""
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    with pytest.raises(AdminHarnessError, match="no registered CLI channel"):
+        _refine_service(chain, runner, admin="mystery-agent").refine(
+            requirement="x", group_id=DEFAULT_GROUP
+        )
+    assert runner.calls == []
+
+
+def test_refine_channel_can_be_pinned_by_configuration(tmp_path, monkeypatch):
+    """`AP_ADMIN_MODEL_CHANNEL` 可以把通道钉到另一条 CLI（部署选择，不是猜）。"""
+    chain = _admin_chain(tmp_path)
+    monkeypatch.setattr(settings, "admin_model_channel", "codex")
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    assert result["model"]["channel"] == "codex"
+    assert "qoder" not in Path(runner.calls[0]["argv"][0]).name.lower()
+
+
+def test_refine_sends_a_long_prompt_on_stdin_for_stdin_only_clis(tmp_path):
+    """只保留首行的 CLI（CodeBuddy）必须从 stdin 拿完整提示词。"""
+    chain = _admin_chain(tmp_path)
+    admin = "codebuddy-member-1"
+    # 用窗口 id 选通道，不需要登记：通道解析只看身份形状，注册是派单面的事
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    _refine_service(chain, runner, admin=admin).refine(requirement="x", group_id=DEFAULT_GROUP)
+    call = runner.calls[0]
+    assert call["stdin"] and "Hard rules" in call["stdin"]
+    assert "Hard rules" not in " ".join(call["argv"])
 
 
 def test_the_owners_answers_are_replayed_to_the_model(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
-    result = _service(chain, runner).refine(
+    result = _refine_service(chain, runner).refine(
         requirement="顺手加个说明",
         group_id=DEFAULT_GROUP,
         answers=["用中文", "不要连外部系统"],
@@ -260,7 +347,9 @@ def test_the_owners_answers_are_replayed_to_the_model(tmp_path):
 def test_blank_answers_are_not_replayed(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
-    _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP, answers=["  ", ""])
+    _refine_service(chain, runner).refine(
+        requirement="x", group_id=DEFAULT_GROUP, answers=["  ", ""]
+    )
     assert "The group owner already answered" not in runner.calls[0]["argv"][-1]
 
 
@@ -272,7 +361,7 @@ def test_refine_refuses_out_of_scope_paths(tmp_path, paths):
     bad = {"tasks": [{**SPEC["tasks"][0], "exclusive_paths": paths}]}
     runner = ScriptedRunner(stdout=_envelope(bad))
     with pytest.raises(AdminHarnessError, match="out-of-scope paths"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_unknown_executor(tmp_path):
@@ -280,7 +369,7 @@ def test_refine_refuses_unknown_executor(tmp_path):
     bad = {"tasks": [{**SPEC["tasks"][0], "harness_id": "gpt-7-invented"}]}
     runner = ScriptedRunner(stdout=_envelope(bad))
     with pytest.raises(AdminHarnessError, match="not a registered online member"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_to_invent_harness_identity(tmp_path):
@@ -290,28 +379,28 @@ def test_refine_refuses_to_invent_harness_identity(tmp_path):
     bad = {"tasks": [{**SPEC["tasks"][0], "harness_id": "ghost-harness"}]}
     runner = ScriptedRunner(stdout=_envelope(bad))
     with pytest.raises(AdminHarnessError, match="unsupported harness id"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_output_without_json(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=json.dumps({"result": "我觉得应该加一份说明"}))
     with pytest.raises(AdminHarnessError, match="no balanced JSON object"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_an_empty_task_list(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope({"tasks": []}))
     with pytest.raises(AdminHarnessError, match="non-empty 'tasks'"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_a_nonzero_cli_exit(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout="", returncode=1, stderr="boom")
     with pytest.raises(AdminHarnessError, match="exited 1"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
 def test_refine_refuses_more_tasks_than_allowed(tmp_path):
@@ -319,14 +408,14 @@ def test_refine_refuses_more_tasks_than_allowed(tmp_path):
     two = {"tasks": [SPEC["tasks"][0], {**SPEC["tasks"][0], "title": "再来一个"}]}
     runner = ScriptedRunner(stdout=_envelope(two))
     with pytest.raises(AdminHarnessError, match="more than the 1 allowed"):
-        _service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP, max_tasks=1)
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP, max_tasks=1)
 
 
 def test_refine_refuses_an_empty_requirement(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
     with pytest.raises(AdminHarnessError, match="must not be empty"):
-        _service(chain, runner).refine(requirement="   ", group_id=DEFAULT_GROUP)
+        _refine_service(chain, runner).refine(requirement="   ", group_id=DEFAULT_GROUP)
 
 
 def test_extract_json_object_takes_the_whole_nested_object():
@@ -337,6 +426,99 @@ def test_extract_json_object_takes_the_whole_nested_object():
 def test_extract_json_object_survives_a_brace_inside_a_string():
     text = '{"goal":"写到 docs/{x}.md 里","tasks":[]}'
     assert extract_json_object(text)["goal"] == "写到 docs/{x}.md 里"
+
+
+# ------------------------------------------------------ 权限：两个方向都通
+
+
+def test_admin_harness_may_both_approve_and_reject_a_plan(monkeypatch):
+    """§17 第 426 行把 `plan.reject` 给了"人类管理员/负责人"。
+
+    管理员 harness 是那个人在部署里的替身，所以 approve 与 reject 必须一起
+    放行：只给 approve 等于让管理员只能批不能退，一张不合要求的计划除了晾着
+    没有出路。这条同时钉住"不新增权限键"：reject 本来就登记在 POLICY 里。
+    """
+    from app.auth.policy import ADMIN_HARNESS_KEYS, POLICY
+
+    assert "plan:reject" in POLICY
+    assert ADMIN_HARNESS_KEYS["plan:reject"] == frozenset({"harness"})
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN}))
+    assert _decide("harness", ADMIN, "plan:reject", settings.admin_subjects).allowed
+    assert _decide("harness", ADMIN, "plan:approve", settings.admin_subjects).allowed
+    # 名单外仍然拒绝，人类侧不受影响。
+    assert not _decide("harness", MEMBER, "plan:reject", settings.admin_subjects).allowed
+    assert _decide("human", "office-operator", "plan:reject", settings.admin_subjects).allowed
+
+
+def test_admin_harness_key_set_is_exactly_the_delegated_rows():
+    """加性表里的每一行都必须是 §17 已经登记过的键，且委托对象只有 harness。
+
+    这条是"加性、不发明权限"的机器断言：以后有人往表里塞一个新键或一种新主体，
+    这里先红，而不是等到线上才发现管理员多了一个动作。
+    """
+    from app.auth.policy import ADMIN_HARNESS_KEYS, ADMIN_ONLY_KEYS, POLICY
+
+    for key, roles in ADMIN_HARNESS_KEYS.items():
+        assert roles == frozenset({"harness"}), key
+        assert key in POLICY or key in ADMIN_ONLY_KEYS, key
+
+
+def test_plan_events_record_the_real_actor_type(tmp_path, monkeypatch):
+    """审计里不许把 harness 的批准写成"人类批准"。
+
+    ``approve_plan`` / ``reject_plan`` 曾经把 ``actor_type`` 写死成 ``human``。
+    管理员 harness 一旦能 approve（早就如此）或 reject（本轮新增），这条假话就会
+    进入审计：同一个事件里 ``actor_type=human``、``actor_id=qoder-window-1``。
+    这里用一个真实的管理员 harness token 走路由，钉住两条路径都记 ``harness``。
+    """
+    chain = _admin_chain(tmp_path)
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN_WINDOW}))
+    register_harness(chain.database, ADMIN_WINDOW, provider="qoder")
+
+    tokens = TokenService(chain.database)
+    human = tokens.issue(subject_type="human", subject_id="office-operator")
+    admin = tokens.issue(subject_type="harness", subject_id=ADMIN_WINDOW)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+
+    def post(path, body, token):
+        return client.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+
+    assert post("/api/v1/projects", {"project_id": "P-9", "name": "p"}, human).status_code == 200
+    assert (
+        post("/api/v1/projects/P-9/groups", {"group_id": "G-9", "name": "g"}, human).status_code
+        == 200
+    )
+
+    def snapshot(plan_id, task_id):
+        response = post(
+            "/api/v1/groups/G-9/plans",
+            {"plan_id": plan_id, "snapshot": {"tasks": [{"id": task_id}]}},
+            human,
+        )
+        assert response.status_code == 200, response.text
+
+    # 两个计划：一个由管理员批准，一个由管理员驳回。
+    snapshot("PL-OK", "T-OK")
+    approved = post("/api/v1/plans/PL-OK/approve", {"decided_by": ADMIN_WINDOW}, admin)
+    assert approved.status_code == 200, approved.text
+
+    snapshot("PL-NO", "T-NO")
+    rejected = post(
+        "/api/v1/plans/PL-NO/reject",
+        {"decided_by": ADMIN_WINDOW, "reason": "范围太大"},
+        admin,
+    )
+    assert rejected.status_code == 200, rejected.text
+
+    rows = chain.database.read(
+        "SELECT event_name, actor_type, actor_id FROM task_events"
+        " WHERE event_name IN ('plan.approve','plan.reject') ORDER BY seq"
+    )
+    assert [tuple(row) for row in rows] == [
+        ("plan.approve", "harness", ADMIN_WINDOW),
+        ("plan.reject", "harness", ADMIN_WINDOW),
+    ]
 
 
 # ------------------------------------------------------------------ 路由

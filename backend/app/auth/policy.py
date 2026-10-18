@@ -123,6 +123,11 @@ ADMIN_HARNESS_KEYS: dict[str, frozenset[str]] = {
     "review:submit": frozenset({HARNESS}),
     # 分派 = 批准计划并生成任务（§17 plan:approve）。
     "plan:approve": frozenset({HARNESS}),
+    # 驳回计划与"分派"是同一次判断的两个方向（§17 第 426 行：`plan.reject` 由
+    # "人类驳回并记录原因"）。只放行 approve、不放行 reject，会让管理员只能批不能
+    # 退：一张不合要求的计划除了晾着没有别的出路。这条不新增权限键，只是把 §17
+    # 里已经属于同一个人（人类管理员/负责人，见列头）的那两行都给到管理员 harness。
+    "plan:reject": frozenset({HARNESS}),
     # 分派前必须先细化；细化与分派同属管理员动作，共用同一白名单。
     "admin:refine": frozenset({HARNESS}),
     # §17 里标着"拒绝（管理员 harness 经 AP_ADMIN_SUBJECTS 委托允许）"的分配面。

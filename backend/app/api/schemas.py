@@ -213,6 +213,11 @@ class HumanReopenRequest(BaseModel):
 class HumanReleaseRequest(BaseModel):
     task_id: str
     decided_by: str = Field(min_length=1)
+    # R10 §8 / R8-08: after the attempt budget is exhausted, human.release may
+    # only proceed when it carries the override (event-side name
+    # ``attempt_budget_override``). The field itself stays ``budget_override_by``.
+    budget_override: bool = False
+    reason: str = ""
 
 
 class HumanAdjudicateRequest(BaseModel):

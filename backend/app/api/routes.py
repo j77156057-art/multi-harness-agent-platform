@@ -130,7 +130,11 @@ def approve_plan(
     bind_declared(
         principal, body.decided_by, key="plan:approve", database=database, request=request
     )
-    outcome = service.approve_plan(plan_id=plan_id, decided_by=body.decided_by)
+    outcome = service.approve_plan(
+        plan_id=plan_id,
+        decided_by=body.decided_by,
+        decided_by_type=_actor_type(principal),
+    )
     return {
         "plan_id": outcome.plan_id,
         "ready": list(outcome.ready),
@@ -149,7 +153,10 @@ def reject_plan(
 ) -> dict[str, Any]:
     bind_declared(principal, body.decided_by, key="plan:reject", database=database, request=request)
     rejected = service.reject_plan(
-        plan_id=plan_id, decided_by=body.decided_by, reason=body.reason or ""
+        plan_id=plan_id,
+        decided_by=body.decided_by,
+        reason=body.reason or "",
+        decided_by_type=_actor_type(principal),
     )
     return {"plan_id": plan_id, "rejected": rejected}
 
@@ -718,7 +725,12 @@ def human_release(
         database=database,
         request=request,
     )
-    return service.release(task_id=body.task_id, decided_by=body.decided_by)
+    return service.release(
+        task_id=body.task_id,
+        decided_by=body.decided_by,
+        budget_override=body.budget_override,
+        reason=body.reason,
+    )
 
 
 @human.post("/adjudicate")
@@ -1269,6 +1281,19 @@ def admin_refine(
         max_tasks=body.max_tasks,
         answers=body.answers,
     )
+
+
+def _actor_type(principal: Principal | None) -> str:
+    """The real subject type of whoever made this decision.
+
+    ``approve_plan`` / ``reject_plan`` used to hardcode ``actor_type="human"``
+    in the audit event while writing whatever id the caller declared. Once the
+    administrator is a harness, that records "a human approved this plan" for a
+    decision a harness made -- the same conflation this round is unwinding.
+    With auth off there is no principal, and the caller is then the human
+    operator, which is the honest default.
+    """
+    return principal.subject_type if principal is not None else "human"
 
 
 def _admin_subject(principal: Principal | None) -> str:
