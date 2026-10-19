@@ -115,9 +115,7 @@ def _repo_policy_mapping(
         raise RuntimePolicyError(f"repository policy {relative} must be a JSON object")
     profiles = raw.get("profiles")
     if not isinstance(profiles, Mapping) or not profiles:
-        raise RuntimePolicyError(
-            f"repository policy {relative} must declare at least one profile"
-        )
+        raise RuntimePolicyError(f"repository policy {relative} must declare at least one profile")
     merged = base.as_mapping()
     base_profiles = dict(merged["profiles"])  # type: ignore[arg-type]
     merged["profiles"] = {**base_profiles, **dict(profiles)}
@@ -125,7 +123,9 @@ def _repo_policy_mapping(
     return merged, raw.get("integration_profile")
 
 
-def load_runtime_policy(path: Path | str | None, repo: CanonicalRepo | None = None) -> RuntimePolicy:
+def load_runtime_policy(
+    path: Path | str | None, repo: CanonicalRepo | None = None
+) -> RuntimePolicy:
     """Load the policy the runtime obeys, refusing loudly when it cannot.
 
     ``AP_RUNTIME_POLICY_FILE`` wins; unset means the repo-side
@@ -167,9 +167,7 @@ def load_runtime_policy(path: Path | str | None, repo: CanonicalRepo | None = No
             except VerifyPolicyError as exc:
                 raise RuntimePolicyError(f"repository policy is unusable: {exc}") from exc
             repo_source = "integration:verify-profiles.json"
-            integration = (
-                str(repo_integration).strip() if repo_integration else integration
-            )
+            integration = str(repo_integration).strip() if repo_integration else integration
     if integration is not None and integration not in policy.profiles:
         raise RuntimePolicyError(
             f"integration_profile {integration!r} is not a declared profile; "
