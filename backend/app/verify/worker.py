@@ -115,6 +115,15 @@ def default_runner(profile: VerifyProfile, cwd: Path) -> RunResult:
         "LANG": "C.UTF-8",
         "PYTHONDONTWRITEBYTECODE": "1",
     }
+    if os.name == "nt":
+        # Node's CSPRNG initialization on Windows reads SystemRoot. Without
+        # it, a stripped environment makes `node` abort with an assertion
+        # failure before the profile command runs. These are not secrets and
+        # do not widen the isolation boundary.
+        for name in ("SystemRoot", "WINDIR"):
+            value = os.environ.get(name)
+            if value:
+                env[name] = value
     try:
         proc = subprocess.run(
             list(profile.command),
