@@ -13,8 +13,13 @@ from app.adapter.harnesses.cli import CliHarness
 from app.adapter.protocol import HarnessRegistration
 
 PI_REGISTRATION = HarnessRegistration(
-    harness_id="pi", name="Pi CLI", provider="ollama", adapter="pi-print",
-    adapter_version="1.0.0", capabilities=("coding",), registration_version="reg-001",
+    harness_id="pi",
+    name="Pi CLI",
+    provider="ollama",
+    adapter="pi-print",
+    adapter_version="1.0.0",
+    capabilities=("coding",),
+    registration_version="reg-001",
 )
 
 
@@ -23,8 +28,15 @@ class PiAdapter(CliHarness):
 
     binary = "pi"
 
-    def __init__(self, client: Any, *, prefix: str = "/api/v1", model: str | None = None,
-                 base_url: str | None = None, config_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        prefix: str = "/api/v1",
+        model: str | None = None,
+        base_url: str | None = None,
+        config_root: Path | None = None,
+    ) -> None:
         super().__init__(client, PI_REGISTRATION, prefix=prefix)
         self.model = model or os.environ.get("AP_PI_MODEL", "ollama/qwen3:8b")
         self.base_url = base_url or os.environ.get(
@@ -39,12 +51,25 @@ class PiAdapter(CliHarness):
             return self._attempt_dir
         root = self.config_root or Path(tempfile.mkdtemp(prefix="agent-platform-pi-"))
         root.mkdir(parents=True, exist_ok=True)
-        models = {"providers": {"ollama": {
-            "baseUrl": self.base_url, "api": "openai-completions", "apiKey": "ollama",
-            "models": [{"id": self.model.removeprefix("ollama/"),
-                        "name": "local Ollama coding model", "reasoning": False,
-                        "contextWindow": 32768, "maxTokens": 4096, "input": ["text"]}],
-        }}}
+        models = {
+            "providers": {
+                "ollama": {
+                    "baseUrl": self.base_url,
+                    "api": "openai-completions",
+                    "apiKey": "ollama",
+                    "models": [
+                        {
+                            "id": self.model.removeprefix("ollama/"),
+                            "name": "local Ollama coding model",
+                            "reasoning": False,
+                            "contextWindow": 32768,
+                            "maxTokens": 4096,
+                            "input": ["text"],
+                        }
+                    ],
+                }
+            }
+        }
         (root / "models.json").write_text(json.dumps(models, indent=2), encoding="utf-8")
         (root / "auth.json").write_text("{}", encoding="utf-8")
         (root / "models-store.json").write_text("{}", encoding="utf-8")
@@ -69,10 +94,21 @@ class PiAdapter(CliHarness):
         executable = shutil.which(self.binary) or self.binary
         if self._work_order_file is None:
             raise RuntimeError("Pi work order was not prepared")
-        return [executable, "--approve", "--model", self.model, "--tools",
-                "read,edit,write", "--no-extensions", "--no-skills",
-                "--no-context-files", "--no-session", "--print", "@" + str(self._work_order_file),
-                work_order]
+        return [
+            executable,
+            "--approve",
+            "--model",
+            self.model,
+            "--tools",
+            "read,edit,write",
+            "--no-extensions",
+            "--no-skills",
+            "--no-context-files",
+            "--no-session",
+            "--print",
+            "@" + str(self._work_order_file),
+            work_order,
+        ]
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {"model": self.model, "provider": "ollama", "final_message": stdout.strip()}
