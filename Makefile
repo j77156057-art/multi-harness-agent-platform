@@ -6,7 +6,7 @@
 PY := .venv/Scripts/python.exe
 PIP := .venv/Scripts/pip.exe
 
-.PHONY: help install dev test lint fmt fmt-check docstate discipline check merge lock clean frontend-install frontend-dev
+.PHONY: help install dev test lint fmt fmt-check docstate discipline check merge lock clean
 
 help:
 	@echo "make install   - 创建 venv 并安装依赖"
@@ -68,8 +68,4 @@ clean:
 	find . -type d -name .ruff_cache -prune -exec rm -rf {} + 2>/dev/null || true
 	@echo "cleaned (data/ 与 wt/ 未动，删它们需人工确认)"
 
-frontend-install:
-	cd frontend && npm install
-
-frontend-dev:
-	cd frontend && npm run dev
+# The standalone frontend was removed on 2026-10-19; the human UI is Agent Office (4174).

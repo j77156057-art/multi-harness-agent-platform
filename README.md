@@ -43,7 +43,7 @@ git switch -c agent/<group-short>/<harness>/<task-id>/<attempt-id> main
 
 ## 快速开始
 
-前置：Python 3.11+（开发用 3.13）、Git、Node 20+（仅前端需要）。
+前置：Python 3.11+（开发用 3.13）、Git。
 
 ### Windows（Git Bash）
 
@@ -64,14 +64,13 @@ cd backend && ../.venv/Scripts/python.exe -m app.main
 
 ~~~bat
 start.bat          rem 后端 → http://127.0.0.1:8848（等价 make dev）
-start.bat all      rem 后端 + 巡检循环 + 前端（三个窗口）
+start.bat all      rem 后端 + 巡检循环（两个窗口）
 start.bat workers  rem 只起巡检循环（app.scheduler --loop）
-start.bat frontend rem 只起前端（npm run dev）
 start.bat help     rem 用法
 ~~~
 
-前置仍是一次性的（venv 与前端 `npm install`，见上一节）；缺 venv/依赖时
-`start.bat` 会打印修复命令并以 exit 2 退出。
+前置仍是一次性的（venv，见上一节）；缺 venv 时 `start.bat` 会打印修复命令
+并以 exit 2 退出。人类界面是 Agent Office（4174，独立仓，单独启动）。
 
 运行环（Verify/Merge 的正式驱动，F6）：`python -m app.runtime --once` 跑一轮、
 `--loop` 常驻（`AP_RUNTIME_INTERVAL` 默认 10s）、`--check` 只读盘点候选；verify
@@ -106,7 +105,7 @@ make dev
 
 | 地址 | 说明 |
 |---|---|
-| <http://127.0.0.1:8848/> | 入口页（常用链接 + 前端地址） |
+| <http://127.0.0.1:8848/> | 入口页（常用链接 + Agent Office 地址） |
 | <http://127.0.0.1:8848/health> | 存活 + 配置摘要 |
 | <http://127.0.0.1:8848/spec/status> | 规范一致性检查（90 项） |
 | <http://127.0.0.1:8848/docs> | OpenAPI 交互文档 |
@@ -145,15 +144,15 @@ cd backend && ../.venv/Scripts/python.exe -m app.auth issue --type harness --id 
 # 请求携带：Authorization: Bearer apt_...
 ~~~
 
-**切到 `enforce` 的步骤**（控制台已接线，frontend-token 卡）：
-① 签发人类令牌（`--type human --id <名字>`）；② 在控制台左栏「认证」面板
-粘贴并应用（面板显示「已认证为 …」，令牌只存本机 localStorage）；③ 设
-`AP_AUTH_MODE=enforce` 重启后端。清令牌/令牌无效时面板会给对应提示，写操作
-的拒绝原因显示在界面错误面（`auth.token_invalid` / `auth.permission_denied`）。
+**切到 `enforce` 的步骤**（原独立控制台已删除；Agent Office 为唯一人类界面）：
+① 签发人类令牌（`--type human --id <名字>`）；② 在调用平台 API 的客户端
+（Agent Office 或脚本）设置 `Authorization: Bearer`；③ 设
+`AP_AUTH_MODE=enforce` 重启后端。令牌无效时 API 返回
+`auth.token_invalid` / `auth.permission_denied`，拒绝原因显示在调用方错误面。
 
 > ⚠️ **全量 enforce 还差 harness 侧**：Adapter worker / 演练脚本 / 真实 adapter
 > 测试尚未携带令牌（它们仍在 off 模式跑），接线前请让它们继续连 off 实例
-> （frontend-token 卡内已声明）。
+> （原 frontend-token 卡内已声明）。
 
 ---
 
@@ -191,7 +190,7 @@ backend/app/          业务代码
   config.py           环境变量配置
   main.py             FastAPI 入口
 backend/tests/        测试（含与 R10 正文的交叉验证）
-frontend/             Vue3 前端（MVP-09 才实质开发）
+# UI：Agent Office（独立仓，4174）；本仓不再包含前端
 docs/
   spec/0.3-R10.md     ★ 唯一真相源（只读！改动走复审流程）
   spec/mvp-task-checklist.md  任务清单（0.4 重排版）

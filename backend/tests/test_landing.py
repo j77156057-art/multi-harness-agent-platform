@@ -2,8 +2,8 @@
 
 A healthy server used to answer 404 on ``/`` -- the coordinator opened the port
 from a browser and the console looked broken. The root now serves a static
-entry page (links to health/docs/spec and the frontend), the favicon is a
-quiet 204, and the loopback Host guard covers both.
+entry page (links to health/docs/spec and the Agent Office on 4174), the
+favicon is a quiet 204, and the loopback Host guard covers both.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def test_root_serves_the_landing_page(tmp_path):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    for door in ("/health", "/docs", "/spec/status", "5173"):
+    for door in ("/health", "/docs", "/spec/status", "4174"):
         assert door in response.text, f"the landing page must point at {door}"
 
 
