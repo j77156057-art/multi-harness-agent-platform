@@ -69,6 +69,21 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
     assert events[0]["n"] == 1
 
 
+def test_the_lease_sweep_reports_a_budget_escalation(tmp_path):
+    """A ready task at max_attempts is escalated and counted by the lease sweep."""
+    database = make_database(tmp_path)
+    seed_project(database)
+    seed_task(database, attempt_no=3, max_attempts=3)
+
+    reports = run_all_sweeps(database, now=datetime.now(UTC))
+
+    assert reports[0].sweep == "expired_leases"
+    assert reports[0].actions == 1
+    assert reports[0].detail["tasks"] == []
+    assert reports[0].detail["budget_escalated"] == ["T-1"]
+    assert _status(database) == "escalated"
+
+
 def test_the_runner_order_is_pinned():
     """Inserting a sweep in the middle must be a deliberate edit (design §7.1)."""
     assert [name for name, _sweep in SWEEPS] == [

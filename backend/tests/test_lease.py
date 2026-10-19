@@ -183,6 +183,36 @@ def test_budget_exhaustion_escalates_from_stale(tmp_path):
     ]
 
 
+@pytest.mark.parametrize("status", ["ready", "queued"])
+def test_budget_exhaustion_escalates_from_waiting_states(tmp_path, status):
+    """A task that used its last attempt and is back in the pool cannot linger.
+
+    R10 §10's attempt_budget_exhausted edge covers ready/queued, not just
+    stale/reclaiming: without it the operator never sees the release control
+    and the only exit is the generic aging timer.
+    """
+    database = make_database(tmp_path)
+    seed_project(database)
+    seed_task(database, status=status, attempt_no=3, max_attempts=3)
+
+    expire_stale_leases(database, now=datetime.now(UTC))
+
+    row = task_row(database, "T-1")
+    assert row["status"] == "escalated"
+    assert event_names(database, aggregate_id="T-1") == ["attempt_budget_exhausted"]
+
+
+def test_budget_override_keeps_a_ready_task_out_of_escalation(tmp_path):
+    database = make_database(tmp_path)
+    seed_project(database)
+    seed_task(database, attempt_no=3, max_attempts=3, budget_override_by="human-1")
+
+    expire_stale_leases(database, now=datetime.now(UTC))
+
+    assert task_row(database, "T-1")["status"] == "ready"
+    assert event_names(database, aggregate_id="T-1") == []
+
+
 def test_stale_task_can_be_reclaimed_and_taken_over(claimed):
     database, item = claimed
     service = ClaimService(database)

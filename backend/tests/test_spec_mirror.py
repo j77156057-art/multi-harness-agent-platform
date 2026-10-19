@@ -137,7 +137,7 @@ def test_recorded_counts_match_r10(spec_path):
     ), f"spec.py 常量与 §37.7 实际集合不一致：常量={dict(R10_ALLOWLIST_COUNTS)} 文档={actual}"
     assert {key: EXPECTED_COUNTS[key] for key in ("M", "O", "R", "A", "UNION")} == actual
     assert EXPECTED_COUNTS["LOOPS"] == R10_ALLOWLIST_COUNTS["LOOPS"] == 10
-    assert R10_TRANSITION_EDGE_COUNT == 86
+    assert R10_TRANSITION_EDGE_COUNT == 87
 
 
 def test_mirror_detects_a_drifted_constant(spec_path, monkeypatch):

@@ -211,7 +211,12 @@ def release_attempt_resources(
     return cursor.rowcount
 
 
-def expire_stale_leases(database: Database, *, now: datetime | None = None) -> list[str]:
+def expire_stale_leases(
+    database: Database,
+    *,
+    now: datetime | None = None,
+    escalated_out: list[str] | None = None,
+) -> list[str]:
     """Sweep expired development leases.
 
     For each expired lease the lease and its resources are always released; the
@@ -220,7 +225,9 @@ def expire_stale_leases(database: Database, *, now: datetime | None = None) -> l
     owner states keeps its status -- releasing the stale lease is bookkeeping,
     not a transition.
 
-    Returns the task ids that actually transitioned.
+    Returns the task ids that actually transitioned by lease expiry. Budget
+    escalations are separate state changes; pass ``escalated_out`` to receive
+    them too (the scheduler reports them without conflating the two lists).
     """
     moment = now or utc_now()
     cutoff = iso(moment)
@@ -284,26 +291,37 @@ def expire_stale_leases(database: Database, *, now: datetime | None = None) -> l
             )
             transitioned.append(task_id)
 
-        escalate_budget_exhausted(conn, store=store, now=moment)
+        escalated = escalate_budget_exhausted(conn, store=store, now=moment)
+        if escalated_out is not None:
+            escalated_out.extend(escalated)
     return transitioned
 
 
 def escalate_budget_exhausted(
     conn: sqlite3.Connection, *, store: EventStore, now: datetime | None = None
 ) -> list[str]:
-    """Move stale/reclaiming tasks with no attempt budget left to ``escalated``.
+    """Move budget-exhausted ``ready``/``queued``/``stale``/``reclaiming`` tasks to ``escalated``.
 
-    R10 §10 only defines ``attempt_budget_exhausted`` out of ``stale`` and
-    ``reclaiming``, so this runs after the expiry sweep rather than from the
-    owner state directly.
+    R10 §10 defines ``attempt_budget_exhausted`` out of all four states. Running
+    from the lease sweep means a task that just lost its owner is escalated in
+    the same round, and a task that returns to ``ready``/``queued`` already at
+    ``max_attempts`` (release, abandon/reopen, rework, resource deferral) is
+    escalated on the next round instead of waiting for the generic aging
+    threshold.
     """
     moment = now or utc_now()
     escalated: list[str] = []
     rows = conn.execute(
         "SELECT task_id, status, current_epoch, attempt_no, max_attempts, budget_override_by"
         "  FROM tasks"
-        " WHERE status IN (?, ?) AND attempt_no >= max_attempts AND budget_override_by IS NULL",
-        (TaskStatus.STALE.value, TaskStatus.RECLAIMING.value),
+        " WHERE status IN (?, ?, ?, ?)"
+        "   AND attempt_no >= max_attempts AND budget_override_by IS NULL",
+        (
+            TaskStatus.READY.value,
+            TaskStatus.QUEUED.value,
+            TaskStatus.STALE.value,
+            TaskStatus.RECLAIMING.value,
+        ),
     ).fetchall()
     for row in rows:
         task_id = str(row["task_id"])

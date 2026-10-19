@@ -356,8 +356,8 @@ def test_attempt_budget_exhausted_rejects_without_an_event(database):
 
     assert result.outcome == OUTCOME_REJECTED
     assert result.items[0].error_code == RejectCode.ATTEMPT_BUDGET_EXHAUSTED.value
-    # R10 §10 defines attempt_budget_exhausted only out of stale/reclaiming, so
-    # there is no legal event to write from ready.
+    # The claim itself writes no state on a refusal; the lease sweep performs
+    # the ready -> escalated transition on its next round.
     assert event_names(database, aggregate_id="T-1") == []
 
 

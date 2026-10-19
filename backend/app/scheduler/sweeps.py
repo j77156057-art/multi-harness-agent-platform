@@ -77,11 +77,12 @@ def sweep_expired_leases(
     of contact". The transition logic stays in ``app/lease`` — this function
     only adapts it to the runner's report shape.
     """
-    transitioned = expire_stale_leases(database, now=now)
+    budget_escalated: list[str] = []
+    transitioned = expire_stale_leases(database, now=now, escalated_out=budget_escalated)
     return SweepReport(
         sweep="expired_leases",
-        actions=len(transitioned),
-        detail={"tasks": transitioned},
+        actions=len(transitioned) + len(budget_escalated),
+        detail={"tasks": transitioned, "budget_escalated": budget_escalated},
     )
 
 

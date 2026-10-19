@@ -927,7 +927,10 @@ paths:
         `POST /human/release` as `{"budget_override": true, "reason": "..."}`.
         A plain release is refused while the task is over budget; the
         `human.release` event carries `attempt_budget_override` and the
-        decision row records the rationale. The unified
+        decision row records the rationale. A task that exhausts its attempt
+        budget while in `ready`/`queued` is escalated by the lease sweep, so
+        the same release endpoint is reachable; a failed claim never writes
+        the transition itself. The unified
         `/tasks/{task_id}/decisions` route in this prep document is not
         implemented.
 

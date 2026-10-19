@@ -653,9 +653,9 @@ class ClaimService:
         budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
         overridden = task["budget_override_by"] is not None
         if not budget_left and not overridden:
-            # R10 §10 defines attempt_budget_exhausted only out of stale and
-            # reclaiming, so there is no legal event to write here. The claim
-            # simply cannot fire; escalation happens in the sweeper.
+            # R10 §10's attempt_budget_exhausted edge covers ready/queued as
+            # well as stale/reclaiming. A failed claim still writes no state
+            # itself; the lease sweep escalates the task on its next round.
             return ClaimItem(
                 task_id=task_id,
                 outcome=OUTCOME_REJECTED,
