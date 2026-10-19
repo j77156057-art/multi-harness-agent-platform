@@ -18,8 +18,8 @@ API_PREFIX = "/api/v1"
 
 #: The human entry page. Humans reach the API from a browser by port, so the
 #: root is the one address they will open first -- answering 404 there made a
-#: healthy server look broken (the coordinator hit exactly this). The console
-#: itself is the frontend on 5173; this page only lists the doors.
+#: healthy server look broken (the coordinator hit exactly this). The human UI
+#: is the Agent Office on 4174; this page only lists the doors.
 _LANDING_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -41,9 +41,9 @@ _LANDING_HTML = """<!doctype html>
 </head>
 <body>
 <h1>Agent 协作平台 · 后端<span>已启动</span></h1>
-<p>R10 三栏控制台在前端（vite）：<code>start.bat all</code> 或
-   <code>cd frontend &amp;&amp; npm run dev</code> →
-   <a href="http://localhost:5173">http://localhost:5173</a></p>
+<p>人类界面是 Agent Office（独立应用）：
+   <a href="http://127.0.0.1:4174">http://127.0.0.1:4174</a>
+   （在 Agent Office 仓单独启动）</p>
 <ul>
   <li><a href="/health">/health</a> — 存活与配置摘要</li>
   <li><a href="/docs">/docs</a> — OpenAPI 交互文档（全部动词可在此试）</li>
@@ -95,8 +95,9 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
                 "auth.host_header_rejected", 400, "requests are accepted from loopback only"
             )
             return JSONResponse(status_code=400, content=envelope(error))
-        # No CORS middleware is installed: the frontend reaches the API same-origin
-        # through its dev proxy, so the scheduler is not driveable from any page.
+        # No CORS middleware is installed: the Agent Office reaches the API
+        # through its own gateway, so the scheduler is not driveable from an
+        # arbitrary page.
         return await call_next(request)
 
     api = APIRouter(prefix=API_PREFIX)
@@ -110,7 +111,7 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
 
     @app.get("/", include_in_schema=False)
     def landing() -> HTMLResponse:
-        """The human entry page (static; the console itself lives in the frontend)."""
+        """The human entry page (static; the UI is the Agent Office on 4174)."""
         return HTMLResponse(_LANDING_HTML)
 
     @app.get("/favicon.ico", include_in_schema=False)

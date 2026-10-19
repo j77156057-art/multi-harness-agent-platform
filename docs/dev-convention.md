@@ -106,8 +106,8 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
   （写成 16，实际 17）。没做成自引用检查是刻意的：断言数包含该检查本身，
   自引用会让数字难以推理
 - `docstate` 只读 R10，不读 `TASKS.md`（那是 `discipline` 的事）
-- 前端尚无任何静态检查（无 eslint / prettier），`docs/` 无 markdown lint、
-  无链接检查
+- 平台仓已无独立前端（UI 统一为 Agent Office，4174）；其静态检查不在本仓
+  门禁内。`docs/` 无 markdown lint、无链接检查
 - 没有 remote，所以 GitHub 侧的 branch protection / required checks 全部不存在
 
 ## H-1 状态机唯一真相源
@@ -151,7 +151,8 @@ python tools/docstate/docstate.py --json      # 机器可读
 
 ## H-3 技术栈偏离已记录
 
-R10 §5 规定 Go + React。本项目用 Python FastAPI + Vue3，偏离理由与回退条件见
+R10 §5 规定 Go + React。本项目用 Python FastAPI + Agent Office（独立前端，
+4174），偏离理由与回退条件见
 `docs/adr/ADR-DEV-001-stack-deviation.md`。
 
 ---
@@ -196,7 +197,7 @@ R10 §5 规定 Go + React。本项目用 Python FastAPI + Vue3，偏离理由与
 ~~~text
 backend/app/          业务代码
 backend/tests/        测试
-frontend/             前端
+UI                    Agent Office（独立仓，4174；本仓不再包含前端）
 docs/spec/            R10 正文（只读！改动走复审流程）
 docs/adr/             架构决策记录
 docs/prep/            各 AI 的准备工作（共享区，不进主分支）

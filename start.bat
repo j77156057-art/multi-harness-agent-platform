@@ -3,11 +3,13 @@ rem One-click launcher for the agent collaboration platform (Windows cmd).
 rem ASCII-only on purpose: cmd parses .bat files with the active code page, so
 rem non-ASCII text here would garble before any chcp could take effect.
 rem
+rem The human UI is the Agent Office at http://127.0.0.1:4174, a separate app
+rem with its own repo; this script only starts the platform backend/workers.
+rem
 rem Modes:
 rem   start.bat            backend only  (http://127.0.0.1:8848)
-rem   start.bat all        backend + sweeper loop + frontend  (3 windows)
+rem   start.bat all        backend + sweeper loop  (2 windows)
 rem   start.bat workers    sweeper loop only  (app.scheduler --loop)
-rem   start.bat frontend   vite dev server only  (npm run dev)
 rem   start.bat help       usage
 setlocal
 cd /d "%~dp0"
@@ -32,11 +34,11 @@ if not exist "%PYBIN%" (
 
 if /i "%~1"=="all"      goto :all
 if /i "%~1"=="workers"  goto :workers
-if /i "%~1"=="frontend" goto :frontend
 goto :backend
 
 :backend
 echo [start] backend on http://127.0.0.1:8848  (health / docs / spec/status)
+echo [start] human UI: Agent Office at http://127.0.0.1:4174 (separate app)
 echo [start] press Ctrl+C to stop.
 pushd backend
 "%PYBIN%" -m app.main
@@ -52,40 +54,23 @@ set "RC=%ERRORLEVEL%"
 popd
 exit /b %RC%
 
-:frontend
-if not exist "%ROOT%frontend\node_modules" (
-    echo [start] frontend dependencies missing - run once:
-    echo           cd frontend
-    echo           npm install --registry=https://registry.npmmirror.com
-    exit /b 2
-)
-echo [start] frontend on http://localhost:5173  (proxies /api to 127.0.0.1:8848)
-pushd frontend
-call npm run dev
-set "RC=%ERRORLEVEL%"
-popd
-exit /b %RC%
-
 :all
-if not exist "%ROOT%frontend\node_modules" (
-    echo [start] WARNING: frontend deps missing - that window will fail.
-    echo         fix once: cd frontend ^&^& npm install --registry=https://registry.npmmirror.com
-)
-echo [start] opening platform-backend / platform-workers / platform-frontend
+echo [start] opening platform-backend / platform-workers
 start "platform-backend" /d "%ROOT%backend" "%PYBIN%" -m app.main
 start "platform-workers" /d "%ROOT%backend" "%PYBIN%" -m app.scheduler --loop
-start "platform-frontend" /d "%ROOT%frontend" cmd /k "npm run dev"
-echo [start] backend http://127.0.0.1:8848 ^| frontend http://localhost:5173
+echo [start] backend http://127.0.0.1:8848 ^| human UI (Agent Office) http://127.0.0.1:4174
 exit /b 0
 
 :usage
 echo Usage: start.bat [mode]
 echo.
 echo   (none)     start the backend on http://127.0.0.1:8848
-echo   all        open backend + sweeper loop + frontend in 3 windows
+echo   all        open backend + sweeper loop in 2 windows
 echo   workers    run the sweeper loop only (app.scheduler --loop)
-echo   frontend   run the vite dev server only (npm run dev)
 echo   help       show this text
+echo.
+echo The human UI is the Agent Office at http://127.0.0.1:4174; start it
+echo separately from its own repo.
 echo.
 echo Optional env knobs (see README): AP_PORT AP_DATA_DIR AP_CHECK_SPEC
 echo Other loops not opened here: python -m app.alerts ^| app.liveness ^| app.budget

@@ -104,12 +104,13 @@ R9 的 10 条"已闭环"修订全部真实落地，但 R9 自身仍有 6 处机�
 
 ### H-3 技术栈偏离必须记 ADR
 
-R10 §5 规定后端 Go + React/TS/Vite。MVP 决定用 **Python FastAPI + Vue3**，理由：
+R10 §5 规定后端 Go + React/TS/Vite。MVP 决定用 **Python FastAPI + Agent Office
+（独立前端，4174）**，理由：
 
 - MVP 的验证目标是协调语义（不重复领取、状态可恢复、验证后合并），语言不影响正确性；
 - Python `sqlite3` 在 Windows 上无 cgo 依赖，`BEGIN IMMEDIATE` / 条件 UPDATE /
   `RowsAffected` 语义与 Go 驱动一致，但测试代码量小得多；
-- 团队现有主力栈是 FastAPI + Vue3。
+- 团队现有主力栈是 FastAPI；人类界面由 Agent Office 承担。
 
 **必须写 `docs/adr/ADR-DEV-001-stack-deviation.md`** 记录偏离与回退条件。
 禁止默默改 R10 §5。
@@ -144,12 +145,14 @@ HEAD 与工作树，正在编辑的文件会消失且 `git status` 仍显示干�
 依赖：无
 唯一无依赖任务，Day 1 唯一可开工项
 
-允许修改：`backend/**`、`frontend/**`、`docs/**`、`tools/**`、`.github/**`、根配置
+允许修改：`backend/**`、`docs/**`、`tools/**`、`.github/**`、根配置
+（UI 在独立 Agent Office 仓，不在本仓任务范围）
 禁止修改：`docs/spec/0.3-R10.md`（只读引用）
 
 交付：
 
-- 目录：`backend/`（FastAPI）、`frontend/`（Vue3）、`tests/`、`docs/`、`tools/docstate/`；
+- 目录：`backend/`（FastAPI）、`tests/`、`docs/`、`tools/docstate/`；UI 在独立
+  Agent Office 仓（4174）；
 - `README.md`：新 AI 按它能启动项目并跑通一个最小测试；
 - `docs/dev-convention.md`：分支命名、commit 格式、目录边界、允许/禁止修改清单；
 - `docs/adr/ADR-DEV-001-stack-deviation.md`：H-3 的偏离记录；
@@ -369,6 +372,9 @@ test_id：`DOC-TRACE-001`（追溯矩阵）
 ---
 
 ### MVP-09：最小前端（AI-9）
+
+> **2026-10-19 更新**：本节已由 Agent Office（4174）承接；平台仓独立
+> `frontend/` 已删除，以下历史交付内容不再维护。
 
 状态：`waiting`（硬依赖 MVP-08）
 

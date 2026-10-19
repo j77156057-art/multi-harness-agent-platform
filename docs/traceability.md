@@ -5,6 +5,10 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 指向了一个空的地方。现由 `tools/discipline` 的 `traceability` 组断言：任务表里
 出现的每个 `test_id` 都必须在此登记。
 
+> **2026-10-19 UI 统一**：平台仓独立 `frontend/` 已删除；人类界面统一为
+> Agent Office（4174）。下表中 `MVP-UI-*` 的 `frontend` vitest 证据是历史记录，
+> 不再由本仓门禁维护。
+
 ## 强制状态列的含义
 
 | 标记 | 含义 |
@@ -43,7 +47,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `OPS-LIVENESS-001` | 存活观测面 + R10 §13 L706 零 commit 告警 + stuck 指纹计入续租（liveness-watch；机制学习自 Paperclip watchdog，原生实现） | ✅ 有断言 | `test_liveness.py`（政策回退链与含界阈值、续租为钟底的健康读数、发布 commit 清零窗口、死租约 critical、无租约走 attempt 钟、**零 commit 告警恰一次/attempt**（新 attempt 重计）、未配置不入队、**stuck 三向回归**〔续租不升级 / 不续租仍升级 / 无租约仍升级〕、CLI 干净与 critical 两态 exit 码）；`python -m app.liveness` |
 | `OPS-BUDGET-001` | 任务级 token 预算 + 调度前预留：claim 授予前 committed=已结算+held 检查（超限拒、新码 claim.token_budget_exhausted）、授予即插 held、submit 结算（未上报=NULL 保守计）、reconcile 巡检收口、阈值事故+告警、split 子预算 ≤ 父剩余（budget-guard；机制学习自 Paperclip budget-reservations/run-cost-accounting，原生实现） | ✅ 有断言 | `test_budget.py`（三桶 committed 与含界分类、预留在场/拒绝零写入、拒绝码、结算恰一次与未上报不落零、reconcile 变异验证、阈值告警幂等与未配置不入队、split 边界、CLI 四态 exit 码）；`python -m app.budget` |
 | `MVP-UI-002` | diff 消息进任务线程：`GET /tasks/{id}/diff` 只读端点（numstat 统计 + 有界 patch〔64KiB 上限 + truncated〕+ available:false 不发明数据）+ TaskPane 线程内 diff 卡（文件/计数/展开 patch；budget-guard 之后吸收⑤；机制学习自 Buzz kind:40008，原生重写） | ✅ 有断言 | `test_task_diff.py`（真 git 仓统计与发布前 unavailable、attempt 指定/默认解析、404、patch 字节上限与截断 flag、二进制识别）；`frontend` vitest（TaskPane diff 四态 + api URL 拼接） |
-| `MVP-UI-003` | 后端根路径落地页：`GET /` 静态入口页（/health、/docs、/spec/status、前端 5173 提示）+ `GET /favicon.ico` 204；不进 OpenAPI schema；Host 校验对根路径同样生效（landing-page） | ✅ 有断言 | `test_landing.py`（200 text/html 与四链接、204 空体、非 loopback Host→400、schema 不含根路由） + 实机 curl 留档 |
+| `MVP-UI-003` | 后端根路径落地页：`GET /` 静态入口页（/health、/docs、/spec/status、Agent Office 4174 提示）+ `GET /favicon.ico` 204；不进 OpenAPI schema；Host 校验对根路径同样生效（landing-page） | ✅ 有断言 | `test_landing.py`（200 text/html 与四链接、204 空体、非 loopback Host→400、schema 不含根路由） + 实机 curl 留档 |
 | `MVP-UI-004` | 前端人操作面：管理链（建项目/群组/计划/审批）与 §18 五决策动词（resume/reopen/release/adjudicate/cancel）接入三栏壳；动作按后端守卫状态上下文给出；零后端改动（human-console） | ✅ 有断言 | `frontend` vitest（api 契约 10 方法、三组件动作矩阵、Shell 编排与 notice）+ 浏览器实测留档（管理链真库；awaiting_human 服务层种子后界面恢复） |
 | `OPS-DRILL-001` | Codex＋OpenCode 真实联调 + 故障演练 + 前端追溯（e2e-harness-drill） | ⚠️ 仅声明 | `docs/reports/e2e-real-harness-drill.md`：6 条真实全链 merged（codex/opencode；含重启重放补跑）、六项故障演练原始证据（并发恰一胜者/lease_expire 幂等/stale/409 fencing 对照/重放续跑/worktree 隔离）、前端快照追溯；附修复=alternates CRLF（字节断言+变异验证）；F1-F13 移交清单；脚本 gitignored，命令可复跑（非 CI 依赖） |
 | `CORE-CLAIM-001` | Claim 幂等：重复 `claim_request_id` 返回首次结果，批量按任务项返回 | ✅ 有断言 | `test_claim.py`（重放返回首次结果且不烧 attempt、按任务项回放走 `task_claims`、payload 冲突拒绝整请求） |
