@@ -43,3 +43,6 @@ credentials.json
 
 # 3D 场景原型：已从 GitHub 撤下，本机保留（后续再启动计划）
 docs/prototypes/office-anim/
+
+# 运行时锁文件（不是源码）
+canonical.git.ensure.lock
