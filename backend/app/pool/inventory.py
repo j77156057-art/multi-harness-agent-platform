@@ -51,7 +51,11 @@ TIER_NATURE = {
     },
     "metered": {
         "balance": False,
-        "note": "按量计费：没有余额概念，只有花了多少。",
+        "note": (
+            "按量计费：单价是 provider 自己的口径"
+            "（这些模型名是中转站改过的），"
+            "平台不猜单价；它只报 token 与余额。"
+        ),
     },
 }
 
@@ -221,6 +225,7 @@ def build_inventory(
     models: list[dict[str, Any]],
     usage: dict[str, Any],
     quota: dict[str, Any] | None = None,
+    balances: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The tier-by-tier inventory: models, spend, and what is left (if known).
 
@@ -259,6 +264,15 @@ def build_inventory(
                 "reason": quota.get("reason"),
                 "checked_at": quota.get("checked_at"),
             }
+        # The metered tier's **money**: what each provider says is left.
+        # The price is not knowable (the model names are the relays' own), so
+        # the tier reports the balances and the tokens -- never a total the
+        # platform made up.
+        provider_balances = []
+        for name in sorted(names):
+            reading = (balances or {}).get(name)
+            if reading:
+                provider_balances.append(reading)
         tiers.append(
             {
                 "tier": tier,
@@ -267,6 +281,7 @@ def build_inventory(
                 "upstreams": sorted(names),
                 "spend": _spend_for(usage, names),
                 "balance": balance,
+                "balances": provider_balances,
                 "note": nature["note"],
             }
         )

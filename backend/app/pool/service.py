@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.pool.balance import cached_balances
 from app.pool.inventory import build_inventory, cached_minimax_quota
 from app.pool.sources import (
     ANTHROPIC,
@@ -104,6 +105,65 @@ class Usage:
 #: different relay port sets) never share an answer.
 _DISCOVERY: dict[tuple[Any, ...], tuple[float, list[Upstream]]] = {}
 _MODELS: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+
+
+def _usage_blobs(event: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every usage object in one SSE event, wherever the protocol puts it.
+
+    The Responses API puts it under ``response.usage``, the chat API at the
+    top level, and the Anthropic API under ``message.usage`` (the input
+    arrives in ``message_start``, the output in ``message_delta``).
+    """
+    found: list[dict[str, Any]] = []
+    usage = event.get("usage")
+    if isinstance(usage, dict):
+        found.append(usage)
+    for key in ("response", "message"):
+        holder = event.get(key)
+        if isinstance(holder, dict) and isinstance(holder.get("usage"), dict):
+            found.append(holder["usage"])
+    return found
+
+
+class _UsageSniffer:
+    """Watch an SSE stream for the usage the upstream reports.
+
+    The streamed paths used to account **zero** tokens: the upstream puts
+    the usage in the last event, and the pool was yielding those lines
+    without looking.  That made the metered tier's spend invisible -- the
+    one number the pool is supposed to own.
+    """
+
+    def __init__(self) -> None:
+        self.prompt = 0
+        self.completion = 0
+
+    def feed(self, line: str) -> None:
+        text = line.strip()
+        if not text.startswith("data:"):
+            return
+        payload = text[5:].strip()
+        if not payload or payload == "[DONE]":
+            return
+        try:
+            event = json.loads(payload)
+        except ValueError:
+            return
+        if not isinstance(event, dict):
+            return
+        for usage in _usage_blobs(event):
+            self.prompt = max(
+                self.prompt, int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+            )
+            self.completion = max(
+                self.completion,
+                int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
+            )
+
+    def watched(self, lines: Iterator[str]) -> Iterator[str]:
+        for line in lines:
+            self.feed(line)
+            yield line
 
 
 class PoolService:
@@ -524,7 +584,8 @@ class PoolService:
             return
         url, body, headers = self._stream_setup(route, payload, target="chat")
         started = time.monotonic()
-        lines = self._upstream_lines(url, body, headers)
+        sniffer = _UsageSniffer()
+        lines = sniffer.watched(self._upstream_lines(url, body, headers))
         if upstream.protocol == ANTHROPIC:
             stream = anthropic_stream_to_openai_stream(lines, model=route.model)
         elif upstream.protocol == OPENAI_RESPONSES:
@@ -540,6 +601,8 @@ class PoolService:
                 protocol=upstream.protocol,
                 status=200,
                 duration_ms=int((time.monotonic() - started) * 1000),
+                prompt_tokens=sniffer.prompt,
+                completion_tokens=sniffer.completion,
                 consumer=consumer,
                 note="streamed",
             )
@@ -578,7 +641,8 @@ class PoolService:
             return
         url, body, headers = self._stream_setup(route, payload, target="responses")
         started = time.monotonic()
-        lines = self._upstream_lines(url, body, headers)
+        sniffer = _UsageSniffer()
+        lines = sniffer.watched(self._upstream_lines(url, body, headers))
         if upstream.protocol == ANTHROPIC:
             stream = anthropic_stream_to_responses_stream(lines, model=route.model)
         elif upstream.protocol == OPENAI_CHAT:
@@ -594,6 +658,8 @@ class PoolService:
                 protocol=upstream.protocol,
                 status=200,
                 duration_ms=int((time.monotonic() - started) * 1000),
+                prompt_tokens=sniffer.prompt,
+                completion_tokens=sniffer.completion,
                 consumer=consumer,
                 note="streamed (responses)",
             )
@@ -704,6 +770,7 @@ class PoolService:
             models=self.models(),
             usage=self.usage_summary(),
             quota=self._quota_reading(upstreams),
+            balances=cached_balances(upstreams),
         )
 
     def _quota_reading(self, upstreams: list[Upstream]) -> dict[str, Any]:

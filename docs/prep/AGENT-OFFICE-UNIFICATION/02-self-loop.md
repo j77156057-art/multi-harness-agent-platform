@@ -1485,3 +1485,26 @@ tokens），现在多投影一条**按小时**的时间线（``GET /pool/status`
 
 规范侧：`docs/prep/AGENT-OFFICE-UNIFICATION/R10-FIX-17-DRAFT.md`（登记输入）；R10 正文已落：**§9**（任务接替关系 `supersedes`）与**§38.12**（R10-fix-17）——**仓库主人 2026-10-22 拍板**，五条待裁问题已落定（落快照 / 只挂新任务 / 四个可接替状态 / 字段进 §9 / 事件 payload 不带）。
 实现与正文在**同一次提交**内；新增事件名 / 状态 / 状态迁移边 / canonical 表 / 列，一样没有；`plan_version` 仍是 v1，**不提升 `schema_version`**（提升规则只针对**新增事件**）。
+
+### 22.10 计量档的“金额”：三个事实，不混在一起
+
+代量档的“花了多少”之前答不上来，因为**流式请求一律记 0 token**：
+
+- 上游把 usage 放在最后一个事件里（Responses 的 `response.completed`、chat 的最后一个 chunk、
+  Anthropic 的 `message_start` + `message_delta`），而池子只是把那些行原样转发出去，没有看一眼；
+- 后来加了一个**嗅探器**（`_UsageSniffer`）：上游线与下游线同时经过它，三种协议的 usage 都能收到；
+- 测试用**真的本地 HTTP 服务**走一遍流式路径（`test_pool_stream_usage.py`）。
+
+现在计量档能报出三个**不同的事实**，不混在一起：
+
+| 事实 | 谁报的 | 怎么报 |
+|---|---|---|
+| token | **平台自己** | 每个请求记的 prompt / completion token（上面那个修复之后才是真的） |
+| 余额 | **provider 自己** | 平台去问 provider 的只读余额接口（已验证：DeepSeek `/user/balance` -> `CNY 1.04`） |
+| 单价 | **不知道** | 这些模型名（`gpt-6.1-sol`、`deepseek-v4-flash[1M]`）是**中转站改过的**，没有公开价格可套；平台**不猜单价**，只报 token 与余额 |
+
+- 每条 provider 都说清楚自己的余额（或为何问不到）：平台知道的余额接口只有**那些 provider 自己公开的**（当前是 DeepSeek）；
+  其余的（中转站链、opencode 的中转站、本地 ollama）面向人说“这个 provider 没有可查的余额接口”，而不是编一个 0；
+- 余额读取只读、带来源与查询时间，缓存 5 分钟；读不到就说读不到的原因（没设置 / 无凭据 / 拒绝 / 超时）；
+- 它**不进 R10**：不新增事件名、状态、状态迁移边、canonical 表或列；余额是 provider 的**只读事实**，
+  不是新的平台语言。
