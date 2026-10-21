@@ -32,11 +32,13 @@ import httpx
 
 from app.config import settings
 
+from app.pool.inventory import build_inventory, cached_minimax_quota
 from app.pool.sources import (
     ANTHROPIC,
     CLI,
     OPENAI_CHAT,
     OPENAI_RESPONSES,
+    POOL_CONFIG_PATH,
     Upstream,
     discover_upstreams,
 )
@@ -94,6 +96,17 @@ class Usage:
     note: str = ""
 
 
+#: The discovery caches live in the module, not on the service.
+#:
+#: The pool service is built per request, so an instance-level TTL would never
+#: be hit: every read of the pool would re-read the CLIs' configuration and
+#: re-probe the upstreams for their model lists (a network round trip each).
+#: The key says what the discovery depends on, so two different homes (or two
+#: different relay port sets) never share an answer.
+_DISCOVERY: dict[tuple[Any, ...], tuple[float, list[Upstream]]] = {}
+_MODELS: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
+
+
 class PoolService:
     """Routing, translation and accounting for the platform's model pool."""
 
@@ -116,10 +129,21 @@ class PoolService:
 
     def upstreams(self, *, refresh: bool = False) -> list[Upstream]:
         now = time.monotonic()
-        if refresh or not self._upstreams or now - self._upstreams_at > DISCOVERY_TTL_SECONDS:
-            self._upstreams = discover_upstreams(self.home, relay_ports=self.relay_ports)
+        key = self._discovery_key()
+        cached = _DISCOVERY.get(key)
+        if refresh or cached is None or now - cached[0] > DISCOVERY_TTL_SECONDS:
+            found = discover_upstreams(self.home, relay_ports=self.relay_ports)
+            _DISCOVERY[key] = (now, found)
+            self._upstreams = found
             self._upstreams_at = now
+        else:
+            self._upstreams = cached[1]
+            self._upstreams_at = cached[0]
         return self._upstreams
+
+    def _discovery_key(self) -> tuple[Any, ...]:
+        """What the discovery depends on -- the cache is shared, so the key must say it."""
+        return (str(self.home), self.relay_ports, str(POOL_CONFIG_PATH.resolve()))
 
     def models(self, *, refresh: bool = False) -> list[dict[str, Any]]:
         """The unified model list: every model the relay can serve, and from where.
@@ -129,7 +153,11 @@ class PoolService:
         would spend.
         """
         now = time.monotonic()
-        if not refresh and self._models and now - self._models_at <= DISCOVERY_TTL_SECONDS:
+        key = self._discovery_key()
+        cached = _MODELS.get(key)
+        if not refresh and cached is not None and now - cached[0] <= DISCOVERY_TTL_SECONDS:
+            self._models = cached[1]
+            self._models_at = cached[0]
             return self._models
         entries: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -155,6 +183,7 @@ class PoolService:
                 )
         self._models = entries
         self._models_at = time.monotonic()
+        _MODELS[key] = (self._models_at, entries)
         return entries
 
     def _probe_models(self, upstream: Upstream) -> list[str]:
@@ -654,6 +683,31 @@ class PoolService:
         except OSError:
             # Accounting must never break a request.
             pass
+
+    def inventory(self) -> dict[str, Any]:
+        """What is **left** in each tier, not just what was spent.
+
+        Only the reserve tier (the MiniMax subscription) has a balance that
+        can be asked for; the others say so rather than showing a number the
+        platform made up.  See :mod:`app.pool.inventory`.
+        """
+        upstreams = self.upstreams()
+        return build_inventory(
+            upstreams=upstreams,
+            models=self.models(),
+            usage=self.usage_summary(),
+            quota=self._quota_reading(upstreams),
+        )
+
+    def _quota_reading(self, upstreams: list[Upstream]) -> dict[str, Any]:
+        """The MiniMax subscription's remaining, read at most every few minutes.
+
+        No MiniMax upstream means no probe at all: there is nothing to ask
+        about, and asking anyway would only cost a round trip.
+        """
+        if not any(str(getattr(upstream, "tier", "")) == "reserve" for upstream in upstreams):
+            return {}
+        return cached_minimax_quota()
 
     def usage_timeline(self, *, hours: int = 24) -> dict[str, Any]:
         """The quota spend over time, hour by hour.

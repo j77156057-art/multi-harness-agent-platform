@@ -622,3 +622,122 @@ def test_the_timeline_of_a_pool_that_never_spent_anything_is_empty_not_broken(tm
     assert len(timeline["buckets"]) == 6
     assert all(bucket["requests"] == 0 for bucket in timeline["buckets"])
     assert timeline["outside_window"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# what is left, tier by tier
+# --------------------------------------------------------------------------- #
+
+
+def _upstream(name: str, tier: str):
+    from app.pool.sources import Upstream
+
+    return Upstream(name=name, protocol="openai_chat", base_url=f"https://{name}", tier=tier)
+
+
+def test_the_inventory_says_what_is_left_where_a_balance_can_be_asked_for():
+    """The reserve tier is a subscription: the CLI can say what is left.
+
+    The free and metered tiers have no balance to ask for, and the inventory
+    must say **that** -- not a number the platform made up.
+    """
+    from app.pool.inventory import build_inventory
+
+    inventory = build_inventory(
+        upstreams=[
+            _upstream("opencode-cli:free", "free"),
+            _upstream("minimax", "reserve"),
+            _upstream("codex:geekspace", "metered"),
+        ],
+        models=[
+            {"id": "opencode/free-model", "tier": "free"},
+            {"id": "MiniMax-M3.1-Flash-Preview", "tier": "reserve"},
+            {"id": "gpt-6.1-sol", "tier": "metered"},
+        ],
+        usage={
+            "upstreams": {
+                "opencode-cli:free": {"requests": 4, "prompt_tokens": 1, "completion_tokens": 2,
+                                       "consumers": {"harness/opencode": 4}},
+                "minimax": {"requests": 2, "prompt_tokens": 10, "completion_tokens": 20,
+                            "consumers": {"harness/opencode": 2}},
+                "codex:geekspace": {"requests": 1, "prompt_tokens": 0, "completion_tokens": 0,
+                                    "consumers": {"harness/claude-code": 1}},
+            }
+        },
+        quota={
+            "known": True,
+            "source": "mmx quota show",
+            "checked_at": "2026-10-21T00:00:00+00:00",
+            "interval": {"remaining_percent": 99, "resets_at": "2026-10-21T17:00:00+00:00"},
+            "weekly": {"remaining_percent": 93, "resets_at": "2026-10-28T00:00:00+00:00"},
+        },
+    )
+
+    tiers = {tier["tier"]: tier for tier in inventory["tiers"]}
+    assert list(tiers) == ["free", "reserve", "metered"]
+    assert tiers["free"]["models"] == 1
+    assert tiers["free"]["balance"] is None
+    assert "没有可查的余额" in tiers["free"]["note"]
+    assert tiers["free"]["spend"]["requests"] == 4
+    assert tiers["free"]["spend"]["consumers"] == {"harness/opencode": 4}
+    # The reserve tier is the only one with a balance, and it says who said so.
+    assert tiers["reserve"]["balance"]["known"] is True
+    assert tiers["reserve"]["balance"]["source"] == "mmx quota show"
+    assert tiers["reserve"]["balance"]["weekly"]["remaining_percent"] == 93
+    assert tiers["reserve"]["spend"]["requests"] == 2
+    assert tiers["reserve"]["spend"]["prompt_tokens"] == 10
+    # Pay-as-you-go has no balance -- and the platform does not invent one.
+    assert tiers["metered"]["balance"] is None
+    assert tiers["metered"]["spend"]["requests"] == 1
+
+
+def test_the_inventory_says_why_a_balance_could_not_be_read():
+    from app.pool.inventory import build_inventory
+
+    inventory = build_inventory(
+        upstreams=[_upstream("minimax", "reserve")],
+        models=[{"id": "MiniMax-M3.1-Flash-Preview", "tier": "reserve"}],
+        usage={"upstreams": {}},
+        quota={"known": False, "source": "mmx quota show", "reason": "mmx 不在这台机器上"},
+    )
+
+    reserve = next(tier for tier in inventory["tiers"] if tier["tier"] == "reserve")
+    assert reserve["balance"]["known"] is False
+    assert reserve["balance"]["reason"] == "mmx 不在这台机器上"
+
+
+def test_the_minimax_quota_answer_is_read_as_it_is():
+    """The CLI's own words: the plan's remaining, and when it resets."""
+    from app.pool.inventory import parse_minimax_quota
+
+    reading = parse_minimax_quota(
+        {
+            "model_remains": [
+                {
+                    "model_name": "general",
+                    "end_time": 1792602009538,
+                    "weekly_end_time": 1793168957471,
+                    "current_interval_remaining_percent": 99,
+                    "current_weekly_remaining_percent": 93,
+                    "current_interval_usage_count": 4,
+                    "current_interval_total_count": 400,
+                }
+            ],
+            "base_resp": {"status_code": 0},
+        }
+    )
+
+    assert reading["known"] is True
+    assert reading["interval"]["remaining_percent"] == 99
+    assert reading["weekly"]["remaining_percent"] == 93
+    assert reading["interval"]["resets_at"].startswith("2026-10-21T17:00")
+    assert reading["weekly"]["resets_at"].startswith("2026-10-28T06:29")
+
+
+def test_a_quota_answer_without_any_allowance_is_not_a_balance():
+    from app.pool.inventory import parse_minimax_quota
+
+    reading = parse_minimax_quota({"model_remains": [], "base_resp": {"status_code": 0}})
+
+    assert reading["known"] is False
+    assert reading["reason"]

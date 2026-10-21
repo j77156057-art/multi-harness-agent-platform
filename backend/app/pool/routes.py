@@ -72,6 +72,9 @@ def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
         # When the quota was spent, hour by hour: a total cannot tell a
         # burst from a trickle, and the human needs to see the burst.
         "timeline": service.usage_timeline(),
+        # What is **left** in each tier -- where a balance can be asked for,
+        # and an honest "there is no balance" where it cannot.
+        "inventory": service.inventory(),
     }
 
 
