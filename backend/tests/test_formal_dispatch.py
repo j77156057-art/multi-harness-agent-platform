@@ -190,7 +190,12 @@ def test_dispatch_to_a_window_without_a_credential_is_refused(env):
     registry = HarnessRegistry(env.db)
     registry.register(
         HarnessRegistration(
-            "codebuddy", "codebuddy", "tencent", "codex-exec", "1", ("coding",),
+            "codebuddy",
+            "codebuddy",
+            "tencent",
+            "codex-exec",
+            "1",
+            ("coding",),
             registration_version="reg-1",
         )
     )
@@ -247,3 +252,86 @@ def test_probe_is_not_registration(env):
         "/api/v1/groups/G/dispatch", json={**body(), "harness_id": "probe-only"}
     )
     assert refused.status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# the lineage: a task that takes over another one
+# --------------------------------------------------------------------------- #
+
+
+def _cancel(env, task_id, reason="re-pointed to a window that can claim it"):
+    response = env.client.post(
+        f"/api/v1/tasks/{task_id}/cancel",
+        json={"decided_by": "operator", "reason": reason},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_a_re_pointed_task_records_the_task_it_takes_over(env):
+    """The lineage is a **platform fact**: it lives in the task's snapshot.
+
+    The office has to be able to say "this task continues that one" without
+    reading a sentence somebody wrote in the group chat.
+    """
+    first = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()["task_id"]
+    _cancel(env, first)
+
+    second = env.client.post(
+        "/api/v1/groups/G/dispatch", json={**body("request-2"), "supersedes": first}
+    ).json()["task_id"]
+
+    listed = env.client.get("/api/v1/groups/G/tasks").json()["tasks"]
+    by_id = {task["task_id"]: task for task in listed}
+    assert by_id[second]["supersedes"] == first
+    # The old task does not point forward: the link lives on the new task, so
+    # a finished task's row is never rewritten.
+    assert "supersedes" not in by_id[first]
+
+    detail = env.client.get(f"/api/v1/tasks/{second}").json()
+    assert detail["supersedes"] == first
+    assert detail["spec"]["supersedes"] == first
+
+
+def test_a_task_that_is_still_running_cannot_be_taken_over(env):
+    first = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()["task_id"]
+    claim(env, first)
+
+    response = env.client.post(
+        "/api/v1/groups/G/dispatch", json={**body("request-2"), "supersedes": first}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "still live" in response.text
+
+
+def test_the_lineage_must_point_at_a_real_task_in_the_same_group(env):
+    missing = env.client.post(
+        "/api/v1/groups/G/dispatch", json={**body("request-1"), "supersedes": "FD-nope"}
+    )
+    assert missing.status_code == 422, missing.text
+    assert "does not exist" in missing.text
+
+    env.client.post("/api/v1/projects", json={"project_id": "P2", "name": "other project"})
+    env.client.post("/api/v1/projects/P2/groups", json={"group_id": "G2", "name": "other group"})
+    elsewhere = env.client.post("/api/v1/groups/G2/dispatch", json=body("request-9")).json()[
+        "task_id"
+    ]
+
+    response = env.client.post(
+        "/api/v1/groups/G/dispatch", json={**body("request-2"), "supersedes": elsewhere}
+    )
+    assert response.status_code == 422, response.text
+    assert "another group" in response.text
+
+
+def test_a_dispatch_without_a_lineage_hashes_exactly_as_before(env):
+    """A replay of an **older** request id must still replay, not conflict.
+
+    The lineage is part of the request's content, so it belongs in the
+    digest -- but only when there is one: a request without a lineage has to
+    keep hashing as it did before the field existed.
+    """
+    first = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()
+    replay = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()
+    assert replay["task_id"] == first["task_id"] and replay["replayed"]

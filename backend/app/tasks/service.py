@@ -339,9 +339,7 @@ class SchedulerService:
                 " content_json, created_at) VALUES (?, ?, ?, ?, ?)",
                 (snapshot_id, plan_id, plan_hash, _canonical(raw), now),
             )
-            conn.execute(
-                "UPDATE plans SET plan_hash = ? WHERE plan_id = ?", (plan_hash, plan_id)
-            )
+            conn.execute("UPDATE plans SET plan_hash = ? WHERE plan_id = ?", (plan_hash, plan_id))
             for item in raw.get("tasks", ()):
                 task_id = str(item.get("id", "")).strip()
                 row = conn.execute(
@@ -1717,6 +1715,13 @@ class SchedulerService:
         )
         if isinstance(spec, dict) and isinstance(spec.get("title"), str) and spec["title"].strip():
             task["title"] = spec["title"]
+        # The lineage: which task this one takes over.  It lives in the
+        # snapshot (the task's immutable contract), so it is read here rather
+        # than guessed from a message.
+        if isinstance(spec, dict):
+            supersedes = spec.get("supersedes")
+            if isinstance(supersedes, str) and supersedes.strip():
+                task["supersedes"] = supersedes
         return task
 
     def get_task(self, task_id: str) -> dict[str, object]:
@@ -1867,9 +1872,14 @@ class SchedulerService:
         titles = self._titles_for(tasks)
         failures = self._last_failures(tasks)
         for task in tasks:
-            title = titles.get(str(task.get("task_id")))
-            if title:
-                task["title"] = title
+            fields = titles.get(str(task.get("task_id")))
+            if fields:
+                title = fields.get("title")
+                if title:
+                    task["title"] = title
+                supersedes = fields.get("supersedes")
+                if supersedes:
+                    task["supersedes"] = supersedes
             # Why the task fell over.  The office's「失败与接手」panel has to
             # say *why*, not just "abandoned": the reason is the last
             # abandon/release event, read in one query for the whole list.
@@ -1903,13 +1913,18 @@ class SchedulerService:
             out[key] = {"reason": reason, "at": str(row["created_at"] or "")}
         return out
 
-    def _titles_for(self, tasks: list[dict]) -> dict[str, str]:
-        """Titles for many tasks, read in **one** query.
+    def _titles_for(self, tasks: list[dict]) -> dict[str, dict[str, str | None]]:
+        """Titles (and lineage) for many tasks, read in **one** query.
 
         Reading them one by one cost one database connection per task (the
         read helper opens a connection per query), so a group of 44 tasks spent
         ~350 ms in the title projection alone -- and the office polls this list
         every few seconds. One query for every snapshot in play, then a dict.
+
+        The **lineage** (``supersedes``) comes from the same snapshot and the
+        same query: the snapshot is the task's immutable contract, and "this
+        task takes over that one" is part of that contract -- so the office
+        can show where a task came from without reading a second source.
         """
         snapshot_ids = {
             str(task.get("plan_snapshot_id")) for task in tasks if task.get("plan_snapshot_id")
@@ -1922,7 +1937,7 @@ class SchedulerService:
             f" WHERE snapshot_id IN ({placeholders})",
             tuple(sorted(snapshot_ids)),
         )
-        titles: dict[str, str] = {}
+        titles: dict[str, dict[str, str | None]] = {}
         for row in rows:
             try:
                 snapshot = json.loads(str(row["content_json"]))
@@ -1940,7 +1955,15 @@ class SchedulerService:
                     and title.strip()
                     and str(task_id) not in titles
                 ):
-                    titles[str(task_id)] = title
+                    supersedes = spec.get("supersedes")
+                    titles[str(task_id)] = {
+                        "title": title,
+                        "supersedes": (
+                            str(supersedes)
+                            if isinstance(supersedes, str) and supersedes.strip()
+                            else None
+                        ),
+                    }
         return titles
 
     def list_projects(self) -> list[dict]:

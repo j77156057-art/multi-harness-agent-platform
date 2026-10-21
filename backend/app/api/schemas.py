@@ -64,6 +64,9 @@ class FormalDispatchRequest(BaseModel):
     decided_by: str = Field(min_length=1)
     exclusive_paths: list[str] = Field(min_length=1, max_length=50)
     acceptance: str = Field(min_length=1, max_length=4000)
+    #: The task this one takes over (a re-point).  Optional; the platform
+    #: checks that it exists, is in the same group, and is no longer live.
+    supersedes: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class HeartbeatRequest(BaseModel):

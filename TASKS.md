@@ -127,6 +127,7 @@
 | R10-fix-13 | OpenCode | auth-layer | doing（Stage A 规范登记 + Stage B 服务/状态机/路由/权限已完成并自测绿；Stage C 与 Claim 门禁强度待定） | `agent/local/opencode/R10-fix-13/a1` | `DOC-STATE-001` `DOC-MIRROR-001` |
 | codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
+| R10-fix-17 | Codex | FORMAL-MULTI-HARNESS-01 | doing（接替关系进平台字段；实现与 R10 正文（§9、§38.12）已就位，**规范复审由仓库主人 2026-10-22 拍板**） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。

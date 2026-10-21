@@ -25,6 +25,7 @@ never dispatches when the model's JSON is invalid.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import time
 from dataclasses import asdict, dataclass, field
@@ -82,7 +83,7 @@ class WorkerState:
     handled_request_seqs: list[int] = field(default_factory=list)
 
     @classmethod
-    def load(cls, path: Path) -> "WorkerState":
+    def load(cls, path: Path) -> WorkerState:
         if not path.exists():
             return cls()
         try:
@@ -164,7 +165,7 @@ def _goal_payload(message: dict[str, Any]) -> dict[str, Any] | None:
     for ref in refs:
         text = str(ref or "").strip()
         if text.startswith("project-goal-json:"):
-            text = text[len("project-goal-json:"):]
+            text = text[len("project-goal-json:") :]
         elif not text.startswith("{"):
             continue
         try:
@@ -307,10 +308,7 @@ class AdminWorker:
                 continue
             if self.state.pending_goal and (
                 GOAL_ANSWER_REF in refs
-                or (
-                    _sender_type(message) == "human"
-                    and str(message.get("body") or "").strip()
-                )
+                or (_sender_type(message) == "human" and str(message.get("body") or "").strip())
             ):
                 # The owner answers the administrator's question in the group.
                 # Only the owner's human message (or an explicit answer ref) is
@@ -335,7 +333,10 @@ class AdminWorker:
         if payload.get("admin") and payload["admin"] != self.admin_harness_id:
             print(
                 json.dumps(
-                    {"goal_skipped_for_other_admin": payload.get("goal_id"), "admin": payload.get("admin")},
+                    {
+                        "goal_skipped_for_other_admin": payload.get("goal_id"),
+                        "admin": payload.get("admin"),
+                    },
                     ensure_ascii=False,
                 ),
                 flush=True,
@@ -345,7 +346,26 @@ class AdminWorker:
         if not force and seq in self.state.processed_goal_seqs:
             return
         if self.dry_run:
-            print(json.dumps({"dry_run": "goal", **{k: payload[k] for k in ("goal_id", "goal", "project_name", "members", "max_tasks", "admin")}}, ensure_ascii=False), flush=True)
+            print(
+                json.dumps(
+                    {
+                        "dry_run": "goal",
+                        **{
+                            k: payload[k]
+                            for k in (
+                                "goal_id",
+                                "goal",
+                                "project_name",
+                                "members",
+                                "max_tasks",
+                                "admin",
+                            )
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             self.state.processed_goal_seqs.append(seq)
             self.state.pending_goal = None
             self.state.save(self.state_path)
@@ -376,7 +396,10 @@ class AdminWorker:
             self.state.save(self.state_path)
             print(
                 json.dumps(
-                    {"goal_needs_owner": payload.get("goal_id"), "questions": result.get("questions") or []},
+                    {
+                        "goal_needs_owner": payload.get("goal_id"),
+                        "questions": result.get("questions") or [],
+                    },
                     ensure_ascii=False,
                 ),
                 flush=True,
@@ -423,7 +446,10 @@ class AdminWorker:
             return
         if self.dry_run:
             print(
-                json.dumps({"dry_run": "circulation", "goal_id": pending.get("goal_id")}, ensure_ascii=False),
+                json.dumps(
+                    {"dry_run": "circulation", "goal_id": pending.get("goal_id")},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -441,7 +467,10 @@ class AdminWorker:
             )
         except httpx.HTTPError as exc:
             print(
-                json.dumps({"circulation_error": str(exc), "goal_id": pending.get("goal_id")}, ensure_ascii=False),
+                json.dumps(
+                    {"circulation_error": str(exc), "goal_id": pending.get("goal_id")},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -507,20 +536,29 @@ class AdminWorker:
         if not pending:
             return
         try:
-            round_info = self.client.get(
-                f"/allocation/circulation/{pending['circulation_id']}"
-            )
+            round_info = self.client.get(f"/allocation/circulation/{pending['circulation_id']}")
         except httpx.HTTPStatusError as exc:
             print(json.dumps({"circulation_read_error": str(exc)}, ensure_ascii=False), flush=True)
             return
         reviews = round_info.get("reviews") or []
         reviewers = pending.get("reviewers") or []
-        missing = [harness for harness in reviewers if harness not in {str(r.get("harness_id")) for r in reviews}]
+        missing = [
+            harness
+            for harness in reviewers
+            if harness not in {str(r.get("harness_id")) for r in reviews}
+        ]
         if missing:
             return
         if self.dry_run:
             print(
-                json.dumps({"dry_run": "circulation", "plan_id": pending["plan_id"], "reviews": len(reviews)}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "dry_run": "circulation",
+                        "plan_id": pending["plan_id"],
+                        "reviews": len(reviews),
+                    },
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -559,7 +597,10 @@ class AdminWorker:
             document = self.client.get(f"/plans/{pending['plan_id']}/document")
         except httpx.HTTPStatusError as exc:
             print(
-                json.dumps({"circulation_error": str(exc), "plan_id": pending.get("plan_id")}, ensure_ascii=False),
+                json.dumps(
+                    {"circulation_error": str(exc), "plan_id": pending.get("plan_id")},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -595,7 +636,10 @@ class AdminWorker:
             if key in done:
                 continue
             if self.dry_run:
-                print(json.dumps({"dry_run": "dispatch", "task": task}, ensure_ascii=False), flush=True)
+                print(
+                    json.dumps({"dry_run": "dispatch", "task": task}, ensure_ascii=False),
+                    flush=True,
+                )
                 done[key] = "dry-run"
                 continue
             try:
@@ -620,9 +664,7 @@ class AdminWorker:
                     flush=True,
                 )
             except httpx.HTTPStatusError as exc:
-                self._post_admin_message(
-                    f"管理员 Harness 分派失败：{task.get('title')} · {exc}"
-                )
+                self._post_admin_message(f"管理员 Harness 分派失败：{task.get('title')} · {exc}")
                 print(
                     json.dumps(
                         {"dispatch_error": str(exc), "title": task.get("title")},
@@ -666,11 +708,7 @@ class AdminWorker:
             targets = _assigned_ids(task)
             if not task_id or not targets or task_id not in own:
                 continue
-            dead = [
-                target
-                for target in targets
-                if not self.admin.harness_has_credential(target)
-            ]
+            dead = [target for target in targets if not self.admin.harness_has_credential(target)]
             if not dead:
                 continue
             # 优先给**最闲**的窗口，别把活全堆到一个窗口上。
@@ -718,7 +756,9 @@ class AdminWorker:
                     break
         if not task_id:
             print(
-                json.dumps({"reassign_request_ignored": "no task id", "seq": seq}, ensure_ascii=False),
+                json.dumps(
+                    {"reassign_request_ignored": "no task id", "seq": seq}, ensure_ascii=False
+                ),
                 flush=True,
             )
             return
@@ -732,9 +772,12 @@ class AdminWorker:
                 target = ref[len(REASSIGN_TARGET_REF) :].strip()
         try:
             task = self.client.get(f"/tasks/{task_id}")
-        except httpx.HTTPStatusError as exc:
+        except httpx.HTTPStatusError:
             print(
-                json.dumps({"reassign_request_ignored": f"task {task_id} not found", "seq": seq}, ensure_ascii=False),
+                json.dumps(
+                    {"reassign_request_ignored": f"task {task_id} not found", "seq": seq},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -752,7 +795,10 @@ class AdminWorker:
         candidates = sorted(self.admin.assignable_harnesses())
         if not candidates:
             print(
-                json.dumps({"reassign_request_ignored": "no window can take work", "seq": seq}, ensure_ascii=False),
+                json.dumps(
+                    {"reassign_request_ignored": "no window can take work", "seq": seq},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -779,7 +825,10 @@ class AdminWorker:
             )
         if not target:
             print(
-                json.dumps({"reassign_request_ignored": "no other window available", "seq": seq}, ensure_ascii=False),
+                json.dumps(
+                    {"reassign_request_ignored": "no other window available", "seq": seq},
+                    ensure_ascii=False,
+                ),
                 flush=True,
             )
             return
@@ -854,8 +903,7 @@ class AdminWorker:
                 # reset state file would make the platform replay an *old*
                 # dispatch (the same task id comes back and nothing happens).
                 # A message-driven request brings its own sequence number.
-                "request_id": f"admin-reassign-{task_id}-{count}"
-                + (f"-{token}" if token else ""),
+                "request_id": f"admin-reassign-{task_id}-{count}" + (f"-{token}" if token else ""),
                 "title": spec.get("title") or task.get("title") or task_id,
                 "goal": self._goal_with_handoff(
                     spec.get("goal") or task.get("title") or task_id, task_id
@@ -864,12 +912,14 @@ class AdminWorker:
                 "exclusive_paths": spec.get("exclusive_paths") or [],
                 "acceptance": acceptance_text,
                 "decided_by": self.admin_harness_id,
+                # The lineage is a **platform fact**, not a sentence in a
+                # group message: the new task's snapshot says which task it
+                # takes over.
+                "supersedes": task_id,
             },
         )
         new_task_id = str(dispatched.get("task_id") or "")
-        self._post_admin_message(
-            f"管理员 Harness 改派：{task_id} → {new_task_id}（{reason}）"
-        )
+        self._post_admin_message(f"管理员 Harness 改派：{task_id} → {new_task_id}（{reason}）")
         print(
             json.dumps(
                 {
@@ -894,8 +944,7 @@ class AdminWorker:
         if not report:
             return goal
         return (
-            goal
-            + "\nThe previous attempt did NOT finish; here is its breakpoint report. "
+            goal + "\nThe previous attempt did NOT finish; here is its breakpoint report. "
             "Continue from it instead of starting over: keep what is already written, "
             "fix what it says is broken. Breakpoint report (verbatim): "
             + json.dumps(report, ensure_ascii=False)
@@ -944,7 +993,10 @@ class AdminWorker:
             if self._review_cooldowns.get(key, 0.0) > time.monotonic():
                 continue
             if self.dry_run:
-                print(json.dumps({"dry_run": "review", "task_id": task_id}, ensure_ascii=False), flush=True)
+                print(
+                    json.dumps({"dry_run": "review", "task_id": task_id}, ensure_ascii=False),
+                    flush=True,
+                )
                 continue
             try:
                 self._review_one(task, attempt_id)
@@ -1034,7 +1086,8 @@ class AdminWorker:
     def _post_admin_message(self, body: str) -> None:
         if self.dry_run:
             return
-        try:
+        # A reporting failure must not hide the state transition failure.
+        with contextlib.suppress(httpx.HTTPStatusError):
             self.client.post(
                 f"/groups/{self.group_id}/messages",
                 {
@@ -1043,9 +1096,6 @@ class AdminWorker:
                     "body": body,
                 },
             )
-        except httpx.HTTPStatusError:
-            # A reporting failure must not hide the state transition failure.
-            pass
 
 
 def run_once(worker: AdminWorker) -> None:
@@ -1097,8 +1147,7 @@ def main() -> None:
         raise SystemExit("admin worker requires enforce authentication")
     token = args.token_file.read_text(encoding="utf-8").strip()
     state_path = args.state_file or (
-        settings.data_dir
-        / f"admin-worker-{args.admin_harness_id}-{args.group}.json"
+        settings.data_dir / f"admin-worker-{args.admin_harness_id}-{args.group}.json"
     )
     state = WorkerState.load(state_path)
     database = Database()
@@ -1152,7 +1201,9 @@ def main() -> None:
             try:
                 run_once(worker)
             except httpx.HTTPError as exc:
-                print(json.dumps({"worker_error": type(exc).__name__}, ensure_ascii=False), flush=True)
+                print(
+                    json.dumps({"worker_error": type(exc).__name__}, ensure_ascii=False), flush=True
+                )
                 if args.once:
                     raise
             except Exception as exc:  # noqa: BLE001 - keep the loop alive
