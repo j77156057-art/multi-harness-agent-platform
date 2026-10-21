@@ -16,6 +16,7 @@ whose quota can it borrow?".  These tests pin the three facts it rests on:
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.pool.cli_model import CliModelSource, extract_text
@@ -564,3 +565,60 @@ def test_opencode_asks_the_pool_through_its_builtin_openai_provider(tmp_path):
         "OPENAI_BASE_URL": "http://127.0.0.1:8848/api/v1/pool/v1",
         "OPENAI_API_KEY": "harness-token",
     }
+
+
+# --------------------------------------------------------------------------- #
+# accounting over time
+# --------------------------------------------------------------------------- #
+
+
+def test_the_quota_timeline_says_when_the_quota_went(tmp_path):
+    """A total cannot tell a burst from a trickle.
+
+    "Did we just burn through this window's quota?" is a question about
+    **time**, and the office can only answer it if the pool hands out the
+    spend hour by hour.
+    """
+    from app.pool.service import PoolService
+
+    usage = tmp_path / "usage.jsonl"
+    now = datetime.now(timezone.utc)
+    records = [
+        {"at": (now - timedelta(hours=1)).isoformat(), "upstream": "opencode-cli",
+         "model": "m", "consumer": "harness/opencode",
+         "prompt_tokens": 3, "completion_tokens": 4},
+        {"at": (now - timedelta(hours=1)).isoformat(), "upstream": "opencode-cli",
+         "model": "m", "consumer": "harness/claude-code",
+         "prompt_tokens": 0, "completion_tokens": 0},
+        {"at": (now - timedelta(hours=30)).isoformat(), "upstream": "older",
+         "model": "m", "consumer": "harness/opencode",
+         "prompt_tokens": 0, "completion_tokens": 0},
+    ]
+    usage.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
+
+    timeline = PoolService(home=tmp_path, usage_path=usage).usage_timeline(hours=24)
+
+    assert timeline["bucket"] == "hour"
+    assert len(timeline["buckets"]) == 24
+    busy = [bucket for bucket in timeline["buckets"] if bucket["requests"]]
+    assert len(busy) == 1
+    assert busy[0]["requests"] == 2
+    assert busy[0]["upstreams"] == {"opencode-cli": 2}
+    assert busy[0]["consumers"] == {"harness/opencode": 1, "harness/claude-code": 1}
+    assert busy[0]["prompt_tokens"] == 3
+    assert busy[0]["completion_tokens"] == 4
+    # 窗口外的那条不混进来，但要**说**它在窗口外，不装作没有。
+    assert timeline["outside_window"] == 1
+
+
+def test_the_timeline_of_a_pool_that_never_spent_anything_is_empty_not_broken(tmp_path):
+    from app.pool.service import PoolService
+
+    usage = tmp_path / "usage.jsonl"
+    usage.write_text("", encoding="utf-8")
+
+    timeline = PoolService(home=tmp_path, usage_path=usage).usage_timeline(hours=6)
+
+    assert len(timeline["buckets"]) == 6
+    assert all(bucket["requests"] == 0 for bucket in timeline["buckets"])
+    assert timeline["outside_window"] == 0

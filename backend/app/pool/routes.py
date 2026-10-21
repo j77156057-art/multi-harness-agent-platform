@@ -69,6 +69,9 @@ def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
         ],
         "models": service.models(),
         "usage": service.usage_summary(),
+        # When the quota was spent, hour by hour: a total cannot tell a
+        # burst from a trickle, and the human needs to see the burst.
+        "timeline": service.usage_timeline(),
     }
 
 

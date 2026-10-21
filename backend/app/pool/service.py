@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -654,6 +655,65 @@ class PoolService:
             # Accounting must never break a request.
             pass
 
+    def usage_timeline(self, *, hours: int = 24) -> dict[str, Any]:
+        """The quota spend over time, hour by hour.
+
+        A total is not enough to answer "已用额度": the human needs to see
+        **when** it was spent.  "Did we just burn through this window's
+        quota?" is a question about time, not about a sum -- and a sum
+        cannot tell a burst from a trickle.
+        """
+        hours = max(1, min(int(hours), 24 * 14))
+        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        start = now - timedelta(hours=hours - 1)
+        buckets: dict[str, dict[str, Any]] = {}
+        for index in range(hours):
+            at = (start + timedelta(hours=index)).isoformat()
+            buckets[at] = {
+                "at": at,
+                "requests": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "upstreams": {},
+                "consumers": {},
+            }
+        outside = 0
+        if self.usage_path is not None and self.usage_path.exists():
+            try:
+                lines = self.usage_path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                stamp = _parse_timestamp(str(record.get("at") or ""))
+                if stamp is None:
+                    continue
+                key = stamp.replace(minute=0, second=0, microsecond=0).isoformat()
+                bucket = buckets.get(key)
+                if bucket is None:
+                    outside += 1
+                    continue
+                bucket["requests"] += 1
+                bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+                bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                upstream = str(record.get("upstream") or "?")
+                bucket["upstreams"][upstream] = bucket["upstreams"].get(upstream, 0) + 1
+                consumer = str(record.get("consumer") or "?")
+                bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
+        return {
+            "bucket": "hour",
+            "hours": hours,
+            "from": start.isoformat(),
+            "to": now.isoformat(),
+            "outside_window": outside,
+            "buckets": list(buckets.values()),
+        }
+
     def usage_summary(self) -> dict[str, Any]:
         """Whose quota was spent, and by whom.
 
@@ -697,6 +757,17 @@ class PoolService:
             pass
         return {"upstreams": summary, "consumers": consumers, "requests": requests}
 
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    """An ISO timestamp, in UTC.  Unparseable is ``None`` -- not a guess."""
+    try:
+        stamp = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc)
 
 
 def _messages_of(payload: dict[str, Any]) -> list[dict[str, Any]]:
