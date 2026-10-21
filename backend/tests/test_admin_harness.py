@@ -1,4 +1,4 @@
-"""管理员 harness：身份、权限与"真的调模型细化"这三件事的回归。
+﻿"""管理员 harness：身份、权限与"真的调模型细化"这三件事的回归。
 
 本部署的角色模型是"群主只提自然语言要求，管理员 harness 细化+分派+审核"。
 平台只有 ``human``/``harness`` 两种主体，所以管理员身份不能靠主体类型表达，
@@ -93,8 +93,24 @@ def _admin_chain(tmp_path):
     """A chain whose registry knows the admin harness *and* the member it assigns to."""
     chain = build_chain(tmp_path)
     register_harness(chain.database, ADMIN, provider="qoder")
-    register_harness(chain.database, MEMBER, provider="qoder")
+    # Different provider from the default administrator below: refine now
+    # enforces the same cross-provider boundary the review policy will apply,
+    # so an assignable member must be reviewable by this administrator.
+    register_harness(chain.database, MEMBER, provider="tencent")
+    # A member that holds no platform credential cannot claim a task, so the
+    # administrator must not be offered it (see
+    # test_a_member_without_a_credential_is_not_offered_work).
+    _issue_credential(chain.database, MEMBER)
     return chain
+
+
+def _issue_credential(database, harness_id: str) -> str:
+    """Give a registered window a platform credential, as a deployment would."""
+    from app.auth.tokens import TokenService
+
+    return TokenService(database).issue(
+        subject_type="harness", subject_id=harness_id, label="test credential"
+    )
 
 
 #: 管理员 Harness 必须是一个**窗口身份**（R10-fix-15）：细化通道由身份解析，
@@ -108,6 +124,7 @@ def _refine_service(
 ) -> AdminService:
     """细化服务的夹具：默认管理员是一个注册过的窗口，且通道固定为 qoder。"""
     register_harness(chain.database, admin, provider="qoder")
+    _issue_credential(chain.database, admin)
     return AdminService(
         chain.database,
         harness_id=admin,
@@ -150,6 +167,22 @@ def test_allowlist_does_not_invent_permissions(monkeypatch):
     assert not decision.allowed and decision.reason == "role_not_allowed"
     unknown = _decide("harness", ADMIN, "admin:nonexistent", settings.admin_subjects)
     assert not unknown.allowed and unknown.reason == "unknown_permission"
+
+
+def test_configured_admin_harness_may_cancel_tasks(monkeypatch):
+    """§17 的 `task:cancel` 属于人类管理员；白名单里的管理员 harness 获得委托。
+
+    没有这条委托，重复派发、以及"指派给同 provider、必然审核不了"的任务
+    都只能晾着：平台助手能列出来，但取消不了。
+    """
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN}))
+    assert _decide("harness", ADMIN, "task:cancel", settings.admin_subjects).allowed
+
+
+def test_member_harness_may_not_cancel_tasks(monkeypatch):
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN}))
+    decision = _decide("harness", MEMBER, "task:cancel", settings.admin_subjects)
+    assert not decision.allowed and decision.reason == "role_not_allowed"
 
 
 def test_human_admin_still_approves_plans(monkeypatch):
@@ -272,6 +305,41 @@ def test_asking_wins_over_a_half_guessed_spec(tmp_path):
     assert result["status"] == "needs_owner" and result["tasks"] == []
 
 
+def test_a_member_without_a_credential_is_not_offered_work(tmp_path):
+    """登记在册 ≠ 能领活：没有凭据的窗口领不了任务，派给它的活永远停在 ready。
+
+    实测过一次：管理员把两个子任务派给了 ``codebuddy`` 与 ``qoder``——它们登记
+    在册（所以进了办公室的成员表），但平台没有它们的凭据（真正跑 worker 的是
+    ``codebuddy-member-1`` / ``qoder-member-1/2``），那两条任务一直没人领。
+    """
+    chain = _admin_chain(tmp_path)
+    register_harness(chain.database, "codebuddy", provider="tencent")
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+
+    result = _refine_service(chain, runner).refine(
+        requirement="写一份说明", group_id=DEFAULT_GROUP
+    )
+
+    # The prompt names only the member that can actually claim the work.
+    prompt = runner.calls[0]["argv"][-1]
+    assert MEMBER in prompt
+    assert "codebuddy" not in prompt
+
+
+def test_refine_refuses_when_no_member_can_claim(tmp_path):
+    """没有能领活的成员时，细化必须**明确失败**，不能派给一个永远领不了的窗口。"""
+    chain = build_chain(tmp_path)
+    register_harness(chain.database, ADMIN, provider="qoder")
+    register_harness(chain.database, "codebuddy", provider="tencent")
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    service = _refine_service(chain, runner, admin=ADMIN_WINDOW)
+
+    with pytest.raises(AdminHarnessError) as error:
+        service.refine(requirement="写一份说明", group_id=DEFAULT_GROUP)
+
+    assert "credential" in str(error.value)
+
+
 # ----------------------------------------------------- 模型通道跟着管理员身份走
 
 
@@ -375,7 +443,10 @@ def test_refine_refuses_unknown_executor(tmp_path):
 def test_refine_refuses_to_invent_harness_identity(tmp_path):
     """A registered-but-unsupported id is still refused (no adapter could run it)."""
     chain = _admin_chain(tmp_path)
-    register_harness(chain.database, "ghost-harness", provider="qoder")
+    register_harness(chain.database, "ghost-harness", provider="tencent")
+    # It has a credential, so the refusal is about the **missing adapter**, not
+    # about it being unable to act.
+    _issue_credential(chain.database, "ghost-harness")
     bad = {"tasks": [{**SPEC["tasks"][0], "harness_id": "ghost-harness"}]}
     runner = ScriptedRunner(stdout=_envelope(bad))
     with pytest.raises(AdminHarnessError, match="unsupported harness id"):
@@ -400,6 +471,14 @@ def test_refine_refuses_a_nonzero_cli_exit(tmp_path):
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout="", returncode=1, stderr="boom")
     with pytest.raises(AdminHarnessError, match="exited 1"):
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+
+
+def test_refine_reports_stdout_when_the_cli_fails_quietly_on_stderr(tmp_path):
+    """Codex's provider failures are JSONL on stdout; a bare exit code is useless."""
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout='{"type":"turn.failed"}', returncode=1, stderr="")
+    with pytest.raises(AdminHarnessError, match="turn.failed"):
         _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
@@ -521,12 +600,57 @@ def test_plan_events_record_the_real_actor_type(tmp_path, monkeypatch):
     ]
 
 
+def test_formal_dispatch_records_the_admin_harness_as_actor(tmp_path, monkeypatch):
+    """The administrator self-loop dispatches through the same route as a human.
+
+    If the route keeps the old hard-coded ``decided_by_type="human"``, every
+    task created by the administrator worker would look like a human hand-off
+    in the audit trail, which defeats the whole "named actor" model.
+    """
+    chain = _admin_chain(tmp_path)
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN_WINDOW}))
+    register_harness(chain.database, ADMIN_WINDOW, provider="qoder")
+
+    tokens = TokenService(chain.database)
+    human = tokens.issue(subject_type="human", subject_id="office-operator")
+    admin = tokens.issue(subject_type="harness", subject_id=ADMIN_WINDOW)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+
+    def post(path, body, token):
+        return client.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+
+    assert post("/api/v1/projects", {"project_id": "P-D", "name": "p"}, human).status_code == 200
+    assert (
+        post("/api/v1/projects/P-D/groups", {"group_id": "G-D", "name": "g"}, human).status_code
+        == 200
+    )
+    dispatched = post(
+        "/api/v1/groups/G-D/dispatch",
+        {
+            "request_id": "admin-goal-1-0",
+            "title": "DEMO · 补一条说明",
+            "goal": "在 docs/demo.md 写一行说明",
+            "harness_id": MEMBER,
+            "decided_by": ADMIN_WINDOW,
+            "exclusive_paths": ["docs/demo.md"],
+            "acceptance": "docs/demo.md 出现该说明",
+        },
+        admin,
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    row = chain.database.read(
+        "SELECT actor_type, actor_id FROM task_events"
+        " WHERE event_name = 'plan.approve' ORDER BY seq DESC LIMIT 1"
+    )[0]
+    assert (row["actor_type"], row["actor_id"]) == ("harness", ADMIN_WINDOW)
+
+
 # ------------------------------------------------------------------ 路由
 
 
 def test_route_refines_only_for_the_configured_admin_harness(tmp_path, monkeypatch):
     chain = _admin_chain(tmp_path)
-    register_harness(chain.database, MEMBER, provider="qoder")
     monkeypatch.setattr(settings, "auth_mode", "enforce")
     monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN}))
 
@@ -593,3 +717,172 @@ def test_route_refuses_an_admin_subject_that_is_not_registered(tmp_path, monkeyp
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "admin.not_registered"
+
+# ----------------------------------------------------- self-loop worker inputs
+
+
+def test_refine_uses_only_selected_members_and_prefixes_the_project(tmp_path):
+    """A project goal names its members; the admin must not assign outsiders."""
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner).refine(
+        requirement="给启动页补一句说明",
+        group_id=DEFAULT_GROUP,
+        members=[MEMBER],
+        project_name="DEMO",
+    )
+    assert result["status"] == "ok"
+    assert result["project_name"] == "DEMO"
+    assert result["tasks"][0]["harness_id"] == MEMBER
+    assert result["tasks"][0]["title"].startswith("DEMO · ")
+
+
+def test_refine_excludes_every_configured_admin_window_from_members(tmp_path, monkeypatch):
+    chain = _admin_chain(tmp_path)
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN, ADMIN_WINDOW}))
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner).refine(
+        requirement="给启动页补一句说明",
+        group_id=DEFAULT_GROUP,
+        members=[ADMIN, MEMBER],
+    )
+    assert result["members"] == [MEMBER]
+    assert result["tasks"][0]["harness_id"] == MEMBER
+
+
+def test_refine_excludes_members_who_share_the_admins_provider(tmp_path):
+    """A same-provider task would be unreviewable under cross_provider.
+
+    The administrator must not dispatch work it is forbidden to review; doing
+    so only creates a task that stalls at ``awaiting_review``.
+    """
+    chain = _admin_chain(tmp_path)
+    register_harness(chain.database, "qoder-member-2", provider="qoder")
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner).refine(
+        requirement="给启动页补一句说明",
+        group_id=DEFAULT_GROUP,
+        members=[MEMBER, "qoder-member-2"],
+    )
+    assert result["members"] == [MEMBER]
+    assert [task["harness_id"] for task in result["tasks"]] == [MEMBER]
+
+
+def test_refine_refuses_when_only_same_provider_members_remain(tmp_path):
+    chain = _admin_chain(tmp_path)
+    register_harness(chain.database, "qoder-member-2", provider="qoder")
+    # It can act (it has a credential), so what rules it out is the provider.
+    _issue_credential(chain.database, "qoder-member-2")
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    with pytest.raises(AdminHarnessError, match="cross-provider"):
+        _refine_service(chain, runner).refine(
+            requirement="给启动页补一句说明",
+            group_id=DEFAULT_GROUP,
+            members=["qoder-member-2"],
+        )
+
+
+def test_refine_excludes_the_platform_assistant_from_members(tmp_path, monkeypatch):
+    chain = _admin_chain(tmp_path)
+    register_harness(chain.database, "office-admin", provider="qoder")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({ADMIN_WINDOW}))
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    result = _refine_service(chain, runner).refine(
+        requirement="给启动页补一句说明",
+        group_id=DEFAULT_GROUP,
+        members=["office-admin", MEMBER],
+    )
+    assert result["members"] == [MEMBER]
+    assert result["tasks"][0]["harness_id"] == MEMBER
+
+
+def test_refine_refuses_a_project_whose_members_are_all_offline(tmp_path):
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+    with pytest.raises(AdminHarnessError, match="no registered online member"):
+        _refine_service(chain, runner).refine(
+            requirement="x",
+            group_id=DEFAULT_GROUP,
+            members=["not-registered"],
+        )
+
+
+def _review_service(tmp_path, payload):
+    runner = ScriptedRunner(stdout=_envelope(payload))
+    service = AdminService(
+        None,  # review() does not read the database; it only invokes the model.
+        harness_id=ADMIN_WINDOW,
+        runner=runner,
+        scratch_dir=tmp_path / "admin-scratch",
+        timeout_seconds=30,
+    )
+    return service, runner
+
+
+def _review_inputs():
+    task = {
+        "task_id": "FD-0123456789abcdef",
+        "attempt_id": "FD-0123456789abcdef.a1",
+        "title": "DEMO · 补一条说明",
+        "status": "awaiting_review",
+    }
+    spec = {
+        "id": task["task_id"],
+        "title": task["title"],
+        "goal": "在 docs/demo.md 写一行说明",
+        "exclusive_paths": ["docs/demo.md"],
+        "acceptance": "docs/demo.md 出现该说明且没有改其他文件",
+    }
+    diff = {"available": True, "patch": "diff --git a/docs/demo.md b/docs/demo.md\n+hello\n"}
+    verification = {"status": "passed", "receipt_id": "rc-1"}
+    return task, spec, diff, verification
+
+
+def test_review_approves_only_from_the_model_verdict(tmp_path):
+    service, runner = _review_service(tmp_path, {"verdict": "approve", "findings": []})
+    task, spec, diff, verification = _review_inputs()
+    result = service.review(
+        task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+    )
+    assert result["verdict"] == "approve"
+    assert result["findings"] == []
+    prompt = " ".join(str(part) for part in runner.calls[0]["argv"]) + str(
+        runner.calls[0]["stdin"] or ""
+    )
+    assert "Real diff" in prompt
+    assert "diff --git a/docs/demo.md" in prompt
+
+
+def test_review_request_changes_requires_a_concrete_finding(tmp_path):
+    service, _ = _review_service(
+        tmp_path, {"verdict": "request_changes", "findings": []}
+    )
+    task, spec, diff, verification = _review_inputs()
+    with pytest.raises(AdminHarnessError, match="requires at least one finding"):
+        service.review(
+            task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+        )
+
+
+def test_review_normalizes_string_findings(tmp_path):
+    service, _ = _review_service(
+        tmp_path,
+        {"verdict": "request_changes", "findings": ["没有写到指定文件"]},
+    )
+    task, spec, diff, verification = _review_inputs()
+    result = service.review(
+        task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+    )
+    assert result["verdict"] == "request_changes"
+    assert result["findings"] == [
+        {"severity": "note", "message": "没有写到指定文件"}
+    ]
+
+
+def test_review_refuses_an_unknown_verdict(tmp_path):
+    service, _ = _review_service(tmp_path, {"verdict": "lgtm", "findings": []})
+    task, spec, diff, verification = _review_inputs()
+    with pytest.raises(AdminHarnessError, match="verdict must be"):
+        service.review(
+            task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+        )

@@ -181,6 +181,30 @@ def test_capacity_and_offline_refused(env):
     assert env.client.get("/api/v1/tasks/" + first).json()["registration_version"] == "reg-1"
 
 
+def test_dispatch_to_a_window_without_a_credential_is_refused(env):
+    """没有平台凭据的窗口领不了任务：派单要**当场拒绝**，不能事后让人干等。
+
+    实测过一次：管理员把两个子任务派给了 ``codebuddy`` 与 ``qoder``——它们
+    登记在册，却没有 worker 令牌，那两条任务永远停在 ``ready``。
+    """
+    registry = HarnessRegistry(env.db)
+    registry.register(
+        HarnessRegistration(
+            "codebuddy", "codebuddy", "tencent", "codex-exec", "1", ("coding",),
+            registration_version="reg-1",
+        )
+    )
+    payload = body("no-credential")
+    payload["harness_id"] = "codebuddy"
+
+    response = env.client.post("/api/v1/groups/G/dispatch", json=payload)
+
+    assert response.status_code == 422, response.text
+    assert "credential" in response.text
+    # Nothing was created: no task, no plan.
+    assert env.client.get("/api/v1/groups/G/tasks").json()["tasks"] == []
+
+
 def test_registration_replay_history_conflict_and_authority(env):
     registry = HarnessRegistry(env.db)
     original = HarnessRegistration(

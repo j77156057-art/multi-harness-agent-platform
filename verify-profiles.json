@@ -16,6 +16,7 @@
     "该绝对路径同时登记进 command_roots。"
   ],
   "version": "1",
+  "integration_profile": "docs-check",
   "command_roots": [
     "python",
     "python3",
@@ -28,6 +29,17 @@
     "D:\\study\\tools\\agent\\new agent\\.worktrees\\codex\\.venv\\Scripts\\python.exe"
   ],
   "profiles": {
+    "docs-check": {
+      "command": [
+        "python",
+        "D:/study/tools/agent/new agent/.worktrees/codex/backend/app/verify/docs_profile.py"
+      ],
+      "timeout_seconds": 300,
+      "max_verify_attempts": 1,
+      "allow_network": false,
+      "allowed_secrets": [],
+      "lockfile_mutating": false
+    },
     "backend-default": {
       "command": ["D:\\study\\tools\\agent\\new agent\\.worktrees\\codex\\.venv\\Scripts\\python.exe", "-m", "pytest", "-q"],
       "timeout_seconds": 1800,

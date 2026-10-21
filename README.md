@@ -66,11 +66,26 @@ cd backend && ../.venv/Scripts/python.exe -m app.main
 start.bat          rem 后端 → http://127.0.0.1:8848（等价 make dev）
 start.bat all      rem 后端 + 巡检循环（两个窗口）
 start.bat workers  rem 只起巡检循环（app.scheduler --loop）
+start-admin.bat    rem 管理员 harness 自循环（目标细化/分派/审核）
 start.bat help     rem 用法
 ~~~
 
 前置仍是一次性的（venv，见上一节）；缺 venv 时 `start.bat` 会打印修复命令
 并以 exit 2 退出。人类界面是 Agent Office（4174，独立仓，单独启动）。
+
+`start-admin.bat` 是管理员 harness 的运行器，不是第二个调度器：它读取群里
+新的 `project-goal` 消息，让管理员自己的模型通道细化目标，用管理员 token
+调用现有分派路由；随后对 `awaiting_review` 任务领取审核租约、读真实 diff，
+再把模型裁决提交到现有审核路由。默认身份 `codex-window-admin`、群
+`office-formal-2`，可用 `AP_ADMIN_HARNESS_ID` / `AP_ADMIN_GROUP` /
+`AP_ADMIN_TOKEN_FILE` 覆盖。首次启动默认不重放历史目标；需要时加
+`--replay-latest`。模型失败或跨提供方规则拒绝时只记录并等待，不会伪造通过。
+成员 worker 仍由各自窗口单独启动。管理员 worker 与成员 worker 一样要求后端以
+`AP_AUTH_MODE=enforce` 运行，并且 token 文件属于已注册的管理员窗口。
+先用 `start-admin.bat --once --dry-run` 做只读连接检查，不会写平台。
+若管理员是 `codex-window-admin`，它用本机 `codex` CLI；codex 的 provider 中继
+（例如 `http://127.0.0.1:8402`）必须可用，否则模型调用 fail-closed 并在群里报告，
+不会伪造结论。必要时用 `AP_ADMIN_MODEL_CHANNEL` 显式指向另一条已装 CLI 通道。
 
 运行环（Verify/Merge 的正式驱动，F6）：`python -m app.runtime --once` 跑一轮、
 `--loop` 常驻（`AP_RUNTIME_INTERVAL` 默认 10s）、`--check` 只读盘点候选；verify

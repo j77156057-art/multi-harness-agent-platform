@@ -285,7 +285,7 @@ class HttpAdapter(HarnessAdapter):
         self.attempts.pop(task_id, None)
         return result
 
-    def release(self, *, task_id: str) -> dict[str, Any]:
+    def release(self, *, task_id: str, reason: str = "harness released") -> dict[str, Any]:
         context = self._context(task_id)
         result = self._post(
             "release",
@@ -294,7 +294,7 @@ class HttpAdapter(HarnessAdapter):
                 "task_id": task_id,
                 "attempt_id": context.attempt_id,
                 "fencing_epoch": context.fencing_epoch,
-                "reason": "harness released",
+                "reason": reason,
             },
         )
         self.attempts.pop(task_id, None)

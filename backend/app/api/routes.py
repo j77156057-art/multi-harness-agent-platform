@@ -7,11 +7,17 @@ the projections; the event stream is the incremental cursor.
 
 from __future__ import annotations
 
+import json
+import uuid
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
+from app.adapter import cli_output
 from app.adapter.dispatch import dispatch, eligible_tasks
+from app.adapter.models import configured_model
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
 from app.admin.service import AdminService
@@ -28,6 +34,7 @@ from app.api.auth_deps import (
 from app.api.errors import ApiError
 from app.auth.tokens import TokenInvalid, TokenService
 from app.claim.service import ClaimRequest, ClaimService
+from app.review_doc import build_document
 from app.config import settings
 from app.db.connection import Database
 from app.git.publish import PublishProxy
@@ -216,10 +223,169 @@ def formal_dispatch(
     bind_declared(
         principal, body.decided_by, key="plan:approve", database=database, request=request
     )
-    return dispatch(service, group_id=group_id, **body.model_dump())
+    return dispatch(
+        service,
+        group_id=group_id,
+        decided_by_type=_actor_type(principal),
+        **body.model_dump(),
+    )
 
 
 # ----------------------------------------------------------------- adapter
+
+
+@adapter.post("/admin/plan_draft")
+def admin_plan_draft(
+    body: schemas.PlanDraftRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("admin:refine"),
+) -> dict[str, Any]:
+    """The administrator's refined plan becomes a **draft** and a circulation round.
+
+    This is the step the owner asked for: after the refinement, the plan is
+    passed on for review (传阅) instead of being dispatched straight away.  The
+    plan stays a draft, so **no task can be claimed** while the readers have
+    not had their say.
+    """
+    bind_declared(principal, body.opened_by, key="admin:refine", database=database, request=request)
+    plan_id = body.plan_id or ("plan-" + uuid.uuid4().hex[:16])
+    snapshot = _plan_snapshot(body.title, body.goal, body.tasks)
+    outcome = SchedulerService(database).create_plan(
+        plan_id=plan_id, group_id=body.group_id, snapshot=snapshot
+    )
+    round_info = _allocation(database).open_circulation(
+        group_id=body.group_id,
+        plan_id=plan_id,
+        plan_snapshot_id=outcome.snapshot_id,
+        reviewer_harness_ids=list(body.reviewer_harness_ids),
+        opened_by=body.opened_by,
+    )
+    return {
+        "plan_id": plan_id,
+        "snapshot_id": outcome.snapshot_id,
+        "plan_hash": outcome.plan_hash,
+        "circulation_id": round_info["circulation_id"],
+        "round_no": round_info["round_no"],
+        "state": round_info["state"],
+    }
+
+
+@adapter.post("/admin/plan_revise")
+def admin_plan_revise(
+    body: schemas.PlanRevisionRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("admin:refine"),
+) -> dict[str, Any]:
+    """The administrator folds the circulation comments into a **new snapshot**.
+
+    The plan stays a draft: the human still has the final word.
+    """
+    bind_declared(principal, body.revised_by, key="admin:refine", database=database, request=request)
+    title = _plan_title(database, body.plan_id)
+    # The revision keeps the plan's **own** task ids, in order: a revision is
+    # the same tasks, better specified.  A model that invents ids would
+    # silently create new work, and the plan's tasks would no longer match.
+    existing_ids = _plan_task_ids(database, body.plan_id)
+    specs = []
+    for index, spec in enumerate(body.tasks):
+        item = dict(spec)
+        if index < len(existing_ids):
+            item["id"] = existing_ids[index]
+        specs.append(item)
+    snapshot = _plan_snapshot(title, body.goal, specs)
+    outcome = SchedulerService(database).revise_plan(
+        plan_id=body.plan_id, snapshot=snapshot
+    )
+    return {
+        "plan_id": body.plan_id,
+        "snapshot_id": outcome.snapshot_id,
+        "plan_hash": outcome.plan_hash,
+    }
+
+
+def _plan_snapshot(title: str, goal: str, tasks: list[dict[str, object]]) -> dict[str, object]:
+    """The plan snapshot the platform stores: the tasks with their windows."""
+    items: list[dict[str, object]] = []
+    for spec in tasks:
+        task_id = str(spec.get("id") or "").strip() or ("FD-" + uuid.uuid4().hex[:16])
+        targets = spec.get("assigned_harness_ids")
+        if not targets:
+            harness = str(spec.get("harness_id") or "").strip()
+            targets = [harness] if harness else []
+        acceptance = spec.get("acceptance")
+        if isinstance(acceptance, str):
+            acceptance = [{"id": "MVP-API-001", "check": "human", "description": acceptance}]
+        elif not isinstance(acceptance, list) or not acceptance:
+            acceptance = [
+                {
+                    "id": "MVP-API-001",
+                    "check": "human",
+                    "description": str(spec.get("acceptance") or "由人最终审核"),
+                }
+            ]
+        items.append(
+            {
+                "id": task_id,
+                "title": str(spec.get("title") or task_id),
+                "goal": str(spec.get("goal") or goal),
+                # The acceptance is a list of **contracts**, not a sentence: the
+                # plan validator refuses anything else, and it is right to -- an
+                # acceptance nobody can check is not an acceptance.
+                "acceptance": acceptance,
+                "capabilities": ["coding"],
+                "exclusive_paths": [str(p) for p in (spec.get("exclusive_paths") or [])],
+                "assigned_harness_ids": [str(t) for t in targets],
+                "require_human_assign": bool(targets),
+                "risk": "medium",
+                "expected_duration_min": 30,
+                "budget_tokens": 0,
+                "verify_profile": "formal-artifact",
+            }
+        )
+    return {
+        "plan_version": "v1",
+        "title": title,
+        "goal": goal,
+        "tasks": items,
+        "registered_capabilities": ["coding"],
+        "verify_profiles": ["formal-artifact"],
+    }
+
+
+def _plan_task_ids(database: Database, plan_id: str) -> list[str]:
+    """The task ids of a plan's current snapshot, in order."""
+    rows = database.read(
+        "SELECT content_json FROM plan_snapshots WHERE plan_id = ?"
+        " ORDER BY created_at DESC LIMIT 1",
+        (plan_id,),
+    )
+    if not rows:
+        return []
+    try:
+        raw = json.loads(str(rows[0]["content_json"] or "{}"))
+    except ValueError:
+        return []
+    tasks = raw.get("tasks")
+    if not isinstance(tasks, list):
+        return []
+    return [str(item.get("id")) for item in tasks if isinstance(item, dict) and item.get("id")]
+
+
+def _plan_title(database: Database, plan_id: str) -> str:
+    rows = database.read(
+        "SELECT content_json FROM plan_snapshots WHERE plan_id = ?"
+        " ORDER BY created_at DESC LIMIT 1",
+        (plan_id,),
+    )
+    if not rows:
+        return plan_id
+    try:
+        raw = json.loads(str(rows[0]["content_json"] or "{}"))
+    except ValueError:
+        return plan_id
+    return str(raw.get("title") or plan_id)
 
 
 @adapter.post("/probe")
@@ -291,6 +457,201 @@ def capabilities(
         "registration_version": row["registration_version"],
         "capabilities": list(capabilities_from(row)),
     }
+
+
+#: How long a failure still counts as "this window cannot work right now".
+#: After that the failure is history: it is reported as a warning with its age
+#: (the provider may have been fixed), but it no longer decides usability --
+#: unless a *new* attempt fails, which starts the clock again.
+AVAILABILITY_FRESH_FAILURE_MINUTES = 30.0
+
+
+@adapter.get("/availability")
+def availability(
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """Who can work right now, and with which model.
+
+    The office needs this to answer a human question after a failure: "the
+    upstream died -- who takes over?". Three facts, each from where it actually
+    lives:
+
+    * **the model** is a deployment fact: the CLI reads its own config, and the
+      platform holds no model credentials, so it reads the same config file and
+      reports what it says (never a guess -- ``None`` when unreadable);
+    * **whether it can act at all**: a window without a platform credential
+      cannot claim a task, so it is not a candidate;
+    * **whether it worked recently**: the platform saw the last attempt fail
+      (provider error, missing binary, refused submission) and can say so
+      instead of leaving the person to guess.
+
+    Read-only; it writes no state and grants nothing.
+    """
+    registry = HarnessRegistry(database)
+    listing = registry.listing()
+    probes = {
+        str(row["harness_id"]): dict(row)
+        for row in database.read(
+            "SELECT p.* FROM capability_probes p JOIN ("
+            "  SELECT harness_id, MAX(rowid) AS latest FROM capability_probes GROUP BY harness_id"
+            ") latest ON latest.latest = p.rowid"
+        )
+    }
+    attempts = {
+        str(row["owner"]): dict(row)
+        for row in database.read(
+            "SELECT a.owner, a.task_id, a.attempt_id, a.status, a.created_at FROM task_attempts a"
+            " JOIN (SELECT owner, MAX(rowid) AS latest FROM task_attempts GROUP BY owner) latest"
+            "  ON latest.latest = a.rowid"
+        )
+    }
+    failures: dict[str, str] = {}
+    failure_seqs: dict[str, int] = {}
+    failure_times: dict[str, str] = {}
+    for row in database.read(
+        "SELECT aggregate_id, payload_json, seq, created_at FROM task_events"
+        " WHERE event_name IN ('abandon', 'release') ORDER BY seq DESC"
+    ):
+        # Newest first, and the first one wins.
+        task_id = str(row["aggregate_id"])
+        if task_id not in failures:
+            failures[task_id] = str(row["payload_json"] or "")
+            failure_seqs[task_id] = int(row["seq"])
+            failure_times[task_id] = str(row["created_at"] or "")
+    # A harness that delivered something *after* its last failure is working
+    # again: the failure must not black-list it forever.
+    successes: dict[str, int] = {}
+    for row in database.read(
+        "SELECT actor_id, MAX(seq) AS seq FROM task_events"
+        " WHERE event_name = 'submit_result' GROUP BY actor_id"
+    ):
+        successes[str(row["actor_id"])] = int(row["seq"])
+    entries: list[dict[str, Any]] = []
+    evidence_dir = Path(database.path).parent / "formal-runs"
+    for row in listing:
+        harness_id = str(row["harness_id"])
+        model = configured_model(harness_id)
+        probe = probes.get(harness_id)
+        attempt = attempts.get(harness_id)
+        failure_reason = failures.get(str(attempt["task_id"])) if attempt else None
+        # The failure *evidence* is the precise record (it names the error class
+        # and whether the failure was retryable); the event reason is the
+        # fallback for a failure recorded before the evidence existed.
+        failure_detail: dict[str, Any] | None = None
+        if attempt:
+            try:
+                failure_detail = json.loads(
+                    (evidence_dir / f"{attempt['task_id']}.failure.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            except (OSError, ValueError):
+                failure_detail = None
+        credential_count = int(row.get("credential_count") or 0)
+        registered = bool(row.get("registration_version"))
+        online = str(row.get("status")) == "online"
+        degraded = bool(probe["degraded"]) if probe else False
+        # ``reasons`` carries a stable code plus a human-readable detail: the
+        # office localises the code, and the detail keeps the exact fact.
+        reasons: list[dict[str, str]] = []
+        warnings: list[dict[str, str]] = []
+        if not registered:
+            reasons.append({"code": "not_registered", "detail": "not in the registry"})
+        if not online:
+            reasons.append(
+                {"code": "offline", "detail": f"registration status: {row.get('status')}"}
+            )
+        if credential_count == 0:
+            reasons.append({"code": "no_credential", "detail": "no platform credential"})
+        if degraded:
+            reasons.append(
+                {"code": "self_reported_degraded", "detail": "the window reported degraded"}
+            )
+        recovered = False
+        if attempt:
+            last_failure_seq = failure_seqs.get(str(attempt["task_id"]))
+            last_success_seq = successes.get(harness_id)
+            if (
+                last_failure_seq is not None
+                and last_success_seq is not None
+                and last_success_seq > last_failure_seq
+            ):
+                recovered = True
+        # A failure is evidence about *that moment*. If nobody retried for a
+        # while (no worker was running), it stops being evidence about **now**:
+        # the provider may have been fixed since. So a stale failure is reported
+        # as a warning with its age, and only a fresh one blocks the window.
+        failure_age_minutes: float | None = None
+        if attempt:
+            failed_at = failure_times.get(str(attempt["task_id"]))
+            if failed_at:
+                try:
+                    failed = datetime.fromisoformat(failed_at)
+                    if failed.tzinfo is None:
+                        failed = failed.replace(tzinfo=UTC)
+                    failure_age_minutes = (
+                        datetime.now(UTC) - failed
+                    ).total_seconds() / 60.0
+                except ValueError:
+                    failure_age_minutes = None
+        failure_reason_text = ""
+        if failure_detail and failure_detail.get("error_type"):
+            failure_reason_text = (
+                f"{failure_detail.get('error_type')}: "
+                f"{str(failure_detail.get('retry_reason') or failure_detail.get('error') or '')[:120]}"
+            )
+        elif failure_reason and "retryable failure" in failure_reason:
+            failure_reason_text = failure_reason[:140]
+        stale_failure = (
+            failure_reason_text
+            and not recovered
+            and failure_age_minutes is not None
+            and failure_age_minutes > AVAILABILITY_FRESH_FAILURE_MINUTES
+        )
+        if failure_reason_text and not recovered and not stale_failure:
+            # Only a failure that points at the **harness or its provider** says
+            # this window cannot work now. A platform-side failure (a Git error,
+            # a locked database) is the platform's problem, not the window's.
+            if failure_detail is None or failure_detail.get("retryable") is True:
+                reasons.append({"code": "last_attempt_failed", "detail": failure_reason_text})
+        elif stale_failure:
+            warnings.append(
+                {
+                    "code": "stale_last_failure",
+                    "detail": f"{failure_reason_text}（{int(failure_age_minutes)} 分钟前，尚未复测）",
+                }
+            )
+        entries.append(
+            {
+                "harness_id": harness_id,
+                "provider": row.get("provider"),
+                "adapter": row.get("adapter"),
+                "status": row.get("status"),
+                "registration_version": row.get("registration_version"),
+                "credential_count": credential_count,
+                "model": model["model"],
+                "model_alias": model.get("model_alias"),
+                "model_source": model["source"],
+                "degraded": degraded,
+                "last_probe_at": probe["created_at"] if probe else None,
+                "warnings": [
+                    *(
+                        [{"code": "probe_warning", "detail": str(item)} for item in (
+                            json.loads(probe["warnings_json"]) if probe and probe.get("warnings_json") else []
+                        )]
+                    ),
+                    *warnings,
+                ],
+                "last_task_id": attempt["task_id"] if attempt else None,
+                "last_attempt_status": attempt["status"] if attempt else None,
+                "recovered": recovered,
+                "usable": not reasons,
+                "reasons": reasons,
+            }
+        )
+    return {"availability": entries}
 
 
 @adapter.get("/list_ready_tasks")
@@ -710,6 +1071,34 @@ def human_reopen(
     return service.reopen(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
 
 
+@human.post("/attempt_budget_override")
+def human_attempt_budget_override(
+    body: schemas.HumanAttemptBudgetOverrideRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:attempt_budget_override"),
+) -> dict[str, Any]:
+    """Give a task whose attempt budget is spent **one more chance**.
+
+    R10 §8 refuses the plain loop-back: the next claim would be refused by
+    the same budget guard.  Only the human can say "give it one more try" --
+    the platform does not grant it to itself, and neither does the
+    administrator harness.
+
+    No task state moves here (the task stays where it is); only the claim
+    guard learns that one more attempt is allowed.  No new event name either:
+    the decision row is the audit trail.
+    """
+    bind_declared(
+        principal, body.decided_by, key="task:attempt_budget_override", database=database, request=request
+    )
+    return _human(database).grant_attempt_budget_override(
+        task_id=body.task_id,
+        decided_by=body.decided_by,
+        reason=body.reason,
+    )
+
+
 @human.post("/release")
 def human_release(
     body: schemas.HumanReleaseRequest,
@@ -762,6 +1151,31 @@ def human_cancel(
 ) -> dict[str, Any]:
     bind_declared(principal, body.decided_by, key="task:cancel", database=database, request=request)
     return service.cancel(task_id=body.task_id, decided_by=body.decided_by, reason=body.reason)
+
+
+@management.post("/tasks/{task_id}/cancel")
+def admin_cancel(
+    task_id: str,
+    body: schemas.AdminCancelRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:cancel"),
+) -> dict[str, Any]:
+    """Cancel as the administrator harness, not as a human.
+
+    §17 gives ``task:cancel`` to the human administrator. The deployment's
+    administrator is a harness subject, so this route records
+    ``_actor_type(principal)`` -- a harness decision stays a harness decision.
+    The edge itself is unchanged (`cancel` / `human.cancel` already exist).
+    """
+    bind_declared(principal, body.decided_by, key="task:cancel", database=database, request=request)
+    return service.cancel(
+        task_id=task_id,
+        decided_by=body.decided_by,
+        reason=body.reason,
+        actor_type=_actor_type(principal),
+    )
 
 
 # ------------------------------------------------------------------ review
@@ -897,6 +1311,97 @@ def open_circulation(
         opened_by=body.opened_by,
         deadline_at=body.deadline_at,
     )
+
+
+@allocation.get("/circulation")
+def list_circulation_rounds(
+    database: DatabaseDep,
+    group_id: Annotated[str | None, Query()] = None,
+    state: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """The circulation rounds of a group (and their comments).
+
+    The write side existed; the read side did not, so the administrator (and
+    the member that has to review) had no way to ask "is there a round waiting
+    for me?".
+    """
+    sql = "SELECT * FROM circulation_rounds"
+    clauses: list[str] = []
+    params: list[object] = []
+    if group_id:
+        clauses.append("group_id = ?")
+        params.append(group_id)
+    if state:
+        clauses.append("state = ?")
+        params.append(state)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY opened_at DESC"
+    rounds = []
+    for row in database.read(sql, tuple(params)):
+        reviews = database.read(
+            "SELECT harness_id, body, submitted_at FROM circulation_reviews"
+            " WHERE circulation_id = ? AND round_no = ? ORDER BY submitted_at",
+            (str(row["circulation_id"]), int(row["round_no"])),
+        )
+        rounds.append(
+            {
+                "circulation_id": str(row["circulation_id"]),
+                "group_id": str(row["group_id"]),
+                "plan_id": str(row["plan_id"]),
+                "plan_snapshot_id": str(row["plan_snapshot_id"]),
+                "round_no": int(row["round_no"]),
+                "state": str(row["state"]),
+                "opened_by": str(row["opened_by"] or ""),
+                "reviewer_harness_ids": json.loads(str(row["reviewer_harness_ids_json"] or "[]")),
+                "reviews": [
+                    {
+                        "harness_id": str(review["harness_id"]),
+                        "body": str(review["body"] or ""),
+                        "submitted_at": str(review["submitted_at"] or ""),
+                    }
+                    for review in reviews
+                ],
+            }
+        )
+    return {"rounds": rounds}
+
+
+@allocation.get("/circulation/{circulation_id}")
+def read_circulation_round(
+    circulation_id: str,
+    database: DatabaseDep,
+) -> dict[str, Any]:
+    """One circulation round with the comments it collected."""
+    rows = database.read(
+        "SELECT * FROM circulation_rounds WHERE circulation_id = ?", (circulation_id,)
+    )
+    if not rows:
+        raise NotFound(f"unknown circulation round: {circulation_id}")
+    row = rows[0]
+    reviews = database.read(
+        "SELECT harness_id, body, submitted_at FROM circulation_reviews"
+        " WHERE circulation_id = ? AND round_no = ? ORDER BY submitted_at",
+        (circulation_id, int(row["round_no"])),
+    )
+    return {
+        "circulation_id": circulation_id,
+        "group_id": str(row["group_id"]),
+        "plan_id": str(row["plan_id"]),
+        "plan_snapshot_id": str(row["plan_snapshot_id"]),
+        "round_no": int(row["round_no"]),
+        "state": str(row["state"]),
+        "opened_by": str(row["opened_by"] or ""),
+        "reviewer_harness_ids": json.loads(str(row["reviewer_harness_ids_json"] or "[]")),
+        "reviews": [
+            {
+                "harness_id": str(review["harness_id"]),
+                "body": str(review["body"] or ""),
+                "submitted_at": str(review["submitted_at"] or ""),
+            }
+            for review in reviews
+        ],
+    }
 
 
 @allocation.post("/circulation/review")
@@ -1394,6 +1899,112 @@ def list_tasks(
     status: Annotated[str | None, Query()] = None,
 ) -> dict[str, Any]:
     return {"tasks": service.list_tasks(group_id, status=status)}
+
+
+@read.get("/groups/{group_id}/plans")
+def list_group_plans(
+    group_id: str,
+    database: DatabaseDep,
+) -> dict[str, Any]:
+    """The plans of a group, newest first, with the document of the draft one.
+
+    The office shows the *plan under review* so the human can read it and give
+    the final word.
+    """
+    rows = database.read(
+        "SELECT plan_id, status, plan_hash, created_at FROM plans WHERE group_id = ?"
+        " ORDER BY created_at DESC",
+        (group_id,),
+    )
+    plans = []
+    for row in rows:
+        entry = {
+            "plan_id": str(row["plan_id"]),
+            "status": str(row["status"]),
+            "plan_hash": str(row["plan_hash"] or ""),
+            "created_at": str(row["created_at"] or ""),
+        }
+        plans.append(entry)
+    draft = next((plan for plan in plans if plan["status"] == "draft"), None)
+    if draft is not None:
+        draft["document"] = build_document(database, plan_id=draft["plan_id"])
+    return {"plans": plans, "draft": draft}
+
+
+@read.get("/plans/{plan_id}/document")
+def plan_document(
+    plan_id: str,
+    database: DatabaseDep,
+    project_name: Annotated[str | None, Query()] = None,
+    goal: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """The final plan as a document a human can read (Markdown + HTML).
+
+    The plan is rendered together with the circulation rounds it went through,
+    so the reader sees *who said what* while the plan was being shaped -- and
+    the task list it will produce.
+    """
+    document = build_document(
+        database,
+        plan_id=plan_id,
+        project_name=project_name or "",
+        goal=goal or "",
+    )
+    return document
+
+
+@read.get("/tasks/{task_id}/output")
+def task_output(task_id: str, service: SchedulerDep, database: DatabaseDep) -> dict[str, Any]:
+    """The harness CLI's own output for the current attempt, as it streams.
+
+    The member worker tees the child's stdout/stderr into the data dir while
+    the CLI runs; this route hands out the tail. It is the same fact the
+    failure evidence keeps, only live -- so the office can show what a harness
+    is saying right now instead of only what it did.
+
+    Read-only, and honest about absence: no attempt, no file, or no bytes yet
+    all come back as an empty output rather than as an error.
+    """
+    task = service.get_task(task_id)
+    attempt_id = task.get("current_attempt_id")
+    current = attempt_id is not None
+    if not attempt_id:
+        # 没有当前 attempt（任务已 abandoned / merged / cancelled），就退回该
+        # 任务最近一次 attempt：人想看的是"这个 harness 临死前说了什么"，
+        # 那段 transcript 还在磁盘上。
+        rows = database.read(
+            "SELECT attempt_id FROM task_attempts WHERE task_id = ?"
+            " ORDER BY attempt_no DESC LIMIT 1",
+            (task_id,),
+        )
+        if not rows:
+            return {"output": None}
+        attempt_id = str(rows[0]["attempt_id"])
+    stdout_path, stderr_path = cli_output.log_paths(
+        settings.data_dir, task_id, str(attempt_id)
+    )
+    stdout = cli_output.read_tail(stdout_path)
+    stderr = cli_output.read_tail(stderr_path)
+    attempt = database.read(
+        "SELECT status, owner, head_commit FROM task_attempts WHERE attempt_id = ?",
+        (str(attempt_id),),
+    )
+    attempt_row = dict(attempt[0]) if attempt else {}
+    return {
+        "output": {
+            "task_id": task_id,
+            "attempt_id": str(attempt_id),
+            "current": current,
+            "attempt_status": attempt_row.get("status"),
+            "harness_id": attempt_row.get("owner") or task.get("owner"),
+            "stdout": stdout["text"],
+            "stderr": stderr["text"],
+            "stdout_bytes": stdout["bytes"],
+            "stderr_bytes": stderr["bytes"],
+            "stdout_lines": stdout["lines"],
+            "updated_at": stdout["updated_at"] or stderr["updated_at"],
+        }
+    }
 
 
 @read.get("/tasks/{task_id}/events")

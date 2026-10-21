@@ -42,12 +42,22 @@ def qoder_command(work_order: str, worktree: Path) -> list[str]:
 
     Module-level so a second caller (the admin harness's refine call) reuses the
     exact argv the worker uses instead of keeping a drifting copy.
+
+    ``--output-format stream-json`` (not ``json``): measured against the real
+    binary (qoderclicn 1.1.71), ``json`` writes **one** object when the run
+    ends -- 0 bytes for 21 seconds, then 1598 -- while ``stream-json`` writes an
+    event per line while the model works (0 bytes at 3s, 3.6 KB at 6s, 10 KB at
+    15s). The stream's last event is a ``result`` event with the same fields
+    the single object carried, and this CLI's own notices ("Skill command ...
+    was renamed") arrive as plain lines that the parser skips.
+
+    Unlike claude, this CLI has no ``--verbose`` and rejects it.
     """
     return [
         _qoder_binary(),
         "-p",
         "--output-format",
-        "json",
+        "stream-json",
         "--dangerously-skip-permissions",
         "-w",
         str(worktree),

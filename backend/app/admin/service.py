@@ -37,6 +37,11 @@ _INSTANCE_RE = re.compile(
     r"-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
 )
 
+#: The platform assistant is neither an administrator window nor a project
+#: member. It has a model identity but no worker seat; a goal must never be
+#: assigned to it even when an API caller omits the project member list.
+PLATFORM_ASSISTANT_HARNESS_ID = "office-admin"
+
 
 class AdminHarnessError(RuntimeError):
     """细化失败。调用方必须把它当失败，不能当"空规格"。"""
@@ -117,7 +122,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
                         return parsed
                     break
         start = text.find("{", start + 1)
-    raise AdminHarnessError("refine output carried no balanced JSON object")
+    raise AdminHarnessError("admin harness output carried no balanced JSON object")
 
 
 def _questions(payload: dict[str, Any]) -> list[str]:
@@ -171,6 +176,61 @@ class AdminService:
             else settings.admin_refine_timeout_seconds
         )
 
+    # --------------------------------------------------------------- revise
+
+    def revise_with_reviews(
+        self,
+        *,
+        plan_id: str,
+        goal: str,
+        tasks: list[dict[str, Any]],
+        reviews: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Fold the circulation comments into the plan.
+
+        The administrator's own model channel does the folding -- the same
+        channel that produced the first refinement.  The comments are quoted
+        verbatim, and the result is the task list again (the same tasks, better
+        specified).  Nothing is dispatched here: the plan stays a draft until a
+        **human** approves it.
+        """
+        if not reviews:
+            return list(tasks)
+        comments = "\n".join(
+            f"- {review.get('harness_id')}: {review.get('body')}" for review in reviews
+        )
+        prompt = (
+            "你是管理员 Harness。下面是一版方案和传阅收到的意见。请把意见并进方案，"
+            "然后**只输出一个 JSON 对象**："
+            '{"tasks": [{"title": …, "goal": …, "exclusive_paths": [...], '
+            '"acceptance": …, "harness_id": …}]}。'
+            "意见没有要求改动的任务原样保留。\n\n"
+            f"方案目标：{goal}\n\n"
+            f"当前任务：{json.dumps(tasks, ensure_ascii=False)}\n\n"
+            f"收到的意见：\n{comments}\n\n"
+            "只输出那个 JSON 对象，不要别的文字。"
+        )
+        payload, model = self._invoke_model(prompt)
+        if isinstance(payload, list):
+            payload = {"tasks": payload}
+        revised = payload.get("tasks") if isinstance(payload, dict) else None
+        if not isinstance(revised, list) or not revised:
+            # The model did not answer with a task list: keep the plan as it is
+            # rather than inventing one.
+            return list(tasks)
+        items = [item for item in revised if isinstance(item, dict)]
+        if len(items) != len(tasks):
+            # A different number of tasks is not a revision: it is a new plan,
+            # and that is the owner's call, not the model's.
+            return list(tasks)
+        # The **ids stay**: a revision is the same tasks, better specified.
+        # A model that invents task ids would silently create new work.
+        merged: list[dict[str, Any]] = []
+        for original, item in zip(tasks, items):
+            changed = {k: v for k, v in item.items() if k not in ("id", "task_id")}
+            merged.append({**original, **changed})
+        return merged
+
     # ------------------------------------------------------------------ refine
 
     def running_harnesses(self) -> list[str]:
@@ -180,6 +240,89 @@ class AdminService:
         )
         return [str(row["harness_id"]) for row in rows]
 
+    def harness_has_credential(self, harness_id: str) -> bool:
+        """Whether this window can actually authenticate to the platform.
+
+        "Registered and online" is not the same as "can act": a window that was
+        registered but never issued a token cannot claim a task, so a plan
+        assigned to it would sit in ``ready`` forever. The administrator must
+        only hand work to windows that can pick it up.
+        """
+        rows = self.database.read(
+            "SELECT COUNT(*) AS n FROM auth_tokens WHERE subject_type = 'harness'"
+            " AND subject_id = ? AND revoked_at IS NULL",
+            (str(harness_id),),
+        )
+        return bool(rows and int(rows[0]["n"]) > 0)
+
+    def dispatched_task_ids(self, prefix: str = "admin-") -> set[str]:
+        """The task ids this administrator dispatched.
+
+        The dispatch idempotency table remembers every dispatch by its request
+        id, and the administrator's own requests are prefixed (``admin-goal-…``
+        for a refinement, ``admin-reassign-…`` for a re-point). The re-point
+        only touches **its own** dispatches: a task somebody else dispatched is
+        that dispatcher's business, not something to silently rewrite.
+        """
+        rows = self.database.read(
+            "SELECT first_result_json FROM command_idempotency"
+            " WHERE operation = 'formal_dispatch' AND idempotency_key LIKE ?",
+            (f"{prefix}%",),
+        )
+        task_ids: set[str] = set()
+        for row in rows:
+            try:
+                result = json.loads(str(row["first_result_json"] or "{}"))
+            except (TypeError, ValueError):
+                continue
+            task_id = result.get("task_id")
+            if isinstance(task_id, str) and task_id:
+                task_ids.add(task_id)
+        return task_ids
+
+    def assignable_harnesses(self) -> list[str]:
+        """The members this administrator may hand work to.
+
+        One rule, used by both the refinement and the re-pointing, so the two
+        cannot drift: a candidate must be online and registered, hold a
+        platform credential (otherwise it could never claim the task), not be an
+        administrator window, and not share the administrator's provider
+        (cross-provider review would be impossible).
+        """
+        admin_ids = set(getattr(settings, "admin_subjects", frozenset())) | {self.harness_id}
+        available = [
+            harness_id
+            for harness_id in self.running_harnesses()
+            if harness_id not in admin_ids and harness_id != PLATFORM_ASSISTANT_HARNESS_ID
+        ]
+        admin_provider = self._provider(self.harness_id)
+        if admin_provider is not None:
+            available = [
+                harness_id
+                for harness_id in available
+                if self._provider(harness_id) != admin_provider
+            ]
+        return [
+            harness_id for harness_id in available if self.harness_has_credential(harness_id)
+        ]
+
+    def _provider(self, harness_id: str) -> str | None:
+        """The registry's provider for a harness, or None when it is unknown.
+
+        ``review_policy=cross_provider`` compares this registry value, not what
+        the administrator's CLI happens to be. It must therefore also bound
+        who the administrator may assign work to: a task given to a member of
+        the administrator's own provider can never be reviewed by that
+        administrator, so dispatching it would create a task that can only
+        stall (or force someone to bypass the policy).
+        """
+        rows = self.database.read(
+            "SELECT provider FROM harnesses WHERE harness_id = ?", (harness_id,)
+        )
+        if not rows or not rows[0]["provider"]:
+            return None
+        return str(rows[0]["provider"])
+
     def refine(
         self,
         *,
@@ -187,6 +330,8 @@ class AdminService:
         group_id: str,
         max_tasks: int = 3,
         answers: list[str] | None = None,
+        members: list[str] | None = None,
+        project_name: str | None = None,
     ) -> dict[str, Any]:
         """One model call: requirement -> validated task specs, or owner questions.
 
@@ -207,64 +352,60 @@ class AdminService:
         if max_tasks < 1 or max_tasks > 8:
             raise AdminHarnessError("max_tasks must be between 1 and 8")
         replies = [str(item).strip() for item in (answers or []) if str(item).strip()]
-        members = self.running_harnesses()
+        # 候选只有一处定义（`assignable_harnesses`）：在线且已登记、**有平台
+        # 凭据**（否则它永远领不了任务）、不是管理员窗口、provider 与管理员不同
+        # （否则交叉审核不可能成立）。细化与改派用同一条规则，不会各说各话。
+        actionable = self.assignable_harnesses()
+        requested_members = members
+        if requested_members is not None:
+            selected = [str(item).strip() for item in requested_members if str(item).strip()]
+            actionable = [item for item in actionable if item in selected]
+        members = actionable
         if not members:
-            raise AdminHarnessError("no registered online harness to assign work to")
+            raise AdminHarnessError(
+                "no registered online member harness to assign work to"
+                + (
+                    " (the requested project members are offline, administrators,"
+                    " share the administrator's provider (cross-provider review"
+                    " would be impossible), or hold no platform credential, so"
+                    " they could never claim the task)"
+                    if requested_members is not None
+                    else " (no online member with a credential has a provider"
+                    " different from the administrator)"
+                )
+            )
 
         prompt = self._prompt(
-            text, group_id=group_id, max_tasks=max_tasks, members=members, answers=replies
+            text,
+            group_id=group_id,
+            max_tasks=max_tasks,
+            members=members,
+            answers=replies,
+            project_name=project_name,
         )
-        self.scratch_dir.mkdir(parents=True, exist_ok=True)
         # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
         # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
         # "看起来能用"的默认通道 —— 那会让回执里的 `model.adapter` 说谎。
-        adapter, base = self._model_channel()
-        work_order = adapter.prepare_work_order(prompt, self.scratch_dir)
-        argv = adapter.command(work_order, self.scratch_dir)
-        # CodeBuddy 这类 CLI 只保留位置参数的第一行，长 prompt 必须走 stdin
-        # （与 worker 同一条规矩）；否则细化提示词会被截成一句话，模型看不到规则。
-        via_stdin = bool(getattr(adapter, "prompt_via_stdin", False))
-        started = time.monotonic()
-        try:
-            run = self.runner.run(
-                argv,
-                cwd=self.scratch_dir,
-                timeout_seconds=float(self.timeout_seconds),
-                on_tick=None,
-                tick_interval_seconds=None,
-                stdin_text=prompt if via_stdin else None,
-            )
-        except CliUnavailable as exc:
-            raise AdminHarnessError(f"admin harness CLI unavailable: {exc}") from exc
-        except HarnessTimeout as exc:
-            raise AdminHarnessError(f"admin harness refine timed out: {exc}") from exc
-        finally:
-            adapter.cleanup_work_order()
-        if run.returncode != 0:
-            raise AdminHarnessError(
-                f"admin harness refine exited {run.returncode}: {run.stderr.strip()[-400:]}"
-            )
-
-        payload = extract_json_object(_answer_text(adapter, run.stdout))
+        payload, model = self._invoke_model(prompt)
         questions = _questions(payload)
         result: dict[str, Any] = {
             "harness_id": self.harness_id,
             "group_id": group_id,
             "requirement": text,
+            "project_name": project_name,
+            "members": list(members),
             "answers": replies,
-            "model": {
-                # 回执里的适配器名沿用注册面那一份（`qoderclicn-print` 等），
-                # 这样老回执与新的按身份选择通道之后仍可比较。
-                "adapter": getattr(getattr(adapter, "registration", None), "adapter", None)
-                or getattr(adapter, "binary", base),
-                "channel": base,
-                "duration_seconds": round(time.monotonic() - started, 1),
-            },
+            "model": model,
         }
         if questions:
             result.update({"status": "needs_owner", "tasks": [], "questions": questions})
         else:
-            tasks = self._parse_payload(payload, members=members, max_tasks=max_tasks)
+            tasks = self._parse_payload(
+                payload,
+                members=members,
+                max_tasks=max_tasks,
+                project_name=project_name,
+            )
             result.update(
                 {
                     "status": "ok",
@@ -315,6 +456,160 @@ class AdminService:
         adapter = adapter_type(None, harness_id=self.harness_id)
         return adapter, base
 
+    def _invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Run the administrator's own model channel once and parse its JSON.
+
+        Both planning and review go through this path so the receipt's
+        ``model.adapter`` names the executable that actually answered. The
+        caller must treat every exception as a hard failure; there is no
+        fallback model and no invented empty result.
+        """
+        self.scratch_dir.mkdir(parents=True, exist_ok=True)
+        adapter, base = self._model_channel()
+        work_order = adapter.prepare_work_order(prompt, self.scratch_dir)
+        argv = adapter.command(work_order, self.scratch_dir)
+        # CodeBuddy-like CLIs keep only the first positional line; long prompts
+        # must travel through stdin (same rule as the member worker).
+        via_stdin = bool(getattr(adapter, "prompt_via_stdin", False))
+        started = time.monotonic()
+        try:
+            run = self.runner.run(
+                argv,
+                cwd=self.scratch_dir,
+                timeout_seconds=float(self.timeout_seconds),
+                on_tick=None,
+                tick_interval_seconds=None,
+                stdin_text=prompt if via_stdin else None,
+            )
+        except CliUnavailable as exc:
+            raise AdminHarnessError(f"admin harness CLI unavailable: {exc}") from exc
+        except HarnessTimeout as exc:
+            raise AdminHarnessError(f"admin harness call timed out: {exc}") from exc
+        finally:
+            adapter.cleanup_work_order()
+        if run.returncode != 0:
+            # Codex reports stream/provider failures on stdout JSONL, not
+            # stderr; keep both tails so the group message is diagnosable.
+            detail = "\n".join(
+                part for part in (run.stderr.strip()[-400:], run.stdout.strip()[-800:]) if part
+            )
+            raise AdminHarnessError(f"admin harness call exited {run.returncode}: {detail}")
+        payload = extract_json_object(_answer_text(adapter, run.stdout))
+        model = {
+            # Keep the registered adapter name (``qoderclicn-print`` etc.) so
+            # old and new receipts remain comparable.
+            "adapter": getattr(getattr(adapter, "registration", None), "adapter", None)
+            or getattr(adapter, "binary", base),
+            "channel": base,
+            "duration_seconds": round(time.monotonic() - started, 1),
+        }
+        return payload, model
+
+    def review(
+        self,
+        *,
+        task: dict[str, Any],
+        spec: dict[str, Any],
+        diff: dict[str, Any],
+        verification: dict[str, Any] | None,
+        project_name: str | None = None,
+    ) -> dict[str, Any]:
+        """The administrator's own verdict on one submitted attempt.
+
+        This method does not claim or submit a review lease -- that is the
+        caller's state transition. It only runs the administrator model and
+        validates its JSON. ``request_changes`` must carry at least one
+        concrete finding, otherwise the rework loop would repeat blindly.
+        """
+        prompt = self._review_prompt(
+            task=task,
+            spec=spec,
+            diff=diff,
+            verification=verification or {},
+            project_name=project_name,
+        )
+        payload, model = self._invoke_model(prompt)
+        verdict = str(payload.get("verdict") or "").strip()
+        if verdict not in {"approve", "request_changes"}:
+            raise AdminHarnessError(
+                "review output verdict must be 'approve' or 'request_changes'"
+            )
+        raw_findings = payload.get("findings") or []
+        if not isinstance(raw_findings, list):
+            raise AdminHarnessError("review output findings must be a list")
+        findings: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_findings, start=1):
+            if isinstance(item, str):
+                message = item.strip()
+                severity = "note"
+            elif isinstance(item, dict):
+                message = str(item.get("message") or "").strip()
+                severity = str(item.get("severity") or "note").strip()
+            else:
+                raise AdminHarnessError(f"review finding {index} is not text or an object")
+            if not message:
+                raise AdminHarnessError(f"review finding {index} has no message")
+            findings.append({"severity": severity, "message": message})
+        if verdict == "request_changes" and not findings:
+            raise AdminHarnessError("request_changes requires at least one finding")
+        return {
+            "verdict": verdict,
+            "findings": findings,
+            "model": model,
+            "task_id": task.get("task_id"),
+            "attempt_id": task.get("attempt_id") or task.get("current_attempt_id"),
+        }
+
+    def _review_prompt(
+        self,
+        *,
+        task: dict[str, Any],
+        spec: dict[str, Any],
+        diff: dict[str, Any],
+        verification: dict[str, Any],
+        project_name: str | None,
+    ) -> str:
+        patch = diff.get("patch")
+        if not isinstance(patch, str) or not patch.strip():
+            # No patch is not approval evidence. Tell the model to refuse
+            # instead of letting it invent a positive verdict from a summary.
+            patch = "(no patch available; the attempt did not publish a readable diff)"
+        # Keep the prompt bounded. A huge generated file is still evidence, but
+        # the model needs the beginning and the explained truncation more than
+        # it needs 2 MB of minified output.
+        if len(patch) > 60000:
+            patch = patch[:60000] + "\n…(patch truncated at 60000 characters)"
+        return "\n".join(
+            [
+                "You are the ADMINISTRATOR harness reviewing a member's submitted attempt.",
+                "Decide only from the task specification and the real diff below.",
+                "Do not approve because the member says it is done; do not request",
+                "changes for style preferences that the acceptance does not require.",
+                "",
+                f"Project: {project_name or 'unspecified'}",
+                "Task row:",
+                json.dumps(task, ensure_ascii=False, indent=2),
+                "Approved specification:",
+                json.dumps(spec, ensure_ascii=False, indent=2),
+                "Verification receipt:",
+                json.dumps(verification, ensure_ascii=False, indent=2),
+                "",
+                "Real diff:",
+                patch,
+                "",
+                "Rules:",
+                "1. Answer with ONE JSON object and nothing else.",
+                '2. Shape: {"verdict":"approve"|"request_changes","findings":['
+                '{"severity":"note|minor|major|critical","message":"..."}]}',
+                "3. approve only when the diff satisfies the acceptance and stays",
+                "   inside exclusive_paths. Otherwise request_changes.",
+                "4. request_changes must name every concrete defect a reworking member",
+                "   can act on; do not write a general complaint.",
+                "5. If the diff is missing or unreadable, request_changes and say so.",
+                "6. Never claim to have run tests or read files you were not given.",
+            ]
+        )
+
     def _prompt(
         self,
         requirement: str,
@@ -323,6 +618,7 @@ class AdminService:
         max_tasks: int,
         members: list[str],
         answers: list[str],
+        project_name: str | None = None,
     ) -> str:
         rule = "is the fixed deliverable path and must never be rewritten by you"
         lines = [
@@ -330,6 +626,7 @@ class AdminService:
             "The group owner states requirements only in natural language; turning that",
             "statement into executable task specifications is your job, and only yours.",
             "",
+            f"Project: {project_name}" if project_name else "",
             "Group owner requirement (verbatim):",
             "---",
             requirement,
@@ -355,6 +652,13 @@ class AdminService:
             "   choice would change the outcome, stop and ask: answer with",
             '   {"questions":["..."]} instead of {"tasks":[...]}. The owner answers in plain',
             "   language; only then produce the task list.",
+        ]
+        if project_name:
+            lines += [
+                f"8. Every task title must start with {project_name!r} followed by ' · '.",
+                "   The office UI uses that prefix to keep one project's tasks separate.",
+            ]
+        lines += [
             "",
             'Output shape: {"tasks":[{"title":"...","goal":"...",'
             '"exclusive_paths":["..."],"acceptance":"...","harness_id":"..."}]}',
@@ -372,7 +676,12 @@ class AdminService:
         return "\n".join(lines)
 
     def _parse_payload(
-        self, payload: dict[str, Any], *, members: list[str], max_tasks: int
+        self,
+        payload: dict[str, Any],
+        *,
+        members: list[str],
+        max_tasks: int,
+        project_name: str | None = None,
     ) -> list[RefinedTask]:
         raw_tasks = payload.get("tasks")
         if not isinstance(raw_tasks, list) or not raw_tasks:
@@ -392,6 +701,12 @@ class AdminService:
             paths = raw.get("exclusive_paths")
             if not title or not goal or not acceptance:
                 raise AdminHarnessError(f"task {index} is missing title/goal/acceptance")
+            # Titles are the only project scope marker on a task row (tasks
+            # carry group_id, not a local project id). The office reads the
+            # prefix to separate projects that share one formal group, so make
+            # it deterministic instead of trusting the model to remember.
+            if project_name and not title.startswith(f"{project_name} · "):
+                title = f"{project_name} · {title}"
             if not isinstance(paths, list) or not paths:
                 raise AdminHarnessError(f"task {index} has no exclusive_paths")
             cleaned = [str(item).strip() for item in paths]
@@ -431,6 +746,7 @@ class AdminService:
         """
         lines = [
             f"管理员 harness 细化回执（{self.harness_id}）",
+            f"项目：{result.get('project_name') or '未命名项目'}",
             f"群主要求：{result['requirement']}",
         ]
         if result.get("answers"):

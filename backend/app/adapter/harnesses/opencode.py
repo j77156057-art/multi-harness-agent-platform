@@ -106,7 +106,7 @@ class OpenCodeAdapter(CliHarness):
         (bundle / "work-order.txt").write_text(work_order, encoding="utf-8", newline="\n")
         (bundle / "run.cmd").write_text(
             "@echo off\r\n"
-            'opencode run --format json --auto --file "%~dp0work-order.txt" '
+            'opencode run --standalone --format json --auto --file "%~dp0work-order.txt" '
             '"Read and follow the attached work order exactly."\r\n'
             "exit /b %errorlevel%\r\n",
             encoding="utf-8",
@@ -136,7 +136,20 @@ class OpenCodeAdapter(CliHarness):
             # ``call \"path\"`` string through Python's Windows quoting makes
             # cmd.exe see the backslashes as literal command text.
             return ["cmd.exe", "/d", "/s", "/c", "call", str(script)]
-        argv = ["opencode", "run", "--format", "json", "--auto", work_order]
+        # ``--standalone``: the CLI must run its **own** server. Without it the
+        # CLI attaches to whatever background service happens to be running (on
+        # this machine: the OpenCode desktop app), and a service with a newer
+        # session schema than the CLI makes every run die with "Database is not
+        # empty and has no session table" -- after minutes of silence.
+        argv = ["opencode", "run", "--standalone", "--format", "json", "--auto"]
+        route = self.provider_route
+        if route is not None:
+            # The platform's quota pool.  The built-in ``openai`` provider
+            # follows OPENAI_BASE_URL / OPENAI_API_KEY, so no configuration
+            # file has to be touched: the model comes from the pool, the work
+            # still happens here.
+            argv += ["--model", f"openai/{route.model}"]
+        argv.append(work_order)
         if self.use_shell_shim():
             # The WindowsApps ``bash.exe`` alias is a WSL launcher that drops
             # argv after ``-c``.  That turns the documented ``$0/$@`` shim into
@@ -154,6 +167,28 @@ class OpenCodeAdapter(CliHarness):
             # this shell instead of the Python worker (see the module docstring).
             return ["bash", "-lc", 'exec "$0" "$@"', *argv]
         return argv
+
+    def review_command(self, prompt: str, workdir: Path) -> list[str]:
+        """A review runs with the **plan** agent: it may look, not touch.
+
+        The default agent edits files and runs commands; a reviewer that edits
+        the repository is not a reviewer.
+        """
+        return self._with_agent(self.command(prompt, workdir), "plan")
+
+    @staticmethod
+    def _with_agent(argv: list[str], agent: str) -> list[str]:
+        if "--agent" in argv:
+            index = argv.index("--agent")
+            argv[index + 1] = agent
+            return argv
+        return [*argv[:1], "--agent", agent, *argv[1:]]
+
+    def route_environment(self) -> dict[str, str]:
+        route = self.provider_route
+        if route is None:
+            return {}
+        return {"OPENAI_BASE_URL": route.base_url, "OPENAI_API_KEY": route.token}
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}

@@ -37,7 +37,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo
 from app.merge.gate import MergeGateRejected
-from app.merge.worker import MergeError, MergeWorker
+from app.merge.worker import HealthRecheck, MergeError, MergeWorker
 from app.spec import TaskStatus
 from app.verify.profile import DEFAULT_POLICY_PATH, VerifyPolicy, VerifyPolicyError
 from app.verify.worker import CommandRunner, VerifyWorker
@@ -433,6 +433,22 @@ class RuntimeDriver:
         )
 
     # ------------------------------------------------------------- execution
+
+    def recheck_integration_health(self, project_id: str, *, apply: bool = False) -> HealthRecheck:
+        """Re-run the integration profile at the canonical tip for one project.
+
+        The queue-stopping health row has no way back to green inside a merge
+        round (see ``MergeWorker.recheck_integration_health``), so the runtime
+        exposes it as an explicit operator action. ``apply=False`` checks only.
+        """
+        worker = MergeWorker(
+            self.database,
+            self.repo,
+            policy=self.policy.merge_policy(),
+            overlay_root=self.overlay_root,
+            runner=self.runner,
+        )
+        return worker.recheck_integration_health(project_id, apply=apply)
 
     def run_once(self) -> RoundReport:
         scan = self.scan()

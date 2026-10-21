@@ -27,7 +27,16 @@ def _codebuddy_binary() -> str:
     configured = os.environ.get("AP_CODEBUDDY_BIN")
     if configured:
         return configured
-    return shutil.which("codebuddy") or shutil.which("cbc") or "codebuddy"
+    found = shutil.which("codebuddy") or shutil.which("cbc")
+    if found and os.name == "nt" and not found.lower().endswith((".exe", ".cmd", ".bat", ".com")):
+        # npm installs a bash shim next to the .cmd; `shutil.which` may hand back
+        # the extensionless one, which Windows cannot execute at all (the child
+        # dies with "system cannot find the file"). Prefer the .cmd.
+        for suffix in (".cmd", ".exe", ".bat"):
+            candidate = found + suffix
+            if os.path.exists(candidate):
+                return candidate
+    return found or "codebuddy"
 
 
 def codebuddy_command(worktree: Path) -> list[str]:
@@ -57,7 +66,7 @@ def codebuddy_command(worktree: Path) -> list[str]:
         _codebuddy_binary(),
         "-p",
         "--output-format",
-        "json",
+        "stream-json",
         "--permission-mode",
         "bypassPermissions",
         "--add-dir",

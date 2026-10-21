@@ -34,8 +34,12 @@ from tests.merge_support import (
     PROFILE,
     approve,
     build_chain,
+    health_of,
     status_of,
 )
+
+PASSING = ["python", "-c", "import sys; sys.exit(0)"]
+FAILING = ["python", "-c", "import sys; sys.exit(1)"]
 
 
 def runtime_policy(*, integration_profile: str | None = PROFILE) -> RuntimePolicy:
@@ -555,3 +559,75 @@ def test_cli_once_runs_a_round(tmp_path, monkeypatch, capsys):
     assert payload["actions"] == 1
     assert payload["verify"][0]["status"] == "passed"
     assert status_of(chain) == "awaiting_review"
+
+
+def _recheck_policy_file(tmp_path, chain, *, command: list[str]) -> "object":
+    policy_file = tmp_path / "policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "command_roots": ["python"],
+                "profiles": {PROFILE: {"command": command}},
+                "integration_profile": PROFILE,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return policy_file
+
+
+def test_cli_recheck_health_checks_without_writing(tmp_path, monkeypatch, capsys):
+    """`--recheck-health` 默认只验证：健康行一动不动。"""
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=PASSING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["result"] == "passed"
+    assert payload["recheck"]["applied"] is False
+    assert health_of(chain) == "escalated"
+
+
+def test_cli_recheck_health_applies_only_after_a_passing_check(tmp_path, monkeypatch, capsys):
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=PASSING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1", "--apply"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["applied"] is True
+    assert health_of(chain) == "green"
+
+
+def test_cli_recheck_health_reports_a_failing_check(tmp_path, monkeypatch, capsys):
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=FAILING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1", "--apply"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["result"] == "failed"
+    assert payload["recheck"]["applied"] is False
+    assert health_of(chain) == "escalated"

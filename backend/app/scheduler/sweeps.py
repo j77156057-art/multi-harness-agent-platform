@@ -1268,7 +1268,13 @@ def sweep_worktree_recycle(
     rows = database.read(
         "SELECT w.attempt_id FROM workspaces w JOIN tasks t ON t.task_id = w.task_id"
         " WHERE w.status = 'active'"
-        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested', 'escalated')"
+        # ``stale`` 也在内：租约一过期，那个 attempt 就死了，它���工位还占着容量
+        # 只会把平台自己锁死（"并发工位上限 8/8"，新任务连工位都开不出来）。
+        # 归档仍会留底（``archive_and_recycle`` 先打包再删），证据不丢。
+        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested',"
+        "                    'escalated', 'stale')"
+        # 没有当前 attempt 的任务，它手上那个 attempt 同样已经死了
+        "        OR t.current_attempt_id IS NULL"
         "        OR (t.current_attempt_id IS NOT NULL"
         "            AND w.attempt_id != t.current_attempt_id))"
         " ORDER BY w.rowid"

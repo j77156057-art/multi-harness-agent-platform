@@ -30,7 +30,7 @@ from app.git.repo import CanonicalRepo, GitError, run_git
 from app.merge.gate import evaluate_merge_gate
 from app.spec import EventKind, TaskStatus
 from app.verify.overlay import Overlay, OverlayError, OverlayManager
-from app.verify.profile import VerifyPolicy
+from app.verify.profile import VerifyPolicy, VerifyProfile
 from app.verify.worker import CommandRunner, default_runner
 
 HEALTH_GREEN = "green"
@@ -62,6 +62,30 @@ class MergeOutcome:
             "event": self.event,
             "conflicts": list(self.conflicts),
             "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class HealthRecheck:
+    """The result of re-running the integration profile at the canonical tip."""
+
+    project_id: str
+    status: str
+    commit: str | None
+    profile: str | None
+    result: str
+    detail: str | None = None
+    applied: bool = False
+
+    def as_json(self) -> dict[str, object]:
+        return {
+            "project_id": self.project_id,
+            "status": self.status,
+            "commit": self.commit,
+            "profile": self.profile,
+            "result": self.result,
+            "detail": self.detail,
+            "applied": self.applied,
         }
 
 
@@ -276,9 +300,7 @@ class MergeWorker:
 
     def _run_integration_check(self, overlay: Overlay, commit: str) -> str | None:
         """Run the integration profile at ``commit``; None means it passed."""
-        if self.policy is None:
-            return None
-        profile = next(iter(self.policy.profiles.values()), None)
+        _, profile = self._integration_profile()
         if profile is None:
             return None
         run_git("checkout", "--detach", commit, cwd=overlay.path, check=False)
@@ -290,6 +312,103 @@ class MergeWorker:
         if result.exit_code != 0:
             return f"integration check exited {result.exit_code}"
         return None
+
+    def _integration_profile(self) -> tuple[str | None, VerifyProfile | None]:
+        """The one profile the merge gate runs, and its name.
+
+        The merge policy is narrowed to the resolved integration profile (see
+        ``RuntimePolicy.merge_policy``), so the first profile *is* the
+        integration profile. Keeping the name next to the profile means the
+        recheck reports which command it actually ran.
+        """
+        if self.policy is None:
+            return None, None
+        name = next(iter(self.policy.profiles), None)
+        if name is None:
+            return None, None
+        return name, self.policy.profiles[name]
+
+    def _set_health_for_project(self, project_id: str, status: str, *, commit: str | None) -> None:
+        with self.database.transaction() as conn:
+            conn.execute(
+                "UPDATE integration_health SET status = ?,"
+                " integration_commit = COALESCE(?, integration_commit), updated_seq = NULL"
+                " WHERE project_id = ?",
+                (status, commit, project_id),
+            )
+
+    # ----------------------------------------------------------- health recheck
+
+    def recheck_integration_health(self, project_id: str, *, apply: bool = False) -> HealthRecheck:
+        """Re-run the integration profile at the canonical tip.
+
+        R10 §21 makes a non-green ``integration_health`` a stop-the-line for the
+        whole merge queue of that project, and the only documented way back to
+        green is a merge (or revert) round. A project whose integration profile
+        was misconfigured therefore deadlocks: the queue is stopped *and* the
+        only thing that could restart it is a merge the stop-the-line forbids.
+
+        This is the operator-side way out, and it is deliberately narrow:
+
+        * the check runs the *configured* integration profile at the current
+          canonical tip -- the same command the merge gate would have run;
+        * without ``apply`` nothing is written (a pure check);
+        * with ``apply`` the projection is set to green **only** when the check
+          passed; a failing check leaves the row exactly as it was.
+
+        No event is written: ``integration_health`` is a projection, and §21
+        gives it no event of its own.
+        """
+        rows = self.database.read(
+            "SELECT status FROM integration_health WHERE project_id = ?", (project_id,)
+        )
+        if not rows:
+            raise MergeError(f"no integration_health row for project {project_id}")
+        status = str(rows[0]["status"])
+
+        name, profile = self._integration_profile()
+        if profile is None:
+            raise MergeError(
+                "no integration profile is configured; refusing to declare the queue healthy"
+                " without running the check"
+            )
+
+        tip = self.repo.ref_commit(self.repo.integration_ref)
+        if tip is None:
+            raise MergeError("canonical has no integration branch to check")
+
+        try:
+            overlay = self.overlays.create(commit=tip, job_id=f"recheck-{project_id}")
+        except OverlayError as exc:
+            raise MergeError(f"could not prepare a recheck tree: {exc}") from exc
+        try:
+            problem = self._run_integration_check(overlay, tip)
+        finally:
+            if overlay.path.exists():
+                self.overlays.recycle(overlay)
+
+        if problem is not None:
+            return HealthRecheck(
+                project_id=project_id,
+                status=status,
+                commit=tip,
+                profile=name,
+                result="failed",
+                detail=problem,
+                applied=False,
+            )
+
+        if apply:
+            self._set_health_for_project(project_id, HEALTH_GREEN, commit=tip)
+        return HealthRecheck(
+            project_id=project_id,
+            status=status,
+            commit=tip,
+            profile=name,
+            result="passed",
+            detail=None,
+            applied=apply,
+        )
 
     def _transition(self, task_id: str, *, current: TaskStatus, event: EventKind) -> TaskStatus:
         with self.database.transaction() as conn:

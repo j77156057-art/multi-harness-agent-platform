@@ -262,6 +262,67 @@ class HumanOpsService:
                 "status": nxt.value,
             }
 
+    def grant_attempt_budget_override(
+        self,
+        *,
+        task_id: str,
+        decided_by: str,
+        reason: str = "",
+    ) -> dict[str, object]:
+        """Give a task whose attempt budget is spent **one more chance**.
+
+        R10 §8: once ``attempt_no`` has reached ``max_attempts`` a plain
+        release would just send the task back to ``ready`` where the next claim
+        is refused by the same budget guard.  The human therefore carries the
+        override.
+
+        This is the human's own move -- the platform does not grant it to
+        itself, and the administrator harness does not either.  It changes **no
+        task state** (the task stays where it is; only the *claim guard* learns
+        that one more attempt is allowed), so it needs no new state edge and
+        no new event name: the decision row is the audit trail, and the next
+        claim records the override in its own payload.
+        """
+        with self.database.transaction() as conn:
+            task = self._task(conn, task_id)
+            exhausted = int(task["attempt_no"]) >= int(task["max_attempts"])
+            if not exhausted:
+                raise Conflict(
+                    f"{task_id} has used {task['attempt_no']} of {task['max_attempts']} attempts; "
+                    "an attempt budget override only applies after the budget is spent"
+                )
+            if task["budget_override_by"] is not None:
+                raise Conflict(
+                    f"{task_id} already carries an attempt budget override "
+                    f"({task['budget_override_by']})"
+                )
+            conn.execute(
+                "UPDATE tasks SET budget_override_by = ? WHERE task_id = ?",
+                (decided_by, task_id),
+            )
+            # 决定行要锚在一个事件序号上。这条动作**不新造事件名**（规范里
+            # 的事件集是闭集），所以锚在���任务最后一个事件上：读历史的人能看到
+            # "在这个时间点上，人给了一次机会"。
+            anchor = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS seq FROM task_events WHERE aggregate_id = ?",
+                (task_id,),
+            ).fetchone()
+            self._record_budget_override(
+                conn,
+                task_id=task_id,
+                attempt_id=task["current_attempt_id"],
+                decided_by=decided_by,
+                reason=reason,
+                decided_seq=int(anchor["seq"] or 0),
+            )
+        return {
+            "task_id": task_id,
+            "attempt_budget_override": True,
+            "budget_override_by": decided_by,
+            "attempt_no": int(task["attempt_no"]),
+            "max_attempts": int(task["max_attempts"]),
+        }
+
     def release(
         self,
         *,
@@ -313,8 +374,24 @@ class HumanOpsService:
                     "waiting_since": None,
                     "next_reminder_at": None,
                     "escalated_at": None,
+                    # 放回队列 = 没有主人、也没有当前 attempt。留着那个死掉的
+                    # attempt 的话，这条任务看着是 ready，却**没人能领**
+                    # （可领列表会跳过还挂着 attempt 的任务）——一个隐形僵尸。
+                    "owner": None,
+                    "current_attempt_id": None,
+                    "queue_reason": None,
                 },
             )
+            if task["current_attempt_id"] is not None:
+                release_attempt_resources(
+                    conn, attempt_id=str(task["current_attempt_id"]), reason="release"
+                )
+                release_lease(
+                    conn,
+                    task_id=task_id,
+                    attempt_id=str(task["current_attempt_id"]),
+                    reason="release",
+                )
             override_by = existing_override
             if budget_override:
                 if existing_override is None:
@@ -379,7 +456,21 @@ class HumanOpsService:
             )
             return {"task_id": task_id, "decision_id": decision_id, "seq": record.seq}
 
-    def cancel(self, *, task_id: str, decided_by: str, reason: str) -> dict[str, object]:
+    def cancel(
+        self,
+        *,
+        task_id: str,
+        decided_by: str,
+        reason: str,
+        actor_type: str = "human",
+    ) -> dict[str, object]:
+        """Cancel on whichever edge the current status has.
+
+        ``actor_type`` is the *real* subject type. The human route leaves it at
+        the default; the administrator harness route passes ``harness`` so the
+        audit event does not claim a human cancelled a task the admin harness
+        cancelled.
+        """
         with self.database.transaction() as conn:
             task = self._task(conn, task_id)
             status = TaskStatus(str(task["status"]))
@@ -397,7 +488,7 @@ class HumanOpsService:
                 task,
                 task_id=task_id,
                 event=event,
-                actor_type="human",
+                actor_type=actor_type,
                 actor_id=decided_by,
                 payload={"decided_by": decided_by, "reason": reason},
                 extra_sets={

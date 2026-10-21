@@ -59,6 +59,20 @@ def run_git(
             "GIT_COMMITTER_EMAIL": "scheduler@localhost",
         }
     )
+    # ``core.quotepath=false``: by default git *quotes* non-ASCII paths in
+    # status/diff output ("docs/\350\207\250...") and quotes paths with spaces.
+    # The scope check then compared an escaped path against the raw authorized
+    # one and refused every task whose path was not plain ASCII -- a member that
+    # wrote exactly the right file was told it had written outside its scope.
+    # Appending to any GIT_CONFIG_* the caller already set keeps both.
+    config_count = 0
+    try:
+        config_count = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
+    except ValueError:
+        config_count = 0
+    env["GIT_CONFIG_COUNT"] = str(config_count + 1)
+    env[f"GIT_CONFIG_KEY_{config_count}"] = "core.quotepath"
+    env[f"GIT_CONFIG_VALUE_{config_count}"] = "false"
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(

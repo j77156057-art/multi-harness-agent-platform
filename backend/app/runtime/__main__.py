@@ -5,7 +5,13 @@ the operator CLI is HTTP-only by design, while the runtime must call the
 workers in-process). Output is one JSON object per round, same line-oriented
 spirit as the other console tools.
 
-Exit codes: 0 a round (or a check) completed; 2 refused -- no database, or the
+``--recheck-health <project_id>`` is the operator-side way out of a
+stop-the-line merge queue: it runs the configured integration profile at the
+canonical tip and, with ``--apply``, puts the project's health projection back
+to green **only** if that check passed.
+
+Exit codes: 0 a round (or a check) completed; 1 the integration recheck ran and
+failed; 2 refused -- no database, or the
 policy file is missing/unusable, which is a refusal because executing without
 a human-maintained policy is exactly what R10 §16 forbids.
 """
@@ -34,6 +40,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     mode.add_argument("--once", action="store_true", help="run one round and exit (default)")
     mode.add_argument("--loop", action="store_true", help="keep running on the configured interval")
+    mode.add_argument(
+        "--recheck-health",
+        metavar="PROJECT_ID",
+        help=(
+            "re-run the integration profile at the canonical tip for one project;"
+            " read-only unless --apply"
+        ),
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="with --recheck-health: write the recovered health row when the check passes",
+    )
     parser.add_argument(
         "--interval", type=int, default=None, help="seconds between rounds (with --loop)"
     )
@@ -52,6 +71,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     driver = RuntimeDriver(database, repo, policy)
+
+    if args.recheck_health:
+        try:
+            outcome = driver.recheck_integration_health(args.recheck_health, apply=args.apply)
+        except MergeError as exc:
+            _emit({"recheck": "error", "project_id": args.recheck_health, "detail": str(exc)})
+            return 2
+        _emit({"recheck": outcome.as_json()})
+        return 0 if outcome.result == "passed" else 1
 
     if args.check:
         _emit(

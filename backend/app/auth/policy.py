@@ -36,6 +36,10 @@ POLICY: dict[str, frozenset[str]] = {
     # --- R10 §17 adapter face (harness token) ---
     "harness:probe": frozenset({HARNESS}),
     "harness:capabilities": frozenset({HARNESS}),
+    # 平台额度池：harness 拿着自己的 token 来借模型额度（自己的 provider 挂了的时候，
+    # 从池子里换一份还活着的额度）。这是**加性**的平台面，2026-10-21 由平台所有者
+    # 批准；它只发模型请求，不领活、不改任务归属、不代表任何 harness 说话。
+    "harness:pool": frozenset({HARNESS}),
     "task:list_ready": frozenset({HARNESS}),
     "task:context": frozenset({HARNESS}),
     # claim/heartbeat: allowed for every harness role (§17 row).
@@ -68,6 +72,12 @@ POLICY: dict[str, frozenset[str]] = {
     "group:create": frozenset({HUMAN}),
     "task:resume": frozenset({HUMAN}),
     "task:reopen": frozenset({HUMAN}),
+    # ��一条���尝试预算用完的活**再给一次机会**��R10 §8 ��"��Ƶ��"��
+    # ��˵��壻��˵�Ŀ���壻���ˣ��˲��ˣ���ˣ��Ŀ���˯���Ŀ��ˡ�
+    # ��һ���˲��ˣ��ƽ̨�����Լ��������ˣ���ˣ���ˣ���ˣ��ˣ��
+    # �����˲��ˣ��˲��ˣ��˯���ˣ���ˣ��˯���ˣ��
+    # ��ע���¼�Ŀ���ȡĿ���Ļ�Ŀ���һ���ˣ���˯��
+    "task:attempt_budget_override": frozenset({HUMAN}),
     # release_escalated in §17 == /human/release here.
     "task:release_escalated": frozenset({HUMAN}),
     "task:adjudicate": frozenset({HUMAN}),
@@ -145,6 +155,13 @@ ADMIN_HARNESS_KEYS: dict[str, frozenset[str]] = {
     # 这个键：邀请一个没申请的人同样是管理员挑人，回避要求由服务层查。
     "allocation:decide": frozenset({HARNESS}),
     "assignment:revoke": frozenset({HARNESS}),
+    # 取消一条**还没有产出**的任务（`ready` / `queued` 等，见 human
+    # `_CANCEL_STATES`）。§17 把 `task:cancel` 只写给人类管理员；现实里管理员是
+    # 一个 harness 主体，没有这条委托，管理员既不能取消重复派发，也不能收口
+    # “指派给同 provider、必然无法审核”的任务——平台助手只能把线索列出来。
+    # 路由 `/tasks/{id}/cancel` 用 `_actor_type(principal)` 记录真实主体，
+    # 所以管理员取消会记成 `harness/<管理员id>`，不会伪装成人类。
+    "task:cancel": frozenset({HARNESS}),
 }
 
 

@@ -277,6 +277,51 @@ def test_release_returns_an_escalated_task_to_ready(tmp_path):
     assert _event_names(database) == ["human.release"]
 
 
+def test_release_takes_the_dead_attempt_with_it(tmp_path):
+    """放回队列 = 没有主人、也没有当前 attempt。
+
+    留着那个死掉的 attempt 的话，这条任务看着是 ready，却**没人能领**
+    （可领列表会跳过还挂着 attempt 的任务）——一个隐形僵尸。
+    """
+    database = _rig(tmp_path, status="escalated", attempt=True, owner="harness-1", escalated_at=NOW)
+
+    _service(database).release(task_id="T-1", decided_by="ops")
+
+    row = _task(database)
+    assert row["status"] == "ready"
+    assert row["owner"] is None, "the queue has no owner"
+    assert row["current_attempt_id"] is None, "the dead attempt goes with it"
+
+
+def test_a_human_can_give_one_more_attempt_to_a_spent_budget(tmp_path):
+    """R10 §8: 预算用完的活只有人能给它一次机会。
+
+    平台不给自己豁免，管理员 harness 也不代劳——这条动作**不改任务状态**
+    （任务还在原地），只是让 claim 的预算闸门放行一次；审计落在决定行上。
+    """
+    database = _rig(tmp_path, status="changes_requested", attempt=True, owner="harness-1")
+    _exhaust_budget(database)
+
+    outcome = _service(database).grant_attempt_budget_override(
+        task_id="T-1", decided_by="ops", reason="give it one more try"
+    )
+
+    assert outcome["attempt_budget_override"] is True
+    assert outcome["budget_override_by"] == "ops"
+    row = _task(database)
+    assert row["status"] == "changes_requested", "the state does not move"
+    assert row["budget_override_by"] == "ops", "the claim guard learns about it"
+
+
+def test_the_budget_override_needs_a_spent_budget(tmp_path):
+    database = _rig(tmp_path, status="changes_requested", attempt=True, owner="harness-1")
+
+    with pytest.raises(Conflict, match="only applies after"):
+        _service(database).grant_attempt_budget_override(task_id="T-1", decided_by="ops")
+
+    assert _task(database)["budget_override_by"] is None
+
+
 def test_release_refuses_a_task_that_is_not_escalated(tmp_path):
     database = _rig(tmp_path, status="awaiting_human", attempt=False, owner=None)
 
@@ -400,6 +445,31 @@ def test_cancel_picks_the_event_by_current_state(tmp_path, status, expected_even
     assert _event_names(database) == [expected_event]
     if status == "queued":
         assert _task(database)["queue_reason"] is None
+
+
+def test_cancel_records_the_actor_type_it_was_called_with(tmp_path):
+    """管理员 harness 取消必须记成 harness，不能写成 human。
+
+    人类路由不传 ``actor_type``（默认 ``human``）；管理员 harness 路由传
+    ``_actor_type(principal)``。这条测试钉住事件里的真实主体，否则"谁取消的"
+    会在审计里变成一句假话。
+    """
+    database = _rig(tmp_path, status="ready", attempt=False, owner=None)
+
+    _service(database).cancel(
+        task_id="T-1",
+        decided_by="codex-window-admin",
+        reason="duplicate dispatch",
+        actor_type="harness",
+    )
+
+    assert _task(database)["status"] == "cancelled"
+    row = database.read(
+        "SELECT actor_type, actor_id FROM task_events"
+        " WHERE aggregate_id = 'T-1' ORDER BY seq DESC LIMIT 1"
+    )[0]
+    assert row["actor_type"] == "harness"
+    assert row["actor_id"] == "codex-window-admin"
 
 
 @pytest.mark.parametrize(

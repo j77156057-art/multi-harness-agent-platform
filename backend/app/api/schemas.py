@@ -210,6 +210,14 @@ class HumanReopenRequest(BaseModel):
     answer: str | None = None
 
 
+class HumanAttemptBudgetOverrideRequest(BaseModel):
+    """A human gives a task whose attempt budget is spent one more chance."""
+
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    reason: str = ""
+
+
 class HumanReleaseRequest(BaseModel):
     task_id: str
     decided_by: str = Field(min_length=1)
@@ -233,6 +241,18 @@ class HumanCancelRequest(BaseModel):
     reason: str = ""
 
 
+class AdminCancelRequest(BaseModel):
+    """Path-addressed cancel for the administrator harness.
+
+    The human route carries ``task_id`` in the body; this one has it in the
+    path. ``decided_by`` is bound to the authenticated principal by
+    ``bind_declared``, so it cannot name someone else.
+    """
+
+    decided_by: str = Field(min_length=1)
+    reason: str = ""
+
+
 # ------------------------------------------------- R10 §39 分配与传阅（R10-fix-13）
 #
 # 这一组刻意把"谁在做"放进请求体（`opened_by` / `harness_id` / `decided_by`），
@@ -248,6 +268,29 @@ class CirculationOpenRequest(BaseModel):
     reviewer_harness_ids: list[str] = Field(min_length=1)
     opened_by: str = Field(min_length=1)
     deadline_at: str | None = None
+
+
+class PlanDraftRequest(BaseModel):
+    """The administrator's refined plan, on its way into circulation."""
+
+    group_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    #: The refined task specs (title/goal/paths/acceptance and the window).
+    tasks: list[dict[str, object]] = Field(min_length=1)
+    #: Who reads the draft before anything is assigned.
+    reviewer_harness_ids: list[str] = Field(min_length=1)
+    opened_by: str = Field(min_length=1)
+    plan_id: str | None = None
+
+
+class PlanRevisionRequest(BaseModel):
+    """The administrator's revised plan: a new snapshot of the same draft."""
+
+    plan_id: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    tasks: list[dict[str, object]] = Field(min_length=1)
+    revised_by: str = Field(min_length=1)
 
 
 class CirculationReviewRequest(BaseModel):

@@ -296,6 +296,79 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- plans
 
+    def revise_plan(self, *, plan_id: str, snapshot: dict[str, object]) -> PlanOutcome:
+        """A **new snapshot** of a draft plan: the revision after the circulation.
+
+        The tasks keep their ids -- they are the same tasks, better specified --
+        and they point at the new snapshot, so the workers see the revision.
+        The plan stays a **draft**: the human still has the final word, and
+        nothing can be claimed before that.
+
+        (A plan's own approval reads the newest snapshot, so a revision is
+        exactly "the plan changed"; the tasks' own ``plan_snapshot_id`` has to
+        follow, or the workers would keep reading the old specification.)
+        """
+        with self.database.transaction() as conn:
+            plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
+            if plan is None:
+                raise NotFound(f"unknown plan: {plan_id}")
+            if str(plan["status"]) != "draft":
+                raise Conflict(f"plan {plan_id} is {plan['status']}, not draft")
+            raw = dict(snapshot)
+            raw.setdefault("plan_id", plan_id)
+            try:
+                spec = PlanSpec.from_mapping(raw)
+            except (TypeError, ValueError) as exc:
+                raise InvalidInput(f"plan snapshot is malformed: {exc}") from exc
+            validation = PlanValidator().validate(spec)
+            if not validation.ok:
+                raise InvalidInput("; ".join(validation.errors))
+            for item in raw.get("tasks", ()):
+                targets = item.get("assigned_harness_ids", [])
+                for target in targets:
+                    member = conn.execute(
+                        "SELECT * FROM harnesses WHERE harness_id = ?", (target,)
+                    ).fetchone()
+                    if member is None or not member["registration_version"]:
+                        raise InvalidInput("assigned Harness has no registration")
+            snapshot_id = f"snap-{uuid.uuid4().hex}"
+            plan_hash = _hash(raw)
+            now = _now()
+            conn.execute(
+                "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"
+                " content_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                (snapshot_id, plan_id, plan_hash, _canonical(raw), now),
+            )
+            conn.execute(
+                "UPDATE plans SET plan_hash = ? WHERE plan_id = ?", (plan_hash, plan_id)
+            )
+            for item in raw.get("tasks", ()):
+                task_id = str(item.get("id", "")).strip()
+                row = conn.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                if row is None:
+                    raise Conflict(f"task {task_id} is not part of plan {plan_id}")
+                if str(row["status"]) != TaskStatus.DRAFT.value:
+                    raise Conflict(f"task {task_id} is {row['status']}, not draft")
+                conn.execute(
+                    "UPDATE tasks SET plan_snapshot_id = ?, assigned_harness_ids_json = ?,"
+                    " require_human_assign = ? WHERE task_id = ?",
+                    (
+                        snapshot_id,
+                        _canonical(item.get("assigned_harness_ids", [])),
+                        int(bool(item.get("require_human_assign", False))),
+                        task_id,
+                    ),
+                )
+        return PlanOutcome(
+            plan_id=plan_id,
+            snapshot_id=snapshot_id,
+            plan_hash=plan_hash,
+            ready=(),
+            waiting=(),
+        )
+
     def approve_plan(
         self, *, plan_id: str, decided_by: str, decided_by_type: str = "human"
     ) -> PlanOutcome:
@@ -1650,7 +1723,37 @@ class SchedulerService:
         rows = self.database.read("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
         if not rows:
             raise NotFound(f"unknown task: {task_id}")
-        return self._add_task_title(dict(rows[0]))
+        task = self._add_task_title(dict(rows[0]))
+        # 规格（工单/验收/路径）也在快照里：**人审核方案要看的正是这段**，
+        # 只给标题等于让人拿着标题去审。
+        spec = self._specs_for([task]).get(task_id)
+        if spec is not None:
+            task["spec"] = spec
+        return task
+
+    def _specs_for(self, tasks: list[dict]) -> dict[str, dict]:
+        """The task specs, read in **one** query (same shape as the titles)."""
+        snapshot_ids = {
+            str(task.get("plan_snapshot_id")) for task in tasks if task.get("plan_snapshot_id")
+        }
+        if not snapshot_ids:
+            return {}
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = self.database.read(
+            f"SELECT snapshot_id, content_json FROM plan_snapshots"
+            f" WHERE snapshot_id IN ({placeholders})",
+            tuple(sorted(snapshot_ids)),
+        )
+        specs: dict[str, dict] = {}
+        for row in rows:
+            try:
+                snapshot = json.loads(str(row["content_json"]))
+            except ValueError:
+                continue
+            for item in snapshot.get("tasks", ()) or ():
+                if isinstance(item, dict) and item.get("id"):
+                    specs[str(item["id"])] = item
+        return specs
 
     def diff_for_task(
         self,
@@ -1760,7 +1863,85 @@ class SchedulerService:
                 "SELECT * FROM tasks WHERE group_id = ? AND status = ? ORDER BY task_id",
                 (group_id, status),
             )
-        return [self._add_task_title(dict(row)) for row in rows]
+        tasks = [dict(row) for row in rows]
+        titles = self._titles_for(tasks)
+        failures = self._last_failures(tasks)
+        for task in tasks:
+            title = titles.get(str(task.get("task_id")))
+            if title:
+                task["title"] = title
+            # Why the task fell over.  The office's「失败与接手」panel has to
+            # say *why*, not just "abandoned": the reason is the last
+            # abandon/release event, read in one query for the whole list.
+            failure = failures.get(str(task.get("task_id")))
+            if failure:
+                task["last_failure"] = failure
+        return tasks
+
+    def _last_failures(self, tasks: list[dict]) -> dict[str, dict]:
+        """The newest failure/abandon reason per task, in one query."""
+        ids = [str(task.get("task_id")) for task in tasks if task.get("task_id")]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.database.read(
+            "SELECT aggregate_id, payload_json, created_at FROM task_events"
+            f" WHERE event_name IN ('abandon', 'release')"
+            f" AND aggregate_id IN ({placeholders}) ORDER BY seq DESC",
+            tuple(ids),
+        )
+        out: dict[str, dict] = {}
+        for row in rows:
+            key = str(row["aggregate_id"])
+            if key in out:
+                continue
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except ValueError:
+                payload = {}
+            reason = str(payload.get("reason") or "") if isinstance(payload, dict) else ""
+            out[key] = {"reason": reason, "at": str(row["created_at"] or "")}
+        return out
+
+    def _titles_for(self, tasks: list[dict]) -> dict[str, str]:
+        """Titles for many tasks, read in **one** query.
+
+        Reading them one by one cost one database connection per task (the
+        read helper opens a connection per query), so a group of 44 tasks spent
+        ~350 ms in the title projection alone -- and the office polls this list
+        every few seconds. One query for every snapshot in play, then a dict.
+        """
+        snapshot_ids = {
+            str(task.get("plan_snapshot_id")) for task in tasks if task.get("plan_snapshot_id")
+        }
+        if not snapshot_ids:
+            return {}
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = self.database.read(
+            f"SELECT snapshot_id, content_json FROM plan_snapshots"
+            f" WHERE snapshot_id IN ({placeholders})",
+            tuple(sorted(snapshot_ids)),
+        )
+        titles: dict[str, str] = {}
+        for row in rows:
+            try:
+                snapshot = json.loads(str(row["content_json"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+            specs = snapshot.get("tasks", []) if isinstance(snapshot, dict) else []
+            for spec in specs:
+                if not isinstance(spec, dict):
+                    continue
+                task_id = spec.get("id")
+                title = spec.get("title")
+                if (
+                    task_id
+                    and isinstance(title, str)
+                    and title.strip()
+                    and str(task_id) not in titles
+                ):
+                    titles[str(task_id)] = title
+        return titles
 
     def list_projects(self) -> list[dict]:
         """Every project, oldest first -- the frontend rail's top level."""
