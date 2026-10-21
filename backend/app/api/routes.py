@@ -1954,7 +1954,12 @@ def plan_document(
 
 
 @read.get("/tasks/{task_id}/output")
-def task_output(task_id: str, service: SchedulerDep, database: DatabaseDep) -> dict[str, Any]:
+def task_output(
+    task_id: str,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    attempt_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
     """The harness CLI's own output for the current attempt, as it streams.
 
     The member worker tees the child's stdout/stderr into the data dir while
@@ -1966,20 +1971,31 @@ def task_output(task_id: str, service: SchedulerDep, database: DatabaseDep) -> d
     all come back as an empty output rather than as an error.
     """
     task = service.get_task(task_id)
-    attempt_id = task.get("current_attempt_id")
-    current = attempt_id is not None
-    if not attempt_id:
-        # 没有当前 attempt（任务已 abandoned / merged / cancelled），就退回该
-        # 任务最近一次 attempt：人想看的是"这个 harness 临死前说了什么"，
-        # 那段 transcript 还在磁盘上。
-        rows = database.read(
-            "SELECT attempt_id FROM task_attempts WHERE task_id = ?"
-            " ORDER BY attempt_no DESC LIMIT 1",
-            (task_id,),
+    # 指定了 attempt 就给那一次（"**这次**失败的真实日志"要看的是失败的那一轮，
+    # 不是正在重跑的那一轮）；没指定才按"当前 -> 最近一次"回退。
+    if attempt_id:
+        attempt_id = str(attempt_id)
+        current = attempt_id == str(task.get("current_attempt_id") or "")
+        known = database.read(
+            "SELECT attempt_id FROM task_attempts WHERE attempt_id = ? AND task_id = ?",
+            (attempt_id, task_id),
         )
-        if not rows:
+        if not known:
             return {"output": None}
-        attempt_id = str(rows[0]["attempt_id"])
+    else:
+        attempt_id = task.get("current_attempt_id")
+        current = attempt_id is not None
+        if not attempt_id:
+            # 没有当前 attempt（abandoned / merged / cancelled……）：给人看**最近一次**
+            # attempt 的 transcript（"这个 harness 刚才到底说了什么"）。
+            rows = database.read(
+                "SELECT attempt_id FROM task_attempts WHERE task_id = ?"
+                " ORDER BY attempt_no DESC LIMIT 1",
+                (task_id,),
+            )
+            if not rows:
+                return {"output": None}
+            attempt_id = str(rows[0]["attempt_id"])
     stdout_path, stderr_path = cli_output.log_paths(
         settings.data_dir, task_id, str(attempt_id)
     )

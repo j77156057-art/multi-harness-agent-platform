@@ -175,3 +175,55 @@ def test_the_read_route_falls_back_to_the_last_attempt(tmp_path, monkeypatch):
     assert output["stdout"] == "the last words"
     assert output["attempt_id"] == "T-1.a1"
     assert output["current"] is False
+
+
+def test_the_read_route_can_serve_one_named_attempt(tmp_path, monkeypatch):
+    """失败那一轮的原话，要能**单独**取出来。
+
+    一条活失败后重跑，"当前 attempt"的输出是重跑那一轮的——想看失败现场就得
+    点名要哪一次 attempt，否则人看到的永远是"现在正在跑的那个"。
+    """
+    client, database = make_client(tmp_path)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    bootstrap(client, project_id="P-1", group_id="G-1")
+    seed_task(database, task_id="T-1", group_id="G-1")
+    now = datetime.now(UTC).isoformat()
+    with database.transaction() as conn:
+        for attempt_id, attempt_no in (("T-1.a1", 1), ("T-1.a2", 2)):
+            conn.execute(
+                "INSERT INTO task_attempts(attempt_id, task_id, attempt_no, owner,"
+                " fencing_epoch, base_commit, base_locked_seq, head_commit, status, created_at)"
+                " VALUES (?, 'T-1', ?, 'claude-code', 1, 'base000', 1, NULL, 'in_progress', ?)",
+                (attempt_id, attempt_no, now),
+            )
+        conn.execute(
+            "UPDATE tasks SET current_attempt_id = 'T-1.a2', owner = 'claude-code'"
+            " WHERE task_id = 'T-1'"
+        )
+    for attempt_id, text in (("T-1.a1", "the failed words\n"), ("T-1.a2", "the current words\n")):
+        stdout_log, _ = cli_output.log_paths(tmp_path, "T-1", attempt_id)
+        stdout_log.parent.mkdir(parents=True, exist_ok=True)
+        stdout_log.write_text(text, encoding="utf-8")
+
+    current = client.get("/api/v1/tasks/T-1/output").json()["output"]
+    assert current["attempt_id"] == "T-1.a2"
+    assert current["current"] is True
+
+    failed = client.get("/api/v1/tasks/T-1/output?attempt_id=T-1.a1").json()["output"]
+    assert failed["attempt_id"] == "T-1.a1"
+    assert failed["current"] is False
+    assert failed["stdout"] == "the failed words"
+
+
+def test_the_read_route_refuses_an_attempt_of_another_task(tmp_path, monkeypatch):
+    client, database = make_client(tmp_path)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    bootstrap(client, project_id="P-1", group_id="G-1")
+    seed_task(database, task_id="T-1", group_id="G-1")
+    seed_task(database, task_id="T-2", group_id="G-1")
+    _seed_attempt(database, task_id="T-2", attempt_id="T-2.a1")
+
+    response = client.get("/api/v1/tasks/T-1/output?attempt_id=T-2.a1")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["output"] is None
