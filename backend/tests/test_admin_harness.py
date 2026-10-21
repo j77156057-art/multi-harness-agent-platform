@@ -1,4 +1,4 @@
-﻿"""管理员 harness：身份、权限与"真的调模型细化"这三件事的回归。
+"""管理员 harness：身份、权限与"真的调模型细化"这三件事的回归。
 
 本部署的角色模型是"群主只提自然语言要求，管理员 harness 细化+分派+审核"。
 平台只有 ``human``/``harness`` 两种主体，所以管理员身份不能靠主体类型表达，
@@ -316,9 +316,7 @@ def test_a_member_without_a_credential_is_not_offered_work(tmp_path):
     register_harness(chain.database, "codebuddy", provider="tencent")
     runner = ScriptedRunner(stdout=_envelope(SPEC))
 
-    result = _refine_service(chain, runner).refine(
-        requirement="写一份说明", group_id=DEFAULT_GROUP
-    )
+    _refine_service(chain, runner).refine(requirement="写一份说明", group_id=DEFAULT_GROUP)
 
     # The prompt names only the member that can actually claim the work.
     prompt = runner.calls[0]["argv"][-1]
@@ -718,6 +716,7 @@ def test_route_refuses_an_admin_subject_that_is_not_registered(tmp_path, monkeyp
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "admin.not_registered"
 
+
 # ----------------------------------------------------- self-loop worker inputs
 
 
@@ -854,9 +853,7 @@ def test_review_approves_only_from_the_model_verdict(tmp_path):
 
 
 def test_review_request_changes_requires_a_concrete_finding(tmp_path):
-    service, _ = _review_service(
-        tmp_path, {"verdict": "request_changes", "findings": []}
-    )
+    service, _ = _review_service(tmp_path, {"verdict": "request_changes", "findings": []})
     task, spec, diff, verification = _review_inputs()
     with pytest.raises(AdminHarnessError, match="requires at least one finding"):
         service.review(
@@ -874,9 +871,7 @@ def test_review_normalizes_string_findings(tmp_path):
         task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
     )
     assert result["verdict"] == "request_changes"
-    assert result["findings"] == [
-        {"severity": "note", "message": "没有写到指定文件"}
-    ]
+    assert result["findings"] == [{"severity": "note", "message": "没有写到指定文件"}]
 
 
 def test_review_refuses_an_unknown_verdict(tmp_path):

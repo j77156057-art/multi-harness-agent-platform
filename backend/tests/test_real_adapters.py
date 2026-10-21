@@ -926,9 +926,7 @@ def test_a_replay_without_a_worktree_provisions_the_same_attempt(tmp_path):
         handovers.append(item["attempt_id"])
         return provision(rig, item)
 
-    outcome = worker.work_on(
-        task_id="T-1", claim_request_id="cr-f9c", on_claimed=handover
-    )
+    outcome = worker.work_on(task_id="T-1", claim_request_id="cr-f9c", on_claimed=handover)
 
     assert handovers == [first["attempt_id"]], "same attempt, provisioned once"
     assert outcome.attempt_id == first["attempt_id"]
@@ -946,7 +944,9 @@ def test_a_provisioning_failure_still_names_the_claimed_attempt(tmp_path):
     """
     rig = build_rig(tmp_path, CODEX_CASE)
     adapter = adapter_for(rig)
-    worker = CliHarnessWorker(adapter, runner=ScriptedRunner(files={"flag.txt": "ok\n"}, stdout=CODEX_OUT))
+    worker = CliHarnessWorker(
+        adapter, runner=ScriptedRunner(files={"flag.txt": "ok\n"}, stdout=CODEX_OUT)
+    )
     seen: list[str | None] = []
 
     def explode(item):
@@ -1290,8 +1290,7 @@ def test_the_subprocess_runner_pipes_the_whole_multi_line_prompt(tmp_path):
     # with the child's locale codec (cp936 on a Chinese Windows) would turn the
     # runner's UTF-8 bytes into surrogates and blame the wrong layer.
     reader.write_text(
-        "import pathlib, sys\n"
-        "pathlib.Path('order.txt').write_bytes(sys.stdin.buffer.read())\n",
+        "import pathlib, sys\n" "pathlib.Path('order.txt').write_bytes(sys.stdin.buffer.read())\n",
         encoding="utf-8",
     )
     order = "line one\nline two\n\nline four — 中文"

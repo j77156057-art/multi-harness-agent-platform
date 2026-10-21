@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from app.adapter.formal_worker import _unquote_git_path

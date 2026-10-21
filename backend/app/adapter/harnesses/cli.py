@@ -467,7 +467,7 @@ def _summarize_output(parsed: dict[str, Any]) -> dict[str, Any]:
                 )
             else:
                 summary[key] = value
-        elif isinstance(value, (int, float, bool)) or value is None:
+        elif isinstance(value, int | float | bool) or value is None:
             summary[key] = value
         else:
             text = json.dumps(value, ensure_ascii=False, default=str)
@@ -610,9 +610,7 @@ class CliHarnessWorker:
             # 越界产物（不可重试 → 终态）。默认保持旧行为（abandon），需要自己
             # 判定的调用方（成员 worker）传 abandon_on_failure=False。
             if abandon_on_failure:
-                self.adapter.abandon(
-                    task_id=task_id, reason=f"harness CLI exited {cli.returncode}"
-                )
+                self.adapter.abandon(task_id=task_id, reason=f"harness CLI exited {cli.returncode}")
             raise CliFailed(task_id, cli)
 
         commit = self._git("rev-parse", "HEAD")

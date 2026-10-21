@@ -34,12 +34,12 @@ from app.api.auth_deps import (
 from app.api.errors import ApiError
 from app.auth.tokens import TokenInvalid, TokenService
 from app.claim.service import ClaimRequest, ClaimService
-from app.review_doc import build_document
 from app.config import settings
 from app.db.connection import Database
 from app.git.publish import PublishProxy
 from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
+from app.review_doc import build_document
 from app.spec import TaskStatus
 from app.tasks.service import NotFound, SchedulerService
 
@@ -282,7 +282,9 @@ def admin_plan_revise(
 
     The plan stays a draft: the human still has the final word.
     """
-    bind_declared(principal, body.revised_by, key="admin:refine", database=database, request=request)
+    bind_declared(
+        principal, body.revised_by, key="admin:refine", database=database, request=request
+    )
     title = _plan_title(database, body.plan_id)
     # The revision keeps the plan's **own** task ids, in order: a revision is
     # the same tasks, better specified.  A model that invents ids would
@@ -295,9 +297,7 @@ def admin_plan_revise(
             item["id"] = existing_ids[index]
         specs.append(item)
     snapshot = _plan_snapshot(title, body.goal, specs)
-    outcome = SchedulerService(database).revise_plan(
-        plan_id=body.plan_id, snapshot=snapshot
-    )
+    outcome = SchedulerService(database).revise_plan(plan_id=body.plan_id, snapshot=snapshot)
     return {
         "plan_id": body.plan_id,
         "snapshot_id": outcome.snapshot_id,
@@ -591,9 +591,7 @@ def availability(
                     failed = datetime.fromisoformat(failed_at)
                     if failed.tzinfo is None:
                         failed = failed.replace(tzinfo=UTC)
-                    failure_age_minutes = (
-                        datetime.now(UTC) - failed
-                    ).total_seconds() / 60.0
+                    failure_age_minutes = (datetime.now(UTC) - failed).total_seconds() / 60.0
                 except ValueError:
                     failure_age_minutes = None
         failure_reason_text = ""
@@ -638,9 +636,14 @@ def availability(
                 "last_probe_at": probe["created_at"] if probe else None,
                 "warnings": [
                     *(
-                        [{"code": "probe_warning", "detail": str(item)} for item in (
-                            json.loads(probe["warnings_json"]) if probe and probe.get("warnings_json") else []
-                        )]
+                        [
+                            {"code": "probe_warning", "detail": str(item)}
+                            for item in (
+                                json.loads(probe["warnings_json"])
+                                if probe and probe.get("warnings_json")
+                                else []
+                            )
+                        ]
                     ),
                     *warnings,
                 ],
@@ -1090,7 +1093,11 @@ def human_attempt_budget_override(
     the decision row is the audit trail.
     """
     bind_declared(
-        principal, body.decided_by, key="task:attempt_budget_override", database=database, request=request
+        principal,
+        body.decided_by,
+        key="task:attempt_budget_override",
+        database=database,
+        request=request,
     )
     return _human(database).grant_attempt_budget_override(
         task_id=body.task_id,
@@ -1996,9 +2003,7 @@ def task_output(
             if not rows:
                 return {"output": None}
             attempt_id = str(rows[0]["attempt_id"])
-    stdout_path, stderr_path = cli_output.log_paths(
-        settings.data_dir, task_id, str(attempt_id)
-    )
+    stdout_path, stderr_path = cli_output.log_paths(settings.data_dir, task_id, str(attempt_id))
     stdout = cli_output.read_tail(stdout_path)
     stderr = cli_output.read_tail(stderr_path)
     attempt = database.read(

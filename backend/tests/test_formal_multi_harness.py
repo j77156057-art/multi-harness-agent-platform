@@ -85,7 +85,10 @@ def test_windowsapps_bash_uses_cmd_shim_for_opencode(tmp_path):
     )
     command = adapter.command("Reply with READY", tmp_path)
     assert command[:3] == ["cmd.exe", "/d", "/s"]
-    assert "opencode run --format json --auto" in command[4]
+    # The recipe carries ``--standalone`` since the OpenCode transport
+    # hardening (the CLI must run its **own** server, not attach to whatever
+    # background service happens to be running).  The shim itself is unchanged.
+    assert "opencode run --standalone --format json --auto" in command[4]
 
 
 def test_windowsapps_opencode_moves_multiline_order_to_attachment(tmp_path):

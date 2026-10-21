@@ -153,9 +153,7 @@ def render_markdown(
         lines.append("## 传阅记录")
         lines.append("")
         for round_info in rounds:
-            lines.append(
-                f"### 第 {round_info['round_no']} 轮（{round_info['state']}）"
-            )
+            lines.append(f"### 第 {round_info['round_no']} 轮（{round_info['state']}）")
             lines.append("")
             lines.append(f"- 传阅对象：{', '.join(round_info['reviewer_harness_ids']) or '—'}")
             lines.append(f"- 发起：{round_info['opened_by'] or '—'}")

@@ -25,9 +25,7 @@ FAIL = ["python", "-c", "import sys; sys.exit(1)"]
 def escalate(chain: Chain) -> None:
     """Put the project's health row where a failed post-merge check left it."""
     with chain.database.transaction() as conn:
-        conn.execute(
-            "UPDATE integration_health SET status = 'escalated' WHERE project_id = 'P-1'"
-        )
+        conn.execute("UPDATE integration_health SET status = 'escalated' WHERE project_id = 'P-1'")
 
 
 def worker_for(chain: Chain, *, command=None, with_policy: bool = True) -> MergeWorker:

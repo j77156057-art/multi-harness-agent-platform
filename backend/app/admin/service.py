@@ -226,7 +226,7 @@ class AdminService:
         # The **ids stay**: a revision is the same tasks, better specified.
         # A model that invents task ids would silently create new work.
         merged: list[dict[str, Any]] = []
-        for original, item in zip(tasks, items):
+        for original, item in zip(tasks, items, strict=False):
             changed = {k: v for k, v in item.items() if k not in ("id", "task_id")}
             merged.append({**original, **changed})
         return merged
@@ -302,9 +302,7 @@ class AdminService:
                 for harness_id in available
                 if self._provider(harness_id) != admin_provider
             ]
-        return [
-            harness_id for harness_id in available if self.harness_has_credential(harness_id)
-        ]
+        return [harness_id for harness_id in available if self.harness_has_credential(harness_id)]
 
     def _provider(self, harness_id: str) -> str | None:
         """The registry's provider for a harness, or None when it is unknown.
@@ -531,9 +529,7 @@ class AdminService:
         payload, model = self._invoke_model(prompt)
         verdict = str(payload.get("verdict") or "").strip()
         if verdict not in {"approve", "request_changes"}:
-            raise AdminHarnessError(
-                "review output verdict must be 'approve' or 'request_changes'"
-            )
+            raise AdminHarnessError("review output verdict must be 'approve' or 'request_changes'")
         raw_findings = payload.get("findings") or []
         if not isinstance(raw_findings, list):
             raise AdminHarnessError("review output findings must be a list")

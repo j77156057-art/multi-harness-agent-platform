@@ -8,11 +8,6 @@ failure must never produce a submitted review verdict.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-import pytest
-
 from app.admin.service import AdminHarnessError
 from app.admin.worker import (
     AdminWorker,
@@ -56,7 +51,9 @@ class FakeAdmin:
         }
 
     def revise_with_reviews(self, *, plan_id, goal, tasks, reviews):
-        self.revise_calls.append({"plan_id": plan_id, "goal": goal, "tasks": tasks, "reviews": reviews})
+        self.revise_calls.append(
+            {"plan_id": plan_id, "goal": goal, "tasks": tasks, "reviews": reviews}
+        )
         return list(tasks)
 
     def review(self, **kwargs):
@@ -67,18 +64,29 @@ class FakeAdmin:
 
 
 class FakeClient:
-    def __init__(self, *, tasks=None, context=None, diff=None, verification=None, inbox=None, roster=None):
+    def __init__(
+        self, *, tasks=None, context=None, diff=None, verification=None, inbox=None, roster=None
+    ):
         self.tasks = tasks or []
         self.context = context or {"task": {}, "spec": {}}
         self.diff = diff or {"available": True, "patch": "diff --git a/a b/a\n+ok\n"}
         self.verification = verification or {"status": "passed"}
         self.inbox = inbox or []
-        self.roster = roster if roster is not None else [
-            {"harness_id": "admin-window", "provider": "openai", "credential_count": 1},
-            {"harness_id": "member-window", "provider": "tencent", "credential_count": 1},
-            {"harness_id": "dead-window", "provider": "tencent", "credential_count": 0},
-        ]
-        self.task_detail = {"task_id": "FD-1", "status": "abandoned", "owner": "member-window", "title": "t"}
+        self.roster = (
+            roster
+            if roster is not None
+            else [
+                {"harness_id": "admin-window", "provider": "openai", "credential_count": 1},
+                {"harness_id": "member-window", "provider": "tencent", "credential_count": 1},
+                {"harness_id": "dead-window", "provider": "tencent", "credential_count": 0},
+            ]
+        )
+        self.task_detail = {
+            "task_id": "FD-1",
+            "status": "abandoned",
+            "owner": "member-window",
+            "title": "t",
+        }
         self.circulation_reviews: list[dict] = []
         self.dispatches = []
         self.plan_drafts = []
@@ -92,9 +100,17 @@ class FakeClient:
 
     def get(self, path, **params):
         if path.startswith("/allocation/circulation/"):
-            return {"circulation_id": path.rsplit("/", 1)[-1], "state": "circulating", "reviews": self.circulation_reviews}
+            return {
+                "circulation_id": path.rsplit("/", 1)[-1],
+                "state": "circulating",
+                "reviews": self.circulation_reviews,
+            }
         if path.endswith("/document"):
-            return {"plan_id": "plan-1", "markdown": "# plan", "markdown_path": "exports/plans/plan-1.md"}
+            return {
+                "plan_id": "plan-1",
+                "markdown": "# plan",
+                "markdown_path": "exports/plans/plan-1.md",
+            }
         if path.startswith("/tasks/") and not path.endswith("/diff"):
             return self.task_detail
         if path.endswith("/messages"):
@@ -114,10 +130,20 @@ class FakeClient:
     def post(self, path, body):
         if path.endswith("/admin/plan_draft"):
             self.plan_drafts.append(body)
-            return {"plan_id": "plan-1", "snapshot_id": "snap-1", "circulation_id": "circ-1", "round_no": 1, "state": "circulating"}
+            return {
+                "plan_id": "plan-1",
+                "snapshot_id": "snap-1",
+                "circulation_id": "circ-1",
+                "round_no": 1,
+                "state": "circulating",
+            }
         if path.endswith("/admin/plan_revise"):
             self.plan_revisions.append(body)
-            return {"plan_id": body.get("plan_id"), "snapshot_id": "snap-2", "plan_hash": "sha256:x"}
+            return {
+                "plan_id": body.get("plan_id"),
+                "snapshot_id": "snap-2",
+                "plan_hash": "sha256:x",
+            }
         if path.endswith("/circulation/complete"):
             self.completed_rounds.append(body)
             return {"circulation_id": body.get("circulation_id"), "state": "completed"}
@@ -317,7 +343,9 @@ def test_the_plan_is_finalised_for_a_human_once_the_readers_answered(tmp_path, m
     admin = FakeAdmin()
     admin.assignable = ["member-window"]
     client = FakeClient()
-    client.circulation_reviews = [{"harness_id": "member-window", "body": "write the acceptance clearer"}]
+    client.circulation_reviews = [
+        {"harness_id": "member-window", "body": "write the acceptance clearer"}
+    ]
     worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
     worker.state.pending_circulation = {
         "goal_seq": 7,

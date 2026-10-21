@@ -561,7 +561,7 @@ def test_cli_once_runs_a_round(tmp_path, monkeypatch, capsys):
     assert status_of(chain) == "awaiting_review"
 
 
-def _recheck_policy_file(tmp_path, chain, *, command: list[str]) -> "object":
+def _recheck_policy_file(tmp_path, chain, *, command: list[str]) -> object:
     policy_file = tmp_path / "policy.json"
     policy_file.write_text(
         json.dumps(

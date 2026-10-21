@@ -16,7 +16,8 @@ Two rules shape everything here:
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 # --------------------------------------------------------------------------- #
 # content helpers
@@ -32,9 +33,12 @@ def _text_of(content: Any) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict):
-                if block.get("type") == "text" and isinstance(block.get("text"), str):
-                    parts.append(block["text"])
+            elif (
+                isinstance(block, dict)
+                and block.get("type") == "text"
+                and isinstance(block.get("text"), str)
+            ):
+                parts.append(block["text"])
         return "\n".join(part for part in parts if part)
     return ""
 
@@ -48,7 +52,11 @@ def _notes_for_unsupported(payload: dict[str, Any]) -> list[str]:
         content = message.get("content")
         if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") not in ("text", "input_text", "output_text"):
+                if isinstance(block, dict) and block.get("type") not in (
+                    "text",
+                    "input_text",
+                    "output_text",
+                ):
                     notes.append(f"dropped content block: {block.get('type')}")
         if message.get("tool_calls"):
             notes.append("dropped tool_calls (not representable in the target protocol)")
@@ -85,7 +93,9 @@ def openai_to_anthropic(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
     body: dict[str, Any] = {
         "model": payload.get("model"),
         "messages": messages,
-        "max_tokens": int(payload.get("max_tokens") or payload.get("max_completion_tokens") or 4096),
+        "max_tokens": int(
+            payload.get("max_tokens") or payload.get("max_completion_tokens") or 4096
+        ),
     }
     if payload.get("temperature") is not None:
         body["temperature"] = payload["temperature"]
@@ -150,7 +160,12 @@ def anthropic_to_openai(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "user")
-        messages.append({"role": "assistant" if role == "assistant" else "user", "content": _text_of(message.get("content"))})
+        messages.append(
+            {
+                "role": "assistant" if role == "assistant" else "user",
+                "content": _text_of(message.get("content")),
+            }
+        )
     body: dict[str, Any] = {
         "model": payload.get("model"),
         "messages": messages,
@@ -218,14 +233,18 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
         items.append(
             {
                 "role": "assistant" if role == "assistant" else "user",
-                "content": [{"type": "input_text" if role != "assistant" else "output_text", "text": text}],
+                "content": [
+                    {"type": "input_text" if role != "assistant" else "output_text", "text": text}
+                ],
             }
         )
     body: dict[str, Any] = {"model": payload.get("model"), "input": items}
     if instructions:
         body["instructions"] = "\n\n".join(instructions)
     if payload.get("max_tokens") or payload.get("max_completion_tokens"):
-        body["max_output_tokens"] = int(payload.get("max_tokens") or payload.get("max_completion_tokens"))
+        body["max_output_tokens"] = int(
+            payload.get("max_tokens") or payload.get("max_completion_tokens")
+        )
     if payload.get("temperature") is not None:
         body["temperature"] = payload["temperature"]
     if payload.get("top_p") is not None:
@@ -293,7 +312,9 @@ def responses_stream_to_openai_stream(lines: Iterator[str], *, model: str) -> It
                         "object": "chat.completion.chunk",
                         "created": 0,
                         "model": model,
-                        "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+                        "choices": [
+                            {"index": 0, "delta": {"content": piece}, "finish_reason": None}
+                        ],
                     },
                     ensure_ascii=False,
                 )
@@ -325,7 +346,10 @@ def chat_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iter
         payload = {"type": kind, "sequence_number": 0, **fields}
         return f"event: {kind}\ndata: {_json.dumps(payload, ensure_ascii=False)}\n\n"
 
-    yield event("response.created", response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model})
+    yield event(
+        "response.created",
+        response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model},
+    )
     for raw in lines:
         raw = raw.strip()
         if not raw.startswith("data:"):
@@ -375,7 +399,10 @@ def anthropic_stream_to_responses_stream(lines: Iterator[str], *, model: str) ->
         payload = {"type": kind, "sequence_number": 0, **fields}
         return f"event: {kind}\ndata: {_json.dumps(payload, ensure_ascii=False)}\n\n"
 
-    yield event("response.created", response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model})
+    yield event(
+        "response.created",
+        response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model},
+    )
     for raw in lines:
         raw = raw.strip()
         if not raw.startswith("data:"):
@@ -511,7 +538,11 @@ def openai_stream_to_anthropic_stream(lines: Iterator[str], *, model: str) -> It
         )
         yield _sse(
             "content_block_start",
-            {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "text", "text": ""},
+            },
         )
     yield _sse("content_block_stop", {"type": "content_block_stop", "index": 0})
     yield _sse(
@@ -529,7 +560,6 @@ def anthropic_stream_to_openai_stream(lines: Iterator[str], *, model: str) -> It
     """Anthropic messages SSE -> OpenAI chat SSE."""
     import json as _json
 
-    first = True
     created = 0
     for raw in lines:
         raw = raw.strip()
@@ -558,7 +588,9 @@ def anthropic_stream_to_openai_stream(lines: Iterator[str], *, model: str) -> It
                             "object": "chat.completion.chunk",
                             "created": created,
                             "model": model,
-                            "choices": [{"index": 0, "delta": {"content": piece}, "finish_reason": None}],
+                            "choices": [
+                                {"index": 0, "delta": {"content": piece}, "finish_reason": None}
+                            ],
                         },
                         ensure_ascii=False,
                     )

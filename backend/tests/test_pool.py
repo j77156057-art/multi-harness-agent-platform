@@ -16,7 +16,7 @@ whose quota can it borrow?".  These tests pin the three facts it rests on:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.pool.cli_model import CliModelSource, extract_text
@@ -29,7 +29,6 @@ from app.pool.translate import (
     openai_to_anthropic,
     responses_to_chat,
 )
-
 
 # --------------------------------------------------------------------------- #
 # translation
@@ -91,7 +90,9 @@ def test_responses_and_chat_answer_each_other():
     chat = {
         "id": "c1",
         "model": "m",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
+        ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
     }
     responses = chat_to_responses(chat) if False else None  # (the other direction)
@@ -163,7 +164,7 @@ def test_sources_are_discovered_from_the_clis_own_configuration(tmp_path):
     assert upstreams["opencode:local"].models == ("qwen",)
     # The CLI slots are declared, not sniffed: codebuddy's hy3, its
     # minimax-m3.1-flash, qoder's two free models.
-    slot_names = {name for name in upstreams}
+    slot_names = set(upstreams)
     assert "codebuddy:hy3" in slot_names
     assert "codebuddy:minimax-m3.1-flash" in slot_names
     assert "qoder:Qwen3.8-Flash" in slot_names
@@ -178,7 +179,10 @@ def test_a_source_pointing_at_the_pool_itself_is_skipped(tmp_path):
             {
                 "provider": {
                     "pool": {
-                        "options": {"baseURL": "http://127.0.0.1:8848/api/v1/pool/v1", "apiKey": "t"},
+                        "options": {
+                            "baseURL": "http://127.0.0.1:8848/api/v1/pool/v1",
+                            "apiKey": "t",
+                        },
                         "models": {"m": {"name": "m"}},
                     }
                 }
@@ -186,14 +190,19 @@ def test_a_source_pointing_at_the_pool_itself_is_skipped(tmp_path):
         ),
         encoding="utf-8",
     )
-    upstreams = {upstream.name: upstream for upstream in discover_upstreams(home, relay_ports=(8848,))}
+    upstreams = {
+        upstream.name: upstream for upstream in discover_upstreams(home, relay_ports=(8848,))
+    }
     assert "opencode:pool" not in upstreams
 
 
 def test_the_cli_slot_is_the_only_way_to_spend_a_cli_only_quota(tmp_path):
     source = CliModelSource(name="opencode-cli", model="opencode/minimax-m3.1-flash-free")
     prompt = source.prompt_for(
-        [{"role": "system", "content": "be brief"}, {"role": "user", "content": "Reply with exactly: OK"}]
+        [
+            {"role": "system", "content": "be brief"},
+            {"role": "user", "content": "Reply with exactly: OK"},
+        ]
     )
     # The CLI is an agent: the message has to look like a question, and it
     # has to be one line (cmd.exe would cut a multi-line argument).
@@ -249,13 +258,16 @@ def test_a_failed_window_is_routed_to_the_pool(tmp_path):
     _write_failure(tmp_path, "T-1")
     pool = _FakePool(
         [
-            {"id": "gpt-6.1-sol", "upstream": "codex:geekspace", "protocol": "openai_responses", "tier": "metered"},
+            {
+                "id": "gpt-6.1-sol",
+                "upstream": "codex:geekspace",
+                "protocol": "openai_responses",
+                "tier": "metered",
+            },
             {"id": "minimax-free", "upstream": "opencode-cli", "protocol": "cli", "tier": "free"},
         ]
     )
-    plan = plan_attempt(
-        "T-1", harness_id="claude-code", data_dir=tmp_path, pool=pool
-    )
+    plan = plan_attempt("T-1", harness_id="claude-code", data_dir=tmp_path, pool=pool)
     assert plan["mode"] == "pool"
     # Somebody's *free* quota comes first.
     assert plan["model"] == "minimax-free"
@@ -271,8 +283,18 @@ def test_a_reserved_quota_is_never_spent_on_its_own(tmp_path):
     _write_failure(tmp_path, "T-1")
     pool = _FakePool(
         [
-            {"id": "gpt-6.1-sol", "upstream": "codex:geekspace", "protocol": "openai_responses", "tier": "metered"},
-            {"id": "MiniMax-M3.1-Flash-Preview", "upstream": "minimax", "protocol": "anthropic", "tier": "reserve"},
+            {
+                "id": "gpt-6.1-sol",
+                "upstream": "codex:geekspace",
+                "protocol": "openai_responses",
+                "tier": "metered",
+            },
+            {
+                "id": "MiniMax-M3.1-Flash-Preview",
+                "upstream": "minimax",
+                "protocol": "anthropic",
+                "tier": "reserve",
+            },
         ]
     )
     plan = plan_attempt("T-1", harness_id="claude-code", data_dir=tmp_path, pool=pool)
@@ -582,17 +604,32 @@ def test_the_quota_timeline_says_when_the_quota_went(tmp_path):
     from app.pool.service import PoolService
 
     usage = tmp_path / "usage.jsonl"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     records = [
-        {"at": (now - timedelta(hours=1)).isoformat(), "upstream": "opencode-cli",
-         "model": "m", "consumer": "harness/opencode",
-         "prompt_tokens": 3, "completion_tokens": 4},
-        {"at": (now - timedelta(hours=1)).isoformat(), "upstream": "opencode-cli",
-         "model": "m", "consumer": "harness/claude-code",
-         "prompt_tokens": 0, "completion_tokens": 0},
-        {"at": (now - timedelta(hours=30)).isoformat(), "upstream": "older",
-         "model": "m", "consumer": "harness/opencode",
-         "prompt_tokens": 0, "completion_tokens": 0},
+        {
+            "at": (now - timedelta(hours=1)).isoformat(),
+            "upstream": "opencode-cli",
+            "model": "m",
+            "consumer": "harness/opencode",
+            "prompt_tokens": 3,
+            "completion_tokens": 4,
+        },
+        {
+            "at": (now - timedelta(hours=1)).isoformat(),
+            "upstream": "opencode-cli",
+            "model": "m",
+            "consumer": "harness/claude-code",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        },
+        {
+            "at": (now - timedelta(hours=30)).isoformat(),
+            "upstream": "older",
+            "model": "m",
+            "consumer": "harness/opencode",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+        },
     ]
     usage.write_text("\n".join(json.dumps(record) for record in records) + "\n", encoding="utf-8")
 
@@ -656,12 +693,24 @@ def test_the_inventory_says_what_is_left_where_a_balance_can_be_asked_for():
         ],
         usage={
             "upstreams": {
-                "opencode-cli:free": {"requests": 4, "prompt_tokens": 1, "completion_tokens": 2,
-                                       "consumers": {"harness/opencode": 4}},
-                "minimax": {"requests": 2, "prompt_tokens": 10, "completion_tokens": 20,
-                            "consumers": {"harness/opencode": 2}},
-                "codex:geekspace": {"requests": 1, "prompt_tokens": 0, "completion_tokens": 0,
-                                    "consumers": {"harness/claude-code": 1}},
+                "opencode-cli:free": {
+                    "requests": 4,
+                    "prompt_tokens": 1,
+                    "completion_tokens": 2,
+                    "consumers": {"harness/opencode": 4},
+                },
+                "minimax": {
+                    "requests": 2,
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "consumers": {"harness/opencode": 2},
+                },
+                "codex:geekspace": {
+                    "requests": 1,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "consumers": {"harness/claude-code": 1},
+                },
             }
         },
         quota={

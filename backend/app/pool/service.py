@@ -23,15 +23,15 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import httpx
 
 from app.config import settings
-
 from app.pool.inventory import build_inventory, cached_minimax_quota
 from app.pool.sources import (
     ANTHROPIC,
@@ -50,7 +50,6 @@ from app.pool.translate import (
     chat_stream_to_responses_stream,
     chat_to_responses,
     openai_response_to_anthropic,
-    openai_stream_to_anthropic_stream,
     openai_to_anthropic,
     responses_stream_to_openai_stream,
     responses_to_chat,
@@ -110,8 +109,14 @@ _MODELS: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
 class PoolService:
     """Routing, translation and accounting for the platform's model pool."""
 
-    def __init__(self, *, home: Path | None = None, usage_path: Path | None = None,
-                 relay_ports: tuple[int, ...] = (8848,), timeout: float = 300.0) -> None:
+    def __init__(
+        self,
+        *,
+        home: Path | None = None,
+        usage_path: Path | None = None,
+        relay_ports: tuple[int, ...] = (8848,),
+        timeout: float = 300.0,
+    ) -> None:
         self.home = home
         self.usage_path = (
             usage_path
@@ -471,19 +476,23 @@ class PoolService:
             url = upstream.base_url + "/chat/completions"
         return url, body, headers
 
-    def _upstream_lines(self, url: str, body: dict[str, Any], headers: dict[str, str]) -> Iterator[str]:
-        with httpx.Client(timeout=self.timeout) as client:
-            with client.stream("POST", url, json=body, headers=headers) as response:
-                if response.status_code >= 400:
-                    detail = response.read().decode(errors="replace")[:300]
-                    raise PoolError(
-                        f"the upstream refused the request ({response.status_code}): {detail}",
-                        status=response.status_code,
-                        code="pool_upstream_rejected",
-                    )
-                for raw in response.iter_lines():
-                    if raw:
-                        yield raw
+    def _upstream_lines(
+        self, url: str, body: dict[str, Any], headers: dict[str, str]
+    ) -> Iterator[str]:
+        with (
+            httpx.Client(timeout=self.timeout) as client,
+            client.stream("POST", url, json=body, headers=headers) as response,
+        ):
+            if response.status_code >= 400:
+                detail = response.read().decode(errors="replace")[:300]
+                raise PoolError(
+                    f"the upstream refused the request ({response.status_code}): {detail}",
+                    status=response.status_code,
+                    code="pool_upstream_rejected",
+                )
+            for raw in response.iter_lines():
+                if raw:
+                    yield raw
 
     def chat_completions_stream(
         self, payload: dict[str, Any], *, consumer: str = ""
@@ -503,7 +512,9 @@ class PoolService:
                         "object": "chat.completion.chunk",
                         "created": 0,
                         "model": route.model,
-                        "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                        "choices": [
+                            {"index": 0, "delta": {"content": text}, "finish_reason": None}
+                        ],
                     },
                     ensure_ascii=False,
                 )
@@ -520,8 +531,7 @@ class PoolService:
             stream = responses_stream_to_openai_stream(lines, model=route.model)
         else:
             stream = lines
-        for chunk in stream:
-            yield chunk
+        yield from stream
         self._account(
             Usage(
                 at=_now(),
@@ -535,9 +545,7 @@ class PoolService:
             )
         )
 
-    def responses_stream(
-        self, payload: dict[str, Any], *, consumer: str = ""
-    ) -> Iterator[str]:
+    def responses_stream(self, payload: dict[str, Any], *, consumer: str = "") -> Iterator[str]:
         """Streamed OpenAI Responses from whichever upstream has the model.
 
         The codex CLI is a Responses client: it asks for ``/responses`` and
@@ -577,8 +585,7 @@ class PoolService:
             stream = chat_stream_to_responses_stream(lines, model=route.model)
         else:
             stream = lines
-        for chunk in stream:
-            yield chunk
+        yield from stream
         self._account(
             Usage(
                 at=_now(),
@@ -718,7 +725,7 @@ class PoolService:
         cannot tell a burst from a trickle.
         """
         hours = max(1, min(int(hours), 24 * 14))
-        now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+        now = datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
         start = now - timedelta(hours=hours - 1)
         buckets: dict[str, dict[str, Any]] = {}
         for index in range(hours):
@@ -790,7 +797,13 @@ class PoolService:
                 requests += 1
                 bucket = summary.setdefault(
                     str(record.get("upstream") or "?"),
-                    {"requests": 0, "prompt_tokens": 0, "completion_tokens": 0, "models": {}, "consumers": {}},
+                    {
+                        "requests": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "models": {},
+                        "consumers": {},
+                    },
                 )
                 bucket["requests"] += 1
                 bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
@@ -812,7 +825,6 @@ class PoolService:
         return {"upstreams": summary, "consumers": consumers, "requests": requests}
 
 
-
 def _parse_timestamp(value: str) -> datetime | None:
     """An ISO timestamp, in UTC.  Unparseable is ``None`` -- not a guess."""
     try:
@@ -820,8 +832,8 @@ def _parse_timestamp(value: str) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return stamp.astimezone(timezone.utc)
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp.astimezone(UTC)
 
 
 def _messages_of(payload: dict[str, Any]) -> list[dict[str, Any]]:

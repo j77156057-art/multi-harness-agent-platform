@@ -186,7 +186,9 @@ def test_a_stale_tasks_worktree_is_recycled(tmp_path, monkeypatch):
     _archive_root(tmp_path, monkeypatch)
     chain = build_chain(tmp_path)
     with chain.database.transaction() as conn:
-        conn.execute("UPDATE tasks SET status = 'stale', current_attempt_id = NULL WHERE task_id = 'T-1'")
+        conn.execute(
+            "UPDATE tasks SET status = 'stale', current_attempt_id = NULL WHERE task_id = 'T-1'"
+        )
 
     report = sweep_worktree_recycle(chain.database, NOW, repo=chain.repo)
 
@@ -203,7 +205,9 @@ def test_a_task_without_a_current_attempt_releases_its_worktree(tmp_path, monkey
     _archive_root(tmp_path, monkeypatch)
     chain = build_chain(tmp_path)
     with chain.database.transaction() as conn:
-        conn.execute("UPDATE tasks SET status = 'ready', current_attempt_id = NULL WHERE task_id = 'T-1'")
+        conn.execute(
+            "UPDATE tasks SET status = 'ready', current_attempt_id = NULL WHERE task_id = 'T-1'"
+        )
 
     report = sweep_worktree_recycle(chain.database, NOW, repo=chain.repo)
 

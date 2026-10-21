@@ -138,12 +138,18 @@ class CodexAdapter(CliHarness):
             # work still happens here.  The overrides are per attempt, so the
             # person's own codex configuration is never touched.
             argv += [
-                "-c", f"model={route.model}",
-                "-c", "model_provider=pool",
-                "-c", "model_providers.pool.name=platform-pool",
-                "-c", f"model_providers.pool.base_url={route.base_url}",
-                "-c", "model_providers.pool.wire_api=responses",
-                "-c", "model_providers.pool.env_key=OPENAI_API_KEY",
+                "-c",
+                f"model={route.model}",
+                "-c",
+                "model_provider=pool",
+                "-c",
+                "model_providers.pool.name=platform-pool",
+                "-c",
+                f"model_providers.pool.base_url={route.base_url}",
+                "-c",
+                "model_providers.pool.wire_api=responses",
+                "-c",
+                "model_providers.pool.env_key=OPENAI_API_KEY",
             ]
         # The work order is on stdin (``-``): argv has a hard length limit on
         # Windows, and a review prompt with the whole diff does not fit.

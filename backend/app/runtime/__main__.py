@@ -25,6 +25,7 @@ import time
 from app.config import settings
 from app.db import Database
 from app.git.repo import CanonicalRepo
+from app.merge.worker import MergeError
 from app.runtime.driver import RuntimeDriver, RuntimePolicyError, load_runtime_policy
 
 

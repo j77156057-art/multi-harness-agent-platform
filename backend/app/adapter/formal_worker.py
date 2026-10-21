@@ -26,11 +26,10 @@ from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
 from app.adapter.scope import path_in_scope
-from app.git.worktree import WorktreeCapacityExceeded
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
-from app.git.worktree import WorktreeManager
+from app.git.worktree import WorktreeCapacityExceeded, WorktreeManager
 from app.tasks.service import SchedulerService
 from app.verify.profile import VerifyPolicy
 from app.verify.worker import VerifyWorker
@@ -194,7 +193,6 @@ class ScopedRunner(SubprocessRunner):
         run_git("commit", "-m", self.commit_message, cwd=cwd)
 
 
-
 def ask_pool_plan(
     client,
     *,
@@ -222,7 +220,10 @@ def ask_pool_plan(
             },
         )
         if response.status_code >= 400:
-            return {"mode": "direct", "reason": f"the platform did not answer ({response.status_code})"}
+            return {
+                "mode": "direct",
+                "reason": f"the platform did not answer ({response.status_code})",
+            }
         plan = response.json()
     except Exception as exc:  # pragma: no cover - network path
         return {"mode": "direct", "reason": f"could not ask the platform ({type(exc).__name__})"}
@@ -231,7 +232,6 @@ def ask_pool_plan(
     plan["platform_url"] = platform_url
     plan["token"] = token
     return plan
-
 
 
 CIRCULATION_REVIEW_PROMPT = """你是 {harness}。下面是一版方案草案（管理员细化之后传阅给你）。
@@ -274,7 +274,10 @@ def submit_circulation_review(
         reviewers = [str(item) for item in (round_info.get("reviewer_harness_ids") or [])]
         if harness_id not in reviewers:
             continue
-        if any(str(review.get("harness_id")) == harness_id for review in (round_info.get("reviews") or [])):
+        if any(
+            str(review.get("harness_id")) == harness_id
+            for review in (round_info.get("reviews") or [])
+        ):
             continue
         plan_id = str(round_info.get("plan_id") or "")
         try:
@@ -382,9 +385,14 @@ def _last_text(stdout: str) -> str:
                 answer = content
             elif isinstance(content, list):
                 for block in content:
-                    if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
+                    if (
+                        isinstance(block, dict)
+                        and isinstance(block.get("text"), str)
+                        and block["text"].strip()
+                    ):
                         answer = block["text"]
     return answer
+
 
 def build_goal(
     spec: dict[str, object],
@@ -429,8 +437,7 @@ def build_goal(
             "\nThe previous attempt did NOT finish; here is its breakpoint report. "
             "Continue from it instead of starting over: keep what is already written, "
             "fix what it says is broken, and do not repeat the steps it already did. "
-            "Breakpoint report (verbatim): "
-            + json.dumps(handoff, ensure_ascii=False)
+            "Breakpoint report (verbatim): " + json.dumps(handoff, ensure_ascii=False)
         )
     return goal
 
@@ -525,9 +532,7 @@ def write_handoff_report(
         "cli_stdout_tail": str(failure.get("stdout") or "")[-2000:],
         "files_touched": changed[:50],
         "diff_stat": diff_summary,
-        "archived_worktree": (
-            f"data/archives/{attempt_id}/" if attempt_id else None
-        ),
+        "archived_worktree": (f"data/archives/{attempt_id}/" if attempt_id else None),
         "scope": "breakpoint report of a failed attempt; the next owner continues from here",
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -541,7 +546,6 @@ def read_handoff_report(path: Path) -> dict[str, object] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-
 
 
 def release_or_abandon(adapter, task_id: str, reason: str) -> str:
@@ -659,7 +663,9 @@ def run_one(
     )
     if plan.get("mode") == "pool":
         protocol = getattr(adapter, "pool_protocol", "openai")
-        base_path = str(plan.get("anthropic_path") if protocol == "anthropic" else plan.get("base_path") or "")
+        base_path = str(
+            plan.get("anthropic_path") if protocol == "anthropic" else plan.get("base_path") or ""
+        )
         route = ProviderRoute(
             base_url=f"{platform_url.rstrip('/')}{base_path}",
             token=token,
@@ -684,9 +690,7 @@ def run_one(
             # abandoned only the attempt id it had captured, and provisioning
             # raises before that value exists. Ask the platform for the real
             # attempt before cleaning up.
-            on_error_attempt=lambda attempt: captured.update(
-                {"attempt_id": attempt}
-            )
+            on_error_attempt=lambda attempt: captured.update({"attempt_id": attempt})
             if attempt
             else None,
             on_claimed=provision,
@@ -727,7 +731,9 @@ def run_one(
     except Exception as exc:
         recycled: dict[str, object] = {"status": "not_attempted"}
         attempt_id = captured.get("attempt_id")
-        retryable, reason = _classify_failure(exc, task=task, manager=manager, attempt_id=attempt_id)
+        retryable, reason = _classify_failure(
+            exc, task=task, manager=manager, attempt_id=attempt_id
+        )
         if attempt_id:
             if retryable:
                 # 可重试的失败：把任务**放回队列**（``RELEASE`` 边：in_progress →
@@ -948,10 +954,10 @@ def main():
                         )
                 if now - last_probe_at >= probe_every_seconds:
                     last_probe_at = now
-                    try:
+                    # A probe that fails is not the run's failure: the probe
+                    # only refreshes what the window can do.
+                    with contextlib.suppress(Exception):
                         adapter_for_harness(client, args.harness_id).probe()
-                    except Exception:
-                        pass
                 completed = run_one(
                     client,
                     database,

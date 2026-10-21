@@ -26,7 +26,7 @@ import os
 import shutil
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 #: The order the tiers are shown in: free first, then the reserve, then the
@@ -76,7 +76,7 @@ def _iso_ms(value: Any) -> str | None:
         return None
     if millis <= 0:
         return None
-    return datetime.fromtimestamp(millis / 1000.0, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(millis / 1000.0, tz=UTC).isoformat()
 
 
 def read_minimax_quota(*, binary: str = "mmx", timeout: float = 20.0) -> dict[str, Any]:
@@ -89,8 +89,11 @@ def read_minimax_quota(*, binary: str = "mmx", timeout: float = 20.0) -> dict[st
     """
     path = shutil.which(binary)
     if not path:
-        return {"known": False, "source": f"{binary} quota show",
-                "reason": f"{binary} 不在这台机器上，问不到订阅额度"}
+        return {
+            "known": False,
+            "source": f"{binary} quota show",
+            "reason": f"{binary} 不在这台机器上，问不到订阅额度",
+        }
     try:
         completed = subprocess.run(
             [path, "quota", "show", "--output", "json"],
@@ -103,22 +106,34 @@ def read_minimax_quota(*, binary: str = "mmx", timeout: float = 20.0) -> dict[st
             env={**os.environ, "NO_COLOR": "1"},
         )
     except subprocess.TimeoutExpired:
-        return {"known": False, "source": f"{binary} quota show",
-                "reason": f"{binary} quota show 超时（{timeout:.0f} 秒）"}
+        return {
+            "known": False,
+            "source": f"{binary} quota show",
+            "reason": f"{binary} quota show 超时（{timeout:.0f} 秒）",
+        }
     except OSError as error:
-        return {"known": False, "source": f"{binary} quota show",
-                "reason": f"跑不了 {binary} quota show：{error}"}
+        return {
+            "known": False,
+            "source": f"{binary} quota show",
+            "reason": f"跑不了 {binary} quota show：{error}",
+        }
     if completed.returncode != 0:
-        return {"known": False, "source": f"{binary} quota show",
-                "reason": f"{binary} quota show 退出了（{completed.returncode}）"}
+        return {
+            "known": False,
+            "source": f"{binary} quota show",
+            "reason": f"{binary} quota show 退出了（{completed.returncode}）",
+        }
     try:
         document = json.loads(completed.stdout or "{}")
     except ValueError:
-        return {"known": False, "source": f"{binary} quota show",
-                "reason": f"{binary} quota show 的输出不是 JSON"}
+        return {
+            "known": False,
+            "source": f"{binary} quota show",
+            "reason": f"{binary} quota show 的输出不是 JSON",
+        }
     reading = parse_minimax_quota(document)
     reading["source"] = f"{binary} quota show"
-    reading["checked_at"] = datetime.now(timezone.utc).isoformat()
+    reading["checked_at"] = datetime.now(UTC).isoformat()
     return reading
 
 
@@ -257,5 +272,5 @@ def build_inventory(
         )
     return {
         "tiers": tiers,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(UTC).isoformat(),
     }

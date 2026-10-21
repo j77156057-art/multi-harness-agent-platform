@@ -1,4 +1,4 @@
-﻿"""``GET /adapter/availability``: who can work right now, and with which model.
+"""``GET /adapter/availability``: who can work right now, and with which model.
 
 The office asks one human question after every failure -- "the upstream died,
 who takes over?" -- and the platform has to answer it from facts, not from a
@@ -144,9 +144,7 @@ def _attempt(database, *, task_id: str, owner: str, status: str = "abandoned") -
 def _evidence(tmp_path, task_id: str, payload: dict[str, object]) -> None:
     evidence = tmp_path / "formal-runs"
     evidence.mkdir(parents=True, exist_ok=True)
-    (evidence / f"{task_id}.failure.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    (evidence / f"{task_id}.failure.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_a_provider_failure_marks_the_window_unusable(tmp_path, monkeypatch):

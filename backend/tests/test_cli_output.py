@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 
 from app.adapter import cli_output
 from app.adapter.harnesses.cli import SubprocessRunner

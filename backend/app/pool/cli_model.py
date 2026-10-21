@@ -78,7 +78,11 @@ class CliModelSource:
             return self.binary
         wanted = self.binary or "opencode"
         found = shutil.which(wanted) or shutil.which(f"{wanted}.cmd")
-        if found and os.name == "nt" and not found.lower().endswith((".exe", ".cmd", ".bat", ".com")):
+        if (
+            found
+            and os.name == "nt"
+            and not found.lower().endswith((".exe", ".cmd", ".bat", ".com"))
+        ):
             for suffix in (".cmd", ".exe", ".bat"):
                 candidate = found + suffix
                 if os.path.exists(candidate):
@@ -126,7 +130,12 @@ class CliModelSource:
         # Long question: let the CLI read it from a file (it supports --file).
         question_file = workdir / "question.txt"
         question_file.write_text(prompt, encoding="utf-8", newline="\n")
-        return [*base, self.file_arg, str(question_file), "Answer the question in the attached file."]
+        return [
+            *base,
+            self.file_arg,
+            str(question_file),
+            "Answer the question in the attached file.",
+        ]
 
     def _through_bash(self, argv: list[str]) -> list[str]:
         """Run the CLI through bash on Windows.
@@ -250,7 +259,11 @@ def extract_text(stdout: str) -> str:
                 answer = value
             elif isinstance(value, list):
                 for block in value:
-                    if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
+                    if (
+                        isinstance(block, dict)
+                        and isinstance(block.get("text"), str)
+                        and block["text"].strip()
+                    ):
                         answer = block["text"]
     if answer:
         return answer

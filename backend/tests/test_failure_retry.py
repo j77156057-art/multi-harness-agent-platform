@@ -16,11 +16,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
-import pytest
-
 from app.adapter.formal_worker import (
     _classify_failure,
     build_goal,

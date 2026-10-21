@@ -450,9 +450,13 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
     return upstreams
 
 
-def discover_upstreams(home: Path | None = None, *, relay_ports: tuple[int, ...] = (),
-                       include_cli: bool = True,
-                       config_path: Path | None = None) -> list[Upstream]:
+def discover_upstreams(
+    home: Path | None = None,
+    *,
+    relay_ports: tuple[int, ...] = (),
+    include_cli: bool = True,
+    config_path: Path | None = None,
+) -> list[Upstream]:
     """Every upstream the platform's harnesses already have access to.
 
     ``relay_ports`` are the ports the pool itself listens on: an upstream
