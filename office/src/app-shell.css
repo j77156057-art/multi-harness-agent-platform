@@ -1,0 +1,264 @@
+/* Agent Office —— 应用外壳的企业级样式。
+ *
+ * 目标是"一眼知道在哪、下一步点哪"：一条顶栏说明项目与连接状态，主区只有
+ * 一个内容（项目大厅或办公室），没有第二个入口跟它抢。
+ */
+
+:root {
+  --ao-bg: #f6f7f9;
+  --ao-surface: #ffffff;
+  --ao-border: #e3e6ea;
+  --ao-border-strong: #cdd3da;
+  --ao-text: #1c2430;
+  --ao-text-soft: #5b6673;
+  --ao-text-faint: #8a94a0;
+  --ao-accent: #2f5d8c;
+  --ao-accent-soft: #eaf1f8;
+  --ao-live: #1f7a4d;
+  --ao-warn: #a8562a;
+  --ao-radius: 6px;
+  --ao-topbar-h: 52px;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ao-bg);
+  color: var(--ao-text);
+  font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app,
+.ao-app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ 顶栏 */
+
+.ao-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: var(--ao-topbar-h);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--ao-surface);
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.ao-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ao-mark {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--ao-radius);
+  background: var(--ao-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.ao-brand-text {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ao-brand-text strong {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.ao-brand-text span {
+  color: var(--ao-text-faint);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ao-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ao-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid var(--ao-border);
+  border-radius: 999px;
+  background: #fbfcfd;
+  color: var(--ao-text-soft);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ao-conn i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ao-text-faint);
+}
+
+.ao-conn.is-live i { background: var(--ao-live); }
+.ao-conn.is-live { color: var(--ao-live); border-color: #cfe3d8; background: #f4fbf7; }
+.ao-conn.is-offline i { background: var(--ao-warn); }
+.ao-conn.is-offline { color: var(--ao-warn); border-color: #ead8cd; background: #fdf7f3; }
+
+.ao-btn {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ao-btn:hover { background: #f2f4f6; }
+
+.ao-user {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8ecf1;
+  color: var(--ao-text-soft);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ 主区 */
+
+.ao-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ao-lobby,
+.ao-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ao-lobby[hidden],
+.ao-workspace[hidden] { display: none; }
+
+.ao-lobby-note {
+  margin: 16px 20px 0;
+  padding: 10px 14px;
+  border: 1px solid #ead8cd;
+  border-radius: var(--ao-radius);
+  background: #fdf7f3;
+  color: var(--ao-warn);
+  font-size: 13px;
+}
+
+/* ------------------------------------------- 开工向导：不再是"手机" */
+
+#aoOpening { display: contents; }
+
+#openingDialog,
+.opening-dialog {
+  border: 1px solid var(--ao-border-strong);
+  border-radius: 10px;
+  padding: 0;
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  box-shadow: 0 18px 48px rgba(20, 30, 45, .18);
+  max-width: 720px;
+  width: min(92vw, 720px);
+}
+
+#openingDialog::backdrop { background: rgba(20, 28, 38, .38); }
+
+.opening-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ao-border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.opening-bar button {
+  border: 1px solid var(--ao-border-strong);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+/* 旧的"手机开机向导"外观（圆角机身、状态栏）在对话框里一律去掉。 */
+#openingDialog .phone-status,
+#openingDialog .home-indicator,
+#openingDialog .phone-island { display: none !important; }
+
+#openingDialog .opening-phone,
+#openingDialog .phone-frame,
+#openingDialog .phone-shell { border: none !important; box-shadow: none !important; background: transparent !important; }
+
+/* 旧的「手机开机向导」欢迎块（小样遗物）：开工配置改由顶栏的按钮进入对话框。 */
+#openingWelcome { display: none !important; }
+
+/* ------------------------------------------- 旧外壳留下来的几个通用样式
+
+   旧版的 style.css 里有这两个类（项目大厅的「新建项目」按钮与小字标题），
+   那份样式表还带着旧 3D 场景的全部规则，已经不再进仓，这里把真正在用的那两个补回来。 */
+
+.primary {
+  border: 1px solid #2f5d8c;
+  background: #2f5d8c;
+  color: #fff;
+  padding: 9px 15px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.primary:hover { background: #27507a; }
+
+.eyebrow {
+  font-size: 10px;
+  color: #5b6673;
+  letter-spacing: 2px;
+  margin-bottom: 10px;
+}

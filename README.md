@@ -205,7 +205,10 @@ backend/app/          业务代码
   config.py           环境变量配置
   main.py             FastAPI 入口
 backend/tests/        测试（含与 R10 正文的交叉验证）
-# UI：Agent Office（独立仓，4174）；本仓不再包含前端
+office/              UI：Agent Office 数据版界面（Vite + 原生 JS，4174）；
+  src/              应用外壳与办公室（任务表 / 详情 / 额度池 / 群聊 / 任务书 / 成员动态）
+  server/           预览层网关（读平台事实，按群裁剪）
+  scripts/          冒烟脚本（需 node + playwright，**不在本仓门禁内**）
 docs/
   spec/0.3-R10.md     ★ 唯一真相源（只读！改动走复审流程）
   spec/mvp-task-checklist.md  任务清单（0.4 重排版）

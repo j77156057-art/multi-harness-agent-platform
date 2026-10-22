@@ -129,6 +129,7 @@
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
 | R10-fix-17 | Codex | FORMAL-MULTI-HARNESS-01 | doing（接替关系进平台字段；实现与 R10 正文（§9、§38.12）已就位，**规范复审由仓库主人 2026-10-22 拍板**） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
+| OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -225,6 +226,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 
 ### 任务卡索引
 
+| OFFICE-UI-01 | [卡](docs/tasks/notes/OFFICE-UI-01.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |
