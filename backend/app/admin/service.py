@@ -417,6 +417,58 @@ class AdminService:
         result["receipt"] = self._post_receipt(result, group_id=group_id)
         return result
 
+    def answer(
+        self,
+        *,
+        question: str,
+        group_id: str,
+        asker: str,
+    ) -> dict[str, Any]:
+        """Answer one private question, and send the answer back privately.
+
+        The owner's question arrives as a *direct* message (R10 §19): a message
+        row whose ``refs`` carry the ``direct`` signature. The answer leaves the
+        same way -- same table, same ordering authority, same visibility rule
+        (sender and recipients only). That is why this adds no event name, no
+        state and no schema column.
+
+        The model is given the group's task ledger and nothing else, and is told
+        to say it does not know when the ledger does not answer: a private
+        channel is still a place where a guess would be read as a fact.
+        """
+        text = question.strip() if isinstance(question, str) else ""
+        if not text:
+            raise AdminHarnessError("question must not be empty")
+        recipient = asker.strip() if isinstance(asker, str) else ""
+        if not recipient:
+            raise AdminHarnessError("a direct answer needs a recipient")
+        if recipient == self.harness_id:
+            # A window answering itself would produce a private echo the owner
+            # never sees and that still claims to be an answer.
+            raise AdminHarnessError("refusing to answer the administrator's own message")
+        prompt = self._answer_prompt(text, group_id=group_id, asker=recipient)
+        payload, model = self._invoke_model(prompt)
+        answer = str(payload.get("answer") or "").strip()
+        if not answer:
+            raise AdminHarnessError("the administrator model returned no answer text")
+        message = SchedulerService(self.database).post_message(
+            group_id=group_id,
+            author_kind="harness",
+            author_id=self.harness_id,
+            body=answer,
+            mentions=[recipient],
+            direct=True,
+        )
+        return {
+            "harness_id": self.harness_id,
+            "group_id": group_id,
+            "asker": recipient,
+            "question": text,
+            "answer": answer,
+            "model": model,
+            "message": message,
+        }
+
     # --------------------------------------------------------------- internals
 
     def _model_channel(self) -> tuple[Any, str]:
@@ -669,6 +721,72 @@ class AdminService:
                 "---",
                 "Produce the task list now, incorporating those answers verbatim.",
             ]
+        return "\n".join(lines)
+
+    def _answer_prompt(self, question: str, *, group_id: str, asker: str) -> str:
+        """One question, one JSON answer, no dispatch and no promises.
+
+        The question is private, but the facts behind it are public inside the
+        group, so the ledger is handed over verbatim instead of a summary: a
+        summary is where an invented reason would hide.
+        """
+        lines = [
+            "You are the ADMINISTRATOR harness of a multi-harness coordination platform.",
+            "The group owner is asking you a question in a PRIVATE channel. Only the",
+            "owner and you can read the answer -- but it is still a claim about real",
+            "work, so it must be true.",
+            "",
+            f"Group: {group_id}",
+            f"Recipient of this answer: {asker}",
+            "",
+            "The platform's task ledger for this group (your only ground truth; you",
+            "cannot see the members' screens, their private notes or their reasoning):",
+            "---",
+            self._task_ledger(group_id),
+            "---",
+            "",
+            "Group owner's question (verbatim):",
+            "---",
+            question,
+            "---",
+            "",
+            "Hard rules:",
+            '1. Answer with ONE JSON object and nothing else: {"answer":"..."}',
+            "2. Answer only from the ledger above. If it does not contain what the",
+            "   owner asks for (for example why a member abandoned a task, or how",
+            "   many tokens were spent), say plainly that you do not know and name",
+            "   what is missing. Never invent a reason, a person, a number or a time.",
+            "3. Do not promise work you are not doing in this same turn: you are",
+            "   answering a question, not dispatching, reviewing or re-pointing.",
+            "4. Write in the language the owner used. Keep it short: a few sentences.",
+        ]
+        return "\n".join(lines)
+
+    def _task_ledger(self, group_id: str) -> str:
+        """What the platform actually knows about this group's work.
+
+        Handing the ledger to the model is the difference between "answering
+        from the record" and "inventing a reason". A broken read fails closed
+        instead of degrading into an empty ledger the model would fill in.
+        """
+        try:
+            tasks = SchedulerService(self.database).list_tasks(group_id)
+        except Exception as exc:  # noqa: BLE001 - a failed read must not become a guess
+            raise AdminHarnessError(f"cannot read the task ledger: {exc}") from exc
+        if not tasks:
+            return "（这个群里还没有任务。）"
+        lines: list[str] = []
+        for task in tasks:
+            failure = task.get("last_failure")
+            reason = str(failure.get("reason") or "").strip() if isinstance(failure, dict) else ""
+            line = (
+                f"- {task.get('task_id')}｜{task.get('title') or '（无标题）'}"
+                f"｜状态 {task.get('status')}"
+                f"｜执行者 {task.get('owner') or '（无人）'}"
+            )
+            if reason:
+                line += f"｜最近一次失败：{reason}"
+            lines.append(line)
         return "\n".join(lines)
 
     def _parse_payload(

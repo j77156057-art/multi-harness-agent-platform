@@ -51,6 +51,11 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 
   你的 id 就在管理员收到那条消息的 `sender_id` 里（`app.cli log` 可以看到）。
 
+- **自动回**：管理员 worker（`python -m app.admin.worker`）在跑的时候会自己答——
+  它把问题连同**平台的任务账本**交给管理员自己的模型通道，答案仍是一条定向消息；
+  同一问题只答一次。账本里没有的事它必须直说“不知道”，模型通道失败时它会私下
+  说明失败原因，不会发一条看起来像回答的空话。
+
 ## 冒烟脚本
 
 `npm run verify` 会跑 `scripts/verify-*.mjs`。它们分两类：

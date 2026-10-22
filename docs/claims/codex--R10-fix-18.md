@@ -31,7 +31,9 @@
 - **可见性在读路径上判**：服务层 `list_messages` 按观看人过滤（发送方/收件人可见），
   路由层用令牌主体作观看人；识别不出身份时**看不到**（失败关闭）；
 - 收件人沿用 mention 的投递记录（`message_deliveries`）；
-- CLI 的 `say` 加 `--mention` / `--direct`，管理员侧读得到、回得了。
+- CLI 的 `say` 加 `--mention` / `--direct`，管理员侧读得到、回得了；
+- **管理员自动回**：worker 的消息循环识别 `direct`，把问题交给管理员自己的模型通道，
+  答案仍以定向消息发回；同一问题只答一次，模型失败时私下说明原因（不冒充回答）。
 
 ## 边界
 
@@ -44,4 +46,7 @@
 2. `backend/tests/test_cli_flow.py` 1 条绿：CLI 能发定向消息；
 3. `office/scripts/verify-office-direct-chat.mjs` 绿：私聊页只列定向消息、发出去带
    `direct` + `mentions`；
-4. `tools/docstate`、`tools/discipline`、`ruff`、全量 `pytest` 全绿。
+4. `tools/docstate`、`tools/discipline`、`ruff`、全量 `pytest` 全绿；
+5. 管理员会**回**私聊：`test_admin_harness.py` 3 条 + `test_admin_worker.py` 3 条绿
+   （答在私聊里、模型只看任务账本且不许编、空答案失败关闭、只答一次、私聊不进群回执、
+   模型失败私下说明）。

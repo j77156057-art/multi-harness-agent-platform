@@ -293,7 +293,9 @@ def test_direct_messages_are_only_visible_to_the_two_ends(tmp_path):
     assert posted.status_code == 200, posted.text
     assert "direct" in posted.json()["refs"], "定向标记要写在 refs 里"
 
-    bodies = lambda viewer: [m["body"] for m in service.list_messages("G-1", viewer=viewer)]
+    def bodies(viewer):
+        return [m["body"] for m in service.list_messages("G-1", viewer=viewer)]
+
     assert bodies("human-1") == ["只给管理员看的一句"], "发送方看得到"
     assert bodies("harness-1") == ["只给管理员看的一句"], "收件方看得到"
     assert bodies("harness-2") == [], "第三方看不到"
