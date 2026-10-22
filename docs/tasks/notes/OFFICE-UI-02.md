@@ -77,9 +77,15 @@ test_id：MVP-UI-012
 一条一条点。补一个独立窗口 `/outputs.html`（从办公室右栏「看他们说了什么」打开），
 按窗口分组摊开。
 
+**每一次尝试都摊开**，不只最近一次：一条活做过三次，这里就摊三次（新的在前），
+同一条活的几轮收在一起，不把标题重复三遍。分组的键是**这一次尝试是谁做的**
+（attempt 的 owner），不是活现在的主人 —— 改派过之后这两者不是一回事，而"谁当时
+说了什么"才是这里要的。
+
 数据一次取回：浏览器只发一个请求（`GET /api/formal/outputs`），网关在服务端并行取
-每条活最近一次的 `/tasks/{id}/output`。平台那个端点在没有当前 attempt 时会回退到
-**最近一次** attempt 的 transcript，正是这里要的。
+每条活每一次尝试的 `/tasks/{id}/output?attempt_id=…`。attempt_id 是**算出来的**
+（`{task_id}.a{attempt_no}`，见 `backend/app/claim/service.py`），所以不用先捞一遍
+事件才知道有哪些尝试，直接按 1..attempt_no 枚举即可。
 
 ## 边界：什么**不**补，和为什么
 
@@ -124,8 +130,9 @@ test_id：MVP-UI-012
    "再给一次机会"并带上 `budget_override`。
 3. 界面上不出现平台内部名：`attempt` / `epoch` / `决策行` / `预算豁免` / `mention` /
    `stdout` 一律换成人话；窗口显示平台登记的名字而不是 id。
-4. 「各个窗口都说了什么」独立窗口可用：按窗口分组、显示原文、默认只显示做完了的、
-   输出里的 HTML 被转义（CLI 说 `<b>x</b>` 时页面上是字面量）。
+4. 「各个窗口都说了什么」独立窗口可用：按窗口分组（键是"这一次是谁做的"）、
+   每一次尝试都摊开、显示原文、默认只显示做完了的、输出里的 HTML 被转义
+   （CLI 说 `<b>x</b>` 时页面上是字面量）。
 5. 既有冒烟全绿（`verify-office-task-view` / `brief-members` / `admin-chat` /
    `direct-chat` / `brief-live` / `layout` / `project-scope` / `platform-assistant` …）。
 6. `office/` 构建通过（`npm run build`）。

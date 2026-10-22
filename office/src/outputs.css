@@ -133,6 +133,19 @@
   overflow: auto;
 }
 
+/* 同一条活的多次尝试：收在任务下面，不要把标题重复三遍。 */
+.outputs-attempt { margin-top: 8px; }
+
+.outputs-attempt-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.outputs-attempt-head b { font-size: 12px; font-weight: 600; color: #5b6673; }
+
 .outputs-words.is-clipped { max-height: 132px; }
 
 .outputs-err {

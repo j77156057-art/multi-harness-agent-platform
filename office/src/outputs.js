@@ -51,50 +51,76 @@ function titleOf(item) {
   return prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
 }
 
-/** 按窗口分组，同一个窗口内部按时间倒序（最近的在最上面）。 */
+/**
+ * 按窗口分组；同一条活在这个窗口下的多次尝试收在一起。
+ *
+ * 分组的键是**这一次尝试是谁做的**（attempt 的 owner），不是这条活现在的
+ * 主人 —— 改派过之后，这两者不是一回事，而"谁当时说了什么"正是这里要的。
+ */
 function grouped() {
-  const rows = (state.outputs || []).filter((item) =>
-    state.filter === 'all' ? true : DONE_STATES.has(String(item.status)),
-  );
   const map = new Map();
-  for (const item of rows) {
-    const key = item.harness_id || item.owner || 'unknown';
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(item);
+  let shown = 0;
+  for (const task of state.outputs || []) {
+    const attempts = (task.attempts || []).filter((attempt) =>
+      state.filter === 'all' ? true : DONE_STATES.has(String(attempt.attempt_status || task.status)),
+    );
+    for (const attempt of attempts) {
+      const key = attempt.harness_id || task.owner || 'unknown';
+      if (!map.has(key)) map.set(key, new Map());
+      const tasks = map.get(key);
+      if (!tasks.has(task.task_id)) {
+        tasks.set(task.task_id, { task, attempts: [] });
+      }
+      tasks.get(task.task_id).attempts.push(attempt);
+      shown += 1;
+    }
   }
-  return [...map.entries()]
-    .map(([id, items]) => ({
+  const windows = [...map.entries()].map(([id, tasks]) => {
+    const items = [...tasks.values()].map((entry) => ({
+      ...entry,
+      attempts: entry.attempts.sort(
+        (a, b) => Number(b.attempt_no || 0) - Number(a.attempt_no || 0),
+      ),
+    }));
+    return {
       id,
       name: harnessName(id),
-      items: items.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || ''))),
-    }))
-    .sort((a, b) => b.items.length - a.items.length);
+      items,
+      count: items.reduce((sum, entry) => sum + entry.attempts.length, 0),
+    };
+  });
+  return { windows: windows.sort((a, b) => b.count - a.count), shown };
 }
 
-function words(item) {
-  const stdout = String(item.stdout || '');
-  const stderr = String(item.stderr || '');
+/** 一次尝试说出来的话。 */
+/** 一次尝试说出来的话。 */
+function words(task, attempt) {
+  const stdout = String(attempt.stdout || '');
+  const stderr = String(attempt.stderr || '');
   const lines = stdout.split('\n');
   const long = lines.length > 12;
-  const expanded = state.expanded.has(item.task_id);
+  const key = `${task.task_id}:${attempt.attempt_id}`;
+  const expanded = state.expanded.has(key);
   const shown = long && !expanded ? lines.slice(-12).join('\n') : stdout;
   return `
     <pre class="outputs-words ${long && !expanded ? 'is-clipped' : ''}">${escape(shown || '（它什么也没输出）')}</pre>
-    ${long ? `<button type="button" class="outputs-more" data-more="${escape(item.task_id)}">${expanded ? '收起' : `展开全部 ${lines.length} 行`}</button>` : ''}
+    ${long ? `<button type="button" class="outputs-more" data-more="${escape(key)}">${expanded ? '收起' : `展开全部 ${lines.length} 行`}</button>` : ''}
     ${stderr.trim() ? `<pre class="outputs-err">${escape(stderr)}</pre>` : ''}`;
 }
 
 function render() {
   const root = $('#outputsApp');
-  const windows = grouped();
-  const total = (state.outputs || []).length;
-  const shown = windows.reduce((sum, item) => sum + item.items.length, 0);
+  const { windows, shown } = grouped();
+  const total = (state.outputs || []).reduce(
+    (sum, task) => sum + (task.attempts || []).length,
+    0,
+  );
   root.innerHTML = `
     <div class="outputs-shell">
       <header class="outputs-head">
         <h1>各个窗口都说了什么</h1>
-        <p>${state.scope ? escape(state.scope.name) : '本项目'} · ${total} 条活有留下话</p>
-        <p class="outputs-note">干活的人做完一条活，都会留下一段<b>它自己的话</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开，最近的在最上面。</p>
+        <p>${state.scope ? escape(state.scope.name) : '本项目'} · ${total} 次尝试留下了话</p>
+        <p class="outputs-note">干活的人每做一次活，都会留下一段<b>它自己的话</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开；一条活做过几次，这里就摊几次，新的那次在前。</p>
         <div class="outputs-tools">
           <label for="outputsFilter">看</label>
           <select id="outputsFilter">
@@ -102,7 +128,7 @@ function render() {
             <option value="all"${state.filter === 'all' ? ' selected' : ''}>全部</option>
           </select>
           <button type="button" id="outputsRefresh">刷新</button>
-          <span class="outputs-count">显示 ${shown} 条</span>
+          <span class="outputs-count">显示 ${shown} 次</span>
         </div>
       </header>
       <div class="outputs-list">
@@ -111,25 +137,39 @@ function render() {
             ? windows
                 .map(
                   (group) => `<section class="outputs-window">
-                    <header><b>${escape(group.name)}</b><span>${group.items.length} 条</span></header>
+                    <header><b>${escape(group.name)}</b><span>${group.count} 次</span></header>
                     ${group.items
-                      .map((item) => {
-                        const done = DONE_STATES.has(String(item.status));
-                        const stuck = ['abandoned', 'stale', 'cancelled', 'escalated'].includes(String(item.status));
-                        // 这一轮的状态只有在**和活的状态不一样**时才值得说 ——
-                        // 两个一样的标签并排挂着只会让人以为页面坏了。
-                        const round =
-                          item.attempt_status && item.attempt_status !== item.status
-                            ? `<span class="outputs-tag">这一轮：${escape(stateLabel(item.attempt_status))}</span>`
-                            : '';
+                      .map((entry) => {
+                        const { task, attempts } = entry;
+                        const done = DONE_STATES.has(String(task.status));
+                        const stuck = ['abandoned', 'stale', 'cancelled', 'escalated'].includes(
+                          String(task.status),
+                        );
+                        const total = Number(task.attempt_total || 0);
                         return `<article class="outputs-item">
                           <header>
-                            <b>${escape(titleOf(item))}</b>
-                            <span class="outputs-tag ${done ? 'is-done' : ''} ${stuck ? 'is-stuck' : ''}">${escape(stateLabel(item.status))}</span>
-                            ${round}
-                            <time>${escape(when(item.updated_at))}</time>
+                            <b>${escape(titleOf(task))}</b>
+                            <span class="outputs-tag ${done ? 'is-done' : ''} ${stuck ? 'is-stuck' : ''}">${escape(stateLabel(task.status))}</span>
+                            ${total > 1 ? `<span class="outputs-tag">做了 ${total} 次</span>` : ''}
+                            <time>${escape(when(task.updated_at))}</time>
                           </header>
-                          ${words(item)}
+                          ${attempts
+                            .map((attempt) => {
+                              // 这一轮的状态只有在**和活的状态不一样**时才值得说 ——
+                              // 两个一样的标签并排挂着只会让人以为页面坏了。
+                              const round =
+                                attempt.attempt_status && attempt.attempt_status !== task.status
+                                  ? `<span class="outputs-tag">这一轮：${escape(stateLabel(attempt.attempt_status))}</span>`
+                                  : '';
+                              return `<div class="outputs-attempt">
+                                <div class="outputs-attempt-head">
+                                  <b>第 ${escape(String(attempt.attempt_no))} 次尝试</b>
+                                  ${round}
+                                </div>
+                                ${words(task, attempt)}
+                              </div>`;
+                            })
+                            .join('')}
                         </article>`;
                       })
                       .join('')}

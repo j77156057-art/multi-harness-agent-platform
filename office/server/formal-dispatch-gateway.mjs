@@ -271,33 +271,49 @@ export function createFormalGateway(config={}){
         json(res,200,{tasks});return true;
       }
       if(req.method==='GET'&&route==='/outputs'){
-        // **每个窗口都说了什么**：一次请求看完本群所有活最近一次的 CLI 原话。
+        // **每个窗口都说了什么**：一次请求看完本群所有活、每一次尝试的 CLI 原话。
         //
         // 为什么要放在服务端而不是让浏览器自己去问：一条活一次请求，几十条活
         // 就是几十个往返，浏览器那边先把页面卡住。服务端并行取，浏览器只等一次。
         //
-        // 平台的 `/tasks/{id}/output` 没有当前 attempt 时会回退到**最近一次**
-        // attempt 的 transcript（"这个 harness 刚才到底说了什么"），正是这里要的。
+        // attempt_id 是**算出来的**（`{task_id}.a{attempt_no}`，见
+        // backend/app/claim/service.py），所以不需要先捞一遍事件才知道有哪些
+        // 尝试 —— 直接按 1..attempt_no 枚举即可；平台对不存在的 attempt 会回
+        // `{output: null}`，那种直接跳过。
+        const MAX_ATTEMPTS=8; // 一条活最多摊开多少次尝试（平台的 max_attempts 通常是 3）
         const group=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
         const rows=await Promise.all((group.tasks||[]).map(async t=>{
-          const out=await call('/tasks/'+encodeURIComponent(t.task_id)+'/output').catch(()=>null);
-          const output=out&&out.output?out.output:null;
-          if(!output)return null;
-          const stdout=String(output.stdout||'');
-          const stderr=String(output.stderr||'');
-          if(!stdout.trim()&&!stderr.trim())return null;
+          const total=Number(t.attempt_no||0);
+          if(!total)return null;
+          const from=Math.max(1,total-MAX_ATTEMPTS+1);
+          const attempts=await Promise.all(Array.from({length:total-from+1},(_,i)=>from+i).map(async n=>{
+            const attemptId=`${t.task_id}.a${n}`;
+            const out=await call('/tasks/'+encodeURIComponent(t.task_id)+'/output?attempt_id='+encodeURIComponent(attemptId)).catch(()=>null);
+            const output=out&&out.output?out.output:null;
+            if(!output)return null;
+            const stdout=String(output.stdout||'');
+            const stderr=String(output.stderr||'');
+            if(!stdout.trim()&&!stderr.trim())return null;
+            return {
+              attempt_no:n,
+              attempt_id:attemptId,
+              attempt_status:output.attempt_status||null,
+              harness_id:output.harness_id||null,
+              current:Boolean(output.current),
+              stdout:stdout.slice(-4000),
+              stderr:stderr.slice(-1500),
+            };
+          }));
+          const live=attempts.filter(Boolean);
+          if(!live.length)return null;
           return {
             task_id:t.task_id,
             title:t.title||t.task_id,
             status:t.status,
             owner:t.owner||null,
             updated_at:t.updated_at||null,
-            attempt_id:output.attempt_id||null,
-            attempt_status:output.attempt_status||null,
-            harness_id:output.harness_id||t.owner||null,
-            current:Boolean(output.current),
-            stdout:stdout.slice(-4000),
-            stderr:stderr.slice(-1500),
+            attempt_total:total,
+            attempts:live,
           };
         }));
         json(res,200,{outputs:rows.filter(Boolean)});return true;

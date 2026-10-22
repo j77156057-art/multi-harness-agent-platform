@@ -1,11 +1,12 @@
 // 「各窗口说了什么」这个独立页面的回归。
 //
 // 断言：
-//   1. 页面把本群每条活最近一次的 CLI 原话按窗口摊开；
-//   2. 窗口显示的是平台登记的名字，不是 id；
-//   3. 默认只显示"做完了的"，切到「全部」能看到还在做的；
-//   4. 输出里的 HTML 被转义了（CLI 说 `<b>x</b>` 时页面上是字面量，不是标签）；
-//   5. 长输出默认只给末尾若干行，能展开。
+//   1. 页面把每条活**每一次尝试**的 CLI 原话按窗口摊开；
+//   2. 分组的键是**这一次是谁做的**（改派过之后与活现在的主人不是一回事）；
+//   3. 窗口显示的是平台登记的名字，不是 id；
+//   4. 默认只显示"做完了的"，切到「全部」能看到没做成的那些轮次；
+//   5. 输出里的 HTML 被转义了（CLI 说 `<b>x</b>` 时页面上是字面量，不是标签）；
+//   6. 每次尝试标着"第 N 次尝试"。
 //
 // 自带静态服务器 + 拦截全部 /api/formal/*：不连平台。
 import assert from 'node:assert/strict';
@@ -35,6 +36,7 @@ const TASKS = [
     group_id: 'g',
     status: 'merged',
     owner: 'codex-window',
+    attempt_no: 1,
     updated_at: '2026-10-22T12:00:00Z',
   },
   {
@@ -43,6 +45,7 @@ const TASKS = [
     group_id: 'g',
     status: 'in_progress',
     owner: 'qoder-window',
+    attempt_no: 3,
     updated_at: '2026-10-22T13:00:00Z',
   },
 ];
@@ -53,28 +56,75 @@ const OUTPUTS = [
     title: '示例项目 · 把搜索改成模糊匹配',
     status: 'merged',
     owner: 'codex-window',
-    harness_id: 'codex-window',
-    attempt_id: 'FD-0123456789abcdef.a1',
-    attempt_status: 'merged',
-    current: false,
     updated_at: '2026-10-22T12:00:00Z',
-    stdout: 'npm test\n> 12 passed\n<b>done</b>',
-    stderr: '',
+    attempt_total: 1,
+    attempts: [
+      {
+        attempt_no: 1,
+        attempt_id: 'FD-0123456789abcdef.a1',
+        attempt_status: 'merged',
+        harness_id: 'codex-window',
+        current: false,
+        stdout: 'npm test\n> 12 passed\n<b>done</b>',
+        stderr: '',
+      },
+    ],
   },
   {
+    // 这条活做过三次：前两次是 codex 做的（都失败了），第三次换成了 qoder。
+    // 页面要按**这一次是谁做的**分组，而不是按活现在的主人。
     task_id: 'FD-1111111111111111',
     title: '示例项目 · 结算页金额显示不对',
     status: 'in_progress',
     owner: 'qoder-window',
-    harness_id: 'qoder-window',
-    attempt_id: 'FD-1111111111111111.a1',
-    attempt_status: 'in_progress',
-    current: true,
     updated_at: '2026-10-22T13:00:00Z',
-    stdout: 'running tests...\n',
-    stderr: 'TypeError: cannot read property of undefined\n    at settle.js:42\n',
+    attempt_total: 3,
+    attempts: [
+      {
+        attempt_no: 1,
+        attempt_id: 'FD-1111111111111111.a1',
+        attempt_status: 'abandoned',
+        harness_id: 'codex-window',
+        current: false,
+        stdout: 'pytest -q\nFAILED test_amount\n第一次就挂了。',
+        stderr: 'TypeError: cannot read properties of undefined\n',
+      },
+      {
+        attempt_no: 2,
+        attempt_id: 'FD-1111111111111111.a2',
+        attempt_status: 'abandoned',
+        harness_id: 'codex-window',
+        current: false,
+        stdout: 'pytest -q\nFAILED test_amount\n第二次还是同一个错。',
+        stderr: '',
+      },
+      {
+        attempt_no: 3,
+        attempt_id: 'FD-1111111111111111.a3',
+        attempt_status: 'in_progress',
+        harness_id: 'qoder-window',
+        current: true,
+        stdout: 'pytest -q\nrunning...\n',
+        stderr: 'TypeError: cannot read properties of undefined\n    at settle.js:42:19\n',
+      },
+    ],
   },
 ];
+
+const STATUS = {
+  configured: true,
+  connected: true,
+  project_id: '示例项目',
+  group_id: 'g',
+  operator: 'office-operator',
+  admin: { configured: true, identity: 'admin-window', error: null },
+  project_members: [],
+  harnesses: [
+    { harness_id: 'codex-window', name: 'Codex 窗口', status: 'online', capabilities: ['coding'] },
+    { harness_id: 'qoder-window', name: 'Qoder 窗口', status: 'online', capabilities: ['coding'] },
+  ],
+  base_adapters: [],
+};
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
@@ -84,22 +134,7 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify(payload));
     };
-    if (route === '/status') {
-      return json({
-        configured: true,
-        connected: true,
-        project_id: '示例项目',
-        group_id: 'g',
-        operator: 'office-operator',
-        admin: { configured: true, identity: 'admin-window', error: null },
-        project_members: [],
-        harnesses: [
-          { harness_id: 'codex-window', name: 'Codex 窗口', status: 'online', capabilities: ['coding'] },
-          { harness_id: 'qoder-window', name: 'Qoder 窗口', status: 'online', capabilities: ['coding'] },
-        ],
-        base_adapters: [],
-      });
-    }
+    if (route === '/status') return json(STATUS);
     if (route === '/outputs') return json({ outputs: OUTPUTS });
     if (route === '/tasks') return json({ tasks: TASKS });
     return json({});
@@ -122,23 +157,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/formal/**', async route => {
     const pathname = new URL(route.request().url()).pathname.replace('/api/formal', '');
-    const payload =
-      pathname === '/status'
-        ? {
-            configured: true,
-            connected: true,
-            project_id: '示例项目',
-            group_id: 'g',
-            operator: 'office-operator',
-            admin: { configured: true, identity: 'admin-window', error: null },
-            harnesses: [
-              { harness_id: 'codex-window', name: 'Codex 窗口', status: 'online' },
-              { harness_id: 'qoder-window', name: 'Qoder 窗口', status: 'online' },
-            ],
-          }
-        : pathname === '/outputs'
-          ? { outputs: OUTPUTS }
-          : {};
+    const payload = pathname === '/status' ? STATUS : pathname === '/outputs' ? { outputs: OUTPUTS } : {};
     await route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
@@ -158,32 +177,63 @@ try {
   await page.goto(`${base}/outputs.html`);
   await page.waitForSelector('.outputs-window', { timeout: 20000 });
 
-  // 1. 默认只显示"做完了的"：那条 merged 的在，还在做的不在。
-  const windows = page.locator('.outputs-window');
-  assert.equal(await windows.count(), 1, '默认只显示做完了的那个窗口');
-  const first = windows.first();
-  assert.match(await first.innerText(), /Codex 窗口/, '窗口显示的是登记名，不是 id');
-  assert.match(await first.innerText(), /把搜索改成模糊匹配/, '任务名在');
-  assert.doesNotMatch(await first.innerText(), /示例项目 · 把搜索/, '任务名里重复的项目名前缀去掉了');
-  assert.equal(await page.locator('.outputs-item', { hasText: '结算页金额显示不对' }).count(), 0);
-
-  // 2. 切到「全部」，还在做的那条也出来。
-  await page.selectOption('#outputsFilter', 'all');
-  await page.waitForTimeout(200);
-  assert.equal(await page.locator('.outputs-window').count(), 2, '切到全部后两个窗口都在');
-  assert.equal(
-    await page.locator('.outputs-item', { hasText: '结算页金额显示不对' }).count(),
-    1,
-    '还在做的那条也在',
+  // 1. 默认只显示"做完了的"：merged 的那次在，abandoned 的两次不在。
+  assert.equal(await page.locator('.outputs-item').count(), 1, '默认只显示做完了的那次尝试');
+  assert.match(await page.locator('.outputs-window').first().innerText(), /Codex 窗口/, '窗口显示登记名');
+  assert.match(
+    await page.locator('.outputs-window').first().innerText(),
+    /把搜索改成模糊匹配/,
+    '任务名在',
+  );
+  assert.doesNotMatch(
+    await page.locator('.outputs-window').first().innerText(),
+    /示例项目 · 把搜索/,
+    '任务名里重复的项目名前缀去掉了',
+  );
+  assert.match(
+    await page.locator('.outputs-item').first().innerText(),
+    /第 1 次尝试/,
+    '每次尝试标着第几次',
   );
 
+  // 2. 切到「全部」：每一次尝试都在，而且按**这一次是谁做的**分组 ——
+  //    那条活现在的主人是 qoder，但前两轮是 codex 做的。
+  await page.selectOption('#outputsFilter', 'all');
+  await page.waitForTimeout(300);
+  // 一次尝试 = 一个 .outputs-attempt；同一条活的多次尝试收在同一个 .outputs-item 里。
+  assert.equal(await page.locator('.outputs-attempt').count(), 4, '四次尝试全摊开');
+  assert.equal(await page.locator('.outputs-item').count(), 3, '两条活（其中一条在两个窗口名下）');
+  const groups = await page.locator('.outputs-window > header').allInnerTexts();
+  assert.ok(
+    groups.some(text => text.includes('Codex 窗口') && text.includes('3 次')),
+    `codex 做了三次（其中两次失败）：${JSON.stringify(groups)}`,
+  );
+  assert.ok(
+    groups.some(text => text.includes('Qoder 窗口') && text.includes('1 次')),
+    `qoder 做了第三次：${JSON.stringify(groups)}`,
+  );
+  const codexItems = page.locator('.outputs-window', { hasText: 'Codex 窗口' }).locator('.outputs-item');
+  assert.equal(await codexItems.count(), 2, 'codex 名下两条活');
+  const settlement = page
+    .locator('.outputs-item', { hasText: '结算页金额显示不对' })
+    .first();
+  assert.equal(await settlement.locator('.outputs-attempt').count(), 2, '同一条活在这个窗口下的两次尝试');
+  const attemptHeads = await settlement.locator('.outputs-attempt-head').allInnerTexts();
+  // 组内按尝试序号倒序：同一条活里也是新的尝试在前。
+  assert.match(attemptHeads[0], /第 2 次尝试/, '同一条活的多次尝试，新的在前');
+  assert.match(attemptHeads[1], /第 1 次尝试/, '第 1 次尝试也在');
+  assert.match(attemptHeads.join('\n'), /已放弃/, '失败的那一轮标出来了');
+
   // 3. 输出里的 HTML 要转义 —— CLI 说 <b>done</b> 时，页面上是字面量。
-  const words = await page.locator('.outputs-words').first().innerText();
+  const words = await page
+    .locator('.outputs-item', { hasText: '把搜索改成模糊匹配' })
+    .locator('.outputs-words')
+    .innerText();
   assert.match(words, /<b>done<\/b>/, '输出里的标签是字面量，不是标签');
   assert.equal(await page.locator('.outputs-words b').count(), 0, '没有真的渲染出标签');
 
-  // 4. 报错单独一块。
-  assert.equal(await page.locator('.outputs-err').count(), 1, '报错另起一块');
+  // 4. 报错单独一块（两次失败各有一次报错）。
+  assert.equal(await page.locator('.outputs-err').count(), 2, '报错各自一块');
 
   // 5. 页面不报错。
   assert.deepEqual(errors, [], '页面没有报错');
