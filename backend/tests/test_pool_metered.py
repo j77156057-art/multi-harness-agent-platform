@@ -254,6 +254,65 @@ def test_a_cli_that_reports_the_shape_but_no_numbers_has_no_usage():
     assert report["usage"] is None
 
 
+def test_credits_are_kept_even_when_the_tokens_are_not_there():
+    """有的 provider 记的是 credits（qoder 记 credits 不记 token）。
+
+    那不是"用量丢了"——只是它用的单位不同。把 credits 留着，用量就还在；
+    换算成 token 需要一个**依据**，而那个依据（context window / 单价）
+    并不在可读的地方，凭空换算就是编数。
+    """
+    from app.pool.cli_model import extract_report
+
+    report = extract_report(
+        json.dumps(
+            {
+                "type": "result",
+                "result": "OK",
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "credits": 0.561569393,
+                    "original_credits": 0.561569393,
+                    "billable": False,
+                    "context_usage_ratio": 0.11206111111111111,
+                },
+            }
+        )
+    )
+
+    assert report["usage"] is None
+    assert report["credits"] == 0.561569393
+
+
+def test_the_summary_keeps_the_credits_of_a_tier(tmp_path):
+    usage = tmp_path / "usage.jsonl"
+    usage.write_text(
+        json.dumps(
+            {
+                "at": "2026-10-22T03:14:00.000000+00:00",
+                "model": "qoder/Qwen3.8-Flash",
+                "upstream": "qoder:Qwen3.8-Flash",
+                "protocol": "cli",
+                "status": 200,
+                "duration_ms": 100,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "usage_reported": False,
+                "credits": 0.561569393,
+                "consumer": "harness/opencode",
+                "note": "served by the CLI slot",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = PoolService(home=tmp_path, usage_path=usage).usage_summary()
+
+    assert summary["upstreams"]["qoder:Qwen3.8-Flash"]["credits"] == 0.561569393
+    assert summary["upstreams"]["qoder:Qwen3.8-Flash"]["tokens_unknown"] == 1
+
+
 # --------------------------------------------------------------------------- #
 # CLI 槽：用量是 CLI 自己报的
 # --------------------------------------------------------------------------- #

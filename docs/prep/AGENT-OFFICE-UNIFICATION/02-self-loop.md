@@ -1655,3 +1655,26 @@ mmx 槽原来的参数：["text", "chat", "--output", "json", "--non-interactive
 | mmx | 42 / 12 | 自己输出的整份 JSON ❌ |
 | opencode | 5600 / 2 | 自己的库（按消息 id）❌ |
 | qoder | —（未记上） | 它的 provider 只给 credits ❌ |
+
+### 22.17 qoder 的 credits 换算 token：换不了，因为没有依据
+
+“换算成 token”这一步，先把依据找了一遍（而且都找不到）：
+
+| 可能的依据 | 结果 |
+|---|---|
+| provider 报 token | 不报。它报 `credits: 0.5616`（`original_credits`、`billable: false`）❌ |
+| `context_usage_ratio` × context window | ratio 是 0.11206111111111111，而所有 1024 倍数的 window 都算不出整数 token ❌ |
+| CLI 的 `--list-models` | 只有模型名，没有 window ❌ |
+| CLI 的模型目录（`.models/`） | **加密**的（二进制）❌ |
+| CLI 的会话状态（`state.json`） | **加密**的（二进制）❌ |
+| provider 的 `/api/v1/models` | 401：平台没有它的凭据（在 CLI 的加密存储里）❌ |
+
+所以：**credits → token 的换算没有依据**——而“凭凭 context window 猜一个”正好是我们一直拒绝的那件事
+（**不猜单价**）。
+
+**能做的是把 provider 自己的单位留下来**：池子记录里多一个 `credits`，汇总里每档一个总数，
+办公室里写明白：**provider 记的是 credits，不是 token**。用量**没丢**，只是不在 token 这个单位里。
+
+**什么时候能真的换算成 token**：只要 provider 把模型目录里的 **context window** 变成可读（或给平台一个
+`gateway.qoder.com.cn/api/v1/models` 的**只读**凭据），那时 tokens = ratio × window 就是**精确**的（两个数都是 provider 自己报的）。
+在那之前，它就是 credits。

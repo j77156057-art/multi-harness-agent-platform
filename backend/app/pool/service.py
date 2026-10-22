@@ -94,6 +94,9 @@ class Usage:
     #: False when the CLI did not report its usage at all -- then the zeros
     #: are the absence of a number, not a measurement.
     usage_reported: bool = True
+    #: Some providers count **credits** instead of tokens.  That is their own
+    #: unit; the platform keeps it rather than inventing a token rate.
+    credits: float | None = None
     #: The CLI's own session id, when it reports one: it makes the record
     #: traceable back to the CLI's own store.
     session_id: str | None = None
@@ -710,6 +713,7 @@ class PoolService:
                 # The CLI did not report its usage: say so, instead of
                 # recording a zero that reads as "this call was free".
                 usage_reported=usage is not None,
+                credits=report.get("credits"),
                 session_id=report.get("session_id"),
                 consumer=consumer,
                 note="served by the CLI slot",
@@ -761,6 +765,7 @@ class PoolService:
                             "prompt_tokens": usage.prompt_tokens,
                             "completion_tokens": usage.completion_tokens,
                             "usage_reported": usage.usage_reported,
+                            "credits": usage.credits,
                             "session_id": usage.session_id,
                             "consumer": usage.consumer,
                             "note": usage.note,
@@ -930,11 +935,15 @@ class PoolService:
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "tokens_unknown": 0,
+                        "credits": 0.0,
                         "models": {},
                         "consumers": {},
                     },
                 )
                 bucket["requests"] += 1
+                credits = record.get("credits")
+                if isinstance(credits, int | float):
+                    bucket["credits"] = round(bucket.get("credits", 0.0) + float(credits), 9)
                 corrected = corrections.get(
                     (str(record.get("at") or ""), upstream, model, consumer)
                 )

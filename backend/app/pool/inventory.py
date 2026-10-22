@@ -203,6 +203,7 @@ def _spend_for(usage: dict[str, Any], names: set[str]) -> dict[str, Any]:
     prompt_tokens = 0
     completion_tokens = 0
     unknown = 0
+    credits = 0.0
     consumers: dict[str, int] = {}
     for name, bucket in upstreams.items():
         if name not in names or not isinstance(bucket, dict):
@@ -211,6 +212,7 @@ def _spend_for(usage: dict[str, Any], names: set[str]) -> dict[str, Any]:
         prompt_tokens += int(bucket.get("prompt_tokens") or 0)
         completion_tokens += int(bucket.get("completion_tokens") or 0)
         unknown += int(bucket.get("tokens_unknown") or 0)
+        credits += float(bucket.get("credits") or 0.0)
         for who, count in (bucket.get("consumers") or {}).items():
             consumers[str(who)] = consumers.get(str(who), 0) + int(count or 0)
     return {
@@ -221,6 +223,9 @@ def _spend_for(usage: dict[str, Any], names: set[str]) -> dict[str, Any]:
         # tokens, and saying so is the difference between an honest book and
         # a cheap-looking one.
         "tokens_unknown": unknown,
+        # Some providers count credits instead of tokens; that is their unit
+        # and it is worth keeping -- the usage is not lost.
+        "credits": round(credits, 6),
         "consumers": consumers,
     }
 

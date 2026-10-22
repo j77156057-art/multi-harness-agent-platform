@@ -263,6 +263,7 @@ def extract_report(stdout: str) -> dict[str, Any]:
     report: dict[str, Any] = {
         "text": "",
         "usage": None,
+        "credits": None,
         "session_id": None,
         "message_ids": [],
     }
@@ -325,6 +326,12 @@ def _read_event(event: dict[str, Any], report: dict[str, Any]) -> None:
         # measurement of zero.
         if counts["prompt_tokens"] or counts["completion_tokens"]:
             report["usage"] = counts
+        credits = usage.get("credits")
+        if isinstance(credits, int | float):
+            # Some providers count **credits** instead of tokens.  That is
+            # their unit, and it is worth keeping: the usage is not lost, it
+            # is just not in tokens.
+            report["credits"] = float(credits)
     text = ""
     if isinstance(part, dict) and isinstance(part.get("text"), str):
         text = part["text"]
