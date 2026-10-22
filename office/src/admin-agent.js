@@ -541,7 +541,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const usableWindows = availability.filter(item => item.usable);
     const takeover = section('失败与接手',
       '这里只列平台侧的事实：哪条活失败了或停滞了、现在还有哪些窗口能领活（带它们当前的模型）。'
-      + '要换人请按「请求管理员改派」——按钮递的是**请求**，改派由管理员 Harness 决定并执行；'
+      + '要换人请按「请管理员换个人做」——按钮递的是**请求**，改派由管理员 Harness 决定并执行；'
       + '办公室不派单、不改任务归属。');
     if (!failedTasks.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
@@ -597,7 +597,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         actions.append(select);
       }
       const btn = actionButton(
-        adminRecipient ? '请求管理员改派' : '请求管理员改派（本项目未指定管理员）',
+        adminRecipient ? '请管理员换个人做' : '请管理员换个人做（本项目未指定管理员）',
         () => requestReassign(task, select ? select.value : ''),
         adminRecipient
           ? `把改派请求递到管理员 Harness @ ${adminRecipient}（由它决定并执行）`
@@ -614,7 +614,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const planSection = section('方案定稿（等人最终审核）',
       '管理员把要求细化成一版方案，传阅给成员提意见，再把意见并进这一版。'
       + '下面就是给人看的最终稿（Markdown + HTML 也落在 exports/plans/ 下）。'
-      + '**只有人点了「批准并派单」，任务才会被创建并可以被领取。**');
+      + '**只有人点了「批准，开始做」，任务才会被创建并可以被领取。**');
     if (planError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `读不到方案：${planError}`;
@@ -630,7 +630,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       body.textContent = doc.markdown || '（空）';
       planSection.append(body);
       const actions = document.createElement('div'); actions.className = 'agent-actions';
-      const btn = actionButton('批准并派单', () => approvePlan(planDoc.draft.plan_id),
+      const btn = actionButton('批准，开始做', () => approvePlan(planDoc.draft.plan_id),
         '由人最终审核：批准后这份方案才会变成可领取的任务');
       actions.append(btn);
       planSection.append(actions);

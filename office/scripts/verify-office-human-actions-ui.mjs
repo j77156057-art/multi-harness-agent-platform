@@ -42,6 +42,7 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
 
 const TASK_ID = 'FD-0123456789abcdef';
+const ESCALATED_ID = 'FD-2222222222222222';
 const PLAN_ID = 'P-1';
 
 const task = {
@@ -64,6 +65,17 @@ const task = {
   supersedes: null,
   created_at: '2026-10-22T10:00:00Z',
   updated_at: '2026-10-22T11:00:00Z',
+};
+
+// 预算用完的升级任务：放行它必须显式带上"再给一次机会"。
+const escalated = {
+  ...task,
+  task_id: ESCALATED_ID,
+  title: '只读观察回归 · 预算用完的升级任务',
+  status: 'escalated',
+  attempt_no: 3,
+  max_attempts: 3,
+  state_changed_seq: 20,
 };
 
 const responses = {
@@ -89,7 +101,7 @@ const responses = {
     ],
     base_adapters: [],
   },
-  '/tasks': { tasks: [task] },
+  '/tasks': { tasks: [task, escalated] },
   '/events': { events: [], next_seq: 0, has_more: false },
   '/messages': { messages: [] },
   '/availability': { availability: [] },
@@ -156,9 +168,19 @@ try {
   assert.equal(await detail.locator('[data-act="decide-release"]').count(), 0, '等待回答的活没有「放行」');
   assert.equal(await detail.locator('[data-act="decide-adjudicate"]').count(), 0, '裁决不在群主面');
 
-  // 点「回答并恢复」：先问清楚，再打平台。
+  // 点「我来回答」：先问清楚，再打平台。
   await detail.locator('[data-act="decide-resume"]').click();
   await page.waitForSelector('#flatDecision[open]');
+  // 勾选框只在"放行"且预算用完时才该出现 —— 它之前在每个对话框里都露着
+  // （hidden 属性被 display:grid 盖掉了），那是靠肉眼看出来的。
+  assert.equal(
+    await page.locator('[data-decision-override-wrap]').isVisible(),
+    false,
+    '回答的对话框里不该问预算豁免',
+  );
+  // 对话框不该是半个屏幕高的空盒子。
+  const dialogHeight = await page.locator('#flatDecision').evaluate(node => node.getBoundingClientRect().height);
+  assert.ok(dialogHeight < 400, `处置对话框按内容收着（实际 ${Math.round(dialogHeight)}px）`);
   await page.locator('[data-decision-text]').fill('按第二条做');
   await page.locator('[data-decision-confirm]').click();
   await page.waitForTimeout(400);
@@ -167,6 +189,27 @@ try {
   assert.equal(resume.method, 'POST');
   assert.equal(resume.body.task_id, TASK_ID);
   assert.equal(resume.body.answer, '按第二条做');
+
+  // 预算用完的升级任务：放行时必须显式问"再给一次机会"。
+  await page.locator('.flat-task', { hasText: '预算用完的升级任务' }).first().click();
+  await page.waitForTimeout(800);
+  const escalatedDetail = page.locator('.flat-detail-actions');
+  await escalatedDetail.locator('[data-act="decide-release"]').waitFor({ state: 'visible' });
+  await escalatedDetail.locator('[data-act="decide-release"]').click();
+  await page.waitForSelector('#flatDecision[open]');
+  assert.equal(
+    await page.locator('[data-decision-override-wrap]').isVisible(),
+    true,
+    '预算用完的活放行前要问一次"再给一次机会"',
+  );
+  await page.locator('[data-decision-text]').fill('换个窗口再试');
+  await page.locator('[data-decision-override]').check();
+  await page.locator('[data-decision-confirm]').click();
+  await page.waitForTimeout(400);
+  const release = calls.find(call => call.path === '/human/release');
+  assert.ok(release, '放行走了 /human/release');
+  assert.equal(release.body.budget_override, true, '勾了"再给一次机会"就带上它');
+  assert.equal(release.body.reason, '换个窗口再试');
 
   // 方案卡片：批准旁边要有驳回。
   const rail = page.locator('.flat-rail');

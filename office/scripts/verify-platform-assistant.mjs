@@ -87,11 +87,12 @@ if (!/本项目范围内没有登记在册的窗口|本项目 \d+ 个窗口/.tes
 }
 if (!audit.plan) throw new Error('platform assistant has no 「方案定稿」 section');
 // 批准方案是**人**的动作：这一节只该有这一个按钮。
-const planButtons = audit.plan.buttons.filter(t => t && t !== '批准并派单');
+// （按钮文案是给人看的说法，平台那边的动作名是"批准并派单"。）
+const planButtons = audit.plan.buttons.filter(t => t && t !== '批准，开始做');
 if (planButtons.length) throw new Error('the plan section offers more than the human approval: ' + JSON.stringify(planButtons));
 if (!audit.takeover) throw new Error('platform assistant has no 「失败与接手」 section');
-// 这一节只能有「请求管理员改派」——不能有直接派单/改派的按钮。
-const takeoverButtons = audit.takeover.buttons.filter(t => t && t !== '请求管理员改派' && !t.startsWith('请求管理员改派'));
+// 这一节只能有「请管理员换个人做」——不能有直接派单/改派的按钮。
+const takeoverButtons = audit.takeover.buttons.filter(t => t && t !== '请管理员换个人做' && !t.startsWith('请管理员换个人做'));
 if (takeoverButtons.length) throw new Error('the takeover section offers more than a request: ' + JSON.stringify(takeoverButtons));
 if (audit.takeover.buttons.some(t => t.startsWith('请求管理员改派')) && audit.takeover.disabled < audit.takeover.buttons.length) {
   // 没有指定管理员 Harness 时，请求按钮必须是禁用的。

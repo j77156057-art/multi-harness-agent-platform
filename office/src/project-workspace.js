@@ -62,15 +62,15 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     <section class="project-lobby" aria-labelledby="projectLobbyTitle">
       <header class="project-lobby-head">
         <div class="project-brand"><span class="project-brand-mark">AO</span><div><strong>Agent Office</strong><span>项目工作区</span></div></div>
-        <span class="project-isolation"><i></i> 本机项目历史</span>
+        <span class="project-isolation"><i></i> 项目历史（存在这台电脑上）</span>
       </header>
       <div class="project-lobby-body">
-        <div class="project-lobby-copy"><p class="eyebrow">PROJECT DESK / 01</p><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点击「新建项目」填写项目名称、数据源与成员，确认后直接进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接 Harness</button></div>
-          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里由 Harness 担任管理员与成员</li></ol>
+        <div class="project-lobby-copy"><p class="eyebrow">PROJECT DESK / 01</p><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点击「新建项目」填写项目名称、数据源与成员，确认后直接进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
+          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里挑管理员和成员</li></ol>
         </div>
         <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><span class="eyebrow">HISTORY</span><h2 id="projectHistoryTitle">项目历史</h2></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
       </div>
-      <footer class="project-lobby-foot"><span>项目历史保存在本机浏览器，同一入口的标签页共享</span><span>不同入口实例（如评审端口）不共享</span></footer>
+      <footer class="project-lobby-foot"><span>项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到这份历史</span></footer>
     </section>`;
 
   // 4176 是跨提供方评审实例，和 4174 不同源，项目历史本来就不共享。这里把
@@ -90,7 +90,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   dialog.className = 'harness-dialog';
   dialog.setAttribute('aria-labelledby', 'harnessDialogTitle');
   dialog.innerHTML = `
-    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">Harness 与模型连接</h2><p>分别检查本机程序、模型端点与正式任务注册状态。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
+    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">连接工作窗口</h2><p>这里检查本机装了哪些 AI 工具、能不能连上模型，并把它们登记成能干活的窗口。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
     <div class="harness-tools"><button type="button" data-refresh-connections>重新检测</button><span data-connection-summary role="status">正在扫描本机…</span></div>
     <section class="harness-list" data-harness-list aria-label="Harness 列表"></section>
     <section class="harness-base" aria-labelledby="harnessBaseTitle"><div><span class="eyebrow">BASE HARNESS</span><h3 id="harnessBaseTitle">登记基座 Harness</h3><p>把平台内置适配器登记为正式基座；只有基座登记后，才能为它注册独立成员窗口。适配器与能力由服务端模板决定，浏览器只选择名称。</p></div><div class="harness-base-form"><label>基座 Harness<select data-base-source><option value="">读取可登记基座…</option></select></label><button type="button" data-register-base>登记基座</button></div><p class="harness-help" data-base-result role="status">登记写入正式注册表，同一版本可重复提交。</p></section>
@@ -431,7 +431,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.projectId = project.id;
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
-      const action = project.phase === 'scene' ? '进入办公室' : '配置开工';
+      const action = project.phase === 'scene' ? '进入办公室' : '先配置一下';
       card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status ${project.phase}">${status}</span><button type="button" class="project-card-open">${action}</button>`;
       card.querySelector('strong').textContent = project.name;
       // Only the date fits next to the status chip; the identity gets its own

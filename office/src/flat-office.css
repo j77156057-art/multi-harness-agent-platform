@@ -61,6 +61,18 @@
   color: var(--ao-ink-soft);
 }
 
+/* 顶部那一句导语：这是哪儿、我该看什么。 */
+.flat-head-main p.flat-guide {
+  font-size: 12.5px;
+  color: var(--ao-ink-soft);
+  max-width: 46rem;
+}
+
+.flat-head-main p.flat-guide b {
+  color: var(--ao-bad);
+  font-weight: 650;
+}
+
 .flat-source {
   display: flex;
   align-items: center;
@@ -299,6 +311,28 @@
   font-size: 11px;
   color: var(--ao-ink-faint);
   overflow-wrap: anywhere;
+}
+
+/* 详情里那句「这条活现在怎么样了」——比状态词更该被先看到。 */
+.flat-summary {
+  margin: 2px 0 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ao-ink);
+}
+
+/* 任务编号：留着有用（报问题时能说清是哪一条），但别抢眼。 */
+.flat-id {
+  opacity: .75;
+}
+
+/* 详情底部的收尾一句：下面没内容了，别让人以为页面坏了。 */
+.flat-detail-foot {
+  margin: 14px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--ao-line-soft);
+  font-size: 12px;
+  color: var(--ao-ink-faint);
 }
 
 .flat-detail-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
@@ -673,6 +707,25 @@
   overflow: hidden;
 }
 
+/* 处置对话框只有一个输入框：给它固定的高对话框就是一大片空白，
+   让人以为没加载出来。高度跟着内容走。
+
+   两个坑：
+   1) `height:auto` 不够 —— 模态对话框是 `inset:0; margin:auto` 定位的，
+      auto 高度会**拉满**视口，再被 max-height 截到 78vh，于是还是一片空白。
+      要 `fit-content` 才是"按内容"。
+   2) 通用规则给的行模板是 `auto minmax(0,1fr) auto`，那条 1fr 会把多余
+      高度分给各行；行高也得一起改成按内容算。 */
+.flat-dialog.is-compact {
+  height: fit-content;
+  max-height: 78vh;
+  align-content: start;
+}
+
+.flat-dialog.is-compact[open] {
+  grid-template-rows: auto auto auto;
+}
+
 .flat-dialog::backdrop { background: rgba(20, 28, 38, .38); }
 
 .flat-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
@@ -742,6 +795,13 @@
   gap: 4px;
   font-size: 13px;
   color: #3d4652;
+}
+
+/* `hidden` 属性默认是 display:none，但上面这条 display:grid 把它盖掉了 ——
+   于是"顺便再给一次机会"那个勾选框在**每一**个对话框里都露出来。
+   显式写回去，它就只在该问的时候才问。 */
+.flat-check[hidden] {
+  display: none;
 }
 
 .flat-check .flat-note {

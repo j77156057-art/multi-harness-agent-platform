@@ -22,10 +22,15 @@ test_id：MVP-UI-012
 
 ## 做什么
 
-把「人自己的动作」补回办公室界面：**回答并恢复、放行、重新打开、取消这条活**，
-以及方案卡上的**驳回方案**。
+两件事，同一面：**让第一次用这个页面的人看得懂、点得对**。
+
+1. 把「人自己的动作」补回办公室界面：**回答并恢复、放行、重新打开、取消这条活**，
+   以及方案卡上的**驳回方案**。
+2. 把界面的说法从平台内部名换成**人话**（状态、按钮、提示、窗口名、次数说法）。
 
 ## 为什么
+
+### 一、按钮在迁移里丢了
 
 旧的人操作面（`frontend/`，已随 `f1f9b7e` 删除）里有这些按钮：`MVP-UI-004`
 明写"管理链与 §18 五决策动词接入三栏壳"，`frontend/src/components/TaskPane.vue`
@@ -44,6 +49,25 @@ test_id：MVP-UI-012
 `/human/cancel`、`/plans/{id}/reject`），CLI 也有对应命令
 （`human-resume` / `human-reopen` / `human-release` / `human-cancel`）；
 缺的只是界面。
+
+### 二、字也没人看得懂
+
+做法是**先看画面再改**：把办公室渲染出来（带假数据），逐屏截图，用眼睛看。
+第一屏的问题不是「不好看」，是**读不懂**：
+
+- 状态词是平台内部名：`待领取 / 待审 / 待人工 / 等人回答 / 方案漂移`；
+- 按钮是平台动作名：`请求再给一次机会（预算豁免）` / `放行回队列` / `批准并派单`；
+- 对话框里直接写 `决策行 / attempt / epoch / R10 §8`；
+- 窗口显示成 id：`codex-window` 而不是「Codex 窗口」；
+- 额度卡显示 `已用 undefined 次`（平台没给这个数时，界面把 undefined 印出来了）；
+- 顶栏显示 `g · 已连接正式平台`（群 id）和一个孤零零的「你」。
+
+走查还看出两个真缺陷：
+
+- `hidden` 属性被 `display:grid` 盖掉 → 「顺便再给一次机会」那个勾选框
+  **在每一个对话框里都露着**（静态测试全绿，肉眼才看得见）；
+- 模态对话框是 `inset:0; margin:auto` 定位的，`height:auto` 会拉满视口 ——
+  处置对话框虽有内容，却有 640px 高的一大片空白（要 `fit-content` 才按内容收）。
 
 ## 边界：什么**不**补，和为什么
 
@@ -69,8 +93,11 @@ test_id：MVP-UI-012
    冒烟脚本从 `backend/app/human/service.py` **解析**出后端守卫再逐个比对，
    后端一改，前端这边立刻红。
 2. **预算是显式问的**：R10 §8 规定预算用完的活普通的 release 会被拒绝，
-   所以"放行"按钮在需要时明确问一次"同时给一次预算豁免"，而不是让人从 409 里猜。
+   所以"放行"按钮在需要时明确问一次"顺便再给一次机会"，而不是让人从 409 里猜。
 3. **不改后端**：这五个端点早就在，零后端改动、零 schema 改动、零事件名改动。
+4. **说法改了不能把断言改松**：平台助手里那两个按钮（批准、改派）改了措辞，
+   `verify-platform-assistant.mjs` 的断言同步改成新措辞 —— 断的是"这一节只该有
+   人的批准按钮"这件事，不是"按钮必须长这样"。
 
 ## 完成标准
 
@@ -80,10 +107,18 @@ test_id：MVP-UI-012
 2. `office/scripts/verify-office-human-actions-ui.mjs` 绿（浏览器实测）：
    按钮真的渲染出来、点了真的打出 `/human/resume` 与 `/plan/reject`、
    页面不报错。该脚本自带静态服务器并拦截全部 `/api/formal/*`，不连在线平台。
-3. `office/` 构建通过（`npm run build`）。
-4. `./scripts.sh check` 三道门禁全绿（docstate + discipline + ruff + pytest）。
-5. `docs/traceability.md` 登记 `MVP-UI-012`，状态如实写"部分有断言" ——
-   前端的静态检查**不在本仓门禁内**（CI 里没有 node），这一点不藏着。
+   另外断言三条**走查才发现**的东西：回答的对话框里不出现预算勾选框、
+   处置对话框高度按内容收着（< 400px）、预算用完的活放行前会问一次
+   "再给一次机会"并带上 `budget_override`。
+3. 界面上不出现平台内部名：`attempt` / `epoch` / `决策行` / `预算豁免` / `mention` /
+   `stdout` 一律换成人话；窗口显示平台登记的名字而不是 id。
+4. 既有冒烟全绿（`verify-office-task-view` / `brief-members` / `admin-chat` /
+   `direct-chat` / `brief-live` / `layout` / `project-scope` / `platform-assistant` …）。
+5. `office/` 构建通过（`npm run build`）。
+6. `./scripts.sh check` 三道门禁全绿（docstate + discipline + ruff + pytest）。
+7. `docs/traceability.md` 登记 `MVP-UI-012`（按钮）与 `MVP-UI-013`（说法），
+   状态如实写"部分有断言" —— 前端的静态检查**不在本仓门禁内**（CI 里没有 node），
+   这一点不藏着。
 
 ## 验证结果
 
@@ -94,5 +129,6 @@ test_id：MVP-UI-012
 | `office/scripts/verify-office-read.mjs` | 34/34 PASS（既有） |
 | `office/scripts/verify-routed-messages.mjs` | 5/5 PASS（既有） |
 | `office/server/formal-gateway-admin.test.mjs` | 10/10 PASS（既有） |
-| `office/` 构建 | `npm run build` 通过（158 kB JS / 48.7 kB CSS） |
+| 其余既有冒烟 | 全 ok（对着带假数据的本地预览逐个跑过） |
+| `office/` 构建 | `npm run build` 通过（161 kB JS / 48.7 kB CSS） |
 | `./scripts.sh check` | 见提交记录 |

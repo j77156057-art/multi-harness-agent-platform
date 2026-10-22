@@ -68,7 +68,7 @@ app.innerHTML = `
       <button class="ao-btn" id="aoStartBtn" type="button" hidden>开工配置</button>
       <span id="aoTopActions" class="ao-topbar-actions"></span>
       <button class="ao-btn" id="aoLobbyBtn" type="button">项目列表</button>
-      <span class="ao-user" title="群主">你</span>
+      <span class="ao-user" title="你就是群主：项目里的事都由你拍板">群主</span>
     </div>
   </header>
   <main class="ao-main">
@@ -81,7 +81,8 @@ app.innerHTML = `
 const connection = $('#aoConn');
 if (status?.connected) {
   connection.classList.add('is-live');
-  connection.querySelector('span').textContent = `正式平台 · ${status.project_id || ''}`;
+  // 连上了就是连上了：项目 id 是给机器看的，界面上只说人话。
+  connection.querySelector('span').textContent = '已连接平台';
 } else {
   connection.classList.add('is-offline');
   connection.querySelector('span').textContent = '未连接平台';

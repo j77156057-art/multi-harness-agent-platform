@@ -21,30 +21,35 @@ import './flat-office.css';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
-import { ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
+import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
 
+// 状态词：**给人看的说法**，不是平台内部的状态名。
+//
+// 平台那边叫 draft/awaiting_review/escalated 是一回事，但第一次用这个页面的人
+// 不知道这些词是什么意思。所以这里换成"现在轮到谁"的说法 —— 想看内部名字的
+// 人可以去 docs/spec/0.3-R10.md。
 const STATE_LABEL = {
-  draft: '草稿',
-  ready: '待领取',
+  draft: '还没开始',
+  ready: '等人接',
   queued: '排队中',
-  claimed: '已领取',
-  in_progress: '执行中',
-  verifying: '校验中',
-  awaiting_review: '待审核',
-  changes_requested: '需返修',
-  approved: '审核通过',
-  merging: '合并中',
-  merged: '已合入',
+  claimed: '已有人接',
+  in_progress: '正在做',
+  verifying: '在检查',
+  awaiting_review: '等着审',
+  changes_requested: '要返工',
+  approved: '审过了',
+  merging: '正在合并',
+  merged: '已完成',
   abandoned: '已放弃',
-  stale: '租约失效',
+  stale: '卡住了',
   cancelled: '已取消',
-  escalated: '待人工',
-  awaiting_human: '等人回答',
-  reclaiming: '重新领取中',
-  plan_drift: '方案漂移',
-  impl_drift: '实现漂移',
-  blocked: '受阻',
-  needs_help: '求助中',
+  escalated: '等你处理',
+  awaiting_human: '等你回答',
+  reclaiming: '重新找人做',
+  plan_drift: '需求变了',
+  impl_drift: '做偏了',
+  blocked: '遇到问题',
+  needs_help: '在求助',
 };
 
 const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
@@ -61,18 +66,18 @@ const STATUS_RANK = {
 
 /** payload 里的字段名（认识的给中文，不认识的照实写英文键）。 */
 const FIELD_LABEL = {
-  attempt_id: '哪一次 attempt',
+  attempt_id: '第几次尝试',
   attempt_no: '第几次尝试',
-  attempt_budget_override: '给了预算豁免',
+  attempt_budget_override: '多给了一次机会',
   branch: '分支',
-  budget_override_by: '谁给的豁免',
-  claim_request_id: '领取请求',
+  budget_override_by: '谁多给了一次机会',
+  claim_request_id: '接活请求',
   commit: 'commit',
   completion: '成员自述',
   decided_by: '谁决定的',
   decision_id: '裁决',
   failure_reason: '失败原因',
-  fencing_epoch: 'fencing 代次',
+  fencing_epoch: '安全代号',
   findings_hash: '问题清单哈希',
   previous_status: '上一步状态',
   receipt_id: '回执',
@@ -228,6 +233,20 @@ export function mountFlatOffice({ root, project: projectOf }) {
   }
 
   /**
+   * 窗口的名字。
+   *
+   * 平台上登记的名字是给人看的（"Codex 窗口"），id 是给机器看的
+   * （"codex-window"）。界面上要**名字**：一串 id 对第一次用的人没有意义。
+   * 名册里没有就退回 id —— 总比空着强。
+   */
+  function harnessName(id) {
+    if (!id) return '';
+    const roster = (state.status && state.status.harnesses) || [];
+    const hit = roster.find((item) => item.harness_id === id);
+    return (hit && hit.name) || id;
+  }
+
+  /**
    * 这轮对话：我 @ 给管理员的，加上从第一条这样的消息开始、
    * 管理员发的那些。
    *
@@ -267,7 +286,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       <header class="flat-dialog-head">
         <div>
           <h2 id="flatAdminChatTitle">与管理员对话</h2>
-          <p class="flat-note">发出去的是项目群里的 <b>@管理员</b>：管理员会收到这条 mention，他的回话也在群里。不是只有你们俩能看的私聊。</p>
+          <p class="flat-note">发出去的是项目群里的 <b>@管理员</b>：管理员会收到这条消息，他的回话也在群里。不是只有你们俩能看的私聊。</p>
         </div>
         <button type="button" class="flat-dialog-close" data-act="close-admin-chat" aria-label="关闭对话">×</button>
       </header>
@@ -495,17 +514,33 @@ export function mountFlatOffice({ root, project: projectOf }) {
   /** 谁在拿着这条活（拿不了就说谁接过）。 */
   function detailHolds(task) {
     const holds = whoHolds(task);
-    const attempt = `第 ${task.attempt_no ?? 0}/${task.max_attempts ?? 0} 次尝试`;
-    if (holds.now) return `现在拿着：${holds.now} · ${attempt}`;
-    if (holds.before) return `现在没人拿着（之前是 ${holds.before}）· ${attempt}`;
-    if (Number(task.attempt_no || 0) > 0) return `现在没人拿着（接过 ${task.attempt_no} 次）· ${attempt}`;
+    const attempt = attemptWord(task);
+    if (holds.now) return `正在做：${holds.now} · ${attempt}`;
+    if (holds.before) return `现在没人做（之前是 ${holds.before}）· ${attempt}`;
+    if (Number(task.attempt_no || 0) > 0) return `现在没人做（接过 ${task.attempt_no} 次）· ${attempt}`;
     return `还没人接过 · ${attempt}`;
   }
 
+  /**
+   * 尝试次数的说法。
+   *
+   * "第 1/3 次尝试"是平台的说法；"第 1 次尝试（最多 3 次）"是人的话 ——
+   * 后者直接回答了"还能再做几次"。
+   */
+  function attemptWord(task) {
+    const used = Number(task.attempt_no || 0);
+    const max = Number(task.max_attempts || 0);
+    if (!max) return `已经试了 ${used} 次`;
+    return `第 ${used} 次尝试（最多 ${max} 次）`;
+  }
+
   function whoHolds(task) {
-    if (task.owner) return { now: task.owner, before: null };
+    if (task.owner) return { now: harnessName(task.owner), before: null };
     const holders = holdersOf(task.task_id);
-    return { now: null, before: holders.length ? holders[holders.length - 1] : null };
+    return {
+      now: null,
+      before: holders.length ? harnessName(holders[holders.length - 1]) : null,
+    };
   }
 
   /** 审核结论的说人话（事件名 -> 人话）。 */
@@ -569,11 +604,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
         const task = row.task;
         const holds = whoHolds(task);
         const owner = holds.now
-          ? `${holds.now}（现在拿着）`
+          ? `${holds.now}（在做）`
           : holds.before
-            ? `现在没人拿着（之前是 ${holds.before}）`
+            ? `现在没人做（之前是 ${holds.before}）`
             : Number(task.attempt_no || 0) > 0
-              ? `现在没人拿着（接过 ${task.attempt_no} 次，接手的人不在近期这段事件里）`
+              ? `现在没人做（接过 ${task.attempt_no} 次，接手的人不在近期这段记录里）`
               : '还没人接过';
         const history = row.claims.map((c) => c.actor_id).filter((v, i, a) => a.indexOf(v) === i);
         const verdict = row.lastReview
@@ -684,7 +719,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
    * 哪个字段是哪个，于是每个动作问一次、一次只问它要的东西。
    */
   const decisionDialog = document.createElement('dialog');
-  decisionDialog.className = 'flat-dialog';
+  decisionDialog.className = 'flat-dialog is-compact';
   decisionDialog.id = 'flatDecision';
   decisionDialog.setAttribute('aria-label', '处置这条活');
   decisionDialog.innerHTML = `
@@ -697,8 +732,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <textarea data-decision-text rows="3"></textarea>
       </label>
       <label class="flat-check" data-decision-override-wrap hidden>
-        <input type="checkbox" data-decision-override /> 同时给一次预算豁免
-        <span class="flat-note">这条活的尝试预算已经用完。不带豁免，平台会拒绝放行（R10 §8）。</span>
+        <input type="checkbox" data-decision-override /> 顺便再给一次机会
+        <span class="flat-note">这条活的尝试次数已经用完了。不勾这个，平台不放行它。</span>
       </label>
       <div class="flat-dialog-actions">
         <button type="button" data-decision-cancel>取消</button>
@@ -826,11 +861,19 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const wrap = document.createElement('header');
     wrap.className = 'flat-head';
     const status = state.status || {};
+    // 顶部第一句要回答两个问题：**这是哪儿**，**我现在该看什么**。
+    // 没有它，一进来就是一屏表格 —— 知道在看，但不知道该干什么。
+    const waitingOnMe = (state.tasks || []).filter((task) =>
+      ['awaiting_human', 'escalated'].includes(String(task.status)),
+    ).length;
+    const guide = waitingOnMe
+      ? `有 <b>${waitingOnMe}</b> 件事在等你处理。左边是所有正在做的事，点一条看详情。`
+      : '这是你这个项目的办公室。左边是所有正在做的事，点一条看详情；右边是需要你过目的东西。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">AGENT OFFICE · 数据版</span>
         <h1>${escape(state.scope?.name || '本项目')}</h1>
-        <p>${escape(status.group_id || '')} · ${status.connected ? '已连接正式平台' : '未连接正式平台'}</p>
+        <p class="flat-guide">${guide}</p>
       </div>
       <div class="flat-source">
         <label for="flatSourceSelect">数据源</label>
@@ -840,11 +883,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
         </select>
       </div>
       <dl class="flat-counts">
-        <div><dt>待领取</dt><dd>${counts.waiting}</dd></div>
-        <div><dt>进行中</dt><dd>${counts.active}</dd></div>
-        <div><dt>待审核</dt><dd>${counts.review}</dd></div>
-        <div><dt>失败/停滞</dt><dd class="${counts.failed ? 'is-bad' : ''}">${counts.failed}</dd></div>
-        <div><dt>已完成</dt><dd>${counts.done}</dd></div>
+        <div><dt>等人接</dt><dd>${counts.waiting}</dd></div>
+        <div><dt>正在做</dt><dd>${counts.active}</dd></div>
+        <div><dt>等人处理</dt><dd class="${counts.review ? 'is-bad' : ''}">${counts.review}</dd></div>
+        <div><dt>没做成</dt><dd class="${counts.failed ? 'is-bad' : ''}">${counts.failed}</dd></div>
+        <div><dt>完成了</dt><dd>${counts.done}</dd></div>
       </dl>`;
     return wrap;
   }
@@ -861,10 +904,10 @@ export function mountFlatOffice({ root, project: projectOf }) {
     filters.className = 'flat-filters';
     for (const [key, label] of [
       ['all', '全部'],
-      ['waiting', '待领取'],
-      ['active', '进行中'],
-      ['review', '待审/返修'],
-      ['failed', '失败/停滞'],
+      ['waiting', '等着开工'],
+      ['active', '正在做'],
+      ['review', '等人处理'],
+      ['failed', '没做成'],
     ]) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -920,7 +963,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       empty.className = 'flat-empty';
       empty.textContent = state.tasks.length
         ? '这个筛选下没有任务。'
-        : '本项目还没有任务（去顶栏的「开工配置」发一条目标，管理员 harness 会细化后分派）。'
+        : '本项目还没有任务。去顶栏的「开工配置」写一句你要做的事，管理员会把它拆成任务分派下去。'
       list.append(empty);
     }
 
@@ -932,17 +975,17 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const stamp = task.updated_at ? ` · 更新于 ${escape(timeOf(task.updated_at))}` : '';
       const holds = whoHolds(task);
       const who = holds.now
-        ? `${holds.now} 拿着`
+        ? `${holds.now} 在做`
         : holds.before
-          ? `无人拿着（之前是 ${holds.before}）`
+          ? `没人做（之前是 ${holds.before}）`
           : Number(task.attempt_no || 0) > 0
-            ? `无人拿着（接过 ${task.attempt_no} 次）`
-            : '无人拿着';
+            ? `没人做（试过 ${task.attempt_no} 次）`
+            : '还没人接';
       row.innerHTML = `
         <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
-        <span class="flat-task-title">${escape(task.title || task.task_id)}</span>
-        <span class="flat-task-meta">${escape(who)} · 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试${escape(reason)}</span>
-        <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看本次失败的真实日志 ↓</span>` : ''}</span>`;
+        <span class="flat-task-title">${escape(listTitle(task))}</span>
+        <span class="flat-task-meta">${escape(who)} · ${escape(attemptWord(task))}${escape(reason)}</span>
+        <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
       row.addEventListener('click', (event) => {
         if (event.target.closest('[data-jump="log"]')) return;
         void select(task.task_id);
@@ -997,18 +1040,19 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <div>
           <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
           <h2>${escape(task.title || task.task_id)}</h2>
-          <p class="flat-mono">${escape(task.task_id)}</p>
+          <p class="flat-summary">${escape(statusSentence(task))}</p>
           <p class="flat-mono">${escape(detailHolds(task))}</p>
+          <p class="flat-mono flat-id">任务编号 ${escape(task.task_id)}</p>
         </div>
         <div class="flat-detail-actions">${humanActions(task)}</div>
       </div>
       ${lineageBlock(task)}
-      ${spec.goal ? `<section class="flat-spec"><h3>工单</h3><p>${escape(spec.goal)}</p></section>` : ''}
-      ${acceptance ? `<section class="flat-spec"><h3>验收</h3><p>${escape(acceptance)}</p></section>` : ''}
-      ${paths.length ? `<section class="flat-spec"><h3>允许改动的路径</h3><ul>${paths.map((p) => `<li><code>${escape(p)}</code></li>`).join('')}</ul></section>` : ''}
+      ${spec.goal ? `<section class="flat-spec"><h3>这件事要做什么</h3><p>${escape(spec.goal)}</p></section>` : ''}
+      ${acceptance ? `<section class="flat-spec"><h3>做到什么程度算完成</h3><p>${escape(acceptance)}</p></section>` : ''}
+      ${paths.length ? `<section class="flat-spec"><h3>只允许改这些地方</h3><ul>${paths.map((p) => `<li><code>${escape(p)}</code></li>`).join('')}</ul></section>` : ''}
       ${files.length ? `<section class="flat-spec"><h3>这次改了什么</h3><ul>${files.map((f) => `<li><code>${escape(typeof f === 'string' ? f : f.path || JSON.stringify(f))}</code></li>`).join('')}</ul></section>` : ''}
-      <section class="flat-spec"><h3>事件轨迹</h3>
-        <p class="flat-note">共 ${events.length} 条，新的在前。点开每一条，看它到底带了什么。</p>
+      <section class="flat-spec"><h3>这条活的经过</h3>
+        <p class="flat-note">${events.length ? `一共 ${events.length} 步，新的在最上面。点开每一步看细节。` : '还没有记录。'}</p>
         <ol class="flat-events">${events
           .slice(-(state.allEvents ? events.length : 14))
           .reverse()
@@ -1020,9 +1064,79 @@ export function mountFlatOffice({ root, project: projectOf }) {
       </section>
       ${isFailed(task) ? failureLog(task) : ''}
       ${showLiveOutput()
-        ? `<section class="flat-spec"><h3>CLI 原话${state.output?.output?.current ? '（当前这一轮）' : ''}</h3><pre class="flat-output">${escape(outputText())}</pre></section>`
-        : ''}`;
+        ? `<section class="flat-spec"><h3>它自己输出的内容${state.output?.output?.current ? '（当前这一轮）' : ''}</h3><pre class="flat-output">${escape(outputText())}</pre></section>`
+        : ''}
+      <p class="flat-detail-foot">以上就是这条活的全部记录。想看整体，去右栏的「要做的事」和「看成员表现」。</p>`;
     return panel;
+  }
+
+  /**
+   * 列表里的标题：**去掉项目名前缀**。
+   *
+   * 平台给的任务标题是「项目名 · 任务名」，那是给跨项目的地方看的。在这个
+   * 页面里每条都带一遍同样的前缀，只会让真正的任务名淹没在重复里 ——
+   * 页面顶上已经写了这是哪个项目。
+   */
+  function listTitle(task) {
+    const title = String(task.title || task.task_id);
+    const name = String((state.scope && state.scope.name) || '').trim();
+    const prefix = name ? `${name} · ` : '';
+    return prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
+  }
+
+  /**
+   * 一句话：**这条活现在怎么样了**。
+   *
+   * 状态词是给筛选和计数用的（"等你处理"），但选中一条活之后，人想知道的是
+   * "所以现在该怎么办"。这句话就是那个答案。
+   */
+  function statusSentence(task) {
+    const who = whoHolds(task);
+    const failure = task.last_failure?.reason;
+    switch (String(task.status)) {
+      case 'awaiting_human':
+        return '这条活在等你回答。回答之后，它会回到干活的人手里。';
+      case 'escalated':
+        return '这条活卡住了，平台把它交给了你：放回去重做，或者干脆取消。';
+      case 'ready':
+        return '这条活还没人接。可以让管理员安排个人。';
+      case 'queued':
+        return '这条活在排队，等资源空出来。';
+      case 'claimed':
+        return '已经有人接了，正在准备开工。';
+      case 'in_progress':
+        return `${who.now || '有人'}正在做这条活。`;
+      case 'verifying':
+        return '做完了，机器正在检查结果。';
+      case 'awaiting_review':
+        return '做完了，正在等人审。';
+      case 'changes_requested':
+        return '审的人觉得要返工，正在打回去。';
+      case 'approved':
+        return '审过了，正在合进主分支。';
+      case 'merging':
+        return '正在合进主分支。';
+      case 'merged':
+        return '已经合进主分支，这件事做完了。';
+      case 'abandoned':
+        return failure ? `这件事被放弃了：${failure}` : '这件事被放弃了。';
+      case 'stale':
+        return '干活的那个窗口失联了，这条活卡在这里。';
+      case 'cancelled':
+        return '这件事被取消了，不会再有人做。';
+      case 'plan_drift':
+        return '需求变了，这条活需要重新确认一下。';
+      case 'impl_drift':
+        return '做的东西和需求对不上了，需要人看一眼。';
+      case 'blocked':
+        return '这条活遇到问题过不去了。';
+      case 'needs_help':
+        return '干活的人正在求助，等人搭把手。';
+      case 'reclaiming':
+        return '正在重新找人做这条活。';
+      default:
+        return '这条活还在进行中。';
+    }
   }
 
   /**
@@ -1312,19 +1426,19 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const stderr = String(source?.stderr || '');
     const stdout = String(source?.stdout || '');
     const facts = [
-      source?.attempt_id ? `attempt ${source.attempt_id}` : '',
-      source?.harness_id ? `harness ${source.harness_id}` : '',
-      source?.attempt_status ? `那一轮的状态 ${source.attempt_status}` : '',
+      source?.attempt_id ? `第 ${source.attempt_id} 次尝试` : '',
+      source?.harness_id ? `窗口 ${harnessName(source.harness_id)}` : '',
+      source?.attempt_status ? `当时的状态 ${source.attempt_status}` : '',
       source?.updated_at ? `时间 ${timeOf(source.updated_at)}` : '',
     ].filter(Boolean).join(' · ');
     return `<section class="flat-spec flat-fail-log" id="flatFailLog">
-      <h3>本次失败的真实日志</h3>
-      ${task.last_failure?.reason ? `<p class="flat-note">平台记的失败理由：${escape(task.last_failure.reason)}</p>` : ''}
+      <h3>它最后说了什么</h3>
+      ${task.last_failure?.reason ? `<p class="flat-note">平台记下的原因：${escape(task.last_failure.reason)}</p>` : ''}
       ${task.last_failure?.at ? `<p class="flat-note">失败于 ${escape(timeOf(task.last_failure.at))}</p>` : ''}
       ${facts ? `<p class="flat-note">${escape(facts)}</p>` : ''}
-      ${stderr ? `<h4>stderr</h4><pre class="flat-output">${escape(stderr.slice(-4000))}</pre>` : ''}
-      ${stdout ? `<h4>stdout</h4><pre class="flat-output">${escape(stdout.slice(-4000))}</pre>` : ''}
-      ${!stderr && !stdout ? '<p class="flat-empty">这一轮没有留下 CLI 输出（进程被杀，或它什么也没写）。</p>' : ''}
+      ${stderr ? `<h4>报错内容</h4><pre class="flat-output">${escape(stderr.slice(-4000))}</pre>` : ''}
+      ${stdout ? `<h4>输出内容</h4><pre class="flat-output">${escape(stdout.slice(-4000))}</pre>` : ''}
+      ${!stderr && !stdout ? '<p class="flat-empty">这一轮它什么也没留下（进程被杀，或者它没说话）。</p>' : ''}
     </section>`;
   }
 
@@ -1334,7 +1448,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ? state.output.output || state.output
       : state.output;
     const text = typeof raw === 'string' ? raw : String(raw?.stdout || raw?.text || '');
-    return text.slice(-4000) || '（还没有 CLI 原话）';
+    return text.slice(-4000) || '（它还没输出过东西）';
   }
 
   /** 人自己的动作。平台与管理员 harness 都不代劳这些。 */
@@ -1345,31 +1459,26 @@ export function mountFlatOffice({ root, project: projectOf }) {
     // 办公室只负责把这个请求送到管理员面前（群里的 @mention）。
     if (!task.owner && task.status === 'ready') {
       buttons.push(
-        `<button type="button" data-act="ask-dispatch" title="这是一条 @管理员 的群消息；派给谁由管理员决定">请管理员派出去</button>`,
+        `<button type="button" data-act="ask-dispatch" title="这是一条 @管理员 的群消息；派给谁由管理员决定">交给管理员安排</button>`,
       );
     }
     if (spent) {
       buttons.push(
-        `<button type="button" data-act="override">请求再给一次机会（预算豁免）</button>`,
+        `<button type="button" data-act="override">再给一次机会</button>`,
       );
     }
-    buttons.push(`<button type="button" data-act="reassign">请求管理员改派</button>`);
+    buttons.push(`<button type="button" data-act="reassign">请管理员换个人做</button>`);
     // 处置动词：回答提问、放行、重开、取消。
     //
     // 这些是**人自己的动作**（R10 §18），旧的人操作面里有过（已随 Vue 控制台
     // 一起删掉），迁到 Agent Office 时整批丢了：于是"等人回答"的任务在界面上
     // 是个死状态 —— 人只能发条群消息，平台不会把它当成决策。
     // 状态集合见 `human-actions.js`，与后端守卫一一对应；后端仍是唯一裁判。
+    //
+    // 按钮上写的是**人话**：平台那边叫"放行回队列"，人只知道"放回去重新找人做"。
     for (const action of humanDecisionActions(task)) {
       const label = ACTION_LABEL[action] || action;
-      const hint =
-        action === 'resume'
-          ? '把答复写进决策行，任务回到干活的人手里'
-          : action === 'reopen'
-            ? '重新打开这条活：清掉主人与 attempt，回到待领取'
-            : action === 'release'
-              ? '升级的活放回队列：清掉主人与 attempt'
-              : '这条活不做了';
+      const hint = ACTION_HINT[action] || '';
       buttons.push(
         `<button type="button" data-act="decide-${action}" title="${escape(hint)}">${escape(label)}</button>`,
       );
@@ -1403,11 +1512,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const used = usedUpstreams[name] || null;
       const tiers = [...new Set(own.map((model) => model.tier).filter(Boolean))];
       const consumersHere = used?.consumers || {};
+      // 次数一律兜底：平台没给这个数的时候显示 0，而不是 "undefined 次"。
+      const usedCount = Number(used?.requests || 0);
       return `<details class="flat-pool-item">
         <summary>
           <b>${escape(name)}</b>
-          <span>${escape(source.protocol || '')}${own.length ? ` · ${own.length} 个模型` : ''}</span>
-          <em>${used ? `已用 ${used.requests} 次` : '还没人用过'}</em>
+          <span>${own.length ? `${own.length} 个模型` : '还没探到模型'}</span>
+          <em>${used ? `已用 ${usedCount} 次` : '还没人用过'}</em>
         </summary>
         <dl class="flat-facts">
           <dt>上游地址</dt><dd><code>${escape(source.base_url || '—')}</code></dd>
@@ -1422,9 +1533,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
           : '<p class="flat-empty">这个额度源还没探测到模型。</p>'}
         ${used
           ? `<h4>已用额度</h4>
-             <p class="flat-note">${used.requests} 次请求 · prompt ${used.prompt_tokens || 0} / completion ${used.completion_tokens || 0} tokens</p>
+             <p class="flat-note">${usedCount} 次请求 · 输入 ${Number(used.prompt_tokens || 0)} / 输出 ${Number(used.completion_tokens || 0)} 个字（token）</p>
              ${Object.keys(consumersHere).length
-               ? `<p class="flat-note">谁用过：${Object.entries(consumersHere).map(([who, count]) => `${escape(who)} × ${count}`).join('，')}</p>`
+               ? `<p class="flat-note">谁用过：${Object.entries(consumersHere).map(([who, count]) => `${escape(harnessName(who))} × ${count}`).join('，')}</p>`
                : ''}`
           : ''}
         ${upstreamTimeline(name)}
@@ -1432,16 +1543,16 @@ export function mountFlatOffice({ root, project: projectOf }) {
     });
     const consumerItems = Object.entries(consumers).map(([who, value]) => {
       const usedHere = Object.entries(value.upstreams || {});
-      return `<li><b>${escape(who)}</b>：${value.requests || 0} 次 · ${usedHere.map(([name, count]) => `${escape(name)} × ${count}`).join('，') || '—'}</li>`;
+      return `<li><b>${escape(harnessName(who))}</b>：${Number(value.requests || 0)} 次 · ${usedHere.map(([name, count]) => `${escape(name)} × ${count}`).join('，') || '—'}</li>`;
     });
     return `<section class="flat-card">
       <h3>额度池</h3>
-      <p class="flat-note">${upstreams.length} 个额度源 · ${models.length} 个模型 · 累计 ${usage.requests || 0} 次请求</p>
+      <p class="flat-note">${upstreams.length} 个额度来源 · ${models.length} 个模型 · 一共用了 ${Number(usage.requests || 0)} 次</p>
       ${inventoryBlock()}
       ${timelineBlock()}
       ${items.join('')}
       ${consumerItems.length
-        ? `<details class="flat-pool-item"><summary><b>谁用了谁的额度</b><span>${consumerItems.length} 个消费者</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
+        ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
         : '<p class="flat-note">还没有人从池子里借过额度。</p>'}
     </section>`;
   }
@@ -1620,13 +1731,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
 
     wrap.innerHTML = `
       <section class="flat-card flat-card-brief">
-        <h3>任务书</h3>
+        <h3>要做的事</h3>
         ${brief.planId
           ? `<p><b>${escape(brief.title)}</b></p>
-             <p class="flat-note">${escape(brief.planId)}</p>
-             <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条没人接）` : ''}</p>
-             <button type="button" data-act="open-brief">查看任务书</button>`
-          : `<p class="flat-note">${(state.tasks || []).length} 条任务</p>
+             <p class="flat-note">方案 ${escape(brief.planId)}</p>
+             <p class="flat-note">${(state.tasks || []).length} 件事${unclaimed.length ? `（${unclaimed.length} 件还没人接）` : ''}</p>
+             <button type="button" data-act="open-brief">看全部要做的事</button>`
+          : `<p class="flat-note">${(state.tasks || []).length} 件事</p>
              <p class="flat-empty">还没有方案正文。</p>`}
       </section>
       <section class="flat-card flat-card-members">
@@ -1635,36 +1746,36 @@ export function mountFlatOffice({ root, project: projectOf }) {
           ? `<p class="flat-note">${helps.length} 条求助待处理</p>
              <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span></li>`).join('')}</ul>`
           : '<p class="flat-empty">没有待处理的求助。</p>'}
-        <button type="button" data-act="open-members">成员动态表</button>
+        <button type="button" data-act="open-members">看成员表现</button>
       </section>
       <section class="flat-card flat-card-admin">
         <h3>与管理员对话</h3>
         ${admin
-          ? `<p><b>${escape(admin)}</b>${adminIdentity() && admin !== adminIdentity() ? ` · ${escape(adminIdentity())}` : ''}</p>
+          ? `<p><b>${escape(admin)}</b></p>
              <p class="flat-note">${!started
-               ? '你还没 @ 过管理员。发一条，他会收到 mention。'
+               ? '你还没找过管理员。发一条，他会看到。'
                : thread.length
                  ? `这轮对话 ${thread.length} 条。`
-                 : '还没说过话。发一条，管理员会收到 mention。'}</p>
+                 : '还没说过话。发一条，管理员就看到了。'}</p>
              <button type="button" data-act="open-admin-chat">打开对话</button>
              <button type="button" data-act="open-direct-window">开私聊窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
       ${poolCard()}
       <section class="flat-card">
-        <h3>现在能干活</h3>
+        <h3>现在能干活的人</h3>
         <ul class="flat-list">${usable
-          .map((item) => `<li><b>${escape(item.harness_id)}</b><span>${escape(item.model || '未知模型')}</span></li>`)
-          .join('') || '<li class="flat-empty">没有可用窗口。</li>'}</ul>
+          .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
+          .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
       </section>
       <section class="flat-card">
-        <h3>等我审核的方案</h3>
+        <h3>等我批准的方案</h3>
         ${plan
-          ? `<p>${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 个任务</p>
+          ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
              <p class="flat-note">${escape((plan.document || {}).markdown_path || '')}</p>
-             <button type="button" data-act="approve-plan">批准并派单</button>
-             <button type="button" data-act="reject-plan" title="驳回这份方案：退回 draft_rejected，由管理员出新版本">驳回方案</button>`
-          : '<p class="flat-empty">没有待审的方案。</p>'}
+             <button type="button" data-act="approve-plan">批准，开始做</button>
+             <button type="button" data-act="reject-plan" title="驳回这份方案：退回给管理员，改一版再来找你">驳回方案</button>`
+          : '<p class="flat-empty">没有等你批准的方案。</p>'}
       </section>`;
     return wrap;
   }
@@ -1935,13 +2046,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
       void (async () => {
         const answer = await askDecision({
           title: '驳回这份方案',
-          note: `方案 ${draft.plan_id}：驳回后它退回 draft_rejected，由管理员出新版本。`,
-          label: '驳回原因（会写进平台的决策记录）',
+          note: `方案 ${draft.plan_id}：驳回之后它会退回给管理员，改一版再来找你。`,
+          label: '为什么驳回（平台会记下来）',
           placeholder: '例如：范围太大，先做核心链路',
         });
         if (!answer) return;
         if (!answer.text) {
-          state.error = '驳回方案要写原因 —— 没有原因，平台上就只剩一个动作没有理由。';
+          state.error = '驳回方案要写为什么 —— 平台会记下这句话，下次改的时候用得上。';
           render();
           return;
         }
@@ -1959,27 +2070,27 @@ export function mountFlatOffice({ root, project: projectOf }) {
       void (async () => {
         const spec = {
           resume: {
-            title: '回答并恢复',
-            note: '答复会写进决策行；任务回到干活的人手里（同一个 attempt，不换 epoch）。',
-            label: '答复（可空，但写清楚点，决策行是给人看的）',
+            title: '我来回答',
+            note: '你的回答会记在平台上，干活的人能看到；这条活会回到他手里继续做。',
+            label: '你的回答（可以留空，但写清楚点更好）',
             route: '/human/resume',
           },
           reopen: {
             title: '重新打开这条活',
-            note: '清掉主人与 attempt，这条活回到待领取；谁都能再领。',
-            label: '为什么重新开（可空，会写进决策行）',
+            note: '清掉现在的负责人，这条活回到「等人接」，谁都能再接。',
+            label: '为什么重新打开（可以留空）',
             route: '/human/reopen',
           },
           release: {
-            title: '放行这条升级的活',
-            note: '升级的活放回队列：清掉主人与 attempt，下一轮重新抢。',
-            label: '放行理由（可空）',
+            title: '放回去重新找人做',
+            note: '这条活会回到「等人接」的列表，下一轮再找人。',
+            label: '为什么放回去（可以留空）',
             route: '/human/release',
           },
           cancel: {
-            title: '取消这条活',
-            note: '取消是终态：这条活不再有人做。',
-            label: '取消原因（必填）',
+            title: '不做了',
+            note: '取消就是结束：这条活不会再有人做。',
+            label: '为什么不做了（必填）',
             route: '/human/cancel',
           },
         }[decision];
@@ -1994,13 +2105,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
         });
         if (!answer) return;
         if (decision === 'cancel' && !answer.text) {
-          state.error = '取消要写原因 —— 平台上会留下这条决策记录。';
+          state.error = '不做了的话要写为什么 —— 平台会把这句话记下来。';
           render();
           return;
         }
         if (needsOverride && !answer.override) {
           // 平台会回 409（R10 §8），但让人自己读那个码不如直接说清楚。
-          state.error = '这条活的尝试预算已经用完，放行必须带上预算豁免 —— 勾上再试。';
+          state.error = '这条活的尝试次数已经用完了。放回去之前要勾上「顺便再给一次机会」。';
           render();
           return;
         }

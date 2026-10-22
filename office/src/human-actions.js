@@ -49,12 +49,25 @@ export const CANCEL_STATES = new Set([
   'awaiting_human',
 ]);
 
-/** 按钮上的字。 */
+/**
+ * 按钮上的字。
+ *
+ * 写的是**人话**，不是平台的动作名：平台那边叫 `human.release`，人只知道
+ * "放回去重新找人做"。工具提示（title）里保留一点内部说法，是给要查日志的人。
+ */
 export const ACTION_LABEL = {
-  resume: '回答并恢复',
+  resume: '我来回答',
   reopen: '重新打开',
-  release: '放行回队列',
-  cancel: '取消这条活',
+  release: '放回去重找',
+  cancel: '不做了',
+};
+
+/** 工具提示：说清楚这个按钮按下之后平台会发生什么。 */
+export const ACTION_HINT = {
+  resume: '你的回答会记在平台上，干活的人能看到，任务回到他手里继续做。',
+  reopen: '这条活重新打开：清掉现在的负责人，回到「等人接」，谁都能接。',
+  release: '这条活放回「等人接」的列表，下一轮重新找人来做。',
+  cancel: '取消就是结束：这条活不会再有人做。',
 };
 
 /**
