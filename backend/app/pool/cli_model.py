@@ -266,6 +266,15 @@ def extract_report(stdout: str) -> dict[str, Any]:
         "session_id": None,
         "message_ids": [],
     }
+    # Some CLIs answer with **one** JSON document (the mmx CLI does), others
+    # with one event per line (the opencode CLI does).  Try the whole thing
+    # first, then the line by line reading.
+    try:
+        whole = json.loads(stdout)
+    except ValueError:
+        whole = None
+    if isinstance(whole, dict):
+        _read_event(whole, report)
     for line in stdout.splitlines():
         line = line.strip()
         if not line:
@@ -276,60 +285,63 @@ def extract_report(stdout: str) -> dict[str, Any]:
             continue
         if not isinstance(event, dict):
             continue
-        session = event.get("session_id") or event.get("sessionID")
-        if isinstance(session, str) and session.strip():
-            report["session_id"] = session.strip()
-        # The message id is the **exact** key into the CLI's own store: it is
-        # how a turn's messages are found without guessing which ones they
-        # were.
-        part_id = event.get("part")
-        candidates = []
-        if isinstance(part_id, dict):
-            candidates.append(part_id.get("messageID"))
-        message = event.get("message")
-        if isinstance(message, dict):
-            candidates.append(message.get("id"))
-        for candidate in candidates:
-            if (
-                isinstance(candidate, str)
-                and candidate.strip()
-                and candidate not in report["message_ids"]
-            ):
-                report["message_ids"].append(candidate)
-        usage = event.get("usage")
-        if not isinstance(usage, dict) and isinstance(event.get("message"), dict):
-            message_usage = event["message"].get("usage")
-            if isinstance(message_usage, dict):
-                usage = message_usage
-        if isinstance(usage, dict) and usage:
-            report["usage"] = _usage_counts(usage)
-        part = event.get("part")
-        text = ""
-        if isinstance(part, dict) and isinstance(part.get("text"), str):
-            text = part["text"]
-        elif event.get("type") == "text" and isinstance(event.get("text"), str):
-            text = event["text"]
-        elif isinstance(event.get("message"), dict):
-            content = event["message"].get("content")
-            if isinstance(content, str):
-                text = content
-        if text.strip():
-            report["text"] = text
-        for key in ("result", "text", "content"):
-            value = event.get(key)
-            if isinstance(value, str) and value.strip():
-                report["text"] = value
-            elif isinstance(value, list):
-                for block in value:
-                    if (
-                        isinstance(block, dict)
-                        and isinstance(block.get("text"), str)
-                        and block["text"].strip()
-                    ):
-                        report["text"] = block["text"]
+        _read_event(event, report)
     if not report["text"]:
         report["text"] = stdout.strip()[-4000:]
     return report
+
+
+def _read_event(event: dict[str, Any], report: dict[str, Any]) -> None:
+    """Take what one event of a CLI's output says."""
+    session = event.get("session_id") or event.get("sessionID")
+    if isinstance(session, str) and session.strip():
+        report["session_id"] = session.strip()
+    # The message id is the **exact** key into the CLI's own store: it is
+    # how a turn's messages are found without guessing which ones they were.
+    part = event.get("part")
+    candidates = []
+    if isinstance(part, dict):
+        candidates.append(part.get("messageID"))
+    message = event.get("message")
+    if isinstance(message, dict):
+        candidates.append(message.get("id"))
+    for candidate in candidates:
+        if (
+            isinstance(candidate, str)
+            and candidate.strip()
+            and candidate not in report["message_ids"]
+        ):
+            report["message_ids"].append(candidate)
+    usage = event.get("usage")
+    if not isinstance(usage, dict) and isinstance(event.get("message"), dict):
+        message_usage = event["message"].get("usage")
+        if isinstance(message_usage, dict):
+            usage = message_usage
+    if isinstance(usage, dict) and usage:
+        report["usage"] = _usage_counts(usage)
+    text = ""
+    if isinstance(part, dict) and isinstance(part.get("text"), str):
+        text = part["text"]
+    elif event.get("type") == "text" and isinstance(event.get("text"), str):
+        text = event["text"]
+    elif isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            text = content
+    if text.strip():
+        report["text"] = text
+    for key in ("result", "text", "content"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            report["text"] = value
+        elif isinstance(value, list):
+            for block in value:
+                if (
+                    isinstance(block, dict)
+                    and isinstance(block.get("text"), str)
+                    and block["text"].strip()
+                ):
+                    report["text"] = block["text"]
 
 
 def _usage_counts(usage: dict[str, Any]) -> dict[str, int]:

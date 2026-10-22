@@ -1607,3 +1607,34 @@ codebuddy / qoder 的流式输出里有**整轮**的 usage（`{"type":"result","
 | CLI 槽 | **CLI 自己的输出** 或 **CLI 自己的库** | 已修（codebuddy / qoder 直接报；opencode 按消息 id 读库）❌ |
 | 历史记录 | — | **仍是“未记上”**（无法归因，不编数字）❌ |
 | 单价 | — | 不知道，不猜（模型名是中转站改过的）❌ |
+
+### 22.15 三个 CLI 槽现在都能报用量了
+
+继续挖下去，发现槽的参数里有一个**主动丢掉用量**的东西：
+
+```
+mmx 槽原来的参数：["text", "chat", "--output", "json", "--non-interactive", "--quiet"]
+```
+
+`--quiet` 会让 mmx CLI **只输出答案**（“OK”），JSON 连同它的 **usage** 一起折了——
+而池子正好只能从输出里拿 usage ❌。去掉 `--quiet` 之后，池子还要能读**整份** JSON
+（mmx 输出的是一份文档 ✗，不是一行一个事件 ✗），读者两种形状都要支持 ❌。
+
+**实机跑一次 mmx 槽调用**，账上的那一条：
+
+```json
+{"at": "2026-10-22T03:03:16.155254+00:00", "model": "mmx/MiniMax-M3.1-Flash-Preview",
+ "upstream": "mmx:MiniMax-M3.1-Flash-Preview", "status": 200, "duration_ms": 2380,
+ "prompt_tokens": 42, "completion_tokens": 12, "usage_reported": true,
+ "consumer": "harness/test", "note": "served by the CLI slot"}
+```
+
+所以现在**四个 CLI 槽都能报用量**（自己的输出或自己的库）：
+
+| 槽 | 用量从哪来 |
+|---|---|
+| codebuddy / qoder | 流式输出的最后一行（`{"type":"result","usage":{...}}`）❌ |
+| mmx | 整份 JSON 文档的 `usage`（需要把 `--quiet` 去掉）❌ |
+| opencode | 自己的库，按消息 id 取（不需要时间窗）❌ |
+
+历史那些记录仍然是“未记上”（无法归因）❌——但**从现在起，新的调用记的都是真的数**。

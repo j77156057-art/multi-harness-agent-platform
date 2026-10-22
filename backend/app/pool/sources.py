@@ -99,7 +99,9 @@ DEFAULT_CLI_SLOTS = (
         "name": "mmx",
         "model": "MiniMax-M3.1-Flash-Preview",
         "binary": "mmx",
-        "args": ["text", "chat", "--output", "json", "--non-interactive", "--quiet"],
+        # ``--quiet`` would leave only the answer on stdout and throw the JSON
+        # (and with it the **usage**) away; the pool reads the JSON.
+        "args": ["text", "chat", "--output", "json", "--non-interactive"],
         "message_flag": "--message",
         # The CLI is signed in with the same account as the direct upstream, so
         # it spends the **same** M Plan allowance: reserve, not free.

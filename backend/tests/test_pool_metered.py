@@ -184,6 +184,45 @@ def test_a_provider_without_a_credential_cannot_be_asked():
     assert "凭据" in reading["reason"]
 
 
+def test_a_cli_that_answers_with_one_json_document_is_read_too():
+    """mmx 形状：整个输出是**一份** JSON 文档（不是一行一个事件）。
+
+    它的 ``usage`` 就在文档里——但槽里那个 ``--quiet`` 会把 JSON（连同 usage）
+    一起扔掉，只剩答案，所以槽不能带它。
+    """
+    from app.pool.cli_model import extract_report
+
+    report = extract_report(
+        json.dumps(
+            {
+                "id": "msg-1",
+                "type": "message",
+                "role": "assistant",
+                "model": "MiniMax-M3.1-Flash-Preview",
+                "content": [{"text": "OK", "type": "text"}],
+                "usage": {
+                    "input_tokens": 42,
+                    "output_tokens": 12,
+                    "cache_read_input_tokens": 7,
+                },
+            }
+        )
+    )
+
+    assert report["text"] == "OK"
+    assert report["usage"] == {"prompt_tokens": 42, "completion_tokens": 12}
+
+
+def test_the_mmx_slot_does_not_quiet_away_its_usage():
+    """``--quiet`` 只留答案：JSON（和 usage）就没了。"""
+    from app.pool.sources import DEFAULT_CLI_SLOTS
+
+    mmx = next(slot for slot in DEFAULT_CLI_SLOTS if slot["name"] == "mmx")
+
+    assert "--output" in mmx["args"] and "json" in mmx["args"]
+    assert "--quiet" not in mmx["args"]
+
+
 # --------------------------------------------------------------------------- #
 # CLI 槽：用量是 CLI 自己报的
 # --------------------------------------------------------------------------- #
