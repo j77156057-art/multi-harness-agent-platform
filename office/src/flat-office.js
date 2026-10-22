@@ -210,6 +210,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
   // 「我 @ 给管理员的」和「管理员回我的」挑出来看的面板。不假装是私聊。
 
   const ADMIN_THREAD_REFS = ['to-admin', 'reassign-request', 'dispatch-request'];
+  // 定向消息的签名（R10 §19）：只有发送方与收件方看得到。
+  const DIRECT_REF = 'direct';
 
   /** 平台配置的管理员窗口（事实，不是猜的）。 */
   function adminIdentity() {
@@ -239,9 +241,12 @@ export function mountFlatOffice({ root, project: projectOf }) {
       (a, b) => Number(a.created_seq || 0) - Number(b.created_seq || 0),
     );
     const isAdmin = (message) => message.sender_id === adminId;
+    const isDirect = (message) =>
+      (Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF);
     const isMine = (message) =>
       !isAdmin(message) &&
-      (Array.isArray(message.refs) ? message.refs : []).some((ref) => ADMIN_THREAD_REFS.includes(ref));
+      ((Array.isArray(message.refs) ? message.refs : []).some((ref) => ADMIN_THREAD_REFS.includes(ref)) ||
+        isDirect(message));
     const mine = ordered.filter(isMine);
     const started = mine.length > 0;
     const from = started ? Math.min(...mine.map((message) => Number(message.created_seq || 0))) : null;
@@ -292,9 +297,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
       if (!body || !adminId) return;
       input.value = '';
       try {
-        // mention 让管理员**收到**（平台按 mention 建投递记录）；
-        // refs 里的 to-admin 让这条消息在本面板里可查。
-        await api('/messages', { body, mentions: [adminId], refs: ['to-admin'] });
+        // 定向消息：只有我与管理员看得到（R10 §19）。mention 让管理员**收到**，
+        // direct 让其他成员看不到；refs 里的 direct 让这条在本面板里可查。
+        await api('/messages', { body, mentions: [adminId], refs: [DIRECT_REF], direct: true });
         await refresh();
       } catch (error) {
         state.error = String(error.message || error);
@@ -1556,7 +1561,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
                : thread.length
                  ? `这轮对话 ${thread.length} 条。`
                  : '还没说过话。发一条，管理员会收到 mention。'}</p>
-             <button type="button" data-act="open-admin-chat">打开对话</button>`
+             <button type="button" data-act="open-admin-chat">打开对话</button>
+             <button type="button" data-act="open-direct-window">开私聊窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
       ${poolCard()}
@@ -1778,6 +1784,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
         note: '全部从平台事件日志算：提交与放弃归事件的 actor，返修与通过归任务当前持有者。这是观测指标，不是能力认证。',
         body,
       });
+      return;
+    }
+    if (button.dataset.act === 'open-direct-window') {
+      // 独立窗口（另开一个标签页）：与管理员的定向消息。
+      window.open('/direct.html', 'agent-office-direct', 'width=820,height=760');
       return;
     }
     if (button.dataset.act === 'open-admin-chat') {

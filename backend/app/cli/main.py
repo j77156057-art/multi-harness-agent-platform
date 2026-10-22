@@ -267,7 +267,13 @@ class Commands:
     def say(self, a: argparse.Namespace) -> Any:
         return self._post(
             f"/groups/{a.group}/messages",
-            {"author_kind": a.kind, "author_id": a.author, "body": a.body},
+            {
+                "author_kind": a.kind,
+                "author_id": a.author,
+                "body": a.body,
+                "mentions": list(a.mention or []),
+                "direct": bool(a.direct),
+            },
         )
 
     def log(self, a: argparse.Namespace) -> Any:
@@ -420,6 +426,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--author", required=True)
     p.add_argument("--kind", default="human")
     p.add_argument("--body", required=True)
+    p.add_argument(
+        "--mention",
+        action="append",
+        default=None,
+        help="收件人（可重复）；带 --direct 就是定向消息（R10 §19）",
+    )
+    p.add_argument(
+        "--direct",
+        action="store_true",
+        help="定向消息：只能被发送方与收件方看到",
+    )
 
     p = add("log", "读群聊消息")
     p.add_argument("--group", required=True)

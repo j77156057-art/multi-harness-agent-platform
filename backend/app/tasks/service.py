@@ -82,6 +82,10 @@ def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# 定向消息的签名（R10 §19）：带这个 ref 的消息只给发送方与收件方看。
+DIRECT_REF = "direct"
+
+
 def _normalise_refs(refs: list[str] | None) -> list[str]:
     """Validate the message refs array (openapi post_message / Message schema).
 
@@ -1604,6 +1608,7 @@ class SchedulerService:
         mentions: list[str],
         task_id: str | None = None,
         refs: list[str] | None = None,
+        direct: bool = False,
     ) -> dict[str, object]:
         if not body.strip():
             raise InvalidInput("body must not be empty")
@@ -1627,6 +1632,12 @@ class SchedulerService:
                 event_seq=seq,
             )
         normalised_refs = _normalise_refs(refs)
+        if direct:
+            # 定向消息（R10 §19）：收件人就是 mentions 里的那些窗口，但这条消息
+            # 只能被发送方与收件方看到。“定向”这个词自己就是签名，不新增事件名。
+            if not mentions:
+                raise InvalidInput("direct message needs at least one recipient")
+            normalised_refs = _normalise_refs([*normalised_refs, DIRECT_REF])
         with self.database.transaction() as conn:
             group = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
             if group is None:
@@ -1670,18 +1681,48 @@ class SchedulerService:
             "refs": normalised_refs,
         }
 
-    def list_messages(self, group_id: str, *, since_seq: int = 0, limit: int = 100) -> list[dict]:
+    def list_messages(
+        self,
+        group_id: str,
+        *,
+        since_seq: int = 0,
+        limit: int = 100,
+        viewer: str | None = None,
+    ) -> list[dict]:
         rows = self.database.read(
             "SELECT * FROM task_messages WHERE group_id = ? AND created_seq > ?"
             " ORDER BY created_seq ASC LIMIT ?",
             (group_id, since_seq, limit),
         )
         messages = [dict(row) for row in rows]
+        messages = [m for m in messages if self._message_visible_to(m, viewer)]
         for message in messages:
             # refs is a JSON TEXT column (004); the wire contract wants an array,
             # and pre-004 rows default to '[]', never null.
             message["refs"] = json.loads(str(message["refs"]))
         return messages
+
+    def _message_visible_to(self, message: dict[str, object], viewer: str | None) -> bool:
+        """定向消息只能被发送方与收件方看到（R10 §19）。
+
+        普通群消息对整群可见；带 direct 签名的那条只对两端可见。
+        收件人从 message_deliveries 取（与 mention 同一套投递记录）。
+        """
+        try:
+            refs = json.loads(str(message.get("refs") or "[]"))
+        except (TypeError, ValueError):
+            refs = []
+        if DIRECT_REF not in refs:
+            return True
+        if not viewer:
+            return False
+        if str(message.get("sender_id") or "") == str(viewer):
+            return True
+        rows = self.database.read(
+            "SELECT recipient_id FROM message_deliveries WHERE message_id = ?",
+            (message.get("message_id"),),
+        )
+        return any(str(row["recipient_id"]) == str(viewer) for row in rows)
 
     # ----------------------------------------------------------------- reads
 

@@ -143,7 +143,7 @@ try {
   await page.waitForTimeout(1200);
   assert.equal(posted.length, 1, '面板发出一条消息');
   assert.deepEqual(posted[0].mentions, [ADMIN], '消息 @ 到了管理员');
-  assert.ok(posted[0].refs.includes('to-admin'), '消息带 to-admin 标记，面板里查得到');
+  assert.ok(posted[0].refs.includes('direct'), '消息带 to-admin 标记，面板里查得到');
   assert.match(posted[0].body, /先别派给 Qoder/, '消息正文就是用户写的那句');
 
   // 4. 面板里没有替管理员做决定的按钮

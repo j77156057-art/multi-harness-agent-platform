@@ -18,5 +18,9 @@ export default defineConfig({
   }), harnessGatewayPlugin()],
   server: { host: '127.0.0.1' },
   preview: { host: '127.0.0.1' },
-  build: { target: 'esnext' },
+  build: {
+    target: 'esnext',
+    // 私聊窗口是独立页面（与管理员的定向消息）。
+    rollupOptions: { input: { main: 'index.html', direct: 'direct.html' } },
+  },
 });

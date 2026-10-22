@@ -1808,6 +1808,21 @@ def _actor_type(principal: Principal | None) -> str:
     return principal.subject_type if principal is not None else "human"
 
 
+def _viewer_subject(request: Request, database: DatabaseDep) -> str | None:
+    """这次读取的是谁。
+
+    定向消息（R10 §19）只能给发送方与收件方看，所以读路径必须知道谁在看。
+    认证关不开时没有主体可识别——那就看不到定向消息（失败关闭）。
+    """
+    if settings.auth_mode != "enforce":
+        return None
+    try:
+        principal = TokenService(database).verify(bearer_token(request))
+    except TokenInvalid:
+        return None
+    return principal.subject_id
+
+
 def _admin_subject(principal: Principal | None) -> str:
     """Who the refinement is attributed to.
 
@@ -2098,6 +2113,7 @@ def post_message(group_id: str, body: schemas.PostMessage, service: SchedulerDep
         mentions=body.mentions,
         task_id=body.task_id,
         refs=body.refs,
+        direct=body.direct,
     )
 
 
@@ -2105,10 +2121,14 @@ def post_message(group_id: str, body: schemas.PostMessage, service: SchedulerDep
 def list_messages(
     group_id: str,
     service: SchedulerDep,
+    request: Request,
+    database: DatabaseDep,
     since_seq: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> dict[str, Any]:
-    rows = service.list_messages(group_id, since_seq=since_seq, limit=limit + 1)
+    # 观看人决定定向消息能否看到：读路径按身份过滤（R10 §19）。
+    viewer = _viewer_subject(request, database)
+    rows = service.list_messages(group_id, since_seq=since_seq, limit=limit + 1, viewer=viewer)
     has_more = len(rows) > limit
     rows = rows[:limit]
     last = int(rows[-1]["created_seq"]) if rows else since_seq

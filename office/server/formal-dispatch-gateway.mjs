@@ -354,12 +354,13 @@ export function createFormalGateway(config={}){
       if(req.method==='POST'&&route==='/messages'){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
-        const fields=['body','mentions','task_id','refs'];
+        const fields=['body','mentions','task_id','refs','direct'];
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||typeof body.body!=='string'||!body.body.trim())throw fail(400,'invalid_message_fields');
         if(body.mentions!==undefined&&!Array.isArray(body.mentions))throw fail(400,'invalid_message_fields');
         if(body.refs!==undefined&&!Array.isArray(body.refs))throw fail(400,'invalid_message_fields');
         const result=await call('/groups/'+encodeURIComponent(config.group)+'/messages',{author_kind:'human',author_id:operator,
-          body:body.body,mentions:body.mentions||[],...(body.task_id?{task_id:body.task_id}:{}),refs:body.refs||[]});
+          body:body.body,mentions:body.mentions||[],...(body.task_id?{task_id:body.task_id}:{}),refs:body.refs||[],
+          ...(body.direct?{direct:true}:{})});
         json(res,200,result);return true;
       }
       if(req.method==='POST'&&(route==='/review/claim'||route==='/review/submit')){

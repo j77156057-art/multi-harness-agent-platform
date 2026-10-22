@@ -116,6 +116,8 @@ class PostMessage(BaseModel):
     mentions: list[str] = Field(default_factory=list)
     task_id: str | None = None
     refs: list[str] = Field(default_factory=list)
+    # 定向消息：收件人必须在 mentions 里（R10 §19）。
+    direct: bool = False
 
 
 class PublishTaskBranchRequest(BaseModel):
