@@ -1571,3 +1571,39 @@ codebuddy / qoder 的流式输出里有**整轮**的 usage（`{"type":"result","
 - 读不到就写 `usage_reported: false`，汇总里算**“未记上”**，**不再是一个 0** ❌；
 - 每条 CLI 槽的记录还带上 **CLI 自己的 session id**（opencode 的流里有 `sessionID`）——
   记录因此**可追溯回 CLI 自己的库**（库还在的话，那一次的 token 就查得到）。
+
+### 22.14 读 CLI 自己的库：消息 id 是精确的查找键
+
+“平台去读 CLI 的私有库”这一步走下来了，而且它解决的不是“数量”，是**查找的准确性**：
+
+- opencode CLI 的流式输出里没有 usage（只有答案与会话），但**每个 assistant 消息的 id 在输出里**（`part.messageID`），
+  而那个消息在 CLI 自己的库里带着 usage；
+- 所以查找是**精确的**：按消息 id 取（主键），**不需要时间窗，不需要猜哪几条消息属于这一轮**；
+- 库的位置跟** CLI 自己的规则**（`XDG_DATA_HOME`，否则 `~/.local/share/opencode`），成员 worker 给 CLI 的那个 home 也自然跟着走 ❌；
+- 读的是**只读**（`mode=ro`），库不在、锁不上、消息不在 → **没有 usage**（而不是 0）；
+- 哪个 CLI 的库怎么读，是**声明**的（槽的声明里一个 `store` 字段），不是运行时猜。
+
+**实机跑一次真的 CLI 槽调用**，账上的那一条：
+
+```json
+{"at": "2026-10-22T02:26:02.219605+00:00",
+ "model": "opencode-cli/minimax-m3.1-flash-free",
+ "upstream": "opencode-cli:opencode/minimax-m3.1-flash-free",
+ "status": 200, "duration_ms": 13929,
+ "prompt_tokens": 5600, "completion_tokens": 2,
+ "usage_reported": true,
+ "session_id": "ses_e9e922ab0ffeEEwIwNltNKDiUr",
+ "consumer": "harness/test", "note": "served by the CLI slot"}
+```
+
+—— **token 是 CLI 自己的数字**（从它自己的库里读的），`usage_reported: true`，而且记录带着 **session id**，
+所以这一次以后永远可以回去查 ❌。
+
+分层说（这是这次挖到的最实用的东西）：
+
+| 层 | 谁报的 | 现在的状态 |
+|---|---|---|
+| 流式请求 | 上游的 usage | 已修（三种协议都能收到）❌ |
+| CLI 槽 | **CLI 自己的输出** 或 **CLI 自己的库** | 已修（codebuddy / qoder 直接报；opencode 按消息 id 读库）❌ |
+| 历史记录 | — | **仍是“未记上”**（无法归因，不编数字）❌ |
+| 单价 | — | 不知道，不猜（模型名是中转站改过的）❌ |

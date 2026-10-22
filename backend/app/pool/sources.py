@@ -46,6 +46,11 @@ DEFAULT_CLI_SLOTS = (
         "binary": "opencode",
         "args": ["run", "--standalone", "--format", "json", "--auto"],
         "file_arg": "--file",
+        # The opencode CLI does not put its usage on stdout; it keeps it in its
+        # own store, keyed by the message id that *is* on stdout.  Declared
+        # here, because "this CLI keeps a store we know how to read" is a fact
+        # about the slot, not something to sniff at runtime.
+        "store": "opencode",
     },
     {
         "name": "codebuddy",
@@ -430,6 +435,7 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
             file_arg=(str(slot.get("file_arg")) if slot.get("file_arg") else None),
             message_flag=(str(slot.get("message_flag")) if slot.get("message_flag") else None),
             timeout_seconds=float(slot.get("timeout_seconds") or 900.0),
+            store=str(slot.get("store") or ""),
         )
         # The pool's model id is namespaced by the slot: two CLIs may both
         # offer "deepseek-v4.1-flash", and the pool must not merge them.

@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.pool.cli_usage import opencode_message_usage
+
 #: What the CLI is told before the question.  The CLI is an agent with tools;
 #: for a model call it must answer, not work.
 CLI_MODEL_PREAMBLE = (
@@ -63,6 +65,10 @@ class CliModelSource:
     #: None the question is the last positional argument.
     message_flag: str | None = None
     timeout_seconds: float = 900.0
+    #: Which of the CLI's own stores holds its usage, when the CLI does not
+    #: put it on stdout.  Declared, not sniffed: "this CLI keeps a store we
+    #: know how to read" is a fact about the slot, not a guess at runtime.
+    store: str = ""
     #: The working directory the CLI runs in (a throw-away one by default).
     workdir: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -228,7 +234,21 @@ class CliModelSource:
                 f"the CLI slot {self.name} failed ({completed.returncode}): "
                 f"{(completed.stderr or completed.stdout or '')[-300:]}"
             )
-        return extract_report(completed.stdout)
+        report = extract_report(completed.stdout)
+        if report.get("usage") is None and self.store and report.get("message_ids"):
+            # The CLI did not put its usage on stdout; it kept it in its own
+            # store, and the message ids are the exact key into it.
+            usage = self._usage_from_store(report["message_ids"])
+            if usage is not None:
+                report["usage"] = usage
+                report["usage_source"] = "the CLI's own store"
+        return report
+
+    def _usage_from_store(self, message_ids: list[str]) -> dict[str, int] | None:
+        """The usage the CLI recorded in its own store, if we know that store."""
+        if self.store == "opencode":
+            return opencode_message_usage(message_ids)
+        return None
 
 
 def extract_report(stdout: str) -> dict[str, Any]:
@@ -240,7 +260,12 @@ def extract_report(stdout: str) -> dict[str, Any]:
     record traceable back to the CLI's own store.  A CLI that reports neither
     simply has no usage here: the pool does not guess one.
     """
-    report: dict[str, Any] = {"text": "", "usage": None, "session_id": None}
+    report: dict[str, Any] = {
+        "text": "",
+        "usage": None,
+        "session_id": None,
+        "message_ids": [],
+    }
     for line in stdout.splitlines():
         line = line.strip()
         if not line:
@@ -254,6 +279,23 @@ def extract_report(stdout: str) -> dict[str, Any]:
         session = event.get("session_id") or event.get("sessionID")
         if isinstance(session, str) and session.strip():
             report["session_id"] = session.strip()
+        # The message id is the **exact** key into the CLI's own store: it is
+        # how a turn's messages are found without guessing which ones they
+        # were.
+        part_id = event.get("part")
+        candidates = []
+        if isinstance(part_id, dict):
+            candidates.append(part_id.get("messageID"))
+        message = event.get("message")
+        if isinstance(message, dict):
+            candidates.append(message.get("id"))
+        for candidate in candidates:
+            if (
+                isinstance(candidate, str)
+                and candidate.strip()
+                and candidate not in report["message_ids"]
+            ):
+                report["message_ids"].append(candidate)
         usage = event.get("usage")
         if not isinstance(usage, dict) and isinstance(event.get("message"), dict):
             message_usage = event["message"].get("usage")

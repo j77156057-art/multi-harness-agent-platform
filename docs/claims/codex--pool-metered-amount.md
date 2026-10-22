@@ -32,6 +32,10 @@
   **整轮**的 usage——“免费档只有用量没有 token”是**池子没去读**。
   但**归回去不了**（池子一条记录 = CLI 的一次整轮，用户自己的会话与它交错，
   成员 worker 的 opencode 库还被重置过）——所以历史那 17 条**仍是“未记上”**，不归因。
+- **读 CLI 自己的库**：opencode CLI 的流式输出里没有 usage，但**每个 assistant 消息的 id 在输出里**，
+  而那个消息在 CLI 自己的库里带着 usage ——查找是**精确的**（按主键，
+  不需要时间窗）。库的位置跟 CLI 自己的规则（`XDG_DATA_HOME`），读只读；
+  哪个 CLI 的库怎么读是**声明**u7684（槽的 `store` 字段），不是运行时猜。
 - **往前修**：CLI 槽读 **CLI 自己输出里的 usage**（codebuddy / qoder 可），
   读不到就写 `usage_reported: false`（汇总里算“未记上”）；每条记录带上 **CLI 自己的 session id**，
   记录因此可追溯回 CLI 自己的库。
@@ -42,6 +46,7 @@
   responses 两条流式路径都接上。
 - `backend/app/pool/balance.py`（新）：provider 的只读余额/用量读取与解析
   （DeepSeek `/user/balance`、codex 链的 `/v1/usage`）。
+- `backend/app/pool/cli_usage.py`（新）：按消息 id 读 CLI 自己的库（只读）。
 - `backend/app/pool/inventory.py`：计量档多出每条 provider 的余额与原因。
 - `backend/app/pool/service.py`：汇总里的 `tokens_unknown`（没数过的记录不算 0）。
 - `backend/scripts/backfill_usage_corrections.py`（新）：可重跑的补历史脚本。
