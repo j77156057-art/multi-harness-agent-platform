@@ -91,6 +91,12 @@ class Usage:
     duration_ms: int
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: False when the CLI did not report its usage at all -- then the zeros
+    #: are the absence of a number, not a measurement.
+    usage_reported: bool = True
+    #: The CLI's own session id, when it reports one: it makes the record
+    #: traceable back to the CLI's own store.
+    session_id: str | None = None
     #: Which harness spent the quota (the pool's caller).
     consumer: str = ""
     note: str = ""
@@ -685,10 +691,12 @@ class PoolService:
             raise PoolError(f"upstream {upstream.name} has no CLI slot", status=500)
         started = time.monotonic()
         try:
-            answer = upstream.cli.complete(_messages_of(payload))
+            report = upstream.cli.run(_messages_of(payload))
         except RuntimeError as exc:
             raise PoolError(f"the CLI slot {upstream.name} failed: {exc}") from exc
         duration = int((time.monotonic() - started) * 1000)
+        usage = report.get("usage")
+        answer = str(report.get("text") or "")
         self._account(
             Usage(
                 at=_now(),
@@ -697,6 +705,12 @@ class PoolService:
                 protocol=upstream.protocol,
                 status=200,
                 duration_ms=duration,
+                prompt_tokens=int((usage or {}).get("prompt_tokens") or 0),
+                completion_tokens=int((usage or {}).get("completion_tokens") or 0),
+                # The CLI did not report its usage: say so, instead of
+                # recording a zero that reads as "this call was free".
+                usage_reported=usage is not None,
+                session_id=report.get("session_id"),
                 consumer=consumer,
                 note="served by the CLI slot",
             )
@@ -746,6 +760,8 @@ class PoolService:
                             "duration_ms": usage.duration_ms,
                             "prompt_tokens": usage.prompt_tokens,
                             "completion_tokens": usage.completion_tokens,
+                            "usage_reported": usage.usage_reported,
+                            "session_id": usage.session_id,
                             "consumer": usage.consumer,
                             "note": usage.note,
                         },
@@ -922,7 +938,7 @@ class PoolService:
                 corrected = corrections.get(
                     (str(record.get("at") or ""), upstream, model, consumer)
                 )
-                if corrected is not None:
+                if corrected is not None or record.get("usage_reported") is False:
                     # The tokens were never counted: say "not recorded", not 0.
                     unknown += 1
                     bucket["tokens_unknown"] += 1

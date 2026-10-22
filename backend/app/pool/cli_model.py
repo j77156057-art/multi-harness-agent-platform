@@ -193,6 +193,15 @@ class CliModelSource:
 
     def complete(self, messages: list[dict[str, Any]]) -> str:
         """Run the CLI once and return its answer."""
+        return self.run(messages)["text"]
+
+    def run(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+        """Run the CLI once and report what it said: text, usage, session.
+
+        The usage and the session id are the **CLI's own** numbers, taken
+        from the CLI's own output.  A CLI that does not report them simply
+        has none here -- the pool does not invent them.
+        """
         prompt = self.prompt_for(messages)
         with tempfile.TemporaryDirectory(prefix="pool-cli-") as directory:
             workdir = Path(directory)
@@ -219,18 +228,19 @@ class CliModelSource:
                 f"the CLI slot {self.name} failed ({completed.returncode}): "
                 f"{(completed.stderr or completed.stdout or '')[-300:]}"
             )
-        return extract_text(completed.stdout)
+        return extract_report(completed.stdout)
 
 
-def extract_text(stdout: str) -> str:
-    """The last text event of a CLI's JSON output.
+def extract_report(stdout: str) -> dict[str, Any]:
+    """What a CLI's own output says: the answer, its usage, its session.
 
-    The opencode CLI writes one JSON event per line (``{"type": "text",
-    "part": {"text": "..."}}``).  The shape is not pinned by any spec, so the
-    reader is forgiving: any event carrying a non-empty ``text`` counts, and
-    the raw tail is the fallback.
+    The usage is **the CLI's own number** -- the Claude-Code-shaped stream
+    (``{"type": "result", "usage": {...}}``) reports the turn's totals, and
+    the opencode-shaped stream reports the session id, which is what makes a
+    record traceable back to the CLI's own store.  A CLI that reports neither
+    simply has no usage here: the pool does not guess one.
     """
-    answer = ""
+    report: dict[str, Any] = {"text": "", "usage": None, "session_id": None}
     for line in stdout.splitlines():
         line = line.strip()
         if not line:
@@ -241,6 +251,16 @@ def extract_text(stdout: str) -> str:
             continue
         if not isinstance(event, dict):
             continue
+        session = event.get("session_id") or event.get("sessionID")
+        if isinstance(session, str) and session.strip():
+            report["session_id"] = session.strip()
+        usage = event.get("usage")
+        if not isinstance(usage, dict) and isinstance(event.get("message"), dict):
+            message_usage = event["message"].get("usage")
+            if isinstance(message_usage, dict):
+                usage = message_usage
+        if isinstance(usage, dict) and usage:
+            report["usage"] = _usage_counts(usage)
         part = event.get("part")
         text = ""
         if isinstance(part, dict) and isinstance(part.get("text"), str):
@@ -252,11 +272,11 @@ def extract_text(stdout: str) -> str:
             if isinstance(content, str):
                 text = content
         if text.strip():
-            answer = text
+            report["text"] = text
         for key in ("result", "text", "content"):
             value = event.get(key)
             if isinstance(value, str) and value.strip():
-                answer = value
+                report["text"] = value
             elif isinstance(value, list):
                 for block in value:
                     if (
@@ -264,7 +284,31 @@ def extract_text(stdout: str) -> str:
                         and isinstance(block.get("text"), str)
                         and block["text"].strip()
                     ):
-                        answer = block["text"]
-    if answer:
-        return answer
-    return stdout.strip()[-4000:]
+                        report["text"] = block["text"]
+    if not report["text"]:
+        report["text"] = stdout.strip()[-4000:]
+    return report
+
+
+def _usage_counts(usage: dict[str, Any]) -> dict[str, int]:
+    """The CLI's usage, in the pool's two counters.
+
+    The CLIs report different shapes (Anthropic's ``input_tokens`` /
+    ``output_tokens``, the cache counters, the total).  The pool counts the
+    input and the output; the cache is the CLI's own business.
+    """
+    return {
+        "prompt_tokens": int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
+    }
+
+
+def extract_text(stdout: str) -> str:
+    """The last text event of a CLI's JSON output.
+
+    The opencode CLI writes one JSON event per line (``{"type": "text",
+    "part": {"text": "..."}}``).  The shape is not pinned by any spec, so the
+    reader is forgiving: any event carrying a non-empty ``text`` counts, and
+    the raw tail is the fallback.
+    """
+    return extract_report(stdout)["text"]

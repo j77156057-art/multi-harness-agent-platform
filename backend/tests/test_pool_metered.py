@@ -185,6 +185,104 @@ def test_a_provider_without_a_credential_cannot_be_asked():
 
 
 # --------------------------------------------------------------------------- #
+# CLI 槽：用量是 CLI 自己报的
+# --------------------------------------------------------------------------- #
+
+
+def test_the_cli_usage_is_taken_from_the_clis_own_output():
+    """Claude-Code 形状的流（codebuddy / qoder）在最后一行报整轮的 usage。
+
+    那是 **CLI 自己的数**——池子不推算，只照抄。
+    """
+    from app.pool.cli_model import extract_report
+
+    report = extract_report(
+        "\n".join(
+            [
+                json.dumps({"type": "system", "subtype": "init", "session_id": "s-1"}),
+                json.dumps(
+                    {
+                        "type": "assistant",
+                        "session_id": "s-1",
+                        "message": {"content": [{"type": "text", "text": "OK"}]},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "session_id": "s-1",
+                        "result": "OK",
+                        "usage": {
+                            "input_tokens": 23513,
+                            "output_tokens": 24,
+                            "cache_read_input_tokens": 512,
+                        },
+                    }
+                ),
+            ]
+        )
+    )
+
+    assert report["text"] == "OK"
+    assert report["session_id"] == "s-1"
+    assert report["usage"] == {"prompt_tokens": 23513, "completion_tokens": 24}
+
+
+def test_a_cli_that_reports_no_usage_has_none():
+    """opencode 形状的流只报答案与会话 id——没有 usage 就是没有。
+
+    平台不能因为"应该有"就填一个 0：那会把"没数过"说成"没用过"。
+    """
+    from app.pool.cli_model import extract_report
+
+    report = extract_report(
+        "\n".join(
+            [
+                json.dumps({"type": "step_start", "sessionID": "s-2", "part": {}}),
+                json.dumps(
+                    {"type": "text", "sessionID": "s-2", "part": {"text": "OK"}, "tokens": {}}
+                ),
+            ]
+        )
+    )
+
+    assert report["text"] == "OK"
+    assert report["session_id"] == "s-2"
+    assert report["usage"] is None
+
+
+def test_a_record_whose_cli_reported_no_usage_is_not_a_zero(tmp_path):
+    usage = tmp_path / "usage.jsonl"
+    usage.write_text(
+        json.dumps(
+            {
+                "at": "2026-10-22T01:00:00.000000+00:00",
+                "model": "opencode/minimax-m3.1-flash-free",
+                "upstream": "opencode-cli",
+                "protocol": "cli",
+                "status": 200,
+                "duration_ms": 100,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "usage_reported": False,
+                "session_id": "ses_abc",
+                "consumer": "harness/opencode",
+                "note": "served by the CLI slot",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    summary = PoolService(home=tmp_path, usage_path=usage).usage_summary()
+
+    assert summary["requests"] == 1
+    assert summary["tokens_unknown"] == 1
+    assert summary["upstreams"]["opencode-cli"]["tokens_unknown"] == 1
+
+
+# --------------------------------------------------------------------------- #
 # 补历史：没数过的 token 不能写成 0
 # --------------------------------------------------------------------------- #
 

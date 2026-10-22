@@ -28,6 +28,13 @@
   `tokens_unknown`；补历史是**可重跑**的脚本，不是手改账。
 - **两个 provider 都能报余额**：DeepSeek `/user/balance` 与 codex 链的
   `/v1/usage`（本地代理透传，报钱包余额与逐日用量）。
+- **挖 CLI 自己的记录**：opencode CLI 的库里有**逐条消息**的 usage，codebuddy / qoder 的流式输出里有
+  **整轮**的 usage——“免费档只有用量没有 token”是**池子没去读**。
+  但**归回去不了**（池子一条记录 = CLI 的一次整轮，用户自己的会话与它交错，
+  成员 worker 的 opencode 库还被重置过）——所以历史那 17 条**仍是“未记上”**，不归因。
+- **往前修**：CLI 槽读 **CLI 自己输出里的 usage**（codebuddy / qoder 可），
+  读不到就写 `usage_reported: false`（汇总里算“未记上”）；每条记录带上 **CLI 自己的 session id**，
+  记录因此可追溯回 CLI 自己的库。
 
 ## 变更
 
