@@ -59,4 +59,13 @@ test_id：MVP-UI-010 DOC-TRACE-001
 
 ## 验证结果
 
-（待本分支收口）
+| 门禁 | 结果 |
+|---|---|
+| `tools/docstate` | 98 项检查，0 失败 |
+| `tools/discipline` | 44 项检查，0 失败（1 个告警：主工作区被其他人占用，不属于本分支） |
+| `ruff check` / `ruff format --check` | 全绿（195 个文件已格式化） |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
+| `office/` 构建 | `npm ci && npm run build` 通过（产物 153 kB JS / 48 kB CSS） |
+| `office/scripts/verify-*.mjs` | 17 条中 14 通过；3 条失败均为**环境依赖**（要 5197 端口的 dev server；本机 ollama 没有 `qwen3:4b`；平台在册窗口数量与断言不同） |
+
+前端冒烟脚本**不在本仓门禁内**（CI 里没有 node），它们是本地冒烟；这一条已写进 `docs/dev-convention.md` 的盲区。
