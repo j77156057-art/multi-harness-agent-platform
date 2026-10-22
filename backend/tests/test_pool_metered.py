@@ -403,7 +403,9 @@ def test_a_record_whose_usage_was_never_counted_is_not_a_zero(tmp_path):
     service = PoolService(home=tmp_path, usage_path=usage)
     before = service.usage_summary()
     assert before["requests"] == 2
-    assert before["tokens_unknown"] == 0
+    # A record with no tokens at all is already "not recorded": a call always
+    # uses some, so zero means "not counted" -- before any correction file.
+    assert before["tokens_unknown"] == 1
 
     corrections = corrections_for(usage)
     assert len(corrections) == 1

@@ -938,13 +938,21 @@ class PoolService:
                 corrected = corrections.get(
                     (str(record.get("at") or ""), upstream, model, consumer)
                 )
-                if corrected is not None or record.get("usage_reported") is False:
+                prompt_tokens = int(record.get("prompt_tokens") or 0)
+                completion_tokens = int(record.get("completion_tokens") or 0)
+                if (
+                    corrected is not None
+                    or record.get("usage_reported") is False
+                    or not (prompt_tokens or completion_tokens)
+                ):
                     # The tokens were never counted: say "not recorded", not 0.
+                    # A record with no tokens at all is that too -- a call
+                    # always uses some, so zero means "not counted".
                     unknown += 1
                     bucket["tokens_unknown"] += 1
                 else:
-                    bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
-                    bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                    bucket["prompt_tokens"] += prompt_tokens
+                    bucket["completion_tokens"] += completion_tokens
                 bucket["models"][model] = bucket["models"].get(model, 0) + 1
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
                 spent = consumers.setdefault(
