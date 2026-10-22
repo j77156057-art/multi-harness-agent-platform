@@ -270,6 +270,38 @@ export function createFormalGateway(config={}){
         }));
         json(res,200,{tasks});return true;
       }
+      if(req.method==='GET'&&route==='/outputs'){
+        // **每个窗口都说了什么**：一次请求看完本群所有活最近一次的 CLI 原话。
+        //
+        // 为什么要放在服务端而不是让浏览器自己去问：一条活一次请求，几十条活
+        // 就是几十个往返，浏览器那边先把页面卡住。服务端并行取，浏览器只等一次。
+        //
+        // 平台的 `/tasks/{id}/output` 没有当前 attempt 时会回退到**最近一次**
+        // attempt 的 transcript（"这个 harness 刚才到底说了什么"），正是这里要的。
+        const group=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const rows=await Promise.all((group.tasks||[]).map(async t=>{
+          const out=await call('/tasks/'+encodeURIComponent(t.task_id)+'/output').catch(()=>null);
+          const output=out&&out.output?out.output:null;
+          if(!output)return null;
+          const stdout=String(output.stdout||'');
+          const stderr=String(output.stderr||'');
+          if(!stdout.trim()&&!stderr.trim())return null;
+          return {
+            task_id:t.task_id,
+            title:t.title||t.task_id,
+            status:t.status,
+            owner:t.owner||null,
+            updated_at:t.updated_at||null,
+            attempt_id:output.attempt_id||null,
+            attempt_status:output.attempt_status||null,
+            harness_id:output.harness_id||t.owner||null,
+            current:Boolean(output.current),
+            stdout:stdout.slice(-4000),
+            stderr:stderr.slice(-1500),
+          };
+        }));
+        json(res,200,{outputs:rows.filter(Boolean)});return true;
+      }
       if(req.method==='GET'&&route==='/events'){
         // 群范围内的事件流：成员的动态表、成员的求助都从这里读。
         // 平台的 /events 返回本主体能看到的全部事件，所以这里必须自己裁到

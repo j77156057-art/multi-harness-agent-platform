@@ -22,35 +22,13 @@ import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-ro
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
+import { STATE_LABEL } from './state-labels.js';
+import { escapeHtml } from './html-escape.js';
 
-// 状态词：**给人看的说法**，不是平台内部的状态名。
-//
-// 平台那边叫 draft/awaiting_review/escalated 是一回事，但第一次用这个页面的人
-// 不知道这些词是什么意思。所以这里换成"现在轮到谁"的说法 —— 想看内部名字的
-// 人可以去 docs/spec/0.3-R10.md。
-const STATE_LABEL = {
-  draft: '还没开始',
-  ready: '等人接',
-  queued: '排队中',
-  claimed: '已有人接',
-  in_progress: '正在做',
-  verifying: '在检查',
-  awaiting_review: '等着审',
-  changes_requested: '要返工',
-  approved: '审过了',
-  merging: '正在合并',
-  merged: '已完成',
-  abandoned: '已放弃',
-  stale: '卡住了',
-  cancelled: '已取消',
-  escalated: '等你处理',
-  awaiting_human: '等你回答',
-  reclaiming: '重新找人做',
-  plan_drift: '需求变了',
-  impl_drift: '做偏了',
-  blocked: '遇到问题',
-  needs_help: '在求助',
-};
+const escape = escapeHtml;
+
+// 状态词（STATE_LABEL）从 `state-labels.js` 来 —— 与「各窗口说了什么」那个
+// 独立页面共用一份，两个页面的说法不会各说各话。
 
 const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
 const WAITING_STATES = new Set(['draft', 'ready', 'queued']);
@@ -104,10 +82,8 @@ const FIELD_LABEL = {
 /** 额度档位：free -> reserve（兜底，不自动动用）-> metered。 */
 const TIER_LABEL = { free: '免费', reserve: '兜底', metered: '计量' };
 
-const escape = (value) =>
-  String(value ?? '').replace(/[&<>"']/g, (ch) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
+// 转义统一走 `html-escape.js`（那里是照这份抄的原始实现，别再手抄第二份）。
 const timeOf = (value) => {
   if (!value) return '—';
   const date = new Date(value);
@@ -1767,6 +1743,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <ul class="flat-list">${usable
           .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
           .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
+        <button type="button" data-act="open-outputs" title="另开一个窗口，看每个窗口做完活之后都说了什么">看他们说了什么</button>
       </section>
       <section class="flat-card">
         <h3>等我批准的方案</h3>
@@ -1986,6 +1963,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (button.dataset.act === 'open-direct-window') {
       // 独立窗口（另开一个标签页）：与管理员的定向消息。
       window.open('/direct.html', 'agent-office-direct', 'width=820,height=760');
+      return;
+    }
+    if (button.dataset.act === 'open-outputs') {
+      // 独立窗口（另开一个标签页）：每个窗口做完活之后都说了什么。
+      window.open('/outputs.html', 'agent-office-outputs', 'width=980,height=860');
       return;
     }
     if (button.dataset.act === 'open-admin-chat') {

@@ -22,11 +22,12 @@ test_id：MVP-UI-012
 
 ## 做什么
 
-两件事，同一面：**让第一次用这个页面的人看得懂、点得对**。
+三件事，同一面：**让第一次用这个页面的人看得懂、点得对**。
 
 1. 把「人自己的动作」补回办公室界面：**回答并恢复、放行、重新打开、取消这条活**，
    以及方案卡上的**驳回方案**。
 2. 把界面的说法从平台内部名换成**人话**（状态、按钮、提示、窗口名、次数说法）。
+3. 加一个独立窗口「各个窗口都说了什么」：按窗口摊开每条活最近一次的 CLI 原话。
 
 ## 为什么
 
@@ -68,6 +69,17 @@ test_id：MVP-UI-012
   **在每一个对话框里都露着**（静态测试全绿，肉眼才看得见）；
 - 模态对话框是 `inset:0; margin:auto` 定位的，`height:auto` 会拉满视口 ——
   处置对话框虽有内容，却有 640px 高的一大片空白（要 `fit-content` 才按内容收）。
+
+### 三、想看"他们说了什么"只能一条条点
+
+平台记的是**结果**（谁接了、谁提交了、审没审过），人真正想看的是**窗口自己说的话**：
+测试怎么报的错、改了哪些文件、最后写了什么。原来这些只在选中某条活的详情里看得到，
+一条一条点。补一个独立窗口 `/outputs.html`（从办公室右栏「看他们说了什么」打开），
+按窗口分组摊开。
+
+数据一次取回：浏览器只发一个请求（`GET /api/formal/outputs`），网关在服务端并行取
+每条活最近一次的 `/tasks/{id}/output`。平台那个端点在没有当前 attempt 时会回退到
+**最近一次** attempt 的 transcript，正是这里要的。
 
 ## 边界：什么**不**补，和为什么
 
@@ -112,13 +124,15 @@ test_id：MVP-UI-012
    "再给一次机会"并带上 `budget_override`。
 3. 界面上不出现平台内部名：`attempt` / `epoch` / `决策行` / `预算豁免` / `mention` /
    `stdout` 一律换成人话；窗口显示平台登记的名字而不是 id。
-4. 既有冒烟全绿（`verify-office-task-view` / `brief-members` / `admin-chat` /
+4. 「各个窗口都说了什么」独立窗口可用：按窗口分组、显示原文、默认只显示做完了的、
+   输出里的 HTML 被转义（CLI 说 `<b>x</b>` 时页面上是字面量）。
+5. 既有冒烟全绿（`verify-office-task-view` / `brief-members` / `admin-chat` /
    `direct-chat` / `brief-live` / `layout` / `project-scope` / `platform-assistant` …）。
-5. `office/` 构建通过（`npm run build`）。
-6. `./scripts.sh check` 三道门禁全绿（docstate + discipline + ruff + pytest）。
-7. `docs/traceability.md` 登记 `MVP-UI-012`（按钮）与 `MVP-UI-013`（说法），
-   状态如实写"部分有断言" —— 前端的静态检查**不在本仓门禁内**（CI 里没有 node），
-   这一点不藏着。
+6. `office/` 构建通过（`npm run build`）。
+7. `./scripts.sh check` 三道门禁全绿（docstate + discipline + ruff + pytest）。
+8. `docs/traceability.md` 登记 `MVP-UI-012`（按钮）、`MVP-UI-013`（说法）、
+   `MVP-UI-014`（独立窗口），状态如实写"部分有断言" —— 前端的静态检查
+   **不在本仓门禁内**（CI 里没有 node），这一点不藏着。
 
 ## 验证结果
 
