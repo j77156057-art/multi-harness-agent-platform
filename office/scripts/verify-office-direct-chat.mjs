@@ -86,6 +86,10 @@ try {
   await page.waitForTimeout(1000);
   assert.ok(await page.locator('#aoWorkspace [data-act="open-direct-window"]').count(), '\u529e\u516c\u5ba4\u91cc\u6709\u201c\u5f00\u79c1\u804a\u7a97\u53e3\u201d');
 
+  // 4. 定向消息不能混进群聊：那是群的带子，只有两端看得到的不能出现在里面
+  const groupChat = await page.locator('#aoWorkspace .flat-chat').innerText();
+  assert.doesNotMatch(groupChat, /只给你看的那句/, '定向消息不得出现在群聊里');
+
   assert.deepEqual(errors, [], '\u9875\u9762\u62a5\u9519');
   console.log('verify-office-direct-chat: ok');
 } finally {

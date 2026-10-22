@@ -1617,7 +1617,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
       empty.textContent = '群里还没有消息。';
       list.append(empty);
     }
-    for (const message of state.messages.slice(-40)) {
+    // 定向消息不属于群聊（只有发送方与收件方看得到），不能混进来。
+    const groupMessages = state.messages.filter(
+      (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
+    );
+    for (const message of groupMessages.slice(-40)) {
       const item = document.createElement('article');
       const isHuman = message.sender_type === 'human';
       item.className = 'flat-msg' + (isHuman ? ' is-human' : '');
