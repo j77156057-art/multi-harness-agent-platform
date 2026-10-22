@@ -22,9 +22,7 @@ BODY = (
     "event: response.output_text.delta\n"
     'data: {"type":"response.output_text.delta","delta":"hi"}\n\n'
     "event: response.completed\n"
-    "data: "
-    + json.dumps({"type": "response.completed", "response": {"usage": USAGE}})
-    + "\n\n"
+    "data: " + json.dumps({"type": "response.completed", "response": {"usage": USAGE}}) + "\n\n"
 )
 
 

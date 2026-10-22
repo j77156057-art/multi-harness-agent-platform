@@ -22,16 +22,25 @@
   读不到就说读不到的原因（没设置 / 无凭据 / 拒绝 / 超时）。
 - **单价**：**不知道**。这些模型名（`gpt-6.1-sol`、`deepseek-v4-flash[1M]`）是
   中转站改过的，没有公开价格可套。平台**不猜单价**，只报 token 与余额。
+- **补历史**：那两次历史请求的 token **恢复不了**（池子没记、代理只记元信息、
+  CLI 侧只有会话总量、provider 侧只有账号汇总）。能做的只有把**假 0** 改成
+  **"未记上"**：`usage-corrections.jsonl`（日志本身不动）+ 汇总里的
+  `tokens_unknown`；补历史是**可重跑**的脚本，不是手改账。
+- **两个 provider 都能报余额**：DeepSeek `/user/balance` 与 codex 链的
+  `/v1/usage`（本地代理透传，报钱包余额与逐日用量）。
 
 ## 变更
 
 - `backend/app/pool/service.py`：`_UsageSniffer` / `_usage_blobs`；chat 与
   responses 两条流式路径都接上。
-- `backend/app/pool/balance.py`（新）：provider 的只读余额读取与解析。
+- `backend/app/pool/balance.py`（新）：provider 的只读余额/用量读取与解析
+  （DeepSeek `/user/balance`、codex 链的 `/v1/usage`）。
 - `backend/app/pool/inventory.py`：计量档多出每条 provider 的余额与原因。
+- `backend/app/pool/service.py`：汇总里的 `tokens_unknown`（没数过的记录不算 0）。
+- `backend/scripts/backfill_usage_corrections.py`（新）：可重跑的补历史脚本。
 - `backend/tests/test_pool_stream_usage.py`（新）：用**真的本地 HTTP 服务**走一遍
   流式路径，证明 token 被记上。
-- `backend/tests/test_pool_metered.py`（新）：嗅探器与余额解析的定点测试。
+- `backend/tests/test_pool_metered.py`（新）：嗅探器、余额解析与补历史的定点测试。
 
 ## 边界
 

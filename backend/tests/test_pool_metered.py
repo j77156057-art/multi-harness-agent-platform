@@ -6,9 +6,12 @@ token 与余额，并且说清楚哪一条 provider 问不到。
 
 from __future__ import annotations
 
-from app.pool.balance import parse_balance_answer, read_balance
-from app.pool.service import _usage_blobs, _UsageSniffer
+import json
+
+from app.pool.balance import parse_balance_answer, parse_usage_answer, read_balance
+from app.pool.service import PoolService, _usage_blobs, _UsageSniffer
 from app.pool.sources import Upstream
+from scripts.backfill_usage_corrections import corrections_for
 
 
 def _upstream(name: str, base_url: str, tier: str = "metered", key: str = "k"):
@@ -113,12 +116,57 @@ def test_a_provider_without_balances_says_so():
     assert reading["reason"]
 
 
+def test_the_usage_answer_keeps_the_wallet_and_the_daily_rows():
+    reading = parse_usage_answer(
+        {
+            "unit": "USD",
+            "balance": 0.17,
+            "remaining": 0.17,
+            "daily_usage": [
+                {
+                    "date": "2026-10-21",
+                    "requests": 28,
+                    "input_tokens": 264807,
+                    "output_tokens": 13980,
+                    "total_tokens": 819779,
+                    "cost": 0.9940092,
+                    "actual_cost": 0.0477124416,
+                }
+            ],
+        }
+    )
+
+    assert reading["known"] is True
+    assert reading["remaining"] == 0.17
+    assert reading["unit"] == "USD"
+    assert reading["daily"][0]["actual_cost"] == 0.0477124416
+    # The daily rows are the **account's**, not the platform's: the platform is
+    # one of its callers, and saying otherwise would misreport someone's bill.
+    assert "账号" in reading["scope"]
+
+
 def test_a_provider_with_no_balance_endpoint_is_named_as_unknown():
-    reading = read_balance(_upstream("codex:geekspace", "http://127.0.0.1:8402/v1"))
+    reading = read_balance(_upstream("opencode:1", "https://relay.example.com/v1"))
 
     assert reading["known"] is False
-    assert reading["upstream"] == "codex:geekspace"
+    assert reading["upstream"] == "opencode:1"
     assert "没有可查的余额接口" in reading["reason"]
+
+
+def test_the_codex_chain_is_asked_its_own_usage_endpoint():
+    """codex 链的 provider 回答 ``/v1/usage``（本地代理透传）。
+
+    代理自己注入真密钥，池子这一跳不需要自己的凭据。
+    """
+    from app.pool.balance import _NAME_READERS
+
+    upstream = _upstream("codex:geekspace", "http://127.0.0.1:8402")
+    reader = next(
+        (fn for prefix, fn in _NAME_READERS.items() if upstream.name.startswith(prefix)), None
+    )
+
+    assert reader is not None
+    assert callable(reader)
 
 
 def test_a_provider_without_a_credential_cannot_be_asked():
@@ -134,3 +182,111 @@ def test_a_provider_without_a_credential_cannot_be_asked():
 
     assert reading["known"] is False
     assert "凭据" in reading["reason"]
+
+
+# --------------------------------------------------------------------------- #
+# 补历史：没数过的 token 不能写成 0
+# --------------------------------------------------------------------------- #
+
+
+def test_a_record_whose_usage_was_never_counted_is_not_a_zero(tmp_path):
+    """池子还不看流式 usage 时记下的 0，不是"这次没用 token"，是"没数过"。
+
+    补历史不能编一个数字出来；能做的只是把"没数过"如实标出来。
+    """
+    usage = tmp_path / "usage.jsonl"
+    usage.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "at": "2026-10-21T02:22:20.071535+00:00",
+                        "model": "gpt-6.1-sol",
+                        "upstream": "codex:geekspace",
+                        "protocol": "openai_responses",
+                        "status": 200,
+                        "duration_ms": 100,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "consumer": "harness/opencode",
+                        "note": "streamed (responses)",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "at": "2026-10-21T02:30:00.000000+00:00",
+                        "model": "MiniMax-M3.1-Flash-Preview",
+                        "upstream": "minimax",
+                        "protocol": "anthropic",
+                        "status": 200,
+                        "duration_ms": 100,
+                        "prompt_tokens": 98,
+                        "completion_tokens": 15,
+                        "consumer": "harness/opencode",
+                        "note": "",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    service = PoolService(home=tmp_path, usage_path=usage)
+    before = service.usage_summary()
+    assert before["requests"] == 2
+    assert before["tokens_unknown"] == 0
+
+    corrections = corrections_for(usage)
+    assert len(corrections) == 1
+    assert corrections[0]["upstream"] == "codex:geekspace"
+    (tmp_path / "usage-corrections.jsonl").write_text(
+        "\n".join(json.dumps(correction, ensure_ascii=False) for correction in corrections) + "\n",
+        encoding="utf-8",
+    )
+
+    after = service.usage_summary()
+    assert after["requests"] == 2
+    assert after["tokens_unknown"] == 1
+    assert after["upstreams"]["codex:geekspace"]["tokens_unknown"] == 1
+    # 真的数过的那条不受影响。
+    assert after["upstreams"]["minimax"]["prompt_tokens"] == 98
+    assert after["upstreams"]["minimax"]["tokens_unknown"] == 0
+
+
+def test_the_corrections_skip_the_records_that_were_counted(tmp_path):
+    usage = tmp_path / "usage.jsonl"
+    usage.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "at": "2026-10-21T02:30:00.000000+00:00",
+                        "model": "m",
+                        "upstream": "minimax",
+                        "prompt_tokens": 98,
+                        "completion_tokens": 15,
+                        "consumer": "harness/x",
+                        "note": "",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "at": "2026-10-21T02:31:00.000000+00:00",
+                        "model": "m",
+                        "upstream": "codebuddy:hy3",
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "consumer": "harness/x",
+                        "note": "served by the CLI slot",
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    corrections = corrections_for(usage)
+
+    assert [item["upstream"] for item in corrections] == ["codebuddy:hy3"]

@@ -842,6 +842,41 @@ class PoolService:
             "buckets": list(buckets.values()),
         }
 
+    def _corrections(self) -> dict[tuple[str, str, str, str], dict[str, Any]]:
+        """The corrections the pool's own log needs.
+
+        A record written before the pool learned to read a stream's usage says
+        ``0`` tokens -- and **0 is a false statement**: the tokens were never
+        counted, not counted as none.  A correction says so, and the summary
+        then reports "not recorded" instead of a zero that would read as
+        "this call was free".
+        """
+        if self.usage_path is None:
+            return {}
+        path = self.usage_path.parent / "usage-corrections.jsonl"
+        if not path.exists():
+            return {}
+        found: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            return {}
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            key = (
+                str(record.get("at") or ""),
+                str(record.get("upstream") or ""),
+                str(record.get("model") or ""),
+                str(record.get("consumer") or ""),
+            )
+            found[key] = record
+        return found
+
     def usage_summary(self) -> dict[str, Any]:
         """Whose quota was spent, and by whom.
 
@@ -851,8 +886,15 @@ class PoolService:
         summary: dict[str, dict[str, Any]] = {}
         consumers: dict[str, dict[str, Any]] = {}
         if self.usage_path is None or not self.usage_path.exists():
-            return {"upstreams": summary, "consumers": consumers, "requests": 0}
+            return {
+                "upstreams": summary,
+                "consumers": consumers,
+                "requests": 0,
+                "tokens_unknown": 0,
+            }
+        corrections = self._corrections()
         requests = 0
+        unknown = 0
         try:
             for line in self.usage_path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -862,22 +904,32 @@ class PoolService:
                 except ValueError:
                     continue
                 requests += 1
+                upstream = str(record.get("upstream") or "?")
+                model = str(record.get("model") or "?")
+                consumer = str(record.get("consumer") or "?")
                 bucket = summary.setdefault(
-                    str(record.get("upstream") or "?"),
+                    upstream,
                     {
                         "requests": 0,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
+                        "tokens_unknown": 0,
                         "models": {},
                         "consumers": {},
                     },
                 )
                 bucket["requests"] += 1
-                bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
-                bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
-                model = str(record.get("model") or "?")
+                corrected = corrections.get(
+                    (str(record.get("at") or ""), upstream, model, consumer)
+                )
+                if corrected is not None:
+                    # The tokens were never counted: say "not recorded", not 0.
+                    unknown += 1
+                    bucket["tokens_unknown"] += 1
+                else:
+                    bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+                    bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
                 bucket["models"][model] = bucket["models"].get(model, 0) + 1
-                consumer = str(record.get("consumer") or "?")
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
                 spent = consumers.setdefault(
                     consumer, {"requests": 0, "upstreams": {}, "models": {}}
@@ -889,7 +941,12 @@ class PoolService:
                 spent["models"][model] = spent["models"].get(model, 0) + 1
         except OSError:
             pass
-        return {"upstreams": summary, "consumers": consumers, "requests": requests}
+        return {
+            "upstreams": summary,
+            "consumers": consumers,
+            "requests": requests,
+            "tokens_unknown": unknown,
+        }
 
 
 def _parse_timestamp(value: str) -> datetime | None:

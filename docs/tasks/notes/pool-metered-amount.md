@@ -29,7 +29,9 @@ test_id：DOC-SCHEMA-001 DOC-STATE-001 DOC-TRACE-001
    查询时间；读不到时给出**原因**（没设置 / 无凭据 / 拒绝 / 超时），不编 0。
 4. **单价不被猜**：界面与接口都只报 token 与余额，并说明单价是 provider 自己的
    口径（这些模型名是中转站改过的）。
-5. 定点测试绿；`tools/discipline`、`tools/docstate`、`ruff` 绿；全量 pytest 绿。
+5. **补历史不编数字**：没数过的记录在汇总里是“未记上”（`tokens_unknown`），
+   而不是 0；日志本身不被改写；补历史由可重跑的脚本产生。
+6. 定点测试绿；`tools/discipline`、`tools/docstate`、`ruff` 绿；全量 pytest 绿。
 
 ### 验证结果
 

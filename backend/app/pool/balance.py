@@ -79,9 +79,73 @@ def parse_balance_answer(document: Any) -> dict[str, Any]:
     return {"known": True, "balances": balances, "source": "provider /user/balance"}
 
 
+def _read_usage_endpoint(base_url: str, key: str, timeout: float) -> dict[str, Any]:
+    """The provider's own usage endpoint (``/v1/usage``).
+
+    It answers with the wallet's **remaining**, the **per-day** usage
+    (requests, tokens, cost) and the per-model totals.  The daily rows are
+    the **account's**, not the platform's: the platform is one of its
+    callers, and saying otherwise would be a lie about someone else's bill.
+    """
+    response = httpx.get(
+        _origin(base_url) + "/v1/usage",
+        headers={"Authorization": f"Bearer {key}"},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return parse_usage_answer(response.json())
+
+
+def parse_usage_answer(document: Any) -> dict[str, Any]:
+    """The provider's own usage answer, read as it is."""
+    if not isinstance(document, dict):
+        return {
+            "known": False,
+            "reason": "\u7528\u91cf\u56de\u7b54\u4e0d\u662f\u4e00\u4e2a\u5bf9\u8c61",
+        }
+    remaining = document.get("remaining")
+    if remaining is None:
+        remaining = document.get("balance")
+    daily: list[dict[str, Any]] = []
+    for row in document.get("daily_usage") or []:
+        if not isinstance(row, dict):
+            continue
+        daily.append(
+            {
+                "date": str(row.get("date") or ""),
+                "requests": int(row.get("requests") or 0),
+                "input_tokens": int(row.get("input_tokens") or 0),
+                "output_tokens": int(row.get("output_tokens") or 0),
+                "total_tokens": int(row.get("total_tokens") or 0),
+                "cost": row.get("cost"),
+                "actual_cost": row.get("actual_cost"),
+            }
+        )
+    if remaining is None and not daily:
+        return {
+            "known": False,
+            "reason": "provider \u6ca1\u6709\u62a5\u51fa\u4f59\u989d\u6216\u7528\u91cf",
+        }
+    return {
+        "known": True,
+        "remaining": remaining,
+        "unit": str(document.get("unit") or ""),
+        "daily": daily,
+        "source": "provider /v1/usage",
+        "scope": "\u8d26\u53f7\u5c42\u9762\u7684\u7528\u91cf\uff08\u5e73\u53f0\u53ea\u662f\u5176\u4e2d\u4e00\u4e2a\u8c03\u7528\u65b9\uff09",
+    }
+
+
 #: The balance endpoints the pool knows how to ask, by provider host.
 _READERS = {
     "api.deepseek.com": _read_deepseek,
+}
+
+#: ... and by the pool's own upstream naming, for the chains whose provider
+#: answers ``/v1/usage`` (the local proxy passes it through and injects the
+#: real key, so the pool needs no credential of its own for that hop).
+_NAME_READERS = {
+    "codex:": _read_usage_endpoint,
 }
 
 #: How long a balance reading stays fresh.  Asking the provider is a network
@@ -131,7 +195,9 @@ def read_balance(upstream: Any, *, timeout: float = 20.0) -> dict[str, Any]:
     """
     name = str(getattr(upstream, "name", "") or "")
     base_url = str(getattr(upstream, "base_url", "") or "")
-    reader = _READERS.get(_host(base_url))
+    reader = next(
+        (fn for prefix, fn in _NAME_READERS.items() if name.startswith(prefix)), None
+    ) or _READERS.get(_host(base_url))
     if reader is None:
         return {"known": False, "upstream": name, "reason": "这个 provider 没有可查的余额接口"}
     try:

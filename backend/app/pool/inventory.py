@@ -202,6 +202,7 @@ def _spend_for(usage: dict[str, Any], names: set[str]) -> dict[str, Any]:
     requests = 0
     prompt_tokens = 0
     completion_tokens = 0
+    unknown = 0
     consumers: dict[str, int] = {}
     for name, bucket in upstreams.items():
         if name not in names or not isinstance(bucket, dict):
@@ -209,12 +210,17 @@ def _spend_for(usage: dict[str, Any], names: set[str]) -> dict[str, Any]:
         requests += int(bucket.get("requests") or 0)
         prompt_tokens += int(bucket.get("prompt_tokens") or 0)
         completion_tokens += int(bucket.get("completion_tokens") or 0)
+        unknown += int(bucket.get("tokens_unknown") or 0)
         for who, count in (bucket.get("consumers") or {}).items():
             consumers[str(who)] = consumers.get(str(who), 0) + int(count or 0)
     return {
         "requests": requests,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
+        # The records whose usage was never counted: they are **not** zero
+        # tokens, and saying so is the difference between an honest book and
+        # a cheap-looking one.
+        "tokens_unknown": unknown,
         "consumers": consumers,
     }
 
