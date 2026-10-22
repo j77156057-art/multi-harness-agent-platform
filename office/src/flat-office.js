@@ -21,6 +21,7 @@ import './flat-office.css';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
+import { ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
 
 const STATE_LABEL = {
   draft: '草稿',
@@ -674,6 +675,70 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
   });
 
+  /**
+   * 处置对话框：一次把该问的问清楚。
+   *
+   * 为什么要有它：这几条动作的入参不是同一套 —— 回答/重开要的是**答复**
+   * （写进决策行，R10 §18），取消/放行要的是**原因**，放行在预算用完时还要
+   * 显式带上**预算豁免**（R10 §8）。让人自己填一个空白 textarea，猜不出
+   * 哪个字段是哪个，于是每个动作问一次、一次只问它要的东西。
+   */
+  const decisionDialog = document.createElement('dialog');
+  decisionDialog.className = 'flat-dialog';
+  decisionDialog.id = 'flatDecision';
+  decisionDialog.setAttribute('aria-label', '处置这条活');
+  decisionDialog.innerHTML = `
+    <header class="flat-dialog-head">
+      <div><h2></h2><p class="flat-note"></p></div>
+      <button type="button" class="flat-dialog-close" data-decision-close aria-label="关闭">×</button>
+    </header>
+    <div class="flat-dialog-list">
+      <label class="flat-field"><span data-decision-label></span>
+        <textarea data-decision-text rows="3"></textarea>
+      </label>
+      <label class="flat-check" data-decision-override-wrap hidden>
+        <input type="checkbox" data-decision-override /> 同时给一次预算豁免
+        <span class="flat-note">这条活的尝试预算已经用完。不带豁免，平台会拒绝放行（R10 §8）。</span>
+      </label>
+      <div class="flat-dialog-actions">
+        <button type="button" data-decision-cancel>取消</button>
+        <button type="button" data-decision-confirm>确认</button>
+      </div>
+    </div>`;
+  document.body.append(decisionDialog);
+
+  /** 打开处置对话框；确认时 resolve {text, override}，取消时 resolve null。 */
+  function askDecision({ title, note, label, placeholder, override }) {
+    return new Promise((resolve) => {
+      decisionDialog.querySelector('h2').textContent = title;
+      decisionDialog.querySelector('.flat-note').textContent = note || '';
+      decisionDialog.querySelector('[data-decision-label]').textContent = label;
+      const text = decisionDialog.querySelector('[data-decision-text]');
+      text.value = '';
+      text.placeholder = placeholder || '';
+      const wrap = decisionDialog.querySelector('[data-decision-override-wrap]');
+      const box = decisionDialog.querySelector('[data-decision-override]');
+      wrap.hidden = !override;
+      box.checked = false;
+      const finish = value => {
+        decisionDialog.close();
+        decisionDialog.removeEventListener('close', onClose);
+        resolve(value);
+      };
+      const onClose = () => {
+        decisionDialog.removeEventListener('close', onClose);
+        resolve(null);
+      };
+      decisionDialog.addEventListener('close', onClose);
+      decisionDialog.querySelector('[data-decision-confirm]').onclick = () =>
+        finish({ text: text.value.trim(), override: box.checked });
+      decisionDialog.querySelector('[data-decision-cancel]').onclick = () => decisionDialog.close();
+      decisionDialog.querySelector('[data-decision-close]').onclick = () => decisionDialog.close();
+      if (!decisionDialog.open) decisionDialog.showModal();
+      text.focus();
+    });
+  }
+
   function openPanel(dialog, { title, note, body }) {
     dialog.querySelector('.flat-dialog-head h2').textContent = title;
     dialog.querySelector('.flat-dialog-head .flat-note').textContent = note || '';
@@ -1289,6 +1354,26 @@ export function mountFlatOffice({ root, project: projectOf }) {
       );
     }
     buttons.push(`<button type="button" data-act="reassign">请求管理员改派</button>`);
+    // 处置动词：回答提问、放行、重开、取消。
+    //
+    // 这些是**人自己的动作**（R10 §18），旧的人操作面里有过（已随 Vue 控制台
+    // 一起删掉），迁到 Agent Office 时整批丢了：于是"等人回答"的任务在界面上
+    // 是个死状态 —— 人只能发条群消息，平台不会把它当成决策。
+    // 状态集合见 `human-actions.js`，与后端守卫一一对应；后端仍是唯一裁判。
+    for (const action of humanDecisionActions(task)) {
+      const label = ACTION_LABEL[action] || action;
+      const hint =
+        action === 'resume'
+          ? '把答复写进决策行，任务回到干活的人手里'
+          : action === 'reopen'
+            ? '重新打开这条活：清掉主人与 attempt，回到待领取'
+            : action === 'release'
+              ? '升级的活放回队列：清掉主人与 attempt'
+              : '这条活不做了';
+      buttons.push(
+        `<button type="button" data-act="decide-${action}" title="${escape(hint)}">${escape(label)}</button>`,
+      );
+    }
     return buttons.join('');
   }
 
@@ -1577,7 +1662,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         ${plan
           ? `<p>${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 个任务</p>
              <p class="flat-note">${escape((plan.document || {}).markdown_path || '')}</p>
-             <button type="button" data-act="approve-plan">批准并派单</button>`
+             <button type="button" data-act="approve-plan">批准并派单</button>
+             <button type="button" data-act="reject-plan" title="驳回这份方案：退回 draft_rejected，由管理员出新版本">驳回方案</button>`
           : '<p class="flat-empty">没有待审的方案。</p>'}
       </section>`;
     return wrap;
@@ -1842,6 +1928,93 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const draft = state.plan && state.plan.draft;
       if (!draft) return;
       void doAction('/plan/approve', { route: '/plan/approve', body: { plan_id: draft.plan_id } });
+    }
+    if (button.dataset.act === 'reject-plan') {
+      const draft = state.plan && state.plan.draft;
+      if (!draft) return;
+      void (async () => {
+        const answer = await askDecision({
+          title: '驳回这份方案',
+          note: `方案 ${draft.plan_id}：驳回后它退回 draft_rejected，由管理员出新版本。`,
+          label: '驳回原因（会写进平台的决策记录）',
+          placeholder: '例如：范围太大，先做核心链路',
+        });
+        if (!answer) return;
+        if (!answer.text) {
+          state.error = '驳回方案要写原因 —— 没有原因，平台上就只剩一个动作没有理由。';
+          render();
+          return;
+        }
+        await doAction('/plan/reject', {
+          route: '/plan/reject',
+          body: { plan_id: draft.plan_id, reason: answer.text },
+        });
+      })();
+      return;
+    }
+    const decision = button.dataset.act && button.dataset.act.startsWith('decide-')
+      ? button.dataset.act.slice('decide-'.length)
+      : '';
+    if (decision && task) {
+      void (async () => {
+        const spec = {
+          resume: {
+            title: '回答并恢复',
+            note: '答复会写进决策行；任务回到干活的人手里（同一个 attempt，不换 epoch）。',
+            label: '答复（可空，但写清楚点，决策行是给人看的）',
+            route: '/human/resume',
+          },
+          reopen: {
+            title: '重新打开这条活',
+            note: '清掉主人与 attempt，这条活回到待领取；谁都能再领。',
+            label: '为什么重新开（可空，会写进决策行）',
+            route: '/human/reopen',
+          },
+          release: {
+            title: '放行这条升级的活',
+            note: '升级的活放回队列：清掉主人与 attempt，下一轮重新抢。',
+            label: '放行理由（可空）',
+            route: '/human/release',
+          },
+          cancel: {
+            title: '取消这条活',
+            note: '取消是终态：这条活不再有人做。',
+            label: '取消原因（必填）',
+            route: '/human/cancel',
+          },
+        }[decision];
+        if (!spec) return;
+        const needsOverride = decision === 'release' && releaseNeedsOverride(task);
+        const answer = await askDecision({
+          title: spec.title,
+          note: spec.note,
+          label: spec.label,
+          placeholder: decision === 'cancel' ? '例如：这条活的方向不对，先停' : '',
+          override: needsOverride,
+        });
+        if (!answer) return;
+        if (decision === 'cancel' && !answer.text) {
+          state.error = '取消要写原因 —— 平台上会留下这条决策记录。';
+          render();
+          return;
+        }
+        if (needsOverride && !answer.override) {
+          // 平台会回 409（R10 §8），但让人自己读那个码不如直接说清楚。
+          state.error = '这条活的尝试预算已经用完，放行必须带上预算豁免 —— 勾上再试。';
+          render();
+          return;
+        }
+        const body = { task_id: task.task_id };
+        if (decision === 'resume' || decision === 'reopen') {
+          if (answer.text) body.answer = answer.text;
+        } else if (decision === 'release') {
+          body.reason = answer.text;
+          if (needsOverride && answer.override) body.budget_override = true;
+        } else {
+          body.reason = answer.text;
+        }
+        await doAction(spec.route, { route: spec.route, body });
+      })();
     }
   });
 

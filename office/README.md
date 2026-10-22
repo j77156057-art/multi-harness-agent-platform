@@ -2,7 +2,12 @@
 
 平台的**观察面**：看任务、方案、额度、事件、群聊，以及跟管理员对话。
 它不派单、不改派、不审核、不合并 —— 那些是管理员 Harness 与成员自己的动作，
-界面只提供**人自己的动作**（请求改派、请求预算豁免、请管理员派单、在群里说话）。
+界面只提供**人自己的动作**（请求改派、请求预算豁免、请管理员派单、在群里说话，
+以及 R10 §18 的几个处置动词：回答并恢复、放行、重新打开、取消这条活，
+外加方案上的批准与驳回）。
+
+裁决（`human.adjudicate`）、派单、细化、审查、管理链**不在群主面** ——
+那是管理员面的事（R10 §39、`docs/tasks/notes/OFFICE-UI-01.md`）。
 
 ```
 npm ci
@@ -18,6 +23,7 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 |---|---|
 | `src/main.js` | 应用外壳：顶栏、项目大厅、办公室、开工配置对话框 |
 | `src/flat-office.*` | 办公室本体：任务表、任务详情、额度池、群聊、任务书、成员动态 |
+| `src/human-actions.js` | 「人自己的动作」的状态门控（抄后端守卫，冒烟脚本会逐个核对） |
 | `src/project-workspace.*` | 项目大厅（项目列表、新建项目、连接 Harness） |
 | `src/opening-host.js` | 开工向导的宿主（群主填目标，管理员 Harness 细化并分派） |
 | `src/admin-agent.js` | 平台助手：巡检与上报，**只读**，不代任何人做决定 |
@@ -34,6 +40,22 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 - `/api/formal/events` —— **本群**的事件流（成员动态、任务书里的"谁接过"都从这来）；
 - `/api/formal/messages` —— 群消息（`mentions` 是平台的投递机制）；
 - `/api/formal/plan` —— 方案定稿（任务书的原文）。
+
+## 人自己的动作
+
+这些按钮**按后端的状态守卫给出**（`src/human-actions.js` 与
+`backend/app/human/service.py` 一一对应；后端仍是唯一裁判，409 照实显示）：
+
+| 动作 | 网关路由 | 平台端点 |
+|---|---|---|
+| 回答并恢复 | `POST /api/formal/human/resume` | `POST /api/v1/human/resume` |
+| 重新打开 | `POST /api/formal/human/reopen` | `POST /api/v1/human/reopen` |
+| 放行回队列 | `POST /api/formal/human/release` | `POST /api/v1/human/release` |
+| 取消这条活 | `POST /api/formal/human/cancel` | `POST /api/v1/human/cancel` |
+| 驳回方案 | `POST /api/formal/plan/reject` | `POST /api/v1/plans/{id}/reject` |
+
+预算用完的活放行时要显式带上**预算豁免**（R10 §8），所以对话框里会多问一次，
+而不是让人从 409 里猜。
 
 ## 与管理员对话
 

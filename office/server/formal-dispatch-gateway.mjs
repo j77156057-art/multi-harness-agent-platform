@@ -313,6 +313,18 @@ export function createFormalGateway(config={}){
         const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/approve',{decided_by:operator});
         json(res,200,result);return true;
       }
+      if(req.method==='POST'&&route==='/plan/reject'){
+        // 驳回是批准的**对称面**：人不能只会点头。R10 §10 有 `draft | plan.reject`
+        // 这条边（落到 draft_rejected），旧的人操作面里本来就有「驳回计划」。
+        // 原因必填 —— 没有原因的驳回在平台的决策记录里只剩一个动作。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.plan_id!=='string'||!ident(body.plan_id)||
+          typeof body.reason!=='string'||!body.reason.trim())throw fail(400,'invalid_plan_fields');
+        const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/reject',
+          {decided_by:operator,reason:body.reason.trim()});
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/pool'){
         // 平台自己的额度池：池子里有哪些额度、谁的额度被谁花了。
         // 池子的接口只认 harness 主体，所以这里用管理员 harness 的凭据读。

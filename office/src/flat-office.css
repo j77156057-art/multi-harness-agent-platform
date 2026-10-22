@@ -711,6 +711,49 @@
   min-height: 0;
 }
 
+/* 处置对话框的表单件：答复 / 原因 / 预算豁免。 */
+.flat-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #3d4652;
+}
+
+.flat-field textarea {
+  width: 100%;
+  border: 1px solid #d9dde3;
+  border-radius: 5px;
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  background: #fff;
+  color: #1f2732;
+}
+
+.flat-field textarea:focus {
+  outline: 2px solid #2f5d8c33;
+  border-color: #2f5d8c;
+}
+
+.flat-check {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #3d4652;
+}
+
+.flat-check .flat-note {
+  margin: 0;
+}
+
+.flat-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .flat-thread-msg {
   border-left: 2px solid #e3e6ea;
   padding-left: 10px;
