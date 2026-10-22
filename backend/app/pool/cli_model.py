@@ -318,7 +318,13 @@ def _read_event(event: dict[str, Any], report: dict[str, Any]) -> None:
         if isinstance(message_usage, dict):
             usage = message_usage
     if isinstance(usage, dict) and usage:
-        report["usage"] = _usage_counts(usage)
+        counts = _usage_counts(usage)
+        # A CLI that reports the **shape** of a usage but not the numbers
+        # (the qoder CLI does: its provider counts credits, not tokens) has
+        # not told us the usage -- an all-zero usage is that, not a
+        # measurement of zero.
+        if counts["prompt_tokens"] or counts["completion_tokens"]:
+            report["usage"] = counts
     text = ""
     if isinstance(part, dict) and isinstance(part.get("text"), str):
         text = part["text"]

@@ -1638,3 +1638,20 @@ mmx 槽原来的参数：["text", "chat", "--output", "json", "--non-interactive
 | opencode | 自己的库，按消息 id 取（不需要时间窗）❌ |
 
 历史那些记录仍然是“未记上”（无法归因）❌——但**从现在起，新的调用记的都是真的数**。
+
+### 22.16 qoder 的 usage 全是 0：那不是“用了 0 token”
+
+四个 CLI 槽都跑了一遍真的，还有一个细节：**qoder CLI 的 usage 全是 0**（`input_tokens: 0`、
+`output_tokens: 0`、`credits: 0.56`）——它的 provider 记的是 **credits**，不是 token ❌。
+
+如果把这个全 0 当成“这次用了 0 token”，就是**在说假话**——所以**全 0 的 usage 按“没报上”处理：
+它报的是**形状**（usage 的键在），不是**数字**（数字不在）。
+
+实测三个槽的账：
+
+| 槽 | 账上的 usage | 来源 |
+|---|---|---|
+| codebuddy | 23080 / 14 | 自己输出的 `result` 事件 ❌ |
+| mmx | 42 / 12 | 自己输出的整份 JSON ❌ |
+| opencode | 5600 / 2 | 自己的库（按消息 id）❌ |
+| qoder | —（未记上） | 它的 provider 只给 credits ❌ |

@@ -223,6 +223,37 @@ def test_the_mmx_slot_does_not_quiet_away_its_usage():
     assert "--quiet" not in mmx["args"]
 
 
+def test_a_cli_that_reports_the_shape_but_no_numbers_has_no_usage():
+    """qoder CLI：usage 的**形状**在，数字全是 0（它的 provider 记 credits，不记 token）。
+
+    全 0 的 usage 不是"这次没用 token"，是"它没告诉我们"——按未记上处理。
+    """
+    from app.pool.cli_model import extract_report
+
+    report = extract_report(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "result",
+                        "subtype": "success",
+                        "result": "OK",
+                        "usage": {
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                            "credits": 0.56,
+                        },
+                    }
+                )
+            ]
+        )
+    )
+
+    assert report["text"] == "OK"
+    assert report["usage"] is None
+
+
 # --------------------------------------------------------------------------- #
 # CLI 槽：用量是 CLI 自己报的
 # --------------------------------------------------------------------------- #
