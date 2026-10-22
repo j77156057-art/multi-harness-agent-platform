@@ -282,6 +282,35 @@ export function createFormalGateway(config={}){
         // `{output: null}`，那种直接跳过。
         const MAX_ATTEMPTS=8; // 一条活最多摊开多少次尝试（平台的 max_attempts 通常是 3）
         const group=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const taskIds=new Set((group.tasks||[]).map(t=>t.task_id));
+        // 每一轮**真正的结果**在事件里，不在 attempt 的状态列上 ——
+        // 那列在提交之后就停在 verifying/in_progress 不动了（真数据实测：一条
+        // 已经 merged 的活，它的 attempt 状态还是 verifying）。事件才记着
+        // 这一轮是"交上去了"还是"放弃了"，以及为什么放弃。
+        //
+        // 事件**整群一次取**（平台的 /events 一页 1000 条，这个群的历史
+        // 一次就装得下），而不是逐条活去取：逐活取要多发 40 个请求，
+        // 真平台上这一下就是 3.7 秒。取回来再按本群的活裁掉。
+        const outcomes=new Map();
+        let since=0;
+        for(let page=0;page<10;page+=1){
+          const res=await call('/events?since_seq='+since+'&limit=1000').catch(()=>null);
+          const events=(res&&res.events)||[];
+          for(const evt of events){
+            if(!taskIds.has(evt.aggregate_id))continue;
+            const aid=evt.payload&&evt.payload.attempt_id;
+            if(!aid)continue;
+            const name=String(evt.event_name||'');
+            const reason=String((evt.payload&&evt.payload.reason)||'');
+            if(name==='submit_result')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'交上去了',reason:''});
+            else if(name==='abandon')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'放弃了',reason});
+            else if(name==='release')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'放开了',reason});
+            else if(name==='claim_for_revision'||name==='reassign')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'被换掉了',reason});
+            else if(!outcomes.has(evt.aggregate_id+'|'+aid))outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'',reason:''});
+          }
+          if(!res||!res.has_more)break;
+          since=Number(res.next_seq||since);
+        }
         const rows=await Promise.all((group.tasks||[]).map(async t=>{
           const total=Number(t.attempt_no||0);
           if(!total)return null;
@@ -294,10 +323,13 @@ export function createFormalGateway(config={}){
             const stdout=String(output.stdout||'');
             const stderr=String(output.stderr||'');
             if(!stdout.trim()&&!stderr.trim())return null;
+            const round=outcomes.get(t.task_id+'|'+attemptId)||{outcome:'',reason:''};
             return {
               attempt_no:n,
               attempt_id:attemptId,
               attempt_status:output.attempt_status||null,
+              outcome:round.outcome,
+              reason:round.reason,
               harness_id:output.harness_id||null,
               current:Boolean(output.current),
               stdout:stdout.slice(-4000),
@@ -316,7 +348,7 @@ export function createFormalGateway(config={}){
             attempts:live,
           };
         }));
-        json(res,200,{outputs:rows.filter(Boolean)});return true;
+        json(res,200,{outputs:rows.filter(Boolean),project_id:config.project,group_id:config.group});return true;
       }
       if(req.method==='GET'&&route==='/events'){
         // 群范围内的事件流：成员的动态表、成员的求助都从这里读。

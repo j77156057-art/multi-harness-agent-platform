@@ -31,10 +31,16 @@ export const STATE_LABEL = {
 };
 
 /**
- * 「做完了」的状态：窗口把活干完并交上去了（平台那边是提交/审过/合入）。
- * 剩下的是"还没交"——包括还在做的、卡住的、被退回的。
+ * 「做完了」与「没做成」是**活**的状态，不是某一轮的状态。
+ *
+ * 真数据实测踩过的坑：平台的 attempt 状态列在提交之后就停在 verifying 了 ——
+ * 一条已经 merged 的活，它的 attempt 状态还是 verifying。按 attempt 状态筛
+ * "做完了的"会一条都筛不出来。活的状态才是人理解的那个意思。
  */
 export const DONE_STATES = new Set(['awaiting_review', 'approved', 'merged']);
+
+/** 明确没做成的（放弃 / 卡住 / 被取消）。 */
+export const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
 
 /** 状态词 + 兜底（平台给了不认识的状态就照实显示它，不编）。 */
 export const stateLabel = (status) => STATE_LABEL[status] || String(status || '');

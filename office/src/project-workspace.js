@@ -490,7 +490,10 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       index: String(sequence).padStart(2, '0'),
       name: recoverable.name,
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-      phase: 'phone',
+      // 恢复出来的项目在平台上**已经有活了**（taskIds 是从平台读回来的），
+      // 所以它不是"待开工"，而是"已经在干"：卡片上要写「已开工 / 进入办公室」，
+      // 而不是"先配置一下"——点下去直接就是办公室，写错了会让人以为还得再配一次。
+      phase: 'scene',
       source: 'platform',
       members: onlineMembers.length ? onlineMembers : members.map(member => member.id),
       taskIds: recoverable.taskIds,

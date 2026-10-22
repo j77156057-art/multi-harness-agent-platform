@@ -22,7 +22,7 @@ import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-ro
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
-import { STATE_LABEL } from './state-labels.js';
+import { STATE_LABEL, DONE_STATES } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
 
 const escape = escapeHtml;
@@ -487,14 +487,32 @@ export function mountFlatOffice({ root, project: projectOf }) {
     return names;
   }
 
+  /**
+   * 这条活现在是谁在做。
+   *
+   * 真数据实测踩到的坑：合入之后平台把 owner 清空了，于是"已完成"的活在列表里
+   * 写着"没人做（之前是 OpenCode）"—— 一件做完的事说成没人做，读者会以为它
+   * 还在等人。所以先看这条活**处在什么状态**，再说人。
+   */
+  function whoWord(task, holds) {
+    const status = String(task.status || '');
+    if (DONE_STATES.has(status)) {
+      return holds.before ? `做完了（之前是 ${holds.before} 做的）` : '做完了';
+    }
+    if (['abandoned', 'stale', 'cancelled'].includes(status)) {
+      return holds.before ? `没做成（之前是 ${holds.before} 做的）` : '没做成';
+    }
+    if (holds.now) return `${holds.now} 在做`;
+    if (holds.before) return `现在没人做（之前是 ${holds.before}）`;
+    if (Number(task.attempt_no || 0) > 0) return `现在没人做（试过 ${task.attempt_no} 次）`;
+    return '还没人接';
+  }
+
   /** 谁在拿着这条活（拿不了就说谁接过）。 */
   function detailHolds(task) {
     const holds = whoHolds(task);
     const attempt = attemptWord(task);
-    if (holds.now) return `正在做：${holds.now} · ${attempt}`;
-    if (holds.before) return `现在没人做（之前是 ${holds.before}）· ${attempt}`;
-    if (Number(task.attempt_no || 0) > 0) return `现在没人做（接过 ${task.attempt_no} 次）· ${attempt}`;
-    return `还没人接过 · ${attempt}`;
+    return `${whoWord(task, holds)} · ${attempt}`;
   }
 
   /**
@@ -950,13 +968,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const reason = task.last_failure?.reason ? ` · ${task.last_failure.reason}` : '';
       const stamp = task.updated_at ? ` · 更新于 ${escape(timeOf(task.updated_at))}` : '';
       const holds = whoHolds(task);
-      const who = holds.now
-        ? `${holds.now} 在做`
-        : holds.before
-          ? `没人做（之前是 ${holds.before}）`
-          : Number(task.attempt_no || 0) > 0
-            ? `没人做（试过 ${task.attempt_no} 次）`
-            : '还没人接';
+      const who = whoWord(task, holds);
       row.innerHTML = `
         <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
         <span class="flat-task-title">${escape(listTitle(task))}</span>

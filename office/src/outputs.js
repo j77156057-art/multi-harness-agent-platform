@@ -8,11 +8,14 @@
 // 数据来自平台的 `/tasks/{id}/output`（每一次 attempt 的 CLI 输出尾巴）。
 // 页面本身只读，不发任何写。
 import './outputs.css';
-import { DONE_STATES, stateLabel } from './state-labels.js';
+import { DONE_STATES, FAILED_STATES, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
 
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
+
+/** 收着显示时最多给多少字（超长的单行 JSON 也要兜住）。 */
+const INLINE_LIMIT = 1200;
 
 const api = async (route) => {
   const response = await fetch(`/api/formal${route}`, { cache: 'no-store' });
@@ -21,7 +24,7 @@ const api = async (route) => {
   return data;
 };
 
-const state = { status: null, outputs: [], scope: null, filter: 'done', error: null, expanded: new Set() };
+const state = { status: null, outputs: [], scope: null, group: null, filter: 'all', error: null, expanded: new Set() };
 
 /** 窗口的登记名（平台的 `codex-window` → 「Codex 窗口」）。 */
 function harnessName(id) {
@@ -61,10 +64,16 @@ function grouped() {
   const map = new Map();
   let shown = 0;
   for (const task of state.outputs || []) {
-    const attempts = (task.attempts || []).filter((attempt) =>
-      state.filter === 'all' ? true : DONE_STATES.has(String(attempt.attempt_status || task.status)),
-    );
-    for (const attempt of attempts) {
+    // 筛选按**活的状态**：一条 merged 的活，它每一轮都是"这条活做成了"；
+    // 用 attempt 那个停在 verifying 的旧状态去筛，会一条都筛不出来。
+    const keep =
+      state.filter === 'all'
+        ? true
+        : state.filter === 'done'
+          ? DONE_STATES.has(String(task.status))
+          : FAILED_STATES.has(String(task.status));
+    if (!keep) continue;
+    for (const attempt of task.attempts || []) {
       const key = attempt.harness_id || task.owner || 'unknown';
       if (!map.has(key)) map.set(key, new Map());
       const tasks = map.get(key);
@@ -101,11 +110,32 @@ function words(task, attempt) {
   const long = lines.length > 12;
   const key = `${task.task_id}:${attempt.attempt_id}`;
   const expanded = state.expanded.has(key);
-  const shown = long && !expanded ? lines.slice(-12).join('\n') : stdout;
+  let shown = long && !expanded ? lines.slice(-12).join('\n') : stdout;
+  // 真数据实测：有些窗口吐出的是**一整行超长的 JSON**（会话日志），按行截断
+  // 等于没截 —— 4000 字直接糊在脸上。再按字数兜一道底。
+  let clipped = long && !expanded;
+  if (shown.length > INLINE_LIMIT) {
+    const dropped = shown.length - INLINE_LIMIT;
+    shown = `…（前面还有 ${dropped} 字）\n${shown.slice(-INLINE_LIMIT)}`;
+    clipped = true;
+  }
   return `
-    <pre class="outputs-words ${long && !expanded ? 'is-clipped' : ''}">${escape(shown || '（它什么也没输出）')}</pre>
+    <pre class="outputs-words ${clipped ? 'is-clipped' : ''}">${escape(shown || '（它什么也没输出）')}</pre>
     ${long ? `<button type="button" class="outputs-more" data-more="${escape(key)}">${expanded ? '收起' : `展开全部 ${lines.length} 行`}</button>` : ''}
     ${stderr.trim() ? `<pre class="outputs-err">${escape(stderr)}</pre>` : ''}`;
+}
+
+/**
+ * 这是哪个项目/群。
+ *
+ * 本机开着办公室时，localStorage 里有项目名（那才是人起的名字）；这个独立
+ * 窗口可能是在没有本机项目的情况下直接打开的，那就说清是**哪个群** ——
+ * 群号是操作员自己认得的，"本项目"反而不知道在说谁。
+ */
+function scopeName() {
+  if (state.scope && state.scope.name) return state.scope.name;
+  if (state.group) return `群 ${state.group}`;
+  return '本项目';
 }
 
 function render() {
@@ -119,13 +149,14 @@ function render() {
     <div class="outputs-shell">
       <header class="outputs-head">
         <h1>各个窗口都说了什么</h1>
-        <p>${state.scope ? escape(state.scope.name) : '本项目'} · ${total} 次尝试留下了话</p>
+        <p>${escape(scopeName())} · ${total} 次尝试留下了话</p>
         <p class="outputs-note">干活的人每做一次活，都会留下一段<b>它自己的话</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开；一条活做过几次，这里就摊几次，新的那次在前。</p>
         <div class="outputs-tools">
           <label for="outputsFilter">看</label>
           <select id="outputsFilter">
-            <option value="done"${state.filter === 'done' ? ' selected' : ''}>做完了的</option>
             <option value="all"${state.filter === 'all' ? ' selected' : ''}>全部</option>
+            <option value="done"${state.filter === 'done' ? ' selected' : ''}>做完了的</option>
+            <option value="failed"${state.filter === 'failed' ? ' selected' : ''}>没做成的</option>
           </select>
           <button type="button" id="outputsRefresh">刷新</button>
           <span class="outputs-count">显示 ${shown} 次</span>
@@ -155,17 +186,20 @@ function render() {
                           </header>
                           ${attempts
                             .map((attempt) => {
-                              // 这一轮的状态只有在**和活的状态不一样**时才值得说 ——
-                              // 两个一样的标签并排挂着只会让人以为页面坏了。
-                              const round =
-                                attempt.attempt_status && attempt.attempt_status !== task.status
-                                  ? `<span class="outputs-tag">这一轮：${escape(stateLabel(attempt.attempt_status))}</span>`
-                                  : '';
+                              // 这一轮的结果来自**事件**，不是那个停在 verifying 的
+                              // attempt 状态：交上去了 / 放弃了（带原因）/ 放开了。
+                              const outcome = attempt.outcome
+                                ? `<span class="outputs-tag ${attempt.outcome === '交上去了' ? 'is-done' : 'is-stuck'}">这一轮：${escape(attempt.outcome)}</span>`
+                                : '';
+                              const reason = attempt.reason
+                                ? `<p class="outputs-reason">它当时说：${escape(attempt.reason)}</p>`
+                                : '';
                               return `<div class="outputs-attempt">
                                 <div class="outputs-attempt-head">
                                   <b>第 ${escape(String(attempt.attempt_no))} 次尝试</b>
-                                  ${round}
+                                  ${outcome}
                                 </div>
+                                ${reason}
                                 ${words(task, attempt)}
                               </div>`;
                             })
@@ -227,6 +261,7 @@ async function refresh() {
     state.status = status;
     state.scope = activeProject();
     state.outputs = outputs.outputs || [];
+    state.group = outputs.group_id || null;
     if (!state.error) state.error = null;
   } catch (error) {
     state.error = String(error.message || error);
@@ -235,4 +270,6 @@ async function refresh() {
 }
 
 void refresh();
-setInterval(() => void refresh(), 15000);
+// 这个页面是"看历史"的：一次要向平台要几十条活、每一轮的原话，15 秒一轮
+// 太勤了（真平台上一次 45 个上游请求）。60 秒一轮，想立刻看新的按「刷新」。
+setInterval(() => void refresh(), 60000);

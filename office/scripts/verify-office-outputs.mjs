@@ -62,7 +62,9 @@ const OUTPUTS = [
       {
         attempt_no: 1,
         attempt_id: 'FD-0123456789abcdef.a1',
-        attempt_status: 'merged',
+        attempt_status: 'verifying',
+        outcome: '交上去了',
+        reason: '',
         harness_id: 'codex-window',
         current: false,
         stdout: 'npm test\n> 12 passed\n<b>done</b>',
@@ -71,11 +73,11 @@ const OUTPUTS = [
     ],
   },
   {
-    // 这条活做过三次：前两次是 codex 做的（都失败了），第三次换成了 qoder。
+    // 这条活做过三次：前两次是 codex 做的（都放弃了），第三次换成了 qoder。
     // 页面要按**这一次是谁做的**分组，而不是按活现在的主人。
     task_id: 'FD-1111111111111111',
     title: '示例项目 · 结算页金额显示不对',
-    status: 'in_progress',
+    status: 'abandoned',
     owner: 'qoder-window',
     updated_at: '2026-10-22T13:00:00Z',
     attempt_total: 3,
@@ -83,7 +85,9 @@ const OUTPUTS = [
       {
         attempt_no: 1,
         attempt_id: 'FD-1111111111111111.a1',
-        attempt_status: 'abandoned',
+        attempt_status: 'in_progress',
+        outcome: '放弃了',
+        reason: '接口签名对不上，改不动',
         harness_id: 'codex-window',
         current: false,
         stdout: 'pytest -q\nFAILED test_amount\n第一次就挂了。',
@@ -92,7 +96,9 @@ const OUTPUTS = [
       {
         attempt_no: 2,
         attempt_id: 'FD-1111111111111111.a2',
-        attempt_status: 'abandoned',
+        attempt_status: 'in_progress',
+        outcome: '放弃了',
+        reason: '还是同一个错',
         harness_id: 'codex-window',
         current: false,
         stdout: 'pytest -q\nFAILED test_amount\n第二次还是同一个错。',
@@ -102,6 +108,8 @@ const OUTPUTS = [
         attempt_no: 3,
         attempt_id: 'FD-1111111111111111.a3',
         attempt_status: 'in_progress',
+        outcome: '',
+        reason: '',
         harness_id: 'qoder-window',
         current: true,
         stdout: 'pytest -q\nrunning...\n',
@@ -177,8 +185,8 @@ try {
   await page.goto(`${base}/outputs.html`);
   await page.waitForSelector('.outputs-window', { timeout: 20000 });
 
-  // 1. 默认只显示"做完了的"：merged 的那次在，abandoned 的两次不在。
-  assert.equal(await page.locator('.outputs-item').count(), 1, '默认只显示做完了的那次尝试');
+  // 1. 默认是「全部」：三次尝试都在（一条 merged 的活 + 两次失败的尝试）。
+  assert.equal(await page.locator('.outputs-attempt').count(), 4, '默认摊开全部尝试（1 + 3）');
   assert.match(await page.locator('.outputs-window').first().innerText(), /Codex 窗口/, '窗口显示登记名');
   assert.match(
     await page.locator('.outputs-window').first().innerText(),
@@ -191,10 +199,35 @@ try {
     '任务名里重复的项目名前缀去掉了',
   );
   assert.match(
-    await page.locator('.outputs-item').first().innerText(),
+    await page.locator('.outputs-attempt-head').first().innerText(),
     /第 1 次尝试/,
     '每次尝试标着第几次',
   );
+  // 每一轮的结果来自事件：交上去了 / 放弃了（带原因）。
+  const roundHeads = await page.locator('.outputs-attempt-head').allInnerTexts();
+  assert.ok(
+    roundHeads.some(text => text.includes('交上去了')),
+    `交上去的那轮标出来了：${JSON.stringify(roundHeads)}`,
+  );
+  assert.ok(
+    roundHeads.some(text => text.includes('放弃了')),
+    `失败的那轮标出来了：${JSON.stringify(roundHeads)}`,
+  );
+  assert.match(
+    await page.locator('.outputs-reason').first().innerText(),
+    /它当时说/,
+    '失败的原因也在',
+  );
+
+  // 1b. 筛「做完了的」：只看活已经做成的那些；「没做成的」看放弃/卡住/取消的。
+  await page.selectOption('#outputsFilter', 'done');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.outputs-attempt').count(), 1, '做完了的只有那一轮');
+  await page.selectOption('#outputsFilter', 'failed');
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('.outputs-attempt').count(), 3, '没做成的三轮');
+  await page.selectOption('#outputsFilter', 'all');
+  await page.waitForTimeout(250);
 
   // 2. 切到「全部」：每一次尝试都在，而且按**这一次是谁做的**分组 ——
   //    那条活现在的主人是 qoder，但前两轮是 codex 做的。
@@ -222,7 +255,7 @@ try {
   // 组内按尝试序号倒序：同一条活里也是新的尝试在前。
   assert.match(attemptHeads[0], /第 2 次尝试/, '同一条活的多次尝试，新的在前');
   assert.match(attemptHeads[1], /第 1 次尝试/, '第 1 次尝试也在');
-  assert.match(attemptHeads.join('\n'), /已放弃/, '失败的那一轮标出来了');
+  assert.match(attemptHeads.join('\n'), /这一轮：放弃了/, '失败的那一轮标出来了');
 
   // 3. 输出里的 HTML 要转义 —— CLI 说 <b>done</b> 时，页面上是字面量。
   const words = await page

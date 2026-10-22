@@ -87,6 +87,27 @@ test_id：MVP-UI-012
 （`{task_id}.a{attempt_no}`，见 `backend/app/claim/service.py`），所以不用先捞一遍
 事件才知道有哪些尝试，直接按 1..attempt_no 枚举即可。
 
+### 四、对着真平台跑一遍,改出来的东西
+
+假数据好看、真数据难看 —— 真跑一遍（真平台 8848 + 真令牌 + 真的群 office-formal-2）
+暴露了四个问题，都不是断言能发现的：
+
+1. **平台的 attempt 状态列是旧的**：提交之后就停在 verifying/in_progress 不动了。
+   一条已经 merged 的活，它的 attempt 状态还是 verifying —— 按它筛"做完了的"，
+   一条都筛不出来。每一轮**真正的结果**在**事件**里（submit_result / abandon / release，
+   abandon 还带原因）。所以网关去整群取一次事件（844 条一页装得下），按
+   `活|尝试` 建索引，每一轮标出"交上去了 / 放弃了（为什么）/ 放开了"。
+2. **筛选要按活的状态**（人理解的那个意思），不是按某一轮的状态。默认改成「全部」，
+   另有「做完了的 / 没做成的」。
+3. **真实 stdout 常常是一整行超长 JSON**：按行截断等于没截，4000 字直接糊在脸上。
+   再加一道按字数的底（1200 字），并写明"前面还有 N 字"。
+4. **合入后平台把 owner 清空了**：于是"已完成"的活在列表里写着"没人做（之前是
+   OpenCode）"—— 一件做完的事说成没人做。先看状态再说人：做完了 / 没做成 / X 在做。
+
+顺带量了一下真平台的规模并据此改了实现：群里 74 条活、44 次尝试、18 次有话可看。
+逐活取事件要 80 个上游请求、3.7 秒；改成整群取一次事件后是 48 个请求、1.1 秒。
+页面的自动刷新也从 15 秒改成 60 秒（这是"看历史"的页面，60 秒一轮，想立刻看按「刷新」）。
+
 ## 边界：什么**不**补，和为什么
 
 按 R10 §39 与 `docs/tasks/notes/OFFICE-UI-01.md`（"派单、拆解、裁决、合并一律
@@ -151,5 +172,6 @@ test_id：MVP-UI-012
 | `office/scripts/verify-routed-messages.mjs` | 5/5 PASS（既有） |
 | `office/server/formal-gateway-admin.test.mjs` | 10/10 PASS（既有） |
 | 其余既有冒烟 | 全 ok（对着带假数据的本地预览逐个跑过） |
-| `office/` 构建 | `npm run build` 通过（161 kB JS / 48.7 kB CSS） |
+| `office/` 构建 | `npm run build` 通过（161 kB JS / 49.3 kB CSS） |
+| 真平台实跑 | 平台 8848 + 令牌 formal-operator.key + 群 office-formal-2：74 条活、44 次尝试、18 次有话可看；网关 48 个上游请求 / 1.1 秒 |
 | `./scripts.sh check` | 见提交记录 |

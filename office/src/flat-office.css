@@ -32,6 +32,9 @@
   padding: 12px 20px;
   background: #fff;
   border-bottom: 1px solid var(--ao-line);
+  /* 真数据实测：1280px 宽下，导语 + 数据源 + 五个计数把这一行挤爆了 ——
+     计数标签被压成竖排（"等人接"一个字一行）。宁可换行，不要挤成竖排。 */
+  flex-wrap: wrap;
 }
 
 .flat-head-main {
@@ -107,6 +110,7 @@
 .flat-counts dt {
   font-size: 11px;
   color: var(--ao-ink-faint);
+  white-space: nowrap;
 }
 
 .flat-counts dd {
