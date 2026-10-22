@@ -45,7 +45,7 @@
 1. `backend/tests/test_api_events_messages.py` 2 条绿：只有两端看得到、没有收件人时拒绝；
 2. `backend/tests/test_cli_flow.py` 1 条绿：CLI 能发定向消息；
 3. `office/scripts/verify-office-direct-chat.mjs` 绿：私聊页只列定向消息、发出去带
-   `direct` + `mentions`；
+   `direct` + `mentions`、页面自己轮询且重画不吞草稿；
 4. `tools/docstate`、`tools/discipline`、`ruff`、全量 `pytest` 全绿；
 5. 管理员会**回**私聊：`test_admin_harness.py` 3 条 + `test_admin_worker.py` 3 条绿
    （答在私聊里、模型只看任务账本且不许编、空答案失败关闭、只答一次、私聊不进群回执、

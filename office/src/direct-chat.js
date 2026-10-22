@@ -49,6 +49,17 @@ function directMessages() {
 
 function render() {
   const root = $('#directApp');
+  // 每次重画都换掉整个 shell，所以先把「用户正在写什么、读到哪儿」留住：
+  // 管理员的回话要过一次模型，比打字慢，不能一刷新就把草稿吞掉，也不能把
+  // 正在往回翻的人拽回底部。
+  const previousInput = $('#directInput');
+  const draft = previousInput ? previousInput.value : '';
+  const wasTyping = previousInput !== null && previousInput === document.activeElement;
+  const previousList = $('#directList');
+  const previousTop = previousList ? previousList.scrollTop : 0;
+  const followTail = previousList
+    ? previousList.scrollHeight - previousList.scrollTop - previousList.clientHeight < 24
+    : true;
   const id = adminId();
   const name = adminName();
   const thread = directMessages();
@@ -84,7 +95,12 @@ function render() {
     </div>`;
 
   const list = $('#directList');
-  if (list) list.scrollTop = list.scrollHeight;
+  if (list) list.scrollTop = followTail ? list.scrollHeight : previousTop;
+  const input = $('#directInput');
+  if (input) {
+    input.value = draft;
+    if (wasTyping) input.focus();
+  }
 
   $('#directForm').addEventListener('submit', async (event) => {
     event.preventDefault();
