@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.pool.catalogue import credential_from_file, read_catalogue, tokens_from_ratio
 from app.pool.cli_usage import opencode_message_usage
 
 #: What the CLI is told before the question.  The CLI is an agent with tools;
@@ -69,6 +70,10 @@ class CliModelSource:
     #: put it on stdout.  Declared, not sniffed: "this CLI keeps a store we
     #: know how to read" is a fact about the slot, not a guess at runtime.
     store: str = ""
+    #: The provider behind this CLI has a model catalogue that carries the
+    #: context window.  Declared, not sniffed: "this provider has a catalogue
+    #: here" is a fact about the slot.
+    catalogue: dict[str, Any] = field(default_factory=dict)
     #: The working directory the CLI runs in (a throw-away one by default).
     workdir: Path | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -235,6 +240,7 @@ class CliModelSource:
                 f"{(completed.stderr or completed.stdout or '')[-300:]}"
             )
         report = extract_report(completed.stdout)
+        self._derive_from_catalogue(report)
         if report.get("usage") is None and self.store and report.get("message_ids"):
             # The CLI did not put its usage on stdout; it kept it in its own
             # store, and the message ids are the exact key into it.
@@ -243,6 +249,36 @@ class CliModelSource:
                 report["usage"] = usage
                 report["usage_source"] = "the CLI's own store"
         return report
+
+    def _derive_from_catalogue(self, report: dict[str, Any]) -> None:
+        """Turn the provider's **ratio** into tokens, if its window is known.
+
+        Some providers report ``context_usage_ratio`` and their own unit
+        (credits) instead of tokens.  The ratio is exact; the window is in
+        their model catalogue, which the platform may read (read-only).  With
+        both, the tokens are the provider's own number.
+        """
+        if not self.catalogue:
+            return
+        usage = report.get("raw_usage")
+        if not isinstance(usage, dict):
+            return
+        if report.get("usage") is not None:
+            return
+        catalogue = read_catalogue(
+            base_url=str(self.catalogue.get("base_url") or ""),
+            path=str(self.catalogue.get("path") or "/api/v1/models"),
+            credential=credential_from_file(str(self.catalogue.get("credential_file") or "")),
+        )
+        if not catalogue.get("known"):
+            report["catalogue_note"] = catalogue.get("reason")
+            return
+        tokens = tokens_from_ratio(usage, catalogue, model=str(self.model or ""))
+        if tokens is None:
+            report["catalogue_note"] = "模型目录里没有这个模型的 context window"
+            return
+        report["usage"] = tokens
+        report["usage_source"] = "the provider's context ratio times its own window"
 
     def _usage_from_store(self, message_ids: list[str]) -> dict[str, int] | None:
         """The usage the CLI recorded in its own store, if we know that store."""
@@ -326,6 +362,9 @@ def _read_event(event: dict[str, Any], report: dict[str, Any]) -> None:
         # measurement of zero.
         if counts["prompt_tokens"] or counts["completion_tokens"]:
             report["usage"] = counts
+        # The provider's own usage object, kept: it carries the ratio that
+        # turns into tokens once the catalogue says the window.
+        report["raw_usage"] = usage
         credits = usage.get("credits")
         if isinstance(credits, int | float):
             # Some providers count **credits** instead of tokens.  That is

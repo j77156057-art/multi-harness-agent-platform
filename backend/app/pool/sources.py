@@ -94,6 +94,16 @@ DEFAULT_CLI_SLOTS = (
             "-w",
             "{workdir}",
         ],
+        # The qoder provider reports a **ratio** (context used / window) and its
+        # own unit (credits), not tokens.  The window is in its model
+        # catalogue -- which the platform may read, read-only, with a
+        # credential the user provides.  Without that credential there is no
+        # window, and the usage stays in credits.
+        "catalogue": {
+            "base_url": "https://gateway.qoder.com.cn",
+            "path": "/api/v1/models",
+            "credential_file": "~/.qoder-cn/api-token",
+        },
     },
     {
         "name": "mmx",
@@ -438,6 +448,7 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
             message_flag=(str(slot.get("message_flag")) if slot.get("message_flag") else None),
             timeout_seconds=float(slot.get("timeout_seconds") or 900.0),
             store=str(slot.get("store") or ""),
+            catalogue=dict(slot.get("catalogue") or {}),
         )
         # The pool's model id is namespaced by the slot: two CLIs may both
         # offer "deepseek-v4.1-flash", and the pool must not merge them.

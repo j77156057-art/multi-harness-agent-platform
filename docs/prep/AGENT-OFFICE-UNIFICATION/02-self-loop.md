@@ -1678,3 +1678,23 @@ mmx 槽原来的参数：["text", "chat", "--output", "json", "--non-interactive
 **什么时候能真的换算成 token**：只要 provider 把模型目录里的 **context window** 变成可读（或给平台一个
 `gateway.qoder.com.cn/api/v1/models` 的**只读**凭据），那时 tokens = ratio × window 就是**精确**的（两个数都是 provider 自己报的）。
 在那之前，它就是 credits。
+
+### 22.18 给 qoder provider 一个只读的模型目录凭据：机制先就位
+
+换算的**缺口是窗口宽度**（context window）——而它在 provider 的**模型目录**里。所以机制先就位：
+
+- qoder 槽的声明里加一个 `catalogue`（**声明**，不是运行时猜）：
+  `base_url` + `path` + 凭据所在的文件；
+- 平台只发**读**（一个 GET，不花钱，不下单）：
+  `GET https://gateway.qoder.com.cn/api/v1/models`；
+- 目录里有这个模型的 **context window** 时：
+  `tokens = context_usage_ratio × context_window`（两个数都是 **provider 自己**报的 → 结果精确）❌；
+- 没有凭据（或目录里没这个模型的窗口）：**不换算**，用量留在 credits 里，
+  并记下原因（“没有凭据，读不了模型目录” / “模型目录里没有这个模型的 context window”）❌。
+
+**用户要做的只有一件事**：把 qoder 的 API token 放到
+`~/.qoder-cn/api-token`（一个文件）。平台只会**读**它（只读模型目录），绝不用它下单；
+没有这个文件也不会出错（只是继续记 credits）。
+
+还有一个现实需要说清楚：**CLI 自己缓存的目录里 `contextWindow` 是 0**（未知）——
+而 provider 的回答里**带着比例**（它自己算得出来的）。所以“带凭据读目录”能不能能解锁窗口，取决于目录里那个字段是不是真的有值。
