@@ -50,3 +50,23 @@ P1 引擎接真模型（池子直连免费档五家，零 USD）与真私聊（a
 （trace 记 `pinned-fallback`）；出错/空回的 free 模型冷却 30 分钟让位，
 全冷时最后一搏。被动健康：失败喂探针，不主动轮询烧槽。目录变更的人侧
 告警另立 `pool-free-set-watch`（提案已登记，待复核）。
+
+### 远端同步备注（2026-10-23 晚）
+
+github.com:443 被墙期间，经 **api.github.com 的 Git Data API** 推送成功
+（blob→tree→commit→ref 快进）。GitHub 重建的提交对象与本地字节不同，
+**内容树等价但 sha 分叉**，对应关系：
+
+| 本地 | 远端（等价） |
+|---|---|
+| `61a9917` | `b16ffc2c` |
+| `7106919` | `a69c080f` |
+| `aaa8da5`（P1） | `5a3f8b28` |
+| `efc664d` | `abf95ad8` |
+| `a6cdf57`（P2） | `9cd1aaed` |
+| `8bba189` | `7ffcf2eb` |
+| `e84ebd0`（目录驱动） | `05533397` |
+
+卡内引用的提交号均为本地 sha；443 恢复后要么以远端为准 rebase 对齐，
+要么 `--force-with-lease` 覆盖（内容相同，安全）。推送脚本：
+`api.github.com /repos/*/git/blobs|trees|commits|refs`（gh token，repo scope）。
