@@ -66,7 +66,9 @@ github.com:443 被墙期间，经 **api.github.com 的 Git Data API** 推送成�
 | `a6cdf57`（P2） | `9cd1aaed` |
 | `8bba189` | `7ffcf2eb` |
 | `e84ebd0`（目录驱动） | `05533397` |
+| `2acfcb6`（本备注） | `6fe544bd` |
 
+表到此为止：其后的备注类提交不再逐条回填，远端等价 sha 以各轮推送日志为准。
 卡内引用的提交号均为本地 sha；443 恢复后要么以远端为准 rebase 对齐，
 要么 `--force-with-lease` 覆盖（内容相同，安全）。推送脚本：
 `api.github.com /repos/*/git/blobs|trees|commits|refs`（gh token，repo scope）。
