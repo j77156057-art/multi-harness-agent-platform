@@ -78,6 +78,10 @@ const ledger = {
 
 const calls = [];
 
+// 让"点头"先失败一次：界面必须看得见这次失败（以前 state.error 从来没被
+// 渲染过，于是点"同意用一次"只给人"点了没反应"）。
+let failApprove = false;
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (url.pathname.startsWith('/api/formal')) {
@@ -131,6 +135,12 @@ const server = http.createServer((req, res) => {
       req.on('data', (chunk) => (raw += chunk));
       req.on('end', () => {
         calls.push({ method: req.method, route, body: raw });
+        if (failApprove && action === 'approve') {
+          // 模拟"平台那边没成"：界面必须**看得见**这次失败。
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ error: 'approve_failed' }));
+          return;
+        }
         if (req.method === 'DELETE') {
           ledger.keys = ledger.keys.filter((key) => key.id !== id);
           if (ledger.pending?.key_id === id) ledger.pending = null;
@@ -205,8 +215,22 @@ try {
   );
   assert.match(railChildren[0] || '', /flat-card-ask/, '这张卡排在右栏第一个');
 
-  // 3. 点「同意用一次」＝ approve + mode=once，点头之后问题消失、列表变已同意。
+  // 3. 点「同意用一次」：先让它失败一次 —— 界面必须**看得见**这次失败，
+  //    而不是"点了没反应"（以前 state.error 从来没被渲染过）。
+  failApprove = true;
   await ask.locator('button[data-act="approve-user-key"][data-mode="once"]').click();
+  const banner = page.locator('.flat-error');
+  await banner.waitFor({ state: 'visible', timeout: 10000 });
+  assert.match(await banner.innerText(), /没成/, '失败的提示要看得见');
+  assert.equal(
+    await page.locator('.flat-userkey-ask').count(),
+    1,
+    '没点成之前问题还在（人可以再点一次）',
+  );
+
+  //    再点一次：这次成了 —— approve + mode=once，问题消失、列表变已同意。
+  failApprove = false;
+  await page.locator('button[data-act="approve-user-key"][data-mode="once"]').click();
   await page.waitForFunction(
     () => !document.querySelector('.flat-userkey-ask'),
     undefined,
