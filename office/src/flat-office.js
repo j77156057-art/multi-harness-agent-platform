@@ -81,7 +81,7 @@ const FIELD_LABEL = {
 };
 
 /** 额度档位：free -> reserve（兜底，不自动动用）-> metered。 */
-const TIER_LABEL = { free: '免费', reserve: '兜底', metered: '计量' };
+const TIER_LABEL = { free: '免费', reserve: '兜底', metered: '计量', user: '你自己的' };
 
 
 // 转义统一走 `html-escape.js`（那里是照这份抄的原始实现，别再手抄第二份）。
@@ -155,6 +155,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
     filter: 'all',
     error: null,
     messages: [],
+    userKeys: [],
+    userKeyPending: null,
+    // 哪些折叠卡片是开着的。
+    //
+    // 右栏每 15 秒重画一次（为了看到新数据）。不记住这件事，用户刚点开
+    // 「额度池」，下一轮刷新就"啪"地合上了 —— 正在看的东西会从手里跑掉。
+    openFolds: new Set(),
     source: 'platform',
     sort: 'updated',
     page: 1,
@@ -164,6 +171,70 @@ export function mountFlatOffice({ root, project: projectOf }) {
     events: [],
     chatExpanded: false,
   };
+
+  // 用户**正在输入**的东西。
+  //
+  // 办公室每 15 秒整块重画一次（为了看到新数据）。重画会把输入框一起换掉，
+  // 所以人家正在填的 key 会在半路上消失 —— 这不是"小毛病"，是这东西没法用。
+  // 重画之前存下来（值、光标、焦点），重画之后放回去。
+  //
+  // 输入框只要带 `data-draft="名字"`，就会被记住；名字自己起，别重复。
+  const drafts = { fields: {}, focus: '', start: 0, end: 0 };
+
+  /** 重画之前：把用户填过的东西存下来（值 + 光标位置）。 */
+  function captureDrafts() {
+    root.querySelectorAll('[data-draft]').forEach((field) => {
+      drafts.fields[field.dataset.draft] = field.value;
+    });
+    const active = document.activeElement;
+    if (active && active.dataset && active.dataset.draft && root.contains(active)) {
+      drafts.focus = active.dataset.draft;
+      drafts.start = active.selectionStart ?? null;
+      drafts.end = active.selectionEnd ?? null;
+    }
+  }
+
+  /** 重画之后：把值、光标和焦点放回去。 */
+  function restoreDrafts() {
+    root.querySelectorAll('[data-draft]').forEach((field) => {
+      const saved = drafts.fields[field.dataset.draft];
+      if (saved !== undefined && field.value !== saved) field.value = saved;
+    });
+    if (!drafts.focus) return;
+    const field = root.querySelector(`[data-draft="${drafts.focus}"]`);
+    if (!field || typeof field.focus !== 'function') return;
+    field.focus();
+    if (drafts.start !== null && typeof field.setSelectionRange === 'function') {
+      try {
+        field.setSelectionRange(drafts.start, drafts.end);
+      } catch {
+        // 不是文本框（select 之类）就放着。
+      }
+    }
+  }
+
+  // 各栏的滚动位置。
+  //
+  // 重画会把这些栏整个换掉，滚动位置也就没了：用户滚到额度池看额度，下一次
+  // 刷新就"啪"地回到顶上 —— 跟刚才那个"正在填的表单被抹掉"是同一类毛病。
+  const scrollState = new Map();
+  const SCROLLING_PANES = ['.flat-rail', '.flat-tasks', '.flat-detail', '.flat-chat-list'];
+
+  function captureScroll() {
+    for (const selector of SCROLLING_PANES) {
+      const pane = root.querySelector(selector);
+      if (pane) scrollState.set(selector, { top: pane.scrollTop, left: pane.scrollLeft });
+    }
+  }
+
+  function restoreScroll() {
+    for (const [selector, position] of scrollState) {
+      const pane = root.querySelector(selector);
+      if (!pane) continue;
+      pane.scrollTop = position.top;
+      pane.scrollLeft = position.left;
+    }
+  }
   // 本地样例（不连平台）：给没有平台的人看界面用。
   const demoRuntime = createOfficeReadRuntime();
   const demoFixture = createOfficeReadFixture();
@@ -180,6 +251,18 @@ export function mountFlatOffice({ root, project: projectOf }) {
             body: JSON.stringify(body_),
           }
         : {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+    return data;
+  };
+
+  /** 删掉一个东西（DELETE 也要带同源写的那个头）。 */
+  const apiDelete = async (route) => {
+    const response = await fetch(`/api/formal${route}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      headers: { 'X-Office-Formal': '1' },
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
@@ -820,6 +903,10 @@ export function mountFlatOffice({ root, project: projectOf }) {
   }
 
   function render() {
+    // 重画之前先把**用户正在输入的东西**存下来：办公室每 15 秒重画一次，
+    // 不存的话，正在填的表单（"加一个 key"）会被抹掉半截。
+    captureDrafts();
+    captureScroll();
     const scope = state.scope;
     const counts = countBy(state.tasks);
     const filtered = state.tasks.filter((task) => {
@@ -845,6 +932,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
       rail(),
       chat(),
     );
+    restoreDrafts();
+    restoreScroll();
     const sourceSelect = root.querySelector('#flatSourceSelect');
     if (sourceSelect) sourceSelect.value = state.source;
     root.dataset.flatState = 'ready';
@@ -883,7 +972,15 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <div><dt>等人处理</dt><dd class="${counts.review ? 'is-bad' : ''}">${counts.review}</dd></div>
         <div><dt>没做成</dt><dd class="${counts.failed ? 'is-bad' : ''}">${counts.failed}</dd></div>
         <div><dt>完成了</dt><dd>${counts.done}</dd></div>
-      </dl>`;
+      </dl>
+      ${
+        state.error
+          ? `<div class="flat-error">
+              <b>刚才那一下没成：</b>${escape(state.error)}
+              <button type="button" data-act="dismiss-error">知道了</button>
+            </div>`
+          : ''
+      }`;
     return wrap;
   }
 
@@ -1497,6 +1594,21 @@ export function mountFlatOffice({ root, project: projectOf }) {
   }
 
   /**
+   * 额度来源的名字。
+   *
+   * 用户自己加的 key 在平台那边叫 `user:k6d9cea` —— 那是机器名，界面上没人
+   * 看得懂。这里换成「你的 key「我的测试 key」」：池子里的每一份额度都要说清
+   * 是谁的钱。
+   */
+  function poolSourceName(name) {
+    const text = String(name || '');
+    if (!text.startsWith('user:')) return text;
+    const keyId = text.slice('user:'.length);
+    const key = (state.userKeys || []).find((item) => item.id === keyId);
+    return key ? `你的 key「${key.label || '未命名'}」` : '你自己的 key';
+  }
+
+  /**
    * 额度池：名字只是轮廓；**明细**（有哪些模型、什么档位、谁花了多少）点开才是真的。
    * 额度池是"谁的钱"的问题，所以明细里必须有消费者，而不只是源名。
    */
@@ -1526,7 +1638,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const usedCount = Number(used?.requests || 0);
       return `<details class="flat-pool-item">
         <summary>
-          <b>${escape(name)}</b>
+          <b>${escape(poolSourceName(name))}</b>
           <span>${own.length ? `${own.length} 个模型` : '还没探到模型'}</span>
           <em>${used ? `已用 ${usedCount} 次` : '还没人用过'}</em>
         </summary>
@@ -1556,7 +1668,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       return `<li><b>${escape(harnessName(who))}</b>：${Number(value.requests || 0)} 次 · ${usedHere.map(([name, count]) => `${escape(name)} × ${count}`).join('，') || '—'}</li>`;
     });
     return `<section class="flat-card flat-card-fold">
-      <details>
+      <details data-fold="pool"${state.openFolds.has('pool') ? ' open' : ''}>
         <summary>额度池 · ${upstreams.length} 个额度来源，已用 ${Number(usage.requests || 0)} 次</summary>
         <p class="flat-note">谁还有多少额度、谁花了多少 —— 要看才展开。</p>
         ${inventoryBlock()}
@@ -1565,6 +1677,94 @@ export function mountFlatOffice({ root, project: projectOf }) {
         ${consumerItems.length
           ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
           : '<p class="flat-note">还没有人从池子里借过额度。</p>'}
+        ${userKeysBlock()}
+      </details>
+    </section>`;
+  }
+
+  /**
+   * 平台**来问**你一件事时，摆在右栏最上面的一张卡。
+   *
+   * 为什么单独一张卡、放在最上面：平台在等一个决定的时候，那件事是**现在**
+   * 唯一重要的事。埋在额度池那张长卡片的底下（要展开、要滚到底），
+   * 等于没有这一问 —— 人看不到，平台就一直等着。
+   */
+  function askCard() {
+    const pending = state.userKeyPending || null;
+    if (!pending) return '';
+    return `<section class="flat-card flat-card-ask">
+      <h3>平台在问你一件事</h3>
+      <div class="flat-userkey-ask">
+        <p><b>免费额度用完了。</b>要不要用它自己加的 key 继续做？</p>
+        <p class="flat-note">用的是你的 key「${escape(pending.label || '未命名')}」${
+          pending.model ? `（模型 ${escape(pending.model)}）` : ''
+        }。你点了头它才会花；不点头它不会自己动。</p>
+        <div class="flat-dialog-actions">
+          <button type="button" data-act="deny-user-key" data-key="${escape(pending.key_id)}">先不用</button>
+          <button type="button" data-act="approve-user-key" data-key="${escape(pending.key_id)}" data-mode="once">同意用一次</button>
+          <button type="button" data-act="approve-user-key" data-key="${escape(pending.key_id)}" data-mode="always">以后都用它</button>
+        </div>
+      </div>
+    </section>`;
+  }
+
+  /**
+   * 用户自己的 API key。
+   *
+   * 这一块是**人自己的钱**：加进来之后平台替它保管，但平台**不会自己花** ——
+   * 免费额度用完时，平台会**来问**你，点了头才用。
+   *
+   * 「平台来问你了」那张卡片**不在这里**：它挂在右栏最上面（`askCard`）——
+   * 埋在这张长卡片的底下，谁都找不到。
+   */
+  function userKeysBlock() {
+    const keys = state.userKeys || [];
+    // 协议名是人给 key 起的**机器名**（「openai_chat」），界面上要让人看懂。
+    const protocolName = (protocol) =>
+      ({
+        openai_chat: 'OpenAI 兼容',
+        openai_responses: 'OpenAI Responses',
+        anthropic: 'Anthropic',
+      })[protocol] || '其他';
+    const rows = keys.length
+      ? keys
+          .map(
+            (key) => `<li class="flat-userkey">
+              <b>${escape(key.label || '未命名')}</b>
+              <span>${escape(protocolName(key.protocol))} · ${escape(key.base_url || '')}</span>
+              <span class="flat-note">${
+                key.approval === 'always'
+                  ? '已同意一直使用'
+                  : key.approval === 'once'
+                    ? '已同意用一次'
+                    : '还没同意使用'
+              }${key.requests ? ` · 已用 ${key.requests} 次` : ''}</span>
+              <button type="button" data-act="drop-user-key" data-key="${escape(key.id)}">删掉</button>
+            </li>`,
+          )
+          .join('')
+      : '<p class="flat-empty">还没加过自己的 key。</p>';
+    return `<section class="flat-userkeys">
+      <h3>自己的 API key</h3>
+      <p class="flat-note">平台替你保管，但<b>不会自己花</b> —— 免费额度用完时它会来问你，点了头才用。</p>
+      <ul class="flat-list flat-userkeys-list">${rows}</ul>
+      <details class="flat-userkeys-add" data-fold="userkey-add"${
+        state.openFolds.has('userkey-add') ? ' open' : ''
+      }>
+        <summary>加一个 key</summary>
+        <div class="flat-userkeys-form">
+          <label>名字<input data-draft="userkey-label" data-userkey-label placeholder="例如：我的 OpenAI" maxlength="60" /></label>
+          <label>协议<select data-draft="userkey-protocol" data-userkey-protocol>
+            <option value="openai_chat">OpenAI 兼容（/v1/chat/completions）</option>
+            <option value="openai_responses">OpenAI Responses</option>
+            <option value="anthropic">Anthropic（/v1/messages）</option>
+          </select></label>
+          <label>地址<input data-draft="userkey-base" data-userkey-base placeholder="https://api.openai.com/v1" /></label>
+          <label>模型（可以留空，让平台去问）<input data-draft="userkey-models" data-userkey-models placeholder="gpt-4.1, o3" /></label>
+          <label>key<input data-draft="userkey-key" data-userkey-key type="password" placeholder="sk-..." autocomplete="off" /></label>
+          <button type="button" data-act="add-user-key">加进来</button>
+          <p class="flat-note" data-userkey-error></p>
+        </div>
       </details>
     </section>`;
   }
@@ -1742,6 +1942,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const unclaimed = unclaimedTasks();
 
     wrap.innerHTML = `
+      ${askCard()}
       <section class="flat-card flat-card-brief">
         <h3>要做的事</h3>
         ${brief.planId
@@ -1775,7 +1976,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       </section>
       ${poolCard()}
       <section class="flat-card flat-card-fold">
-        <details>
+        <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
           <summary>现在能干活的人 · ${usable.length} 个</summary>
           <ul class="flat-list">${usable
             .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
@@ -1845,6 +2046,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     input.type = 'text';
     input.placeholder = '在项目群里说一句话（写 @管理员 会真的向他提醒）';
     input.setAttribute('aria-label', '群聊消息');
+    input.dataset.draft = 'chat';
     const send = document.createElement('button');
     send.type = 'submit';
     send.textContent = '发送';
@@ -1854,6 +2056,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const body = String(input.value || '').trim();
       if (!body) return;
       input.value = '';
+      delete drafts.fields.chat;
       try {
         // 在群里手动 @ 了管理员，就真的建一条 mention（不只是文字）：
         // 平台靠 mention 建投递记录，管理员才收得到。
@@ -1910,6 +2113,87 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
   }
 
+  // ---------------------------------------------------- 自己的 API key
+
+  /** 把用户自己加的 key 读回来（只读列表与遮罩，key 本身不在这条路上）。 */
+  async function loadUserKeys() {
+    try {
+      const result = await api('/user-keys');
+      state.userKeys = result.keys || [];
+      state.userKeyPending = result.pending || null;
+    } catch (error) {
+      // 没连平台的时候这一段没有意义，不该在顶上报错。
+      state.userKeys = [];
+      state.userKeyPending = null;
+    }
+  }
+
+  async function addUserKey() {
+    const form = root.querySelector('.flat-userkeys-form');
+    if (!form) return;
+    const error = form.querySelector('[data-userkey-error]');
+    const value = (selector) => String(form.querySelector(selector)?.value || '').trim();
+    const label = value('[data-userkey-label]');
+    const key = value('[data-userkey-key]');
+    if (!label || !key) {
+      if (error) error.textContent = '名字和 key 都要填。';
+      return;
+    }
+    const models = value('[data-userkey-models]')
+      .split(/[,，\s]+/)
+      .filter(Boolean);
+    try {
+      await api('/user-keys', {
+        label,
+        protocol: value('[data-userkey-protocol]') || 'openai_chat',
+        base_url: value('[data-userkey-base]'),
+        key,
+        models,
+      });
+      if (error) error.textContent = '';
+      form.querySelector('[data-userkey-key]').value = '';
+      form.querySelector('[data-userkey-models]').value = '';
+      // 加过了：草稿清掉（否则重画会把刚加过的 key 又填回表单里）。
+      delete drafts.fields['userkey-key'];
+      delete drafts.fields['userkey-models'];
+      await refresh();
+    } catch (problem) {
+      if (error) error.textContent = String(problem.message || problem);
+    }
+  }
+
+  async function dropUserKey(keyId) {
+    if (!keyId) return;
+    try {
+      await apiDelete(`/user-keys/${encodeURIComponent(keyId)}`);
+      await refresh();
+    } catch (error) {
+      state.error = String(error.message || error);
+      render();
+    }
+  }
+
+  async function answerUserKey(keyId, mode) {
+    if (!keyId) return;
+    try {
+      await api(`/user-keys/${encodeURIComponent(keyId)}/${mode === 'none' ? 'deny' : 'approve'}`, {
+        mode: mode === 'none' ? 'none' : mode,
+      });
+      await refresh();
+    } catch (error) {
+      state.error = String(error.message || error);
+      render();
+    }
+  }
+
+  // 记住哪些折叠卡片是开着的（右栏每 15 秒重画一次，不记住就会"啪"地合上）。
+  root.addEventListener('toggle', (event) => {
+    const fold = event.target.closest?.('details[data-fold]');
+    if (!fold) return;
+    if (fold.open) state.openFolds.add(fold.dataset.fold);
+    else state.openFolds.delete(fold.dataset.fold);
+  }, true);
+
   root.addEventListener('change', (event) => {
     const source = event.target.closest('#flatSourceSelect');
     if (source) {
@@ -1932,8 +2216,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
   });
 
-  root.addEventListener('click', (event) => {
-    // 任务行里的「看本次失败的真实日志」：选那条活，再把日志滚到眼前。
+  root.addEventListener('click', (event) => {    // 任务行里的「看本次失败的真实日志」：选那条活，再把日志滚到眼前。
     const jump = event.target.closest('[data-jump="log"]');
     if (jump) {
       const taskId = jump.dataset.task;
@@ -1946,6 +2229,15 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
     const button = event.target.closest('button[data-act]');
     if (!button) return;
+    // 一次新的动作开始：把上一条"没成"的提示收起来（这次要是再失败，会写新的）。
+    if (state.error) {
+      state.error = null;
+      render();
+    }
+    if (button.dataset.act === 'dismiss-error') {
+      render();
+      return;
+    }
     if (button.dataset.act === 'page-prev') {
       state.page = Math.max(1, state.page - 1);
       render();
@@ -2001,6 +2293,22 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (button.dataset.act === 'open-direct-window') {
       // 独立窗口（另开一个标签页）：与管理员的定向消息。
       window.open('/direct.html', 'agent-office-direct', 'width=820,height=760');
+      return;
+    }
+    if (button.dataset.act === 'add-user-key') {
+      void addUserKey();
+      return;
+    }
+    if (button.dataset.act === 'drop-user-key') {
+      void dropUserKey(button.dataset.key);
+      return;
+    }
+    if (button.dataset.act === 'approve-user-key') {
+      void answerUserKey(button.dataset.key, button.dataset.mode || 'once');
+      return;
+    }
+    if (button.dataset.act === 'deny-user-key') {
+      void answerUserKey(button.dataset.key, 'none');
       return;
     }
     if (button.dataset.act === 'open-outputs') {
@@ -2176,7 +2484,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
       state.status = status;
       const all = tasks.tasks || [];
       state.tasks = scope ? all.filter(scope.matches) : all;
-      state.error = null;
+      // 这里**不**清 state.error：一次失败的提示要留到人下一次动手为止。
+      // 每 15 秒把它抹掉，等于"点了没反应" —— 提示闪过就没了，人只记得没反应。
       if (!state.selected && state.tasks.length) {
         const first = state.tasks.find((task) => FAILED_STATES.has(task.status)) || state.tasks[0];
         void select(first.task_id);
@@ -2188,6 +2497,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         api('/plan').catch(() => null),
         api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
         api('/events?limit=400').catch(() => ({ events: [] })),
+        loadUserKeys(),
       ]);
       state.availability = availability.availability || [];
       state.pool = pool;

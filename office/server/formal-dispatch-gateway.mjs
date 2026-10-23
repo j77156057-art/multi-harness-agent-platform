@@ -59,7 +59,7 @@ export function createFormalGateway(config={}){
     if(!trimmed||trimmed.startsWith('['))throw fail(503,'administrator_credential_unavailable');
     return fs.readFileSync(trimmed,'utf8');
   }
-  async function call(path,body,credential){
+  async function call(path,body,credential,method){
     // `undefined` = the operator; `null`/`''` used to mean "open" by accident,
     // so an explicit call site must pass a credential and defaulting is done here,
     // once.
@@ -68,7 +68,7 @@ export function createFormalGateway(config={}){
     if(process.env.ADMIN_DEBUG_ROUTES){console.error('ADMIN-DEBUG call',path,'cred type',typeof credential,'first',String(credential).slice(0,6));}
     if(!/^apt_[a-f0-9]{64}$/.test(token)){throw fail(503,'administrator_credential_unavailable');}
     let response;
-    try{response=await fetch(new URL('/api/v1'+path,upstream),{method:body?'POST':'GET',
+    try{response=await fetch(new URL('/api/v1'+path,upstream),{method:method||(body?'POST':'GET'),
       headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},
       ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000),redirect:'error'});}
     catch{throw fail(503,'formal_backend_unavailable');}
@@ -360,6 +360,40 @@ export function createFormalGateway(config={}){
         }));
         json(res,200,{outputs:rows.filter(Boolean),project_id:config.project,group_id:config.group});return true;
       }
+      if(req.method==='GET'&&route==='/user-keys'){
+        // 用户自己的 API key：平台替用户保管，但**不自己花** —— 要用得用户点头。
+        const result=await call('/pool/user-keys');
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&route==='/user-keys'){
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/pool/user-keys',{
+          label:String(body.label||''),
+          protocol:String(body.protocol||'openai_chat'),
+          base_url:String(body.base_url||''),
+          key:String(body.key||''),
+          models:Array.isArray(body.models)?body.models.map(String):[],
+        });
+        json(res,200,result);return true;
+      }
+      const keyId=/^\/user-keys\/([A-Za-z0-9_-]+)(\/(approve|deny))?$/.exec(route);
+      if(keyId){
+        const id=encodeURIComponent(keyId[1]);
+        if(req.method==='DELETE'&&!keyId[2]){
+          const result=await call('/pool/user-keys/'+id,undefined,undefined,'DELETE');
+          json(res,200,result);return true;
+        }
+        if(req.method==='POST'&&keyId[3]){
+          // keyId[2] 是 "/approve"（带斜杠），keyId[3] 才是动作名 —— 拼 URL 用后者，
+          // 否则会拼成 ".../k123//approve"，平台那边是 404（点"同意"一点反应也没有）。
+          let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2000)throw fail(413,'body_too_large');}
+          let body={};if(raw.trim()){try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}}
+          const result=await call('/pool/user-keys/'+id+'/'+keyId[3],{mode:String(body.mode||'once')});
+          json(res,200,result);return true;
+        }
+      }
       if(req.method==='GET'&&route==='/events'){
         // 群范围内的事件流：成员的动态表、成员的求助都从这里读。
         // 平台的 /events 返回本主体能看到的全部事件，所以这里必须自己裁到
@@ -526,8 +560,12 @@ export function createFormalGateway(config={}){
       if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}$/.test(route)){
         const id=route.split('/').at(-1),task=await call('/tasks/'+id);
         if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
-        const diff=await call('/tasks/'+id+'/diff?include_patch=true');
-        const events=await call('/tasks/'+id+'/events?limit=200');
+        // 改动与事件是**锦上添花**：平台那边算不出 diff（提交不在正式仓库里、
+        // 正式仓库路径不对）时，它会回 500 —— 那是"没有改动"，不是"这条活
+        // 坏了"。所以这两样各自失败就各自空着，不能把整条详情一起带崩
+        // （那会让人以为这条活坏了，其实只是看不到 diff）。
+        const diff=await call('/tasks/'+id+'/diff?include_patch=true').catch(()=>null);
+        const events=await call('/tasks/'+id+'/events?limit=200').catch(()=>({events:[]}));
         // 规格（工单/验收/路径）一起给：办公室要让人**看着工单**做决定。
         json(res,200,{task:{...safeTask(task),...(task.spec?{spec:task.spec}:{})},diff,events});return true;
       }

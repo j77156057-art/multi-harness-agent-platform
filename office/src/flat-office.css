@@ -44,6 +44,37 @@
   min-width: 0;
 }
 
+/* 刚才那一下没成：一条能看见的提示。
+   以前这些失败只写进 state.error，而 state.error **从来没有被渲染过** ——
+   于是所有失败都是静默的，人只看到"点了没反应"。 */
+.flat-error {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 11px;
+  border: 1px solid #e6c3c3;
+  border-radius: 6px;
+  background: #fdf1f1;
+  color: #8d2f2f;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.flat-error button {
+  margin-left: auto;
+  border: 1px solid #d9a9a9;
+  border-radius: 5px;
+  background: #fff;
+  color: #8d2f2f;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
 .flat-eyebrow {
   font-size: 10px;
   letter-spacing: .1em;
@@ -1085,9 +1116,23 @@
 }
 
 @media (max-width: 1180px) {
-  .flat-office { grid-template-columns: 280px minmax(0, 1fr); }
+  .flat-office {
+    grid-template-columns: 280px minmax(0, 1fr);
+    /* 右栏排到下面一行，而不是没有：额度池（连同"自己的 API key"）不能因为
+       窗口窄就消失 —— 那里是唯一能加自己的 key 的地方。 */
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
   .flat-body { grid-template-columns: 280px minmax(0, 1fr); }
-  .flat-rail { display: none; }
+  .flat-rail {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    align-items: start;
+    max-height: 40vh;
+    overflow: auto;
+  }
+  .flat-chat { grid-row: 4; }
 }
 
 @media (max-width: 860px) {
@@ -1095,5 +1140,115 @@
   .flat-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
   .flat-tasks { height: auto; max-height: 40vh; }
   .flat-detail { height: auto; }
+  .flat-rail { grid-template-columns: minmax(0, 1fr); max-height: 46vh; }
   .flat-chat-form { display: none; }
 }
+
+/* --------------------------------------- 自己的 API key（额度池卡片里的一块） */
+
+.flat-userkeys { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ao-line-soft); }
+.flat-userkeys h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; }
+.flat-userkeys .flat-note { margin: 0 0 8px; }
+
+.flat-userkeys-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+
+.flat-userkey {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.flat-userkey b { font-size: 12.5px; font-weight: 600; }
+.flat-userkey span { font-size: 11px; color: var(--ao-ink-faint); overflow-wrap: anywhere; }
+.flat-userkey .flat-note { grid-column: 1; margin: 0; }
+
+.flat-userkey button {
+  grid-row: 1 / span 2;
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #5b6673;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.flat-userkey button:hover { background: #f2f4f6; }
+
+/* 平台来问的那一句。 */
+/* 平台在问的那张卡：摆在右栏最上面，一眼能看见。 */
+.flat-card-ask {
+  border-color: #e8d9b8;
+  background: #fdf7ea;
+}
+
+.flat-card-ask h3 { color: #6b5320; }
+
+.flat-userkey-ask {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid #e8d9b8;
+  border-radius: 7px;
+  background: #fdf7ea;
+}
+
+.flat-userkey-ask p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.55; color: #4a3a1c; }
+.flat-userkey-ask p.flat-note { margin-bottom: 8px; }
+.flat-userkey-ask .flat-dialog-actions { justify-content: flex-start; }
+
+.flat-userkey-ask button {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.flat-userkey-ask button[data-act="approve-user-key"] {
+  border-color: #2f5d8c;
+  background: #2f5d8c;
+  color: #fff;
+}
+
+.flat-userkeys-add > summary {
+  font-size: 12px;
+  color: #2f5d8c;
+  cursor: pointer;
+}
+
+.flat-userkeys-form { display: grid; gap: 6px; margin-top: 8px; }
+.flat-userkeys-form label { display: grid; gap: 3px; font-size: 11.5px; color: #5b6673; }
+
+.flat-userkeys-form input,
+.flat-userkeys-form select {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1c2430;
+}
+
+.flat-userkeys-form button {
+  justify-self: start;
+  border: 1px solid #2f5d8c;
+  border-radius: 5px;
+  background: #2f5d8c;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.flat-userkeys-form [data-userkey-error] { margin: 0; color: #b03a3a; }
