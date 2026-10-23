@@ -6,7 +6,7 @@
 | Harness | Codex |
 | 认领时间 | 2026-10-23 18:36 +08:00 |
 | 分支 | `agent/local/codex/OFFICE-UI-01/a1` |
-| 状态 | doing（审核助攻实现＋scripted 测试已就位，本轮提交；验收守门另立提案 review-contract-gate 待复核） |
+| 状态 | done（审核助攻实装＋scripted 全绿；**全量 pytest 绿**：`[100%]` 全点、退出码 0，输出留档 `D:\Temp\opencode\p3_full_pytest.txt`。守门另立提案 review-contract-gate 待复核） |
 
 ## 做什么（P3 第一刀：审核助攻）
 
@@ -28,3 +28,9 @@
 认领与卡里 rehearsed 的六条 scripted（三读齐/计数/补丁透传/诚实透传/
 标识符校验/loop 全链＋prompt 边界）＋ ruff、docstate、discipline 坚持、
 pytest 定点绿、与全量测试零新增失败。
+
+## 记录
+
+- 2026-10-23：全量 pytest（约 990 项）跑批结束，`[100%]` 全点、退出码 0，
+  输出留档 `D:\Temp\opencode\p3_full_pytest.txt`（末行统计被 PowerShell
+  重定向吞掉，凭据为退出码与 100%）。

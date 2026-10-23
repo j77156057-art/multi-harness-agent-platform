@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+import subprocess
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +86,14 @@ DEFAULT_CLI_SLOTS = (
         # about the slot, not something to sniff at runtime.
         "store": "opencode",
         "tier": "free",
+        # The CLI itself can list its catalogue (an **undeclared** listing
+        # costs no quota; only a model call does).  The naming rule is the
+        # declaration, not a sniff: "-free" is opencode's own suffix for its
+        # free family -- the slot the platform first declared carries it.
+        # Every roster entry matching the rule joins the slot's tier (free)
+        # with the same argv contract; the roster is re-listed on a TTL, so
+        # the pool adjusts when opencode adds or retires a free model.
+        "enumerate": {"args": ["models"], "pattern": r"^opencode/.+-free$"},
     },
     {
         "name": "codebuddy",
@@ -442,6 +453,68 @@ def _slot_key(slot: dict[str, Any]) -> tuple[str, str]:
     return (str(slot.get("name") or "cli-slot"), str(slot.get("model") or "").strip())
 
 
+#: How long a CLI's own roster listing stays fresh.  A listing costs no
+#: quota, but it is a process spawn; ten minutes is far under the drift the
+#: free family has shown and far above the discovery TTL that would ask.
+ENUM_TTL_SECONDS = 600.0
+_ENUM_ROSTER: dict[tuple[str, str], tuple[float, list[str]]] = {}
+
+#: The runner that reads one CLI's roster (injectable for tests).
+ListingRunner = Callable[[str, list[str]], list[str]]
+
+
+def _run_listing(binary: str, args: list[str]) -> list[str]:
+    """Run the CLI's listing subcommand and return its non-empty lines."""
+    completed = subprocess.run(
+        [binary, *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60.0,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"{binary} {' '.join(args)} failed ({completed.returncode}):"
+            f" {(completed.stderr or completed.stdout or '')[-200:]}"
+        )
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _enumerate_roster(
+    slot: dict[str, Any], source: CliModelSource, runner: ListingRunner | None
+) -> list[str]:
+    """The models the CLI itself lists that match the slot's declared rule.
+
+    A listing subprocess is shared via a TTL cache keyed by the resolved
+    binary -- several slots may expand from one CLI without re-spawning it.
+    A listing that cannot run leaves the expansion empty: the declared slot
+    still serves, and nothing is invented to fill its place.
+    """
+    spec = slot.get("enumerate")
+    if not isinstance(spec, dict):
+        return []
+    args = [str(arg) for arg in (spec.get("args") or ())]
+    if not args:
+        return []
+    binary = source.resolve_binary()
+    key = (binary, " ".join(args))
+    now = time.monotonic()
+    cached = _ENUM_ROSTER.get(key)
+    if cached is None or now - cached[0] > ENUM_TTL_SECONDS:
+        try:
+            roster = (runner or _run_listing)(binary, args)
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            roster = []
+        _ENUM_ROSTER[key] = (now, roster)
+    pattern_text = str(spec.get("pattern") or "")
+    try:
+        pattern = re.compile(pattern_text)
+    except re.error:
+        return []
+    return [line for line in _ENUM_ROSTER.get(key, (now, []))[1] if pattern.fullmatch(line)]
+
+
 def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The built-in slots plus the declared ones.
 
@@ -468,7 +541,12 @@ def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [merged[key] for key in order if key in merged]
 
 
-def discover_cli_slots(config_path: Path | None = None, home: Path | None = None) -> list[Upstream]:
+def discover_cli_slots(
+    config_path: Path | None = None,
+    home: Path | None = None,
+    *,
+    listing_runner: ListingRunner | None = None,
+) -> list[Upstream]:
     """The CLI slots the pool may serve.
 
     They are declared, not discovered: a CLI slot runs a real CLI, and which
@@ -566,6 +644,30 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
                 tier=tier,
             )
         )
+        # The slot's own enumerate rule may widen the family: the CLI's free
+        # roster is read from the CLI itself (a listing costs no quota), the
+        # naming rule is the operator's declaration.  Each hit joins with the
+        # same argv contract; the declared model itself never duplicates.
+        for raw_model in _enumerate_roster(slot, source, listing_runner):
+            if raw_model == model:
+                continue
+            if any(existing.name == f"{name}:{raw_model}" for existing in upstreams):
+                continue
+            extra_id = f"{name}/{raw_model.split('/', 1)[-1]}"
+            extra = replace(source, model=raw_model)
+            upstreams.append(
+                Upstream(
+                    name=f"{name}:{raw_model}",
+                    protocol=CLI,
+                    base_url=f"cli://{raw_model}",
+                    models=(extra_id,),
+                    credential=None,
+                    origin=str(path),
+                    note="roster entry matched the slot's declared enumerate rule",
+                    cli=extra,
+                    tier=tier,
+                )
+            )
     return upstreams
 
 

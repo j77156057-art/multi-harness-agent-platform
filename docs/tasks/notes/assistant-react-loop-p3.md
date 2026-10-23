@@ -53,5 +53,8 @@ test_id：MVP-ADAPTER-003
 
 ## 状态
 
-实现与测试已就位（本轮提交，sha 见认领）；守门半件按共享文件纪律另立
-提案 `docs/proposals/review-contract-gate.md`，待仓库主人复核，不抢跑。
+实装＋定点全绿已登记（本轮提交，sha 见认领）；**2026-10-23 全量
+pytest 绿**：codex 工作树全仓跑批 `[100%]` 全点、退出码 0
+（输出留档 `D:\Temp\opencode\p3_full_pytest.txt`）；守门半件按
+共享文件纪律另立提案 `docs/proposals/review-contract-gate.md`，
+待仓库主人复核，不抢跑。
