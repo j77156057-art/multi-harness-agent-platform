@@ -148,6 +148,44 @@ def build_registry(
             "verification": verification.get("verification"),
         }
 
+    def task_diagnose(args: dict[str, Any]) -> dict[str, Any]:
+        """One read that lays the failure evidence side by side.
+
+        The *narration* of a root cause belongs to the assistant (which fact
+        explains which symptom); the assembly here stays mechanical: the task
+        state, the failure-shaped ledger events (abandon/release) kept to the
+        newest few with their payloads untouched, the CLI's own output tail
+        with its honest ``None`` when there is nothing, and the latest
+        verification receipt.  Every fact comes from a read face that already
+        exists -- nothing is invented to fill a gap.
+        """
+        task_id = _required_id(args, "task_id")
+        task = client.get(f"/tasks/{task_id}")
+        events = client.get(f"/tasks/{task_id}/events", limit=200)
+        rows = events.get("events") if isinstance(events, dict) else []
+        failure_events = [
+            {
+                key: event.get(key)
+                for key in ("seq", "event_name", "created_at", "actor_id", "payload")
+            }
+            for event in rows
+            if isinstance(event, dict)
+            and str(event.get("event_name") or "") in ("abandon", "release")
+        ]
+        output = client.get(f"/tasks/{task_id}/output")
+        output_pack = output.get("output") if isinstance(output, dict) else None
+        verification = client.get(f"/tasks/{task_id}/verification")
+        return {
+            "task_id": task_id,
+            "status": str(task.get("status") or ""),
+            "title": str(task.get("title") or ""),
+            "owner": task.get("owner"),
+            "current_attempt_id": task.get("current_attempt_id"),
+            "failure_events": failure_events[-3:],
+            "output": output_pack,
+            "verification": verification.get("verification"),
+        }
+
     def group_tasks(args: dict[str, Any]) -> dict[str, Any]:
         params: dict[str, Any] = {}
         status = str(args.get("status") or "").strip()
@@ -187,6 +225,13 @@ def build_registry(
             "审核助攻素材包：验收条款逐条 + diff 读数 + 验证回执（一次取证；"
             "include_patch 才带补丁文本）",
             task_review_pack,
+        ),
+        Tool(
+            "task.diagnose",
+            "read",
+            "失败诊断证据束：任务状态 + 失败事件（最新至多 3 条，原样） + "
+            "CLI 输出尾巴 + 验证回执（一次取证；不编原因）",
+            task_diagnose,
         ),
         Tool("group.tasks", "read", "本群任务表（可选 status 过滤）", group_tasks),
         Tool(

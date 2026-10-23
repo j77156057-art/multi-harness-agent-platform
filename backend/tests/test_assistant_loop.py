@@ -126,6 +126,7 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
         "task.diff",
         "task.verification",
         "task.review_pack",
+        "task.diagnose",
         "group.tasks",
         "say",
     }
@@ -483,6 +484,160 @@ def test_the_prompts_carry_the_review_assist_boundary():
     checklist = reflect_prompt({"text": "草稿", "cites": ["c1"]})
     assert "每条验收条款都指到了出处" in checklist
     assert "未记上" in checklist
+
+
+# --------------------------------------------------- the diagnose pack
+
+
+def _diagnose_client() -> FakeClient:
+    """Canned bodies for the four reads behind one diagnose pack."""
+    return FakeClient(
+        {
+            "/tasks/fd-1/verification": {
+                "verification": {
+                    "status": "fail",
+                    "failure_reason": "code_failed",
+                    "verify_profile": "default",
+                    "receipt_id": "r9",
+                }
+            },
+            "/tasks/fd-1/output": {
+                "output": {
+                    "task_id": "fd-1",
+                    "attempt_id": "at-1",
+                    "current": False,
+                    "attempt_status": "in_progress",
+                    "harness_id": "qoder",
+                    "stdout": "....F...",
+                    "stderr": "AssertionError: expected 3 got 2",
+                    "updated_at": "2026-10-23T19:00:00",
+                }
+            },
+            "/tasks/fd-1/events": {
+                "events": [
+                    {"seq": 1, "event_name": "claimed", "payload": {"attempt_id": "at-1"}},
+                    {
+                        "seq": 2,
+                        "event_name": "release",
+                        "created_at": "2026-10-23T18:40:00",
+                        "actor_id": "qoder",
+                        "payload": {"reason": "retryable failure (CliFailed): rc 1"},
+                    },
+                    {
+                        "seq": 3,
+                        "event_name": "release",
+                        "created_at": "2026-10-23T19:10:00",
+                        "actor_id": "qoder",
+                        "payload": {"reason": "TIMEOUT"},
+                    },
+                    {"seq": 4, "event_name": "submit_result", "payload": {}},
+                ],
+                "next_seq": 4,
+                "has_more": False,
+            },
+            "/tasks/fd-1": {
+                "task_id": "fd-1",
+                "status": "in_progress",
+                "title": "渲染输出",
+                "owner": "qoder",
+                "current_attempt_id": "at-1",
+            },
+        }
+    )
+
+
+def test_the_diagnose_pack_lays_state_events_output_and_receipt_side_by_side():
+    client = _diagnose_client()
+    pack = _registry(client)["task.diagnose"].handler({"task_id": "fd-1"})
+    assert pack["status"] == "in_progress" and pack["owner"] == "qoder"
+    assert pack["current_attempt_id"] == "at-1"
+    assert [e["event_name"] for e in pack["failure_events"]] == ["release", "release"]
+    assert pack["failure_events"][-1]["payload"] == {"reason": "TIMEOUT"}
+    assert pack["output"]["stderr"] == "AssertionError: expected 3 got 2"
+    assert pack["verification"]["failure_reason"] == "code_failed"
+    paths = [path for path, _ in client.reads]
+    assert paths == [
+        "/tasks/fd-1",
+        "/tasks/fd-1/events",
+        "/tasks/fd-1/output",
+        "/tasks/fd-1/verification",
+    ], "一次取证，四读齐"
+    limit = [params for path, params in client.reads if path.endswith("/events")]
+    assert limit == [{"limit": 200}]
+
+
+def test_the_diagnose_pack_keeps_at_most_the_three_newest_failure_events():
+    client = FakeClient(
+        {
+            "/tasks/fd-2/events": {
+                "events": [
+                    {
+                        "seq": seq,
+                        "event_name": "release",
+                        "created_at": f"t{seq}",
+                        "actor_id": "x",
+                        "payload": {"reason": f"r{seq}"},
+                    }
+                    for seq in range(1, 6)
+                ],
+                "next_seq": 5,
+                "has_more": True,
+            },
+            "/tasks/fd-2/output": {"output": None},
+            "/tasks/fd-2": {"task_id": "fd-2", "status": "in_progress"},
+        }
+    )
+    pack = _registry(client)["task.diagnose"].handler({"task_id": "fd-2"})
+    reasons = [e["payload"]["reason"] for e in pack["failure_events"]]
+    assert reasons == ["r3", "r4", "r5"], "最新三条，不是最早三条"
+    assert pack["output"] is None, "没有 CLI 输出就如实 None"
+    assert pack["verification"] is None, "没有回执就如实 None"
+
+
+def test_the_diagnose_pack_tolerates_unreadable_shapes_and_keeps_the_facts():
+    client = FakeClient(
+        {
+            "/tasks/fd-3/events": {"events": [("not", "a", "dict")], "next_seq": 0},
+            "/tasks/fd-3": {},
+            "/tasks/fd-3/output": "not-an-object",
+        }
+    )
+    pack = _registry(client)["task.diagnose"].handler({"task_id": "fd-3"})
+    assert pack["failure_events"] == []
+    assert pack["status"] == "" and pack["title"] == ""
+    assert pack["output"] is None and pack["verification"] is None
+
+
+def test_the_diagnose_pack_refuses_a_non_identifier_task_id():
+    with pytest.raises(ToolRefused):
+        _registry(FakeClient())["task.diagnose"].handler({"task_id": "../etc/passwd"})
+
+
+def test_the_diagnose_pack_runs_inside_the_loop_with_resolvable_citations(tmp_path):
+    client = _diagnose_client()
+    model = ScriptedModel(
+        [
+            json.dumps(
+                {"thought": "拿诊断束", "tool": "task.diagnose", "args": {"task_id": "fd-1"}}
+            ),
+            _final(
+                "最新失败：回执 failure_reason=code_failed [s1]；" "改派与否待管理员裁决。",
+                ["s1"],
+            ),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run("fd-1 为什么失败？", ["管理员在群里问。"])
+    assert result["status"] == "done"
+    assert result["answer"]["text"].endswith("待管理员裁决。")
+
+
+def test_the_prompts_carry_the_diagnose_boundary():
+    assert "task.diagnose" in SYSTEM_PROMPT
+    assert "失败诊断" in SYSTEM_PROMPT
+    assert "待管理员裁决" in SYSTEM_PROMPT
+    checklist = reflect_prompt({"text": "草稿", "cites": ["c1"]})
+    assert "怀疑/大概" in checklist, "自检清单拦'大概'式结论"
 
 
 # ------------------------------------------------------------------ trace
