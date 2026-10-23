@@ -81,6 +81,84 @@ export function createFormalGateway(config={}){
     if(!response.ok)throw fail(response.status,data.error?.code||'backend_rejected');
     return data;
   }
+  /**
+   * 让**平台**把机器写的文本洗成人话（一次问一批）。
+   *
+   * 结论第一句常常是"FD-0b0bcc415aa9fe2f（attempt .a1）· 提交 32f84d6" ——
+   * 人读到的是编号，不是"这件事"。失败原因常常是 `HarnessLeaseLost` 这种
+   * 给日志看的错误码。规则在平台的翻译服务里（单一出处），界面不自己造一套。
+   * 平台够不着就照旧显示原文，不让这一屏白掉。
+   *
+   * @param {string[]} texts 要洗的原文
+   * @param {string} kind 平台那边的分类（text=自由文本 / reason=失败原因）
+   * @returns {Promise<Map<string,string>>} 原文 → 人话
+   */
+  async function translateBatch(texts, kind) {
+    const wanted = [...new Set((texts || []).filter(Boolean).map((text) => String(text)))];
+    if (!wanted.length) return new Map();
+    try {
+      const result = await call('/wording/translate', { texts: wanted, kind });
+      // 钥匙用**发出去的原文**。平台回显的 original 与它一致；但平台那边也会
+      // 去掉首尾空白再回显，所以两种都存一份，省得按哪种都找不回来。
+      const map = new Map();
+      for (const row of result.texts || []) {
+        const original = String(row.original || '');
+        const text = String(row.text || '');
+        if (!original) continue;
+        map.set(original, text);
+        const trimmed = original.trim();
+        if (trimmed && trimmed !== original) map.set(trimmed, text);
+      }
+      return map;
+    } catch {
+      // 平台够不着：照旧。
+      return new Map();
+    }
+  }
+
+  /** 输出窗口：结论（自由文本）与失败原因（错误码）分别洗。 */
+  async function humanizeRows(rows) {
+    const texts = [];
+    const reasons = [];
+    for (const row of rows || []) {
+      for (const attempt of row.attempts || []) {
+        for (const item of attempt.texts || []) {
+          const text = String(item.text || '');
+          if (text) texts.push(text);
+        }
+        const reason = String(attempt.reason || '');
+        if (reason) reasons.push(reason);
+      }
+    }
+    const [cleaned, spoken] = await Promise.all([
+      translateBatch(texts, 'text'),
+      translateBatch(reasons, 'reason'),
+    ]);
+    for (const row of rows || []) {
+      for (const attempt of row.attempts || []) {
+        for (const item of attempt.texts || []) {
+          const next = cleaned.get(String(item.text || ''));
+          if (next) item.text = next;
+        }
+        const next = spoken.get(String(attempt.reason || ''));
+        if (next) attempt.reason = next;
+      }
+    }
+  }
+
+  /**
+   * 方案正文：管理员写的方案也是机器写的，里面有 `exclusive_paths`、
+   * `FD-…` 这类标记。给人看的那一份要洗过 —— 批准之前，人读的就是这份。
+   */
+  async function humanizePlan(plan) {
+    const draft = plan && plan.draft;
+    const doc = draft && draft.document;
+    if (!doc || !doc.markdown) return;
+    const cleaned = await translateBatch([String(doc.markdown)], 'text');
+    const next = cleaned.get(String(doc.markdown));
+    if (next) doc.markdown = next;
+  }
+
   // The scope (who the operator is, and which group this gateway serves) does
   // not change between requests, but it was re-fetched on **every** call: the
   // office's harness screens ask for one task and one output per window, so a
@@ -313,7 +391,7 @@ export function createFormalGateway(config={}){
           if(!res||!res.has_more)break;
           since=Number(res.next_seq||since);
         }
-        const rows=await Promise.all((group.tasks||[]).map(async t=>{
+        const rows0=(group.tasks||[]).map(async t=>{
           const total=Number(t.attempt_no||0);
           if(!total)return null;
           const from=Math.max(1,total-MAX_ATTEMPTS+1);
@@ -357,8 +435,12 @@ export function createFormalGateway(config={}){
             attempt_total:total,
             attempts:live,
           };
-        }));
-        json(res,200,{outputs:rows.filter(Boolean),project_id:config.project,group_id:config.group});return true;
+        });
+        const rows=(await Promise.all(rows0)).filter(Boolean);
+        // 结论里常有编号（FD-…、attempt .a1、commit 的 hash、exclusive_paths）——
+        // 让**平台**统一洗成人话（规则在平台的翻译服务里，界面不自己造一套）。
+        await humanizeRows(rows);
+        json(res,200,{outputs:rows,project_id:config.project,group_id:config.group});return true;
       }
       if(req.method==='GET'&&route==='/user-keys'){
         // 用户自己的 API key：平台替用户保管，但**不自己花** —— 要用得用户点头。
@@ -428,6 +510,8 @@ export function createFormalGateway(config={}){
       if(req.method==='GET'&&route==='/plan'){
         // 方案定稿：给人看的那一份（草稿 + 传阅记录），以及由人点「批准并派单」。
         const plan=await call('/groups/'+encodeURIComponent(config.group)+'/plans');
+        // 批准之前人读的就是这一份，所以先把方案里的机器标记洗成人话。
+        await humanizePlan(plan);
         json(res,200,plan);return true;
       }
       if(req.method==='POST'&&route==='/task/budget_override'){

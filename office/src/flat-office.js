@@ -26,7 +26,7 @@ import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state
 // 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
 // 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
 import { humanize, summarize, translated } from './wording.js';
-import { headlineText, parseTranscript } from './cli-transcript.js';
+import { headlineText, parseTranscript, readableText } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
 const escape = escapeHtml;
@@ -1745,7 +1745,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       return `<section class="flat-spec flat-live" id="flatLive">${stamp}
         <h3>${title}${state.output?.output?.current ? '（当前这一轮）' : ''}</h3>
         <p class="flat-note">它最后说了</p>
-        <pre class="flat-output">${escape(headlineText(transcript) || '（这段里没有可读的文字）')}</pre>
+        <pre class="flat-output">${escape(readableText(headlineText(transcript)) || '（这段里没有可读的文字）')}</pre>
         ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.text)}${tool.count > 1 ? ` <em>×${tool.count}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
         <details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
       </section>`;

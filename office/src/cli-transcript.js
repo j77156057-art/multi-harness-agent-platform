@@ -203,3 +203,42 @@ export function headlineText(transcript) {
   const last = list[list.length - 1];
   return last.kind === '结论' ? last.text : last.text;
 }
+
+/**
+ * Markdown 源码 → 能读的正文。
+ *
+ * 窗口交上来的是一份 **Markdown 报告**：带 `##` 标题、`**粗体**`、表格竖线、
+ * 反引号。直接摆出来，人看到的是"源码"而不是"这件事" —— 这一层就是把那层
+ * 标记去掉，**内容一个字不改**（原文仍在"看原始记录"里）。
+ *
+ * 表格行（`| a | b |`）压成一行（`a · b`），不然一屏全是竖线。
+ */
+export function readableText(markdown) {
+  const lines = String(markdown || '').split('\n');
+  const out = [];
+  for (const raw of lines) {
+    let line = raw;
+    // 表格：`| 屏 | 内容 |` → `屏 · 内容`
+    if (/^\s*\|.*\|\s*$/.test(line)) {
+      const cells = line
+        .trim()
+        .replace(/^\||\|$/g, '')
+        .split('|')
+        .map((cell) => cell.trim())
+        .filter((cell) => cell && !/^:?-{2,}:?$/.test(cell));
+      line = cells.length ? cells.join(' · ') : '';
+    }
+    line = line
+      .replace(/^\s{0,3}#{1,6}\s+/, '') // 标题的 `##`
+      .replace(/^\s{0,3}>\s?/, '· ') // 引用
+      .replace(/^\s*[-*+]\s+/, '· ') // 列表
+      .replace(/^\s*\d+\.\s+/, '· ') // 有序列表
+      .replace(/\*\*([^*]+)\*\*/g, '$1') // 粗体
+      .replace(/(^|\s)\*([^*\n]+)\*/g, '$1$2') // 斜体
+      .replace(/`([^`]+)`/g, '$1') // 反引号
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1（$2）') // 链接
+      .replace(/[ \t]+$/, '');
+    if (line.trim() || (out.length && out[out.length - 1] !== '')) out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}

@@ -46,6 +46,9 @@ const audit = await page.evaluate(() => {
   // 段落的标题现在是给人看的说法。
   const sections = [...dialog.querySelectorAll('.agent-section')];
   const availability = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('谁能干活')) || null;
+  // 「进度总览」：排队/在办/谁在跑都在这一节里。**管理员窗口不能出现在这里**
+  // 的成员表里 —— 它不是干活的人，它是收件人。
+  const patrol = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('进度总览')) || null;
   // 「额度」也一样：它只说池子里有什么、谁的额度被谁花了，不能有动作。
   const pool = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('额度')) || null;
   // 「没做成的活」：只列事实 + 递请求。按钮只能是「请管理员换个人做」，
@@ -61,6 +64,7 @@ const audit = await page.evaluate(() => {
     disabledReports: reports.filter(b => b.disabled).length,
     hasAdminFields: Boolean(dialog.querySelector('form, [name="harness_id"], [name="goal"], [name="exclusive_paths"], [name="acceptance"]')),
     summary: dialog.querySelector('[data-body]')?.textContent || '',
+    patrol: patrol ? { text: patrol.textContent || '' } : null,
     availability: availability ? {
       buttons: [...availability.querySelectorAll('button')].map(b => b.textContent.trim()),
       text: availability.textContent || '',
@@ -118,7 +122,15 @@ if (!/本项目 0 条任务/.test(audit.summary)) {
 if (!/本群共 \d+ 条/.test(audit.summary)) {
   throw new Error('platform assistant hides the group total instead of labelling it: ' + audit.summary.slice(0, 200));
 }
-if (/管理员 harness|Codex · 管理员|Qoder · 管理员/.test(audit.summary)) {
+// 管理员窗口不能被当成"在排队的干活的人"。这条只查**进度总览**那一节 ——
+// 排队表、在办表都在那里。方案正文里出现管理员窗口是另一回事（方案就是它
+// 写的，"发起：Codex · 管理员"是事实），所以不再拿整块面板来判。
+//
+// 那一节里还有一句「上报收件人：管理员窗口 Codex · 管理员」—— 说的是**收件人**，
+// 不是排队的人。匹配前先把这句去掉，剩下的才是"谁在排队/在办"。
+if (!audit.patrol) throw new Error('platform assistant has no 「进度总览」 section');
+const queueText = audit.patrol.text.replace(/上报收件人：[^\n]*/g, '');
+if (/管理员 harness|Codex · 管理员|Qoder · 管理员/.test(queueText)) {
   throw new Error('platform assistant lists administrator windows as queueing members');
 }
 if (audit.reportCount && audit.disabledReports !== audit.reportCount) {

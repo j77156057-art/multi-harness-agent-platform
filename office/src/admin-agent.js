@@ -2,16 +2,17 @@
 //
 // 职责边界（对齐 PROACTIVE-HELP-REQUIREMENT.md §3.1 / TASK-ALLOCATION-ARBITRATION.md）：
 //   · 做：定期巡检、追加式进度记录、停滞判定、负担观测、中转播报，以及把异常（超时 /
-//     卡在同一任务过久 / 待审查积压 / 无人可派）上报给本项目的管理员 Harness。
+//     卡在同一任务过久 / 待审查积压 / 无人可派）上报给本项目的管理员窗口。
 //   · 不做：拆解任务表、裁决竞争、重新分工、续期/重开/取消/去重、领取与提交审核。
-//     这些是管理员 Harness 的职责；split / request_help / accept_help / reject_help /
-//     release / abandon 始终是 Harness 侧权限，助手不代任何成员发起。
+//     这些是管理员窗口的职责；split / request_help / accept_help / reject_help /
+//     release / abandon 始终是窗口侧权限，助手不代任何成员发起。
 //   · 不伪造 Claim / Lease / 进度，不改变任务 owner，不自动执行外部检索结果。
 //   · 自报与核验分开：所有数字都来自平台回执；没有可信数据时写“未知”，不虚构。
 // 文件名沿用 admin-agent.js：改名会牵动构建入口与既有验证脚本，界面文案已统一为「平台助手」。
 import './admin-agent.css';
 import { createRoutedMessage } from './routed-message.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { readableText } from './cli-transcript.js';
 
 const POLL_MS = 20000; // 面板刷新周期：只影响显示新鲜度，不参与停滞判定
 // 进度窗口按 PROACTIVE-HELP-REQUIREMENT.md §3 的产品默认值：每 5 分钟核对一次，
@@ -49,7 +50,7 @@ const PERSONAS = {
 };
 // 管理员的真实前置条件见 backend/app/human/service.py：状态不匹配时平台返回 request.conflict。
 // 这些状态只用于**判定某条线索是否值得上报给管理员**（例如 stale 没有自动回收、abandoned 是终态），
-// 平台助手不据此放出任何处置按钮 —— 续期 / 重开 / 释放 / 取消都是管理员 Harness 的动作。
+// 平台助手不据此放出任何处置按钮 —— 续期 / 重开 / 释放 / 取消都是管理员窗口的动作。
 const ADMIN_ACTIONABLE = new Set(['awaiting_review', 'awaiting_human', 'plan_drift', 'impl_drift', 'abandoned', 'escalated', 'stale']);
 const ACTIVE = new Set(['claimed', 'in_progress', 'verifying']);
 const TERMINAL = new Set(['merged', 'cancelled']);
@@ -97,7 +98,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   launchArea.append(button);
   const phoneButton = phoneArea ? button.cloneNode(true) : null;
   if (phoneButton) { phoneButton.id = 'adminAgentPhoneBtn'; phoneButton.className = 'phone-agent-launch admin-agent-launch'; phoneArea.append(phoneButton); }
-  // 上报的收件人：本项目的管理员 Harness（用户在开工向导里选的那个外部窗口）。
+  // 上报的收件人：本项目的管理员窗口（用户在开工向导里选的那个外部窗口）。
   // 它不是平台助手本身，也不推断：没有配置就没有收件人，界面上直接说明。
   let adminRecipient = typeof adminHarness === 'string' && adminHarness ? adminHarness : null;
 
@@ -106,8 +107,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   dialog.innerHTML = `<header class="agent-head"><div><h2>平台助手 · 盯着项目</h2>
     <p>只看不改：它把平台上的事实列出来，不做规划、不分派、不改谁负责。超时或长时间没进展时，报给本项目的管理员。</p>
     <details class="agent-rules"><summary>职责边界（点开查看）</summary>
-      <p>平台助手负责：定时巡检、进度记录、停滞判定、催促与上报。收件人是本项目的管理员 Harness。</p>
-      <p>不属于平台助手：拆解任务表、裁决竞争、重新分工、续期重开取消、领取与提交审核 —— 这些是管理员 Harness 与正式分派面板的事。求助/接单（split / request_help / accept_help / reject_help / release / abandon）始终是 Harness 侧权限，助手不代任何成员发起。</p>
+      <p>平台助手负责：定时巡检、进度记录、停滞判定、催促与上报。收件人是本项目的管理员窗口。</p>
+      <p>不属于平台助手：拆解任务表、裁决竞争、重新分工、续期重开取消、领取与提交审核 —— 这些是管理员窗口与正式分派面板的事。求助/接单（split / request_help / accept_help / reject_help / release / abandon）始终是窗口侧权限，助手不代任何成员发起。</p>
     </details></div>
     <button type="button" data-close aria-label="关闭平台助手">关闭</button></header>
     <p data-connection role="status">正在检查连接…</p>
@@ -127,6 +128,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
   const db = loadStore({ fresh: bootstrap === false });
   let connected = false, timer = null, tasks = [], harnesses = [], lastPatrolAt = null, snapshot = null;
+  // 窗口 id → 登记名。面板上别只印 id（"codex-window-admin" 谁认得）。
+  // 统一走这里：别在别的函数里直接写 `names` —— 浏览器里 `names` 是 window 的
+  // 内建属性（frame 名列表），写错地方会静默拿到它、`.get` 就炸。
+  const nameOf = id => (snapshot && snapshot.names && snapshot.names.get(id)) || id;
   // 「谁现在能用」：平台侧的事实（凭据、在线、最近一次失败的原因、当前模型）。
   // 这是只读观察面——这里不派单、不改派、不决定谁接手。
   let availability = [];
@@ -383,41 +388,42 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const summary = document.createElement('p'); summary.className = 'agent-kv';
     const scopeNote = memberScope
       ? `${memberScope.size} 个成员`
-      : `按任务证据判定 ${load.size} 个 harness`;
+      : `按任务证据判定 ${load.size} 个窗口`;
     // The group id is already printed in the connection line right above; the
     // scope is what this line has to say.
     summary.textContent = `本项目 ${tasks.length} 条任务（本群共 ${groupTaskCount} 条）· 范围：${scopeNote} · `
       + (Object.entries(counts).map(([k, v]) => `${STATE_LABEL[k] || k} ${v}`).join(' · ') || '当前没有任务');
     const when = document.createElement('p'); when.className = 'agent-kv';
-    when.textContent = `上次巡检：${new Date(lastPatrolAt).toLocaleTimeString()} · 在办 ${inflight.length} 条 · 记录键 ${Object.keys(db.samples).length} 个`;
-    // 范围和负担都要能追溯到来源，否则「为什么这个 harness 没算进来」只能靠猜。
+    when.textContent = `上次巡检：${new Date(lastPatrolAt).toLocaleTimeString()} · 在办 ${inflight.length} 条 · 记了 ${Object.keys(db.samples).length} 条进度`;
+    // 范围和负担都要能追溯到来源，否则「为什么这个窗口没算进来」只能靠猜。
     const origin = document.createElement('p'); origin.className = 'agent-kv agent-origin';
-    origin.textContent = '范围来源：当前项目的回执任务（taskIds ∪ 标题前缀「项目名 · 」）+「新建项目」时勾选的成员。'
-      + `同群其他项目的任务与窗口不进本表；harness 登记表是全局共享的（${harnesses.length} 个窗口）。`;
+    origin.textContent = '这里只算这个项目自己的活（开工时领到的那些，加上标题以「项目名 · 」开头的）。'
+      + `同一个群里的别的项目不算进来；本机登记的 ${harnesses.length} 个窗口是所有项目共用的。`;
     const loadNote = document.createElement('p'); loadNote.className = 'agent-kv agent-origin';
-    loadNote.textContent = '「平台运行中」只算开发租约（kind=development），复核租约不计入；每个任务/尝试有独立的 worktree 与分支，互不覆盖。';
+    loadNote.textContent = '「平台运行中」只算开发中的那一种（复核的不算）；每条活、每一次尝试都各有自己的目录和分支，互不覆盖。';
     patrol.append(summary, when, origin, loadNote);
     if (adminRecipient) {
       const who = document.createElement('p'); who.className = 'agent-kv agent-origin';
-      who.textContent = `上报收件人：管理员 Harness ${adminRecipient}。`;
+      // 印登记名，不印 id（"codex-window-admin" 谁认得）。
+      who.textContent = `上报收件人：管理员窗口 ${nameOf(adminRecipient)}。`;
       patrol.append(who);
     } else {
       const who = document.createElement('p'); who.className = 'agent-kv agent-origin is-missing';
-      who.textContent = '本项目还没有指定管理员 Harness：下面的上报按钮不可用。请先在开工向导的「管理员」里选一个外部 Harness。';
+      who.textContent = '本项目还没有指定管理员窗口：下面的上报按钮不可用。请先在开工向导的「管理员」里选一个。';
       patrol.append(who);
     }
-    // 只列真的有排队 / 在办 / 平台运行中的 harness。全零的成员折成一行说明，
+    // 只列真的有排队 / 在办 / 平台运行中的窗口。全零的成员折成一行说明，
     // 否则「本项目」看起来仍然像一长串窗口在排队。
     const busyRows = [...ranking]
       .filter(r => r.queued + r.active + r.running > 0)
       .sort((a, b) => (b.queued + b.active) - (a.queued + a.active));
     if (!busyRows.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
-      p.textContent = '本项目当前没有排队或在办的 harness。';
+      p.textContent = '本项目现在没有窗口在排队，也没有窗口在干活。';
       patrol.append(p);
     } else {
       const loadTable = document.createElement('table'); loadTable.className = 'agent-table';
-      loadTable.innerHTML = '<thead><tr><th>Harness</th><th>排队</th><th>在办</th><th>平台运行中</th><th>负担</th></tr></thead>';
+      loadTable.innerHTML = '<thead><tr><th>窗口</th><th>排队</th><th>在办</th><th>平台运行中</th><th>负担</th></tr></thead>';
       const tbody = document.createElement('tbody');
       for (const r of busyRows) {
         const tr = document.createElement('tr');
@@ -429,7 +435,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const idleRows = ranking.filter(r => r.queued + r.active + r.running === 0);
     if (idleRows.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
-      p.textContent = `本项目其余 ${idleRows.length} 个成员当前空闲（不列在表里）。`;
+      p.textContent = `本项目其余 ${idleRows.length} 个成员现在闲着（上面没列它们）。`;
       patrol.append(p);
     }
     if (outsiders.length) {
@@ -454,7 +460,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       who.append(p);
     } else {
       const table = document.createElement('table'); table.className = 'agent-table';
-      table.innerHTML = '<thead><tr><th>Harness</th><th>状态</th><th>模型</th><th>原因</th></tr></thead>';
+      table.innerHTML = '<thead><tr><th>窗口</th><th>状态</th><th>模型</th><th>原因</th></tr></thead>';
       const tbody = document.createElement('tbody');
       for (const item of scopedAvailability) {
         const tr = document.createElement('tr');
@@ -536,12 +542,12 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(stalls);
 
     // 2b. 失败与接手 —— 谁倒了、谁能接、怎么把"改派请求"递到管理员那里。
-    // 办公室只列事实并**转达请求**：改派由管理员 Harness 决定并执行，UI 不派单。
+    // 办公室只列事实并**转达请求**：改派由管理员窗口决定并执行，UI 不派单。
     const failedTasks = tasks.filter(t => t.status === 'abandoned' || t.status === 'stale');
     const usableWindows = availability.filter(item => item.usable);
     const takeover = section('没做成的活',
       '哪条活没做成、哪些窗口现在还能接活（连它们用的哪个模型）。'
-      + '要换人请按「请管理员换个人做」——那只是**请求**，换不换由管理员决定；'
+      + '要换人请按「请管理员换个人做」——那只是请求，换不换由管理员决定；'
       + '办公室自己不派单。');
     if (!failedTasks.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
@@ -554,12 +560,12 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const state = STATE_LABEL[task.status] || task.status;
       const candidates = usableWindows.map(item => ({
         id: item.harness_id,
-        name: names.get(item.harness_id) || item.harness_id,
+        name: nameOf(item.harness_id),
         model: item.model || '未知模型',
       }));
       const head = document.createElement('p');
       head.textContent = `「${task.title || task.task_id}」${state} · 上次持有者 ${owner}`
-        + (candidates.length ? ` · 现在能接的有 ${candidates.length} 个窗口` : ' · **现在没有能接活的窗口**');
+        + (candidates.length ? ` · 现在能接的有 ${candidates.length} 个窗口` : ' · 现在没有能接活的窗口');
       row.append(head);
       // 为什么倒的：平台记下的最后一次 abandon/release 理由（不是猜的）。
       const reason = task.last_failure && task.last_failure.reason;
@@ -578,7 +584,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const spent = Number(task.attempt_no || 0) >= Number(task.max_attempts || 0);
       if (spent) {
         const again = actionButton('请求再给一次机会（预算豁免）', () => grantBudgetOverride(task),
-          '这条活的尝试预算已经用完（R10 §8）。只有人能给它一次机会——平台和管理员 harness 都不给自己豁免。');
+          '这条活的尝试预算已经用完（R10 §8）。只有人能给它一次机会——平台和管理员窗口都不给自己豁免。');
         actions.append(again);
       }
       let select = null;
@@ -600,8 +606,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         adminRecipient ? '请管理员换个人做' : '请管理员换个人做（本项目未指定管理员）',
         () => requestReassign(task, select ? select.value : ''),
         adminRecipient
-          ? `把改派请求递到管理员 Harness @ ${adminRecipient}（由它决定并执行）`
-          : '本项目还没有指定管理员 Harness：请先在开工向导的「管理员」里选一个外部 Harness',
+          ? `把改派请求递到管理员窗口 ${nameOf(adminRecipient)}（由它决定并执行）`
+          : '本项目还没有指定管理员窗口：请先在开工向导的「管理员」里选一个',
       );
       btn.disabled = !adminRecipient;
       actions.append(btn);
@@ -614,7 +620,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const planSection = section('等你批准的方案',
       '管理员把要求拆成一版方案，给成员传阅收意见，再并进这一版。'
       + '下面是给人看的最终稿。'
-      + '**只有人点了「批准，开始做」，任务才会被创建、才能有人接。**');
+      + '只有人点了「批准，开始做」，任务才会被创建、才能有人接。');
     if (planError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `读不到方案：${planError}`;
@@ -625,10 +631,26 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       meta.textContent = `方案 ${doc.plan_id} · 第 ${doc.revision} 轮传阅后 · ${doc.tasks} 个任务`
         + ` · 文件：${doc.markdown_path}`;
       planSection.append(meta);
+      // 方案正文是**Markdown 源码**（带 ##、表格竖线、反引号）。人读的是"这件事
+      // 怎么做"，不是源码；再长也不该让人被一堵字墙挡住 —— 上面给结论，其余折叠。
+      const docText = readableText(doc.markdown || '');
+      const docLines = docText.split('\n');
+      const shown = docLines.slice(0, 12);
+      const rest = docLines.slice(12);
       const body = document.createElement('pre');
       body.className = 'agent-doc';
-      body.textContent = doc.markdown || '（空）';
+      body.textContent = shown.join('\n') || '（空）';
       planSection.append(body);
+      if (rest.length) {
+        const more = document.createElement('details'); more.className = 'agent-more';
+        const summary = document.createElement('summary');
+        summary.textContent = `方案还有 ${rest.length} 行`;
+        const full = document.createElement('pre');
+        full.className = 'agent-doc';
+        full.textContent = rest.join('\n');
+        more.append(summary, full);
+        planSection.append(more);
+      }
       const actions = document.createElement('div'); actions.className = 'agent-actions';
       const btn = actionButton('批准，开始做', () => approvePlan(planDoc.draft.plan_id),
         '由人最终审核：批准后这份方案才会变成可领取的任务');
@@ -647,7 +669,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const measured = ranking.filter(r => r.total > 0);
     if (!measured.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '本项目还没有可核验的跃迁可统计。'; rank.append(p); }
     const rankTable = document.createElement('table'); rankTable.className = 'agent-table';
-    rankTable.innerHTML = '<thead><tr><th>#</th><th>Harness</th><th>提交</th><th>返修</th><th>放弃</th><th>通过率</th><th>中位耗时</th></tr></thead>';
+    rankTable.innerHTML = '<thead><tr><th>#</th><th>窗口</th><th>提交</th><th>返修</th><th>放弃</th><th>通过率</th><th>中位耗时</th></tr></thead>';
     const rbody = document.createElement('tbody');
     measured.forEach((r, index) => {
       const tr = document.createElement('tr');
@@ -659,7 +681,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
     // 4. 需要管理员处理的线索 —— 这里只给判断与上报，不做分工动作。
     const plan = section('要管理员处理的事',
-      '助手只出线索：卡点、无人可派、重复派发。改派、拆分、重开、取消由管理员 Harness 决定；求助/接单始终走 Harness 侧流程，助手不代任何成员发起。');
+      '助手只出线索：卡点、无人可派、重复派发。改派、拆分、重开、取消由管理员窗口决定；求助/接单始终走窗口侧流程，助手不代任何成员发起。');
     if (!suggestions.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有需要管理员重新规划的事项。'; plan.append(p); }
     for (const item of suggestions) {
       const row = document.createElement('article'); row.className = 'agent-row';
@@ -713,7 +735,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const dead = tasks.filter(t => t.status === 'abandoned' || t.status === 'stale');
     if (dead.length) {
       const head = document.createElement('p'); head.className = 'agent-note';
-      head.textContent = `超时/失败后待处理 ${dead.length} 条：abandoned 可回到 ready 重新领取，stale 平台只允许取消收口（无自动回收）。是否重新打开或取消由管理员 Harness 决定，助手只上报。`;
+      head.textContent = `超时/失败后待处理 ${dead.length} 条：abandoned 可回到 ready 重新领取，stale 平台只允许取消收口（无自动回收）。是否重新打开或取消由管理员窗口决定，助手只上报。`;
       // 之前只渲染前 8 条，剩下的任务在界面上根本点不到。加一个筛选框，
       // 默认仍是前 8 条，输入 task_id 或标题即可定位任意一条。
       const filter = document.createElement('input');
@@ -755,7 +777,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const ripe = item.age >= URGE_WINDOWS * WINDOW_MS;
       const cooled = Boolean(last) && (now - last) < REMIND_COOLDOWN_MS;
       const canUrge = ripe && busy < LOAD_HOLD && !cooled && Boolean(target);
-      const why = !target ? '没有收件人：请先在开工向导里指定管理员 Harness（或登记时选一个目标）'
+      const why = !target ? '没有收件人：请先在开工向导里指定管理员窗口（或登记时选一个目标）'
         : !ripe ? `未到催促窗口（已积压 ${windowsOf(item.age)}/${URGE_WINDOWS} 个窗口）`
         : busy >= LOAD_HOLD ? `${target} 当前在办+排队 ${busy} 条，暂缓催促以免影响其任务完成`
         : cooled ? `冷却中（最近催促 ${new Date(last).toLocaleTimeString()}）` : '可催促：不强制完成，只提醒安排';
@@ -767,14 +789,14 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       urge.disabled = !canUrge;
       actions.append(urge); row.append(actions); backlogSec.append(row);
     }
-    // 登记表：输入框只是筛选/登记草稿，不是分派表单。目标默认是本项目的管理员 Harness。
+    // 登记表：输入框只是筛选/登记草稿，不是分派表单。目标默认是本项目的管理员窗口。
     const form = document.createElement('div'); form.className = 'agent-actions';
     const input = document.createElement('input'); input.type = 'text'; input.className = 'agent-input';
     input.placeholder = '登记协调事项，如：6 项 PENDING_ALIGNMENT 待 Qoder 签字';
     input.value = backlogDraft.text;
     input.addEventListener('input', () => { backlogDraft.text = input.value; });
     const targetSelect = document.createElement('select'); targetSelect.className = 'agent-input';
-    targetSelect.innerHTML = '<option value="">收件人（默认管理员 Harness）</option>' + ranking.map(r => `<option value="${escapeAttr(r.id)}">${escapeAttr(r.name)}</option>`).join('');
+    targetSelect.innerHTML = '<option value="">收件人（默认管理员窗口）</option>' + ranking.map(r => `<option value="${escapeAttr(r.id)}">${escapeAttr(r.name)}</option>`).join('');
     targetSelect.value = backlogDraft.target;
     targetSelect.addEventListener('change', () => { backlogDraft.target = targetSelect.value; });
     form.append(input, targetSelect,
@@ -794,8 +816,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     }
     body.append(relay);
 
-    // 7. 待审查提醒 —— 审核是管理员 Harness 的动作，助手只提醒、不打开审核面。
-    const review = section('等着审的', '机器验证不能替代人工验收。审核（领取 / 提交结论）是管理员 Harness 的动作；助手这里只列出待审任务，并把清单报给管理员。');
+    // 7. 待审查提醒 —— 审核是管理员窗口的动作，助手只提醒、不打开审核面。
+    const review = section('等着审的', '机器验证不能替代人工验收。审核（领取 / 提交结论）是管理员窗口的动作；助手这里只列出待审任务，并把清单报给管理员。');
     const awaiting = tasks.filter(t => t.status === 'awaiting_review');
     if (!awaiting.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有待审查任务。'; review.append(p); }
     for (const task of awaiting) {
@@ -850,7 +872,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         (orphan.length ? `（其中 ${orphan.map(t => t.task_id).join('、')} 的持有者已经没有在跑的 worker）` : '') };
   }
 
-  // 收件人是本项目的管理员 Harness（开工向导里选的那个外部窗口）。没有配置就明说，
+  // 收件人是本项目的管理员窗口（开工向导里选的那个外部窗口）。没有配置就明说，
   // 不自动挑一个成员顶替。正文是确定性推导的事实，不加评价、不替管理员做决定。
   // 上报的正文是完整事实，不能只靠 mention：网关的 mentions 只做提醒，正文同样要引用收件人。
   const REPORT_KIND = {
@@ -876,15 +898,17 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   function reportAction(item, kind) {
     const wrap = document.createElement('div'); wrap.className = 'agent-actions';
     const recipient = adminRecipient;
-    const btn = actionButton(recipient ? `上报管理员（${recipient}）` : '上报管理员（未配置收件人）',
+    // 按钮与提示上印登记名；@ 的还是 id（那是平台认的东西）。
+    const recipientName = recipient ? nameOf(recipient) : '';
+    const btn = actionButton(recipient ? `上报管理员（${recipientName}）` : '上报管理员（未配置收件人）',
       () => sendReport(item, kind),
-      recipient ? `把这条上报写入项目群聊并 @ ${recipient}` : '本项目还没有指定管理员 Harness：请先在开工向导里选择管理员');
+      recipient ? `把这条上报写入项目群聊并 @ ${recipient}` : '本项目还没有指定管理员窗口：请先在开工向导里选择管理员');
     btn.disabled = !recipient;
     wrap.append(btn);
     return wrap;
   }
   async function sendReport(item, kind) {
-    if (!adminRecipient) { showAction('上报失败：本项目还没有指定管理员 Harness', false); return; }
+    if (!adminRecipient) { showAction('上报失败：本项目还没有指定管理员窗口', false); return; }
     const t = item.task || {};
     try {
       await api('/messages', {
@@ -893,7 +917,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         ...(t.task_id ? { task_id: t.task_id } : {}),
         refs: [],
       });
-      showAction(`已上报 ${adminRecipient}：${REPORT_KIND[kind] || kind} · ${t.task_id || ''}`);
+      showAction(`已上报 ${nameOf(adminRecipient)}：${REPORT_KIND[kind] || kind} · ${t.task_id || ''}`);
       // 上报即留痕：记进记忆清单，便于面板显示「已上报」。
       const key = `report:${kind}:${t.task_id || 'group'}`;
       const log = db.reminders[key] || (db.reminders[key] = []);
@@ -902,21 +926,21 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     } catch (error) { showAction(`上报失败：${error.message}`, false); }
   }
 
-  // 把「请改派」这件事递到管理员那里。**只递请求**：改派由管理员 Harness 决定并
+  // 把「请改派」这件事递到管理员那里。**只递请求**：改派由管理员窗口决定并
   // 执行（办公室既不派单，也不改任务归属）。
   async function requestReassign(task, target) {
-    if (!adminRecipient) { showAction('请求失败：本项目还没有指定管理员 Harness', false); return; }
+    if (!adminRecipient) { showAction('请求失败：本项目还没有指定管理员窗口', false); return; }
     const usable = availability.filter(item => item.usable);
     const candidates = usable.map(item =>
-      `${names.get(item.harness_id) || item.harness_id}（${item.model || '未知模型'}）`);
+      `${nameOf(item.harness_id)}（${item.model || '未知模型'}）`);
     const lines = [
       `@${adminRecipient} 平台助手转达的改派请求：`,
       `任务「${task.title || task.task_id}」（${task.task_id}）状态：${STATE_LABEL[task.status] || task.status}`,
       `上次持有者：${task.owner || '（无持有者）'}`,
       `现在能接活的窗口（平台侧事实）：${candidates.length ? candidates.join('、') : '（没有）'}`,
-      `指定接手窗口：${target ? (names.get(target) || target) : '由管理员按负载挑'}`,
+      `指定接手窗口：${target ? nameOf(target) : '由管理员按负载挑'}`,
       '',
-      '这条消息只是**请求**：改派、收口、放弃由管理员 Harness 决定并执行，平台助手不派单。',
+      '这条消息只是请求：改派、收口、放弃由管理员窗口决定并执行，平台助手不派单。',
     ];
     const refs = ['reassign-request'];
     if (target) refs.push('reassign-to:' + target);
@@ -927,12 +951,12 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         task_id: task.task_id,
         refs,
       });
-      showAction(`已请求管理员改派 ${task.task_id}${target ? '（指定 ' + (names.get(target) || target) + '）' : ''}`);
+      showAction(`已请求管理员改派 ${task.task_id}${target ? '（指定 ' + nameOf(target) + '）' : ''}`);
     } catch (error) { showAction(`请求失败：${error.message}`, false); }
   }
 
   // 人给一次机会：尝试预算用完的活，只有人能给它续一次。这是**人**的动作
-  // （平台不给自己豁免，管理员 harness 也不代劳）。
+  // （平台不给自己豁免，管理员窗口也不代劳）。
   async function grantBudgetOverride(task) {
     try {
       await api('/task/budget_override', {
@@ -967,10 +991,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   }
 
   async function urgeBacklog(item) {
-    // 协调事项（例如等签字对账）的催促对象由登记人指定；没指定时交回管理员 Harness。
+    // 协调事项（例如等签字对账）的催促对象由登记人指定；没指定时交回管理员窗口。
     // 管理员在开工向导里选，平台助手不替用户挑一个成员顶替。
     const target = item.target || adminRecipient || null;
-    if (!target) { showAction('催促失败：本项目还没有指定管理员 Harness', false); return; }
+    if (!target) { showAction('催促失败：本项目还没有指定管理员窗口', false); return; }
     const message = createRoutedMessage({ sender: '平台助手',
       recipients: [{ instance_id: target, display_name: target, role: 'member' }],
       kind: 'backlog_reminder', subject: '积压事项催促（不强制完成）',

@@ -229,7 +229,7 @@ def _codex_upstreams(home: Path, relay_ports: tuple[int, ...]) -> list[Upstream]
                 base_url=base_url,
                 credential=("literal", "local-relay"),
                 origin=str(path),
-                note="codex CLI already uses this chain; the key lives in the chain, not here",
+                note="codex CLI 本来就用这条链路；key 在链路里，不在池子里",
             )
         )
     return found
@@ -270,7 +270,7 @@ def _claude_upstream(home: Path, relay_ports: tuple[int, ...]) -> list[Upstream]
             models=tuple(models),
             credential=("config", str(path), "env.ANTHROPIC_AUTH_TOKEN"),
             origin=str(path),
-            note="the provider the Claude CLI is configured to use",
+            note="Claude CLI 自己配的那个 provider",
         )
     ]
 
@@ -311,7 +311,7 @@ def _opencode_upstreams(home: Path, relay_ports: tuple[int, ...]) -> list[Upstre
                 models=models,
                 credential=credential,
                 origin=str(path),
-                note="provider the opencode CLI is configured with",
+                note="opencode CLI 自己配的那个 provider",
             )
         )
     return found
@@ -390,7 +390,7 @@ def _minimax_upstream(home: Path) -> list[Upstream]:
             models=("MiniMax-M3.1-Flash-Preview",),
             credential=("config", str(path), credential or "api_key"),
             origin=str(path),
-            note="the MiniMax subscription the mmx CLI is signed in with (kept in reserve)",
+            note="mmx CLI 登录用的 MiniMax 订阅（留着当兜底）",
             tier="reserve",
         )
     ]
@@ -461,7 +461,7 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
                 models=(pool_id,),
                 credential=None,
                 origin=str(path),
-                note="the CLI itself is the only client allowed to spend this quota",
+                note="只有这个 CLI 自己能用这份额度",
                 cli=source,
                 tier=str(slot.get("tier") or "free"),
             )

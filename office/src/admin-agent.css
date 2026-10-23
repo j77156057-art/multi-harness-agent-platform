@@ -1,27 +1,38 @@
-.agent-dialog{width:min(960px,calc(100vw - 24px));max-height:90dvh;border:1px solid #cad7d2;border-radius:18px;background:#fcfaf6;color:#243b33;padding:24px;box-sizing:border-box;overflow:auto}
-.agent-dialog::backdrop{background:#182b2588}.agent-head{display:flex;justify-content:space-between;gap:16px}.agent-head h2{margin:0 0 8px}.agent-head p{color:#63756d;font-size:13px;line-height:1.6;margin:0}.agent-dialog button{cursor:pointer;border-radius:8px;padding:9px 14px;font:inherit}
-.agent-body{display:grid;gap:18px;margin-top:18px}.agent-section{padding:14px;border:1px solid #d7dfd9;border-radius:12px;background:#fff}.agent-section h3{margin:0 0 6px;font-size:15px}.agent-note{color:#63756d;font-size:12px;line-height:1.6;margin:0 0 8px}.agent-kv{font-size:13px;margin:4px 0;color:#33463e}
-.agent-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}.agent-table th,.agent-table td{text-align:left;padding:6px 8px;border-bottom:1px solid #e7eee9}.agent-table th{color:#63756d;font-weight:600;font-size:12px}
-.agent-row{padding:10px 12px;border:1px solid #d7dfd9;border-radius:10px;margin:8px 0;display:grid;gap:6px;overflow-wrap:anywhere}.agent-row strong{display:block;font-size:13px}.agent-row span{font-size:12px;color:#63756d}.agent-row p{margin:0;font-size:12px;line-height:1.55;color:#4a5f56}.agent-row button{justify-self:start}
+/* 平台助手面板的样式。
+ *
+ * 配色用产品外壳的那一套（蓝灰），不再各写各的：变量带兜底值，所以这个文件
+ * 单独被引到别的页面时也不会掉色。
+ */
+.agent-dialog{width:min(960px,calc(100vw - 24px));max-height:90dvh;border:1px solid var(--ao-border-strong,#cdd3da);border-radius:18px;background:var(--ao-surface,#fff);color:var(--ao-text,#1c2430);padding:24px;box-sizing:border-box;overflow:auto}
+.agent-dialog::backdrop{background:#1c24308c}.agent-head{display:flex;justify-content:space-between;gap:16px}.agent-head h2{margin:0 0 8px}.agent-head p{color:var(--ao-text-soft,#5b6673);font-size:13px;line-height:1.6;margin:0}.agent-dialog button{cursor:pointer;border-radius:8px;padding:9px 14px;font:inherit}
+.agent-body{display:grid;gap:18px;margin-top:18px}.agent-section{padding:14px;border:1px solid var(--ao-border,#e3e6ea);border-radius:12px;background:var(--ao-surface,#fff)}.agent-section h3{margin:0 0 6px;font-size:15px}.agent-note{color:var(--ao-text-soft,#5b6673);font-size:12px;line-height:1.6;margin:0 0 8px}.agent-kv{font-size:13px;margin:4px 0;color:var(--ao-text-soft,#5b6673)}
+.agent-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}.agent-table th,.agent-table td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--ao-border,#e3e6ea)}.agent-table th{color:var(--ao-text-soft,#5b6673);font-weight:600;font-size:12px}
+.agent-row{padding:10px 12px;border:1px solid var(--ao-border,#e3e6ea);border-radius:10px;margin:8px 0;display:grid;gap:6px;overflow-wrap:anywhere}.agent-row strong{display:block;font-size:13px}.agent-row span{font-size:12px;color:var(--ao-text-soft,#5b6673)}.agent-row p{margin:0;font-size:12px;line-height:1.55;color:var(--ao-text-soft,#5b6673)}.agent-row button{justify-self:start}
 .agent-row.is-stall{border-color:#e6cf94;background:#fffaf0}.agent-row.is-escalate{border-color:#e2a8a0;background:#fff4f2}
-.agent-preview{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;background:#f4f7f4;border:1px solid #e0e7e2;border-radius:10px;padding:12px;font-size:12px;margin:8px 0}
+.agent-preview{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;background:var(--ao-bg,#f6f7f9);border:1px solid var(--ao-border,#e3e6ea);border-radius:10px;padding:12px;font-size:12px;margin:8px 0}
 .agent-checklist{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;font-size:12px}.agent-checklist li{display:flex;gap:8px;align-items:center}
-.admin-agent-launch{margin-left:8px}.phone-agent-launch{margin-left:8px;border:1px solid #b9d0c4;border-radius:999px;background:#f4faf6;color:#2d5b49;padding:4px 9px;font:inherit;font-size:11px;cursor:pointer}
+.admin-agent-launch{margin-left:8px}.phone-agent-launch{margin-left:8px;border:1px solid var(--ao-border-strong,#cdd3da);border-radius:999px;background:var(--ao-accent-soft,#eaf1f8);color:var(--ao-accent,#2f5d8c);padding:4px 9px;font:inherit;font-size:11px;cursor:pointer}
 @media(max-width:500px){.agent-dialog{padding:16px}.agent-head{align-items:start}.agent-head h2{font-size:19px}.agent-table{font-size:12px}}
 
 .agent-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:6px}
 .agent-actions button{justify-self:auto}
 .agent-actions button:disabled{opacity:.5;cursor:not-allowed}
-.agent-input{border:1px solid #cad7d2;border-radius:8px;padding:8px 10px;font:inherit;font-size:12px;background:#fff;color:#243b33;min-width:0}
+.agent-input{border:1px solid var(--ao-border-strong,#cdd3da);border-radius:8px;padding:8px 10px;font:inherit;font-size:12px;background:var(--ao-surface,#fff);color:var(--ao-text,#1c2430);min-width:0}
 .agent-input[type=text]{flex:1 1 260px}
 .agent-action-result{font-size:12px;line-height:1.6;margin:8px 0 0;padding:8px 10px;border:1px solid #cfe3d6;border-radius:8px;background:#f0f7f2;color:#2d5b49;overflow-wrap:anywhere}
 .agent-action-result.is-error{border-color:#e6c3bb;background:#fdf3f1;color:#8a3d31}
 /* 管理员面才挂分派与审查入口：群主面（.formal-dispatch-launch）只读观察。 */
 .agent-launch-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0 4px}
 
-.agent-rules{margin:6px 0 0;color:#63756d;font-size:12px;line-height:1.6}
-.agent-rules summary{cursor:pointer;color:#426452}
+.agent-rules{margin:6px 0 0;color:var(--ao-text-soft,#5b6673);font-size:12px;line-height:1.6}
+.agent-rules summary{cursor:pointer;color:var(--ao-accent,#2f5d8c)}
 .agent-rules p{margin:6px 0 0}
 
-.agent-origin{color:#7b8c83;font-size:11px;line-height:1.55}
-.agent-scope-note{margin:8px 0 0;padding:8px 10px;border-left:3px solid #c9d8cf;background:#f5f8f5;color:#6a7d72;font-size:11px;line-height:1.6}
+.agent-origin{color:var(--ao-text-faint,#8a94a0);font-size:11px;line-height:1.55}
+.agent-scope-note{margin:8px 0 0;padding:8px 10px;border-left:3px solid var(--ao-border-strong,#cdd3da);background:var(--ao-bg,#f6f7f9);color:var(--ao-text-soft,#5b6673);font-size:11px;line-height:1.6}
+
+/* 方案正文：给人读的那一份，不是 Markdown 源码。 */
+.agent-doc{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;background:var(--ao-bg,#f6f7f9);border:1px solid var(--ao-border,#e3e6ea);border-radius:10px;padding:12px;font-size:13px;margin:8px 0;font-family:inherit;color:var(--ao-text,#1c2430)}
+.agent-more{margin:0 0 8px}
+.agent-more summary{cursor:pointer;color:var(--ao-accent,#2f5d8c);font-size:12px}
+.agent-more .agent-doc{margin-top:6px;color:var(--ao-text-soft,#5b6673);font-size:12px}

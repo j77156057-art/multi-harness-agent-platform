@@ -38,12 +38,23 @@ def _harness_names(database: Database) -> dict[str, str]:
 
     平台自己知道每个窗口叫什么，所以"翻译"这件事该由平台做 ——
     前端拿不到注册表，就只能自己猜或者印 id。
+
+    名字在 **注册表**（``harness_registrations``）里，不在 ``harnesses`` 表 ——
+    后者只有 id、provider、adapter 这些。读错了表，异常被吞掉，窗口名就整
+    个消失了（真跑才发现：方案里"执行窗口：opencode"没换成"OpenCode"）。
     """
     try:
-        rows = database.read("SELECT harness_id, name FROM harnesses")
+        rows = database.read(
+            "SELECT harness_id, name FROM harness_registrations "
+            "WHERE superseded_by IS NULL ORDER BY created_seq"
+        )
     except Exception:  # pragma: no cover - 注册表读不到就不翻这一类
         return {}
-    return {str(row["harness_id"]): str(row["name"] or row["harness_id"]) for row in rows}
+    names: dict[str, str] = {}
+    for row in rows:
+        harness_id = str(row["harness_id"])
+        names[harness_id] = str(row["name"] or harness_id)
+    return names
 
 
 @router.post("/wording/translate")
@@ -59,7 +70,17 @@ def translate_texts(
     if not isinstance(texts, list) or len(texts) > 200:
         raise ApiError("request.invalid", 400, "texts must be a list of at most 200 items")
     kind = str(payload.get("kind") or "auto")
-    if kind not in {"auto", "reason", "event", "status", "harness", "path", "id", "prose"}:
+    if kind not in {
+        "auto",
+        "reason",
+        "event",
+        "status",
+        "harness",
+        "path",
+        "id",
+        "text",
+        "prose",
+    }:
         raise ApiError("request.invalid", 400, f"unknown kind {kind!r}")
     names = _harness_names(database)
     return {"texts": service.translate_many([str(item) for item in texts], kind=kind, names=names)}

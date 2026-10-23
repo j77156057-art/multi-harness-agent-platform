@@ -44,6 +44,28 @@ REASON_TEXT: dict[str, str] = {
     "timeout": "超时了",
     "abandoned": "这条活被放弃了",
     "cancelled": "这条活被取消了",
+    "harness released": "租约被放开了（这条活还等着有人接）",
+    "role_not_allowed": "这个身份不能做这件事",
+    "identity_mismatch": "身份对不上（拿这份凭据的人不是那条活的负责人）",
+    "token_missing": "这次调用没带凭据",
+    "token_invalid": "凭据不对",
+}
+
+#: 平台内部错误的代码 → 人话。
+#:
+#: 这些代码是写给日志看的（`HarnessLeaseLost`），人读到它只会知道"出错了"，
+#: 不知道出了什么事。真数据里输出页显示过「它当时说：formal worker error:
+#: HarnessLeaseLost」—— 认不出的代码原样留着，但认得出的换成人话。
+WORKER_ERROR_TEXT: dict[str, str] = {
+    "harnessleaselost": "租约丢了（这个窗口的活被接管了，或者租约过期了）",
+    "harnessleasemissing": "租约不见了（这条活已经被别人领走）",
+    "harnessnotregistered": "这个窗口没在平台登记",
+    "harnessoffline": "这个窗口不在线",
+    "cliunavailable": "这个窗口的命令没装好（或者不在 PATH 上）",
+    "budgetexhausted": "预算用完了",
+    "providererror": "模型那边出错了",
+    "verifystalled": "检查卡住了",
+    "timeout": "超时了",
 }
 
 #: 失败原因：按模式认（顺序有意义，先具体后宽泛）。
@@ -144,6 +166,21 @@ def _reason_text(text: str) -> str | None:
     lowered = text.strip().lower()
     if lowered in REASON_TEXT:
         return REASON_TEXT[lowered]
+    # 平台内部错误：代码本身是给日志看的，认得出的换成人话，认不出的照旧留着
+    # （总比整句英文看不懂强，但也别把信息丢了）。
+    worker = re.match(r"^formal worker error:\s*(\w+)", text.strip(), re.I)
+    if worker:
+        code = worker.group(1)
+        human = WORKER_ERROR_TEXT.get(code.lower())
+        return f"平台内部出错了（{human}）" if human else f"平台内部出错了（{code}）"
+    # Windows 的退出码是**无符号**的：-1 传上来是 4294967295（真数据里出现过）。
+    # 十个数字摆在那里没人认得，转回负数才是人平时说的那个数。
+    exited = re.match(r"^harness cli exited (\d+)$", text.strip(), re.I)
+    if exited:
+        code = int(exited.group(1))
+        if code >= 2**31:
+            code -= 2**32
+        return f"窗口的命令退出了（退出码 {code}）"
     for pattern, template in REASON_PATTERNS:
         match = pattern.search(text)
         if match:
@@ -185,10 +222,14 @@ def translate(
 
     认不出的**原样返回**，``translated`` 为 False —— 调用方可以据此决定是不是
     要把原文也摆出来。
+
+    ``original`` 回显**调用方给的原文**（一个字不动），因为调用方要拿它当
+    回填的钥匙：方案正文末尾带换行时，按洗过的文本找回来会找不到。
     """
-    raw = str(text or "").strip()
+    original = str(text or "")
+    raw = original.strip()
     if not raw:
-        return {"text": "", "kind": kind, "translated": False, "original": ""}
+        return {"text": "", "kind": kind, "translated": False, "original": original}
     chosen = kind
     if chosen == "auto":
         chosen = _guess_kind(raw)
@@ -205,6 +246,15 @@ def translate(
         human = _path_text(raw)
     elif chosen == "id":
         human = _id_text(raw)
+    elif chosen in ("text", "prose"):
+        # 自由文本：把里面的机器标记换成能读的说法。
+        cleaned = humanize_text(raw, names=names)
+        return {
+            "text": cleaned,
+            "kind": chosen,
+            "translated": cleaned != raw,
+            "original": original,
+        }
     if human is None and chosen != "auto":
         # 猜的那一类没命中，再按别的类试一遍（一个字符串可能既是路径也是 id）。
         for other in ("reason", "event", "status", "path", "id"):
@@ -215,8 +265,8 @@ def translate(
                 chosen = other
                 break
     if human is None:
-        return {"text": raw, "kind": chosen, "translated": False, "original": raw}
-    return {"text": human, "kind": chosen, "translated": True, "original": raw}
+        return {"text": raw, "kind": chosen, "translated": False, "original": original}
+    return {"text": human, "kind": chosen, "translated": True, "original": original}
 
 
 def _translate_as(raw: str, kind: str, names: dict[str, str] | None) -> str | None:
@@ -260,6 +310,114 @@ def translate_many(
 ) -> list[dict[str, Any]]:
     """一批文本一起翻（界面一次要翻好几条，别让人等好几次）。"""
     return [translate(text, kind=kind, names=names) for text in texts]
+
+
+#: 自由文本里的**机器标记**：出现在人写的段落里（结论、报告、评审意见）。
+#:
+#: 这些词本身没有错，错的是**给人看的时候**还留着 —— 一句结论的第一句就是
+#: "FD-0b0bcc415aa9fe2f（attempt .a1）· 提交 32f84d6 · exclusive_paths"，
+#: 人读到的是编号，不是"这件事"。这里把它们换成能读的说法。
+#:
+#: **只动标识符，不动英文词**：散文里的 "commit"（动词）、"harness"（测试台）
+#: 不是编号，替掉它们只会把句子改坏 —— 所以这些词不在表里。
+#:
+#: **字段名也不动**：`attempt_id` 是平台接口里的字段名，方案里那句"attempt_no
+#: 是序号，不是 attempt_id"是给人对照口径的；把它换成"轮次"就把话改错了。
+TEXT_MARKS: tuple[tuple[Any, str], ...] = (
+    (re.compile(r"`?\battempt[`_\s]*\.?a(\d+)\b`?", re.I), r"第 \1 轮"),
+    # 机器词后面常常紧跟着它的人话解释：「改动只落在 `exclusive_paths` 唯一允许的
+    # 路径上」。直接替换会变成"落在 允许改的路径 唯一允许的路径上"（同一件事说了
+    # 两遍），所以先把这一整段折成一句人话，再轮到下面那条兜底规则。
+    (
+        re.compile(
+            r"`?\bexclusive_paths\b`?\s*(?:唯一允许的路径|唯一可改的路径|the only allowed path)",
+            re.I,
+        ),
+        "唯一允许的路径",
+    ),
+    (re.compile(r"`?\bexclusive_paths\b`?", re.I), "允许改的路径"),
+    (re.compile(r"\btaskIds?\b", re.I), "任务号"),
+    (re.compile(r"\bkind\s*=\s*development\b", re.I), "开发租约"),
+    (re.compile(r"\bworktree\b", re.I), "独立工作区"),
+    (re.compile(r"\bagent/[A-Za-z0-9._/-]+"), "一条分支"),
+)
+
+
+#: 任务号：``FD-`` 加 16 位十六进制。
+_TASK_ID_IN_TEXT_RE = re.compile(r"FD-[0-9a-f]{16}", re.I)
+
+
+def _task_ids(text: str) -> str:
+    """任务号 → 人话。
+
+    **只有一个**的时候说"这条活"（人读到的是"这件事"，不是编号）；
+    **有两个以上**就得用短号 —— 方案里那句"只有 plan_id 与任务号变了
+    （FD-b0302acf397341cd → FD-e88e4c97e92843c9）"洗成"这条活 → 这条活"
+    就成了一句废话，两头还分不清。
+    """
+    ids = {match.group(0) for match in _TASK_ID_IN_TEXT_RE.finditer(text)}
+    if len(ids) > 1:
+        # 连着外面的反引号一起吃掉（`` `FD-…` `` → 短号）：留着半对反引号，
+        # 后面 markdown 化的时候配对会错位，页面上就会冒出孤零零的一个 `。
+        # 短号取 7 位（跟 git 的短 hash 一样长，也就不会再被 shorten_hash 砍一刀）。
+        return re.sub(
+            r"`?FD-([0-9a-f]{16})`?",
+            lambda match: match.group(1)[:7],
+            text,
+            flags=re.I,
+        )
+    return re.sub(r"`?\bFD-[0-9a-f]{16}\b`?", "这条活", text, flags=re.I)
+
+
+def shorten_hash(text: str) -> str:
+    """一次提交的完整 hash → 短 hash（7 位）。
+
+    长短 hash 指的是同一件事，但长的是 40 个字符 —— 摆在一句话里比一句话本身
+    还长。短 hash 是人（和 git）都认得的写法，留着比换成一个词更好。
+    """
+    return re.sub(
+        r"\b(?=[0-9a-f]{7,40}\b)(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b",
+        lambda match: match.group(0)[:7],
+        text,
+    )
+
+
+#: 「窗口：<id>」这种写法 —— id 后面通常跟的是**窗口 id**。
+_WINDOW_LABEL_RE = re.compile(
+    r"(执行窗口|窗口|执行者|负责人|owner|发起人|发起|传阅对象)\s*[:：]\s*([A-Za-z0-9][A-Za-z0-9._-]{0,63})",
+    re.I,
+)
+
+
+def _window_names(text: str, names: dict[str, str] | None) -> str:
+    """「执行窗口：opencode」→「执行窗口：OpenCode」。
+
+    窗口 id 是机器 id：小白看到 ``opencode`` 不知道那是谁。登记名在平台的名册
+    里，所以这一层拿得到 —— 拿不到就照旧显示 id。
+    """
+    if not names:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        label, ident = match.group(1), match.group(2)
+        name = names.get(ident)
+        return f"{label}：{name}" if name else match.group(0)
+
+    return _WINDOW_LABEL_RE.sub(replace, text)
+
+
+def humanize_text(text: str, names: dict[str, str] | None = None) -> str:
+    """一段自由文本 → 把里面的机器标记换成能读的说法。
+
+    这是**规则**（确定性的、不调模型）：只换标记本身，句子照旧。
+    整段的"翻译"仍然是模型那一层的事。
+    """
+    out = str(text or "")
+    out = _task_ids(out)
+    for pattern, replacement in TEXT_MARKS:
+        out = pattern.sub(replacement, out)
+    out = shorten_hash(out)
+    return _window_names(out, names)
 
 
 # ------------------------------------------------------------------ 模型层

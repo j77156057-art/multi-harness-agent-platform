@@ -10,7 +10,7 @@
 import './outputs.css';
 import { DONE_STATES, FAILED_STATES, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
-import { headlineText, parseTranscript } from './cli-transcript.js';
+import { headlineText, parseTranscript, readableText } from './cli-transcript.js';
 
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
@@ -102,7 +102,21 @@ function grouped() {
   return { windows: windows.sort((a, b) => b.count - a.count), shown };
 }
 
-/** 一次尝试说出来的话。 */
+/**
+ * 长文本只给开头几行，其余折起来。
+ *
+ * 真数据里一条活的结论有 386 行（字段映射表），整段摆出来人读到的是一堵墙。
+ */
+function clipLines(text, limit) {
+  const lines = String(text || '').split('\n');
+  if (lines.length <= limit) return { text: lines.join('\n'), rest: 0, restText: '' };
+  return {
+    text: lines.slice(0, limit).join('\n'),
+    rest: lines.length - limit,
+    restText: lines.slice(limit).join('\n'),
+  };
+}
+
 /** 一次尝试说出来的话。 */
 function words(task, attempt) {
   const stderr = String(attempt.stderr || '');
@@ -119,19 +133,27 @@ function words(task, attempt) {
 
   // 机器日志（JSONL）先给人话：结论 + 做了哪些事；原文收在后面。
   if (transcript.isJson && transcript.texts.length) {
-    const headline = headlineText(transcript);
+    const headline = readableText(headlineText(transcript));
     const others = transcript.texts.slice(0, -1).reverse();
     const steps = transcript.tools.slice(-8).reverse();
     const raw = attempt.stdout_tail ?? stdout.slice(-2000);
+    // 结论常常是**很长**的（真数据里有一份 386 行的字段映射表）。整段摆出来，
+    // 人读到的是一堵墙 —— 上面那几行才是"做完了什么"，其余收在折叠里。
+    const head = clipLines(headline, 6);
     return `
       <div class="outputs-said">
         <div class="outputs-said-head">它最后说了</div>
-        <pre class="outputs-words">${escape(headline || '（这段里没有可读的文字）')}</pre>
+        <pre class="outputs-words">${escape(head.text || '（这段里没有可读的文字）')}</pre>
+        ${
+          head.rest
+            ? `<details class="outputs-more-block"><summary>它还写了 ${head.rest} 行</summary><pre class="outputs-words">${escape(head.restText)}</pre></details>`
+            : ''
+        }
         ${steps.length ? `<div class="outputs-said-head">它做了什么（最近 ${steps.length} 步）</div><ul class="flat-list outputs-tools">${steps.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
-        ${others.length ? `<details class="outputs-more-block"><summary>它之前还说了 ${others.length} 段</summary>${others.map((item) => `<pre class="outputs-words">${escape(item.text)}</pre>`).join('')}</details>` : ''}
+        ${others.length ? `<details class="outputs-more-block"><summary>它之前还说了 ${others.length} 段</summary>${others.map((item) => `<pre class="outputs-words">${escape(readableText(item.text))}</pre>`).join('')}</details>` : ''}
         ${raw.trim() ? `<details class="outputs-more-block"><summary>看原始记录（机器日志）</summary><pre class="outputs-raw">${escape(raw)}</pre></details>` : ''}
       </div>
-      ${stderr.trim() ? `<pre class="outputs-err">${escape(stderr)}</pre>` : ''}`;
+      ${stderr.trim() ? `<div class="outputs-said-head">它报的错</div><pre class="outputs-err">${escape(readableText(stderr))}</pre>` : ''}`;
   }
 
   const plain = stdout || String(attempt.stdout_tail || '');
@@ -153,16 +175,15 @@ function words(task, attempt) {
 }
 
 /**
- * 这是哪个项目/群。
+ * 这是哪个项目。
  *
  * 本机开着办公室时，localStorage 里有项目名（那才是人起的名字）；这个独立
- * 窗口可能是在没有本机项目的情况下直接打开的，那就说清是**哪个群** ——
- * 群号是操作员自己认得的，"本项目"反而不知道在说谁。
+ * 窗口可能是在没有本机项目的情况下直接打开的。群号是机器 id（`office-formal-2`），
+ * 摆出来也没人认得 —— 说"这个项目"至少不骗人。
  */
 function scopeName() {
   if (state.scope && state.scope.name) return state.scope.name;
-  if (state.group) return `群 ${state.group}`;
-  return '本项目';
+  return '这个项目';
 }
 
 function render() {
