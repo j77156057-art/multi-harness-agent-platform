@@ -65,8 +65,10 @@ test_id：MVP-UI-018
 |---|---|
 | `backend/tests/test_wording.py` | 15/15 PASS |
 | 翻译 + 池子 + 权限矩阵 | 94/94 PASS |
+| **后端全量** `pytest` | **全绿**（退出码 0；这套在这台共享机器上要 40 分钟） |
 | `office/scripts/verify-office-wording.mjs` | ok（Chromium 实测，拦截 API） |
-| 其余办公室冒烟 | 22 条全绿（含新的一条） |
+| 办公室冒烟 | 22 条全绿（含新的一条） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98 / 44 / 全过 |
 | 真平台实跑 | 见下 |
 
 ### 真跑记录（真平台 8849 + 真令牌 + 真数据）
