@@ -20,6 +20,10 @@ test_id：MVP-UI-012
 | 允许修改 | `office/**`、`docs/claims/mavis--OFFICE-UI-02.md`、`docs/tasks/notes/OFFICE-UI-02.md`、`docs/traceability.md`、`TASKS.md` |
 | 禁止修改 | `backend/**`、`docs/spec/**`、`backend/migrations/**`、其他 Harness 的工作区与分支 |
 
+> 后来的「用户自己的 API key」（额度池第四档 + 平台来问）**要动后端**，
+> 所以另立 `OFFICE-UI-03`（`docs/tasks/notes/OFFICE-UI-03.md`），不塞进这张卡 ——
+> 这张卡的「禁止修改 backend/**」是真的（本次零后端改动）。
+
 ## 做什么
 
 三件事，同一面：**让第一次用这个页面的人看得懂、点得对**。
