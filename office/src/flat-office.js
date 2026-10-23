@@ -1135,7 +1135,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
         <span class="flat-task-title">${escape(parts.main)}</span>
         ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
-        <span class="flat-task-meta">${escape(who)} · ${escape(attemptWord(task))}${escape(reason)}</span>
+        <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="它正在做"></i>' : ''}${escape(who)} · ${escape(attemptWord(task))}${escape(reason)}</span>
         <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
       row.addEventListener('click', (event) => {
         if (event.target.closest('[data-jump="log"]')) return;
@@ -1703,23 +1703,57 @@ export function mountFlatOffice({ root, project: projectOf }) {
    * 「它自己输出的内容」：机器日志先给人话（结论 + 做了什么），原文收在后面。
    * 和「各个窗口都说了什么」那个页面用的是同一个解析器（`cli-transcript.js`）。
    */
+  /**
+   * 这条活**正在跑**吗？
+   *
+   * 正在跑的活是"活"的：有人在做，输出文件在长。页面上要能看出它在自己动
+   * （心跳点 + 持续刷新的输出），而不是一条静止的记录。
+   */
+  function isRunning(task) {
+    if (!task) return false;
+    if (['claimed', 'in_progress', 'verifying'].includes(String(task.status))) return true;
+    if (DONE_STATES.has(String(task.status))) return false;
+    return ['abandoned', 'stale', 'cancelled', 'escalated', 'awaiting_human'].includes(String(task.status))
+      ? false
+      : Boolean(task.owner);
+  }
+
+  /** 正在跑的那条活，输出文件最后一次被写是什么时候。 */
+  function liveStamp() {
+    const raw = state.output && typeof state.output === 'object'
+      ? state.output.output || state.output
+      : null;
+    const at = raw && raw.updated_at ? String(raw.updated_at) : '';
+    if (!at) return '还没开始说话';
+    const ago = timeAgo(at);
+    return ago === '刚刚' ? '刚刚还在动' : `${ago}还有动静`;
+  }
+
   function liveOutputBlock() {
     const raw = state.output && typeof state.output === 'object'
       ? state.output.output || state.output
       : state.output;
     const stdout = typeof raw === 'string' ? raw : String(raw?.stdout || '');
     const transcript = parseTranscript(stdout);
-    const title = `它自己输出的内容${state.output?.output?.current ? '（当前这一轮）' : ''}`;
+    const running = isRunning(state.selected);
+    const title = running ? '它现在正在做什么' : '它自己输出的内容';
+    const stamp = running
+      ? `<p class="flat-live-stamp"><i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自己更新</p>`
+      : '';
     if (transcript.isJson && transcript.texts.length) {
       const tools = transcript.tools.slice(-6).reverse();
-      return `<section class="flat-spec"><h3>${title}</h3>
+      return `<section class="flat-spec flat-live" id="flatLive">${stamp}
+        <h3>${title}${state.output?.output?.current ? '（当前这一轮）' : ''}</h3>
         <p class="flat-note">它最后说了</p>
         <pre class="flat-output">${escape(headlineText(transcript) || '（这段里没有可读的文字）')}</pre>
         ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
         <details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
       </section>`;
     }
-    return `<section class="flat-spec"><h3>${title}</h3><pre class="flat-output">${escape(outputText())}</pre></section>`;
+    return `<section class="flat-spec flat-live" id="flatLive">${stamp}
+      <h3>${title}</h3>
+      <pre class="flat-output">${escape(outputText())}</pre>
+    </section>`;
   }
 
   /** 人自己的动作。平台与管理员 harness 都不代劳这些。 */
@@ -2772,11 +2806,42 @@ export function mountFlatOffice({ root, project: projectOf }) {
     render();
   }
 
+  /**
+   * 盯着**正在跑**的那条活。
+   *
+   * 平台的 `/output` 读的是 worker 正在写的那个日志文件的尾巴，所以它本来就是
+   * 活的 —— 办公室以前只是**点开时取一次**，之后就冻住了。现在每 4 秒取一次，
+   * 而且**只换那一块**（不整页重画，免得把人正在看的东西刷掉）。
+   */
+  async function refreshLive() {
+    const task = state.selected;
+    if (!task || !isRunning(task)) return;
+    const data = await api(`/tasks/${encodeURIComponent(task.task_id)}/output`).catch(() => null);
+    if (!data) return;
+    const before = String((state.output && state.output.output && state.output.output.stdout) || '');
+    state.output = data;
+    const after = String((data && data.output && data.output.stdout) || '');
+    const box = root.querySelector('#flatLive');
+    if (!box) return;
+    if (after === before) {
+      // 没有新字，但"还有动静"的时间变了 —— 只改那一行。
+      const stamp = box.querySelector('.flat-live-stamp');
+      if (stamp) stamp.innerHTML = `<i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自己更新`;
+      return;
+    }
+    box.outerHTML = liveOutputBlock();
+  }
+
   const timer = setInterval(() => void refresh(), 15000);
+  // 正在跑的活 4 秒一轮（只有选中它的时候才有请求）。
+  const liveTimer = setInterval(() => void refreshLive(), 4000);
   void refresh();
 
   return {
     refresh,
-    stop: () => clearInterval(timer),
+    stop: () => {
+      clearInterval(timer);
+      clearInterval(liveTimer);
+    },
   };
 }

@@ -496,6 +496,43 @@
 
 .flat-spec:last-child { border-bottom: none; }
 
+/* 「它正在做」的心跳点：一个会呼吸的小点。 */
+.flat-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #2f5d8c;
+  box-shadow: 0 0 0 0 rgba(47, 93, 140, .45);
+  animation: flat-pulse 1.8s ease-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes flat-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 93, 140, .45); }
+  70% { box-shadow: 0 0 0 7px rgba(47, 93, 140, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 93, 140, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flat-pulse { animation: none; }
+}
+
+/* 正在跑的那条活：它的输出块。 */
+.flat-live { background: #fbfcfd; border-radius: 10px; padding: 12px 14px; }
+
+.flat-live-stamp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-live .flat-output { max-height: 220px; }
+
 /* 详情里每一段的小标题：中文就是中文，不必套大写英文的排版。
    左边一条细竖条 —— 段落之间不用靠一堆细线分隔。 */
 .flat-spec h3 {
