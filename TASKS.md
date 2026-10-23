@@ -131,13 +131,13 @@
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
-| OFFICE-UI-02 | Mavis | OFFICE-UI-01 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
-| OFFICE-UI-03 | Mavis | OFFICE-UI-02 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
-| OFFICE-UI-04 | Mavis | OFFICE-UI-02 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-018` |
-| OFFICE-UI-05 | Mavis | OFFICE-UI-02 | →doing（列表按「人」归堆：每个窗口一块，块头写清是谁、几条、忙还是闲） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-020` |
-| OFFICE-UI-06 | Mavis | OFFICE-UI-05 | →doing（讲故事的「今天」：头顶一段人话，讲这个项目今天发生了什么） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-021` |
-| OFFICE-UI-07 | Mavis | OFFICE-UI-04 | →doing（任务详情里夹着的机器 JSON：拆出工单、现场另起一节说人话） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-022` |
-| OFFICE-UI-08 | Mavis | OFFICE-UI-04 | →doing（群聊摘要：最近群里在说什么） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-023` |
+| OFFICE-UI-02 | Mavis | OFFICE-UI-01 | done（界面收拾：状态词/按钮/版式/活气；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
+| OFFICE-UI-03 | Mavis | OFFICE-UI-02 | done（用户自己的 API key：平台保管、不点头不花；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
+| OFFICE-UI-04 | Mavis | OFFICE-UI-02 | done（平台上的翻译：机器文本 → 人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-018` |
+| OFFICE-UI-05 | Mavis | OFFICE-UI-02 | done（列表按「人」归堆：谁忙谁闲一眼看得出；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-020` |
+| OFFICE-UI-06 | Mavis | OFFICE-UI-05 | done（讲故事的「今天」：头顶一段人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-021` |
+| OFFICE-UI-07 | Mavis | OFFICE-UI-04 | done（工单里夹着的机器 JSON 拆开、现场说人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-022` |
+| OFFICE-UI-08 | Mavis | OFFICE-UI-04 | done（群聊摘要：最近群里在说什么；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-023` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。

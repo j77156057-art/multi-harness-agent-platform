@@ -11,6 +11,8 @@
 §15（事件、事实源）；`backend/app/wording/service.py`（机器文本的人话表）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
 当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：群聊摘要：`office/scripts/verify-office-chat-digest.mjs` 通过；真跑：180 条群聊算出「管理员窗口 121 条、你 55 条、成员 4 条」，消息里的任务号与窗口 id 都换成人读的名字；办公室冒烟 27/30。
 test_id：MVP-UI-023
 
 | 项 | 内容 |

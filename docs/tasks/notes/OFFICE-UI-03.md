@@ -10,7 +10,9 @@
 真相源引用：R10 §8（预算与额度）、§17（权限矩阵：谁能碰用户自己的 key）、
 §39（人机职责：花谁的钱是人的决定）；`backend/app/pool/service.py`（池子不拥有凭据，
 它只切换）；`docs/dev-convention.md` H-4/H-7/H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：用户自己的 provider API key：`backend/tests/test_pool_user_keys.py` 12 项 + `office/scripts/verify-office-user-keys.mjs` 通过；真跑：平台来问、人点头（once/always）、池子真的用了那一档；后端全量 pytest 全绿。
 test_id：MVP-UI-017
 
 | 项 | 内容 |

@@ -12,7 +12,9 @@
 `backend/app/admin/worker.py` 的 `_goal_with_handoff`（同一句话的另一个出处）；
 `backend/app/wording/service.py`（失败原因的人话表）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：工单里夹着的机器 JSON 拆开：`office/scripts/verify-office-handoff.mjs` 通过；真跑：2957 字的工单拆成 80 字工单 + 一句人话（谁做的、哪儿错了、有没有产出），机器那部分收进折叠。
 test_id：MVP-UI-022
 
 | 项 | 内容 |

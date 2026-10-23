@@ -10,7 +10,9 @@
 真相源引用：R10 §8（attempt_budget_override）、§10（human.resume / human.reopen /
 human.release / human.cancel / plan.reject 五条边）、§18（人类的五决策动词）、
 §39（分配与传阅：裁决归管理员面）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：办公室的界面收拾（状态词/按钮/版式/活气）：办公室冒烟 30 条里 27 条通过（3 条是环境依赖：Godot dev server、本机 CLI/Ollama、真平台凭据窗口数 9 vs 本机 7）；docstate 98 / discipline 44 / ruff 全过；后端全量 pytest 全绿（退出码 0）。
 test_id：MVP-UI-012
 
 | 项 | 内容 |

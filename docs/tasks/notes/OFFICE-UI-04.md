@@ -10,7 +10,9 @@
 真相源引用：R10 §17（权限矩阵：谁能让人翻）、§26（检查追溯）；
 `backend/app/admin/service.py`（管理员的模型通道）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：平台上的翻译：`backend/tests/test_wording.py` 31 项 + `office/scripts/verify-office-wording.mjs` 通过；真跑：失败原因、事件名、方案原文都成了人话；后端全量 pytest 全绿。
 test_id：MVP-UI-018
 
 | 项 | 内容 |
