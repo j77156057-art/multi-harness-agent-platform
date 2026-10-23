@@ -40,4 +40,4 @@ scripted 全测）。
 ## 状态
 
 P1 实现与定点测试已就位。分支 `agent/local/codex/OFFICE-UI-01/a1`，
-提交：`663194f`（feat(assistant-react-loop): 平台助手升级为自有 ReAct 引擎（P1））。
+提交：`aaa8da5`（feat(assistant-react-loop): 平台助手升级为自有 ReAct 引擎（P1））。
