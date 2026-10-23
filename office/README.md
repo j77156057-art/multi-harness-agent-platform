@@ -89,6 +89,29 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 预算用完的活放行时要显式带上**预算豁免**（R10 §8），所以对话框里会多问一次，
 而不是让人从 409 里猜。
 
+## 自己的 API key（额度池里）
+
+额度池卡片里有一块「自己的 API key」：加一个你自己的 provider key（名字、协议、
+地址、模型、key 本体）。平台替人保管它 —— **key 永不出接口**（列表上只有
+`sk-…abcd` 这样的遮罩）。
+
+它排在免费档、计量档**之后**，而且平台**不会自己花**：免费与计量都拿不出额度时，
+平台**来问**你 —— 右栏最上面出现一张「平台在问你一件事」的卡（三个按钮：先不用 /
+同意用一次 / 以后都用它）。点了头，池子才会用那一档；「用一次」被那一次请求用掉
+就失效。
+
+没点头时，池子给 worker 的拒绝是 **409 `pool_user_key_pending`**（不是 500）：
+worker 分得清"没这个模型"和"用户在等点头"，不会一直重试。
+
+| 动作 | 网关路由 | 平台端点 |
+|---|---|---|
+| 列出（含未答的问题） | `GET /api/formal/user-keys` | `GET /api/v1/pool/user-keys` |
+| 加一个 | `POST /api/formal/user-keys` | `POST /api/v1/pool/user-keys` |
+| 点头（一次 / 一直 / 先不用） | `POST /api/formal/user-keys/{id}/approve` | `POST /api/v1/pool/user-keys/{id}/approve` |
+| 删掉 | `DELETE /api/formal/user-keys/{id}` | `DELETE /api/v1/pool/user-keys/{id}` |
+
+平台那边只给**人**（`pool:user_keys` 权限只含 human）：借别人的钱必须是人的决定。
+
 ## 各个窗口都说了什么
 
 `/outputs.html` 是另一个独立窗口（从办公室右栏的「看他们说了什么」打开）。
@@ -127,6 +150,11 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 已知的环境依赖：脚本要 node + playwright；`verify-anchors` 还要 5197 端口的 dev
 server；`verify-harness-connections` 断言本机 ollama 有 `qwen3:4b`；
 `verify-project-workspace` 断言平台在册窗口的数量。
+
+`verify-office-user-keys` 覆盖「自己的 API key」：列表上没有 key 本身 / 平台来问时
+是一张人话卡片且三个按钮都在、且那张卡在右栏最上面 / 点头失败**看得见**（以前点完
+跟没点一样）/ 点头打的是 approve+once 且问题消失 / 正在填的表单在重画后不丢 /
+窄屏（<1180px）也够得着额度池。
 
 ## 环境变量
 
