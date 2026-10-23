@@ -804,6 +804,23 @@
 
 .flat-card-fold > button { margin: 0 14px 12px; }
 
+/* 任务书顶上那句人话：平台把方案原文翻成的一句话。 */
+.flat-brief-summary {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid #cfe0ef;
+  border-radius: 7px;
+  background: #eaf1f8;
+  color: #24486b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.flat-brief-summary::before {
+  content: '这份方案讲的是：';
+  color: #5b6673;
+}
+
 /* ------------------------------------------- 与管理员对话（对话框）
 
    平台只有群消息 + @mention 这一个通道（R10 §19），所以这个对话框是

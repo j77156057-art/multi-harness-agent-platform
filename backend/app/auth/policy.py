@@ -112,6 +112,10 @@ POLICY: dict[str, frozenset[str]] = {
     # provider key，但平台**不自己花**它 —— 要用得用户点头。harness 主体
     # 拿不到这个面：借别人的钱必须是人的决定。
     "pool:user_keys": frozenset({HUMAN}),
+    # 平台的"翻译"：把机器写的文本（失败原因、事件名、绝对路径、方案原文）
+    # 翻成人话。只给**人** —— 让机器自己给自己的日志翻成好话，那是给日志化妆。
+    # 纯加性的一行（2026-10-23）。
+    "wording:read": frozenset({HUMAN}),
 }
 
 #: 已知、但**任何主体类型都拿不到**的键（管理员 harness 私有面，admin-harness）。

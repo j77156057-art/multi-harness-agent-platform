@@ -22,7 +22,10 @@ import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-ro
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
-import { STATE_LABEL, DONE_STATES, eventLabel } from './state-labels.js';
+import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state-labels.js';
+// 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
+// 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
+import { humanize, summarize, translated } from './wording.js';
 import { headlineText, parseTranscript } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
@@ -737,7 +740,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
          <span class="flat-note">这是一条 @管理员 的群消息；派给谁由管理员自己决定，办公室不代点。</span></p>`
       : '<p class="flat-brief-action flat-note">没有待领取的活：要么已经都在人手上，要么已经收尾了。</p>';
     return `${dispatchNote}<p class="flat-note">共 ${rows.length} 条任务：进行中 ${running} · 已完成 ${done}。下面每一条都写着：现在谁拿着、接过几次、交了几次、审核结论。</p>
-      <p class="flat-note">当前持有者与尝试次数是平台自己的字段，一定准；接过的人与交付次数取自**近期这一段事件**，这个群的事件已经超过一页，更早的接手记录不在窗口里。</p>${cards}${original}`;
+      <p class="flat-note">当前持有者与尝试次数是平台自己的字段，一定准；接过的人与交付次数取自**近期这一段事件**，这个群的事件已经超过一页，更早的接手记录不在窗口里。</p>
+      <p class="flat-brief-summary" data-brief-summary hidden></p>${cards}${original}`;
   }
 
   /**
@@ -1238,18 +1242,28 @@ export function mountFlatOffice({ root, project: projectOf }) {
   /**
    * 失败原因说人话。
    *
-   * 平台给的是机器写的句子（`harness CLI exited 1`）。看进度的人不该读这个 ——
-   * 认得的换成中文；**认不出的原样留着**（宁可原样，也不要编一个错的说法）。
+   * 平台给的答案优先（`POST /wording/translate`）—— 那是这些文本的出处；
+   * 平台够不着时用本地兜底。兜底认不出的**原样留着**（宁可原样，也不要编一个
+   * 错的说法）。
    */
   function reasonText(reason) {
     const text = String(reason || '').trim();
     if (!text) return '';
+    const fromPlatform = translated(text);
+    if (fromPlatform) return fromPlatform;
     const exit = /^harness CLI exited (\d+)$/.exec(text);
     if (exit) return `窗口的命令退出了（退出码 ${exit[1]}）`;
     if (/^harness timeout:/.test(text)) return '窗口跑超时了，没在时间内做完';
     if (/quota|rate.?limit|insufficient/i.test(text)) return '额度用完了';
     if (/^(provider|upstream)/i.test(text)) return '模型那边出了问题';
     return text;
+  }
+
+  /** 事件名说人话：平台翻过就用平台的，没翻过用本地那张表。 */
+  function eventName(event) {
+    const name = String(event?.event_name || '');
+    if (!name) return '';
+    return translated(name) || eventLabelLocal(name);
   }
 
   /**
@@ -1320,9 +1334,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const who = actorName(event);
     return `<li class="flat-event">
       <details>
-        <summary title="事件编号 ${escape(event.seq ?? '')} · ${escape(timeOf(event.created_at))}">
+        <summary title="事件编号 ${escape(event.seq ?? '')} · ${escape(timeOf(event.created_at))}${event.event_name && eventName(event) !== event.event_name ? ` · 原文 ${escape(event.event_name)}` : ''}">
           <span class="flat-event-seq">${escape(timeShort(event.created_at))}</span>
-          <b>${escape(eventLabel(event.event_name))}</b>
+          <b>${escape(eventName(event))}</b>
           <em>${escape(who)}</em>
           ${hint ? `<span class="flat-event-hint">${escape(hint)}</span>` : ''}
         </summary>
@@ -2088,7 +2102,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         ${plan
           ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
              <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
-               fileNameOf((plan.document || {}).markdown_path),
+               translated((plan.document || {}).markdown_path) ||
+                 fileNameOf((plan.document || {}).markdown_path),
              )}</p>
              <button type="button" data-act="approve-plan">批准，开始做</button>
              <button type="button" data-act="reject-plan" title="驳回这份方案：退回给管理员，改一版再来找你">驳回方案</button>`
@@ -2365,6 +2380,16 @@ export function mountFlatOffice({ root, project: projectOf }) {
         note: brief.planId ? `方案 ${brief.planId}（给人看的那一份）` : '',
         body: briefBody(brief),
       });
+      // 方案原文是"源码一样"的段落：让**平台**翻成一句人话（翻不出来就还是原文）。
+      if (brief.markdown) {
+        void summarize(brief.markdown).then((summary) => {
+          if (!summary || !briefDialog.open) return;
+          const box = briefDialog.querySelector('[data-brief-summary]');
+          if (!box) return;
+          box.textContent = summary;
+          box.hidden = false;
+        });
+      }
       return;
     }
     if (button.dataset.act === 'open-members') {
@@ -2560,6 +2585,27 @@ export function mountFlatOffice({ root, project: projectOf }) {
 
   // ---------------------------------------------------------------- 数据
 
+  /**
+   * 把这一屏要显示的机器文本一次问平台要回来。
+   *
+   * 只问**没问过**的（`wording.js` 里有缓存），所以每 15 秒的刷新不会变成
+   * 每 15 秒一次请求。
+   */
+  async function loadWording() {
+    const texts = [];
+    for (const task of state.tasks || []) {
+      if (task.last_failure?.reason) texts.push(task.last_failure.reason);
+    }
+    for (const event of state.events || []) {
+      if (event?.event_name) texts.push(event.event_name);
+    }
+    const plan = state.plan && state.plan.draft ? state.plan.draft : null;
+    const path = plan && plan.document ? plan.document.markdown_path : '';
+    if (path) texts.push(path);
+    if (!texts.length) return;
+    await humanize(texts);
+  }
+
   async function refresh() {
     try {
       const scope = projectScope() || (projectOf && projectOf());
@@ -2605,6 +2651,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
       state.plan = plan;
       state.messages = messages.messages || [];
       state.events = events.events || [];
+      // 人话从平台来（问过的会缓存，不会每 15 秒问一次）。
+      await loadWording();
     } catch (error) {
       state.error = String(error.message || error);
     }

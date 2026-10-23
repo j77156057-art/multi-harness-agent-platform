@@ -419,6 +419,14 @@ class AdminService:
 
     # --------------------------------------------------------------- internals
 
+    def invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """跑一次管理员自己的模型通道（平台上的"翻译"用这一层）。
+
+        公开它是因为：翻译要用的是**管理员那台 CLI** —— 方案是它写的，它的话
+        最贴切；换个模型通道就换了说话的人，那不是翻译，是换人。
+        """
+        return self._invoke_model(prompt)
+
     def _model_channel(self) -> tuple[Any, str]:
         """Which CLI answers the refinement -- decided by the admin's identity.
 

@@ -394,6 +394,14 @@ export function createFormalGateway(config={}){
           json(res,200,result);return true;
         }
       }
+      if(req.method==='POST'&&(route==='/wording/translate'||route==='/wording/summarize')){
+        // 平台自己的"翻译"：机器写的文本 → 人话。界面只负责显示。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>200000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/'+route.replace(/^\//,''),body);
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/events'){
         // 群范围内的事件流：成员的动态表、成员的求助都从这里读。
         // 平台的 /events 返回本主体能看到的全部事件，所以这里必须自己裁到
