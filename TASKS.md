@@ -140,6 +140,7 @@
 | review-contract-gate | Codex | assistant-react-loop-p3 | waiting（提案：评审契约守门，落点 tasks/service.py 共享在途；待复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-diagnose-pack | Codex | assistant-react-loop-p3 | doing（证据束取样器：`task.diagnose` 一次取准失败证据束＋诊断姿势 prompt；守门因 tasks/service.py 共享在途，仍走提案） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
