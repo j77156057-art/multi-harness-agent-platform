@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -36,8 +37,18 @@ class PiAdapter(CliHarness):
         model: str | None = None,
         base_url: str | None = None,
         config_root: Path | None = None,
+        harness_id: str = "pi",
+        display_name: str | None = None,
     ) -> None:
-        super().__init__(client, PI_REGISTRATION, prefix=prefix)
+        # 平台现在按**注册身份**建适配器（``adapter_for_harness`` 会传 harness_id），
+        # 所以这里照 CodexAdapter 的样子用 ``replace`` 换掉登记名 —— 否则平台上
+        # 登记的窗口名与 id 对不上。
+        registration = replace(
+            PI_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name or ("Pi CLI" if harness_id == "pi" else f"Pi CLI · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
         self.model = model or os.environ.get("AP_PI_MODEL", "ollama/qwen3:8b")
         self.base_url = base_url or os.environ.get(
             "AP_PI_OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"
