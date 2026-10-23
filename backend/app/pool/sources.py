@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.pool.cli_model import CliModelSource
 
 #: The protocols an upstream can speak.
@@ -27,7 +28,37 @@ ANTHROPIC = "anthropic"
 CLI = "cli"
 
 #: Where the pool's own configuration lives (the CLI slots it may serve).
+#: Kept for the historical CWD-relative deployments; new deployments put it
+#: under ``AP_DATA_DIR`` (see :func:`pool_config_path`).
 POOL_CONFIG_PATH = Path("data") / "pool" / "config.json"
+
+#: What a declared slot may say its quota is.
+#:
+#: There is deliberately **no default**: a missing tier used to mean "free",
+#: which would let a paid quota be spent as if it were free.  The built-in
+#: slots below say it explicitly; a declaration that does not is not offered.
+CLI_TIERS = ("free", "reserve", "metered")
+
+#: The CLI stores the pool knows how to read usage from.  A slot that names
+#: any other store cannot be accounted honestly (its usage would be unknown
+#: for ever), so it is not offered -- better a visible rejection than a
+#: silent "unknown" on every call.
+KNOWN_CLI_STORES = ("opencode",)
+
+
+def pool_config_path() -> Path:
+    """Where the pool's own declarations live.
+
+    The data directory first: that is where the pool's usage log is kept, and
+    it is the directory the platform was actually pointed at.  The historical
+    CWD-relative path stays as a fallback so an existing checkout keeps
+    working.
+    """
+    scoped = Path(settings.data_dir) / "pool" / "config.json"
+    if scoped.exists():
+        return scoped
+    return POOL_CONFIG_PATH
+
 
 #: The default CLI slots: the quotas that **only** the CLI itself may spend.
 #:
@@ -51,10 +82,12 @@ DEFAULT_CLI_SLOTS = (
         # here, because "this CLI keeps a store we know how to read" is a fact
         # about the slot, not something to sniff at runtime.
         "store": "opencode",
+        "tier": "free",
     },
     {
         "name": "codebuddy",
         "model": "hy3",
+        "tier": "free",
         "binary": "codebuddy",
         "args": [
             "-p",
@@ -70,6 +103,7 @@ DEFAULT_CLI_SLOTS = (
     {
         "name": "codebuddy",
         "model": "minimax-m3.1-flash",
+        "tier": "free",
         "binary": "codebuddy",
         "args": [
             "-p",
@@ -85,6 +119,7 @@ DEFAULT_CLI_SLOTS = (
     {
         "name": "qoder",
         "model": "Qwen3.8-Flash",
+        "tier": "free",
         "binary": "qoderclicn",
         "args": [
             "-p",
@@ -123,6 +158,7 @@ DEFAULT_CLI_SLOTS = (
     {
         "name": "qoder",
         "model": "DeepSeek-Flash",
+        "tier": "free",
         "binary": "qoderclicn",
         "args": [
             "-p",
@@ -401,25 +437,60 @@ def _port_of(base_url: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _slot_key(slot: dict[str, Any]) -> tuple[str, str]:
+    """A slot's identity: the CLI name and the model it spends."""
+    return (str(slot.get("name") or "cli-slot"), str(slot.get("model") or "").strip())
+
+
+def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The built-in slots plus the declared ones.
+
+    A declaration with the same (name, model) **replaces** the built-in; one
+    with ``"enabled": false`` removes it (by name alone when no model is
+    given, which is how a whole CLI is switched off).  Declarations no longer
+    replace the whole list: adding one harness used to silently drop every
+    other free slot, which is the opposite of what adding a harness means.
+    """
+    merged = {_slot_key(slot): dict(slot) for slot in DEFAULT_CLI_SLOTS}
+    order = list(merged)
+    for slot in declared:
+        key = _slot_key(slot)
+        if slot.get("enabled") is False:
+            if key[1]:
+                merged.pop(key, None)
+            else:
+                for existing in [item for item in merged if item[0] == key[0]]:
+                    merged.pop(existing, None)
+            continue
+        if key not in merged:
+            order.append(key)
+        merged[key] = dict(slot)
+    return [merged[key] for key in order if key in merged]
+
+
 def discover_cli_slots(config_path: Path | None = None, home: Path | None = None) -> list[Upstream]:
     """The CLI slots the pool may serve.
 
     They are declared, not discovered: a CLI slot runs a real CLI, and which
     CLIs are allowed to spend their quota for the platform is a decision, not
-    a fact to be sniffed out of a config file.
+    a fact to be sniffed out of a config file.  Declarations extend the
+    built-in list (see :func:`_merge_slots`).
+
+    A declaration that does not say **which tier** it is, or that names a
+    store the pool cannot read, is not offered: an unreported quota must be
+    visible, not a free-looking one that spends money.
     """
-    path = config_path or POOL_CONFIG_PATH
+    path = config_path or pool_config_path()
     declared: list[dict[str, Any]] = []
     document = _read_json(path) if path.exists() else {}
     if isinstance(document, dict):
         slots = document.get("cli_slots")
         if isinstance(slots, list):
             declared = [slot for slot in slots if isinstance(slot, dict)]
-    if not declared:
-        declared = [dict(slot) for slot in DEFAULT_CLI_SLOTS]
     upstreams: list[Upstream] = []
     home = home if home is not None else Path.home()
-    for slot in declared:
+    for slot in _merge_slots(declared):
+        name = str(slot.get("name") or "cli-slot")
         model = str(slot.get("model") or "").strip()
         if not model:
             continue
@@ -437,7 +508,36 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
                     continue
             elif not document.get(key):
                 continue
-        name = str(slot.get("name") or "cli-slot")
+        tier = str(slot.get("tier") or "").strip().lower()
+        store = str(slot.get("store") or "").strip()
+        problem = ""
+        if tier not in CLI_TIERS:
+            problem = (
+                "declared without a tier: say free, reserve or metered -- the pool "
+                "will not guess whether spending this quota costs money"
+            )
+        elif store and store not in KNOWN_CLI_STORES:
+            problem = (
+                f"declares the store {store!r}, which the pool cannot read; "
+                "leave store empty or name one it knows"
+            )
+        if problem:
+            # Keep it in the list, with no models: the office shows *why* this
+            # quota is not on offer, instead of hiding a broken declaration.
+            upstreams.append(
+                Upstream(
+                    name=f"{name}:{model}",
+                    protocol=CLI,
+                    base_url=f"cli://{model}",
+                    models=(),
+                    credential=None,
+                    origin=str(path),
+                    note=problem,
+                    cli=None,
+                    tier="",
+                )
+            )
+            continue
         source = CliModelSource(
             name=name,
             model=model,
@@ -447,7 +547,7 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
             file_arg=(str(slot.get("file_arg")) if slot.get("file_arg") else None),
             message_flag=(str(slot.get("message_flag")) if slot.get("message_flag") else None),
             timeout_seconds=float(slot.get("timeout_seconds") or 900.0),
-            store=str(slot.get("store") or ""),
+            store=store,
             catalogue=dict(slot.get("catalogue") or {}),
         )
         # The pool's model id is namespaced by the slot: two CLIs may both
@@ -463,7 +563,7 @@ def discover_cli_slots(config_path: Path | None = None, home: Path | None = None
                 origin=str(path),
                 note="the CLI itself is the only client allowed to spend this quota",
                 cli=source,
-                tier=str(slot.get("tier") or "free"),
+                tier=tier,
             )
         )
     return upstreams

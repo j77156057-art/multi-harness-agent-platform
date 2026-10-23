@@ -39,9 +39,9 @@ from app.pool.sources import (
     CLI,
     OPENAI_CHAT,
     OPENAI_RESPONSES,
-    POOL_CONFIG_PATH,
     Upstream,
     discover_upstreams,
+    pool_config_path,
 )
 from app.pool.translate import (
     anthropic_response_to_openai,
@@ -217,7 +217,7 @@ class PoolService:
 
     def _discovery_key(self) -> tuple[Any, ...]:
         """What the discovery depends on -- the cache is shared, so the key must say it."""
-        return (str(self.home), self.relay_ports, str(POOL_CONFIG_PATH.resolve()))
+        return (str(self.home), self.relay_ports, str(pool_config_path().resolve()))
 
     def models(self, *, refresh: bool = False) -> list[dict[str, Any]]:
         """The unified model list: every model the relay can serve, and from where.

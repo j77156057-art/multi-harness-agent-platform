@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.adapter.formal_worker import ADAPTER_TYPES, base_harness_id
+from app.adapter.formal_worker import base_harness_id, build_adapter, known_bases
 from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
@@ -31,9 +31,10 @@ from app.tasks.service import SchedulerService
 
 #: 执行者身份只接受"注册过的 base harness id"或"<base>-member|window-<slot>"，
 #: 与 ``app.adapter.formal_worker.base_harness_id`` 同一口径：不让模型发明一个新身份。
-_BASE_HARNESSES = ("codex", "claude-code", "opencode", "qoder", "codebuddy")
+#: base 是否注册由 ``known_bases()`` 现读（内置 + ``adapters/cli.json`` 声明），
+#: 所以这里只认形状，不抄一份名单。
 _INSTANCE_RE = re.compile(
-    r"^(?:codex|claude-code|opencode|qoder|codebuddy)-(?:member|window)"
+    r"^(?P<base>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)-(?:member|window)"
     r"-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
 )
 
@@ -81,7 +82,14 @@ def _valid_exclusive_path(raw: str) -> bool:
 
 
 def _known_harness_id(value: str) -> bool:
-    return value in _BASE_HARNESSES or bool(_INSTANCE_RE.fullmatch(value))
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    bases = known_bases()
+    if value in bases:
+        return True
+    match = _INSTANCE_RE.fullmatch(value)
+    return bool(match and match.group("base") in bases)
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -489,21 +497,21 @@ class AdminService:
             ) from exc
         pinned = getattr(settings, "admin_model_channel", "auto")
         if pinned and pinned != "auto":
-            if base not in ADAPTER_TYPES:
+            if base not in known_bases():
                 raise AdminHarnessError(
                     f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
                 )
             # 身份必须能解析（上面那句），但通道可以被显式钉到另一条 CLI：这是
             # "管理员窗口的 CLI 不在本机"时的部署选择，不是猜。
             base = pinned
-        adapter_type = ADAPTER_TYPES.get(base)
-        if adapter_type is None:
+        try:
+            # No client: the refine call needs the argv contract and the output
+            # parser, not the HTTP surface.
+            adapter = build_adapter(base, None, harness_id=self.harness_id)
+        except ValueError as exc:
             raise AdminHarnessError(
-                f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
-            )
-        # No client: the refine call needs the argv contract and the output
-        # parser, not the HTTP surface.
-        adapter = adapter_type(None, harness_id=self.harness_id)
+                f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}: {exc}"
+            ) from exc
         return adapter, base
 
     def _invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:

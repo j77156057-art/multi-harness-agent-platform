@@ -131,6 +131,7 @@
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
+| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -204,6 +205,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- R10-fix-13 → docs/claims/opencode--R10-fix-13.md -->
 <!-- codebuddy-cli-channel → docs/claims/opencode--codebuddy-cli-channel.md -->
 <!-- review-provider-record → docs/claims/opencode--review-provider-record.md -->
+<!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 
 
 
@@ -229,6 +231,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 
 | R10-fix-18 | [卡](docs/tasks/notes/R10-fix-18.md) | | |
 | OFFICE-UI-01 | [卡](docs/tasks/notes/OFFICE-UI-01.md) | | |
+| pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |
