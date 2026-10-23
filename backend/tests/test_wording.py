@@ -240,6 +240,20 @@ def test_two_task_ids_keep_their_short_forms() -> None:
     assert "这条活" not in cleaned
 
 
+def test_a_reason_with_a_task_id_in_front_is_still_a_reason() -> None:
+    """现场报告里就是这么记的：「FD-93c9e4fa07914dbc: harness CLI exited 1」。"""
+    result = service.translate("FD-93c9e4fa07914dbc: harness CLI exited 1", kind="reason")
+    assert result["text"] == "窗口的命令退出了（退出码 1）"
+
+
+def test_an_unknown_reason_with_a_task_id_in_front_is_left_alone() -> None:
+    """里面认不出来就别去掉前缀 —— 留着比丢意思强。"""
+    raw = "FD-93c9e4fa07914dbc: 某种没人认识的原因"
+    result = service.translate(raw, kind="reason")
+    assert result["translated"] is False
+    assert result["text"] == raw
+
+
 def test_the_cache_is_a_file_under_the_data_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

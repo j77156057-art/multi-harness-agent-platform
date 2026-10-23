@@ -213,6 +213,54 @@ export function createFormalGateway(config={}){
    supersedes:t.supersedes||null,
    // 时间戳：办公室要按"最近更新"排序、要让人看见一条活多久没动了。
    created_at:t.created_at||null,updated_at:t.updated_at||null});
+  /**
+   * 把**工单**和平台追加的**现场报告**拆开。
+   *
+   * 上一轮没做完时，平台会把上一次尝试的现场报告（错误、CLI 自己的话、动过哪些
+   * 文件）**追加到工单后面**，让接手的人能接着做 —— 那是给干活的人看的，不是给
+   * 人看的。真数据里那条工单有 2957 字，后面 2900 字是一坨机器 JSON。
+   *
+   * 所以这里按平台自己的标记拆开：工单还给工单，现场报告单独一个字段。
+   *
+   * 标记来自平台（backend/app/adapter/formal_worker.py 的 build_goal 与
+   * backend/app/admin/worker.py 的 _goal_with_handoff）。平台哪天改了这句话，
+   * 这里就拆不开 —— 退回今天的样子（工单里带机器那坨），**不会丢东西**。
+   */
+  const HANDOFF_MARKER='The previous attempt did NOT finish; here is its breakpoint report.';
+  const HANDOFF_JSON_MARKER='Breakpoint report (verbatim):';
+  function splitHandoff(spec){
+    const source=spec||{};
+    const goal=String(source.goal||'');
+    const at=goal.indexOf(HANDOFF_MARKER);
+    if(at<0)return source;
+    const human=goal.slice(0,at).trim();
+    const rest=goal.slice(at);
+    const jsonAt=rest.indexOf(HANDOFF_JSON_MARKER);
+    const raw=jsonAt>=0?rest.slice(jsonAt+HANDOFF_JSON_MARKER.length).trim():'';
+    let report=null;
+    try{report=JSON.parse(raw);}catch{report=null;}
+    return {...source,goal:human,handoff:report,handoff_raw:raw};
+  }
+
+  /**
+   * 现场报告里的失败原因 → 人话。
+   *
+   * 走**平台**的规则表（跟输出页的失败原因同一条路）：认得出的换成人话，认不出的
+   * 原样留着（宁可原样，也不要编一个错的说法）。平台够不着就照旧显示原文。
+   */
+  async function humanizeHandoff(spec){
+    const report=spec&&spec.handoff;
+    if(!report||!report.error)return spec;
+    try{
+      const result=await call('/wording/translate',{texts:[String(report.error)],kind:'reason'});
+      const row=(result.texts||[])[0];
+      if(row&&row.translated&&row.text)return {...spec,handoff:{...report,error_human:row.text}};
+    }catch{
+      // 平台够不着：照旧。
+    }
+    return spec;
+  }
+
   async function handle(req,res){
     if(!(req.url===PREFIX||req.url.startsWith(PREFIX+'/')))return false;
     try{
@@ -661,7 +709,11 @@ export function createFormalGateway(config={}){
         const diff=await call('/tasks/'+id+'/diff?include_patch=true').catch(()=>null);
         const events=await call('/tasks/'+id+'/events?limit=200').catch(()=>({events:[]}));
         // 规格（工单/验收/路径）一起给：办公室要让人**看着工单**做决定。
-        json(res,200,{task:{...safeTask(task),...(task.spec?{spec:task.spec}:{})},diff,events});return true;
+        // 工单里可能夹着平台追加的**现场报告**（一坨机器 JSON）—— 拆开，
+        // 人看的是工单，机器那部分单独摆（见 splitHandoff）；里面的失败原因
+        // 顺手翻成人话（见 humanizeHandoff）。
+        const spec=await humanizeHandoff(splitHandoff(task.spec||{}));
+        json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events});return true;
       }
       if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}\/output$/.test(route)){
         // The harness CLI's own output, as it streams. Read-only, and scoped to

@@ -1398,6 +1398,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       </div>
       ${lineageBlock(task)}
       ${spec.goal ? `<section class="flat-spec"><h3>这件事要做什么</h3><p>${escape(spec.goal)}</p></section>` : ''}
+      ${handoffBlock(spec)}
       ${acceptance ? `<section class="flat-spec"><h3>做到什么程度算完成</h3><p>${escape(acceptance)}</p></section>` : ''}
       ${paths.length ? `<section class="flat-spec"><h3>只允许改这些地方</h3><ul>${paths.map((p) => `<li><code>${escape(p)}</code></li>`).join('')}</ul></section>` : ''}
       ${files.length ? `<section class="flat-spec"><h3>这次改了什么</h3><ul>${files.map((f) => `<li><code>${escape(typeof f === 'string' ? f : f.path || JSON.stringify(f))}</code></li>`).join('')}</ul></section>` : ''}
@@ -1690,6 +1691,42 @@ export function mountFlatOffice({ root, project: projectOf }) {
    * （谁领的、什么时候、结果如何、从哪一轮改过来）。
    * 以前这些散在事件流里，要一条条读。
    */
+  /**
+   * 「上一次没做完，窗口贴回来的现场」。
+   *
+   * 上一轮失败时，平台把现场报告（错误、CLI 自己的话、动过哪些文件）**追加到工单
+   * 后面** —— 那是给**干活的人**看的：接手的人要靠它接着做。人看它没用：真数据里
+   * 那条工单有 2957 字，后面 2900 字是一整份 CLI 报错转储。
+   *
+   * 所以把它单独摆出来，并且**用人话说一句**：谁做的、哪儿错了、有没有产出。
+   * 这些都是现场报告里的**结构化字段**——不用问模型（问模型反而会编）。
+   * 原文收在后面，想查的人自己展开。
+   */
+  function handoffBlock(spec) {
+    const report = spec && spec.handoff;
+    if (!report || typeof report !== 'object') return '';
+    const bits = [];
+    const who = report.failed_harness ? harnessName(report.failed_harness) : '';
+    if (who) bits.push(`上一次是 ${who} 干的`);
+    // 网关已经翻过一遍（平台的规则表）；翻不出来就用本地兜底。
+    const error = report.error_human || reasonText(report.error || '');
+    if (error) bits.push(error);
+    const touched = Array.isArray(report.files_touched) ? report.files_touched : [];
+    bits.push(touched.length ? `动了 ${touched.length} 个文件` : '没有产出文件');
+    // 它自己最后说的话：CLI 的原话是一段机器日志（JSON 行），用办公室现成的
+    // 解析器挑出那句**人话**（"API Error: 503 No available accounts"），
+    // 原话收在后面 —— 跟输出页用的是同一个解析器。
+    const said = String(report.cli_stdout_tail || report.cli_stderr_tail || '').trim();
+    const saidHuman = said ? readableText(headlineText(parseTranscript(said))) : '';
+    return `<section class="flat-spec flat-handoff">
+      <h3>上一次没做完，窗口贴回来的现场</h3>
+      <p>${escape(bits.join('，'))}。</p>
+      ${saidHuman ? `<p class="flat-handoff-said">它自己最后说的是：${escape(saidHuman)}</p>` : ''}
+      ${said ? `<details class="flat-tech"><summary>看它自己的原话</summary><pre>${escape(said.slice(-1200))}</pre></details>` : ''}
+      ${spec.handoff_raw ? `<details class="flat-tech"><summary>看原始现场（机器记的）</summary><pre>${escape(spec.handoff_raw)}</pre></details>` : ''}
+    </section>`;
+  }
+
   function lineageBlock(task) {
     const events = detailEvents();
     const attempts = attemptChain(events);

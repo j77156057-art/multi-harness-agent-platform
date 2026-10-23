@@ -173,6 +173,12 @@ def _reason_text(text: str) -> str | None:
         code = worker.group(1)
         human = WORKER_ERROR_TEXT.get(code.lower())
         return f"平台内部出错了（{human}）" if human else f"平台内部出错了（{code}）"
+    # 失败原因前面可能带着任务号：「FD-93c9e4fa07914dbc: harness CLI exited 1」。
+    # 那是同一个失败原因，只是多带了个前缀（现场报告里就是这么记的）—— 去掉前缀
+    # 再认一次；里面认不出就照旧留着，别把前缀去掉却把意思丢了。
+    prefixed = re.match(r"^FD-[0-9a-f]{16}:\s*(.+)$", text.strip(), re.I)
+    if prefixed:
+        return _reason_text(prefixed.group(1))
     # Windows 的退出码是**无符号**的：-1 传上来是 4294967295（真数据里出现过）。
     # 十个数字摆在那里没人认得，转回负数才是人平时说的那个数。
     exited = re.match(r"^harness cli exited (\d+)$", text.strip(), re.I)

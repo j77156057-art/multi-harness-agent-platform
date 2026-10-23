@@ -561,6 +561,30 @@
   overflow-wrap: anywhere;
 }
 
+/* 「技术信息」里的原始块：机器写的那些（现场报告、CLI 原话）。 */
+.flat-tech pre {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ao-ink-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* 「上一次没做完」：人话那一句在前面，机器那坨收在后面。 */
+.flat-handoff h3 { color: #8a5b2f; }
+.flat-handoff p { color: var(--ao-ink); }
+
+/* 它自己最后说的那句（从机器日志里挑出来的原话）。 */
+.flat-handoff p.flat-handoff-said {
+  color: var(--ao-ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 /* 详情底部的收尾一句：下面没内容了，别让人以为页面坏了。 */
 .flat-detail-foot {
   margin: 14px 0 0;
