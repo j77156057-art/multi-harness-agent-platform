@@ -135,6 +135,7 @@
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p2 | Codex | assistant-react-loop | doing（P2：池子直连免费档模型通道 + assistant worker 私聊轮询；admin/worker 只复用零修改，权限矩阵核实零行新增） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-free-set-watch | Codex | — | waiting（提案：免费档目录变更哨，快照 diff + alerts 现成投递；待仓库主人复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -212,6 +213,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
 <!-- assistant-react-loop-p2 → docs/claims/codex--assistant-react-loop-p2.md -->
+<!-- pool-free-set-watch → docs/claims/codex--pool-free-set-watch.md -->
 
 
 
@@ -241,6 +243,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
 | assistant-react-loop-p2 | [卡](docs/tasks/notes/assistant-react-loop-p2.md) | | |
+| pool-free-set-watch | [卡](docs/tasks/notes/pool-free-set-watch.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |

@@ -190,7 +190,7 @@ def test_a_model_channel_failure_replies_with_the_truth(tmp_path):
     )  # scripted model is empty => "{}" each call -> loop stops on budget? no calls
     state = AssistantState(initialized=True, cursor_seq=0)
     worker = _worker(client, model, tmp_path / "s.json", state=state, budget=Budget(max_calls=1))
-    worker.model = PoolModelChannel(DeadPool(), models=("qoder/Qwen3.8-Flash",))
+    worker.model = PoolModelChannel(DeadPool(), fallback=("qoder/Qwen3.8-Flash",))
     worker.answer(_message(7, "问"), seq=7)
     _, body = client.posts[0]
     assert "没有答上来" in body["body"]
