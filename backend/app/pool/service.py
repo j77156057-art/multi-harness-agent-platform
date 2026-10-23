@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.pool import user_keys
 from app.pool.balance import cached_balances
 from app.pool.inventory import build_inventory, cached_minimax_quota
 from app.pool.sources import (
@@ -295,6 +296,37 @@ class PoolService:
 
     # -------------------------------------------------------------- routing
 
+    def _guard_user_upstream(self, upstream: Upstream, *, model: str = "") -> None:
+        """A user's own key is only spent when the user said yes.
+
+        Without this the pool would happily spend somebody's own money the
+        moment a model matched -- which is exactly what "asking" is supposed
+        to prevent.  So an unapproved key is **asked about** (the office shows
+        the question) and the request is refused with a reason a worker can
+        act on.
+        """
+        if upstream.tier != user_keys.USER_TIER:
+            return
+        key_id = str(upstream.extra.get("key_id") or "")
+        if not key_id:
+            return
+        if user_keys.approved(key_id):
+            return
+        user_keys.raise_request(
+            key_id=key_id,
+            reason=(
+                "the free and metered quotas could not serve this request; "
+                "the platform asked the user about their own key"
+            ),
+            model=model,
+        )
+        raise PoolError(
+            "this model would be served with the user's own key, and the user has "
+            "not said yes yet (the office is asking)",
+            status=409,
+            code="pool_user_key_pending",
+        )
+
     def route(self, model: str) -> Route:
         """Find the upstream that serves ``model``.
 
@@ -313,12 +345,14 @@ class PoolService:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is None:
                     break
+                self._guard_user_upstream(upstream, model=wanted)
                 return Route(upstream=upstream, model=wanted, upstream_model=wanted)
         lowered = wanted.lower()
         for entry in entries:
             if str(entry["id"]).lower() == lowered:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is not None:
+                    self._guard_user_upstream(upstream, model=str(entry["id"]))
                     return Route(upstream=upstream, model=wanted, upstream_model=str(entry["id"]))
         known = ", ".join(str(entry["id"]) for entry in entries[:12]) or "(none discovered)"
         raise PoolError(
@@ -748,6 +782,11 @@ class PoolService:
     # ----------------------------------------------------------- accounting
 
     def _account(self, usage: Usage) -> None:
+        # 自己的 key：用户点的是"用一次"，那就**只花这一次**。
+        # 放在记账之前：记账失败（磁盘满、路径不对）也不该让这次授权留着 ——
+        # 留着就等于"用户点了一次，平台可以一直花"。
+        if usage.upstream.startswith("user:"):
+            user_keys.spend_once(usage.upstream.split(":", 1)[1])
         if self.usage_path is None:
             return
         try:

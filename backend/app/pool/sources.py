@@ -517,7 +517,43 @@ def discover_upstreams(
         if port_key is not None:
             by_port[port_key] = upstream
         unique.append(upstream)
+    # The user's own keys go in **after** the fold above, on purpose: that loop
+    # folds two upstreams pointing at the same host:port into one (one quota,
+    # one identity).  A key the user typed in is a **different credential** even
+    # when the address is the same, so it must not be folded away.
+    unique.extend(user_key_upstreams())
     return unique
+
+
+def user_key_upstreams() -> list[Upstream]:
+    """The keys the **user** gave the platform, as upstreams of the ``user`` tier.
+
+    They are read at call time (like every other upstream's credential) and
+    they carry the ``user`` tier, which the router only spends after the user
+    has said yes.
+    """
+    from app.pool import user_keys  # local import: keeps the module cycle out
+
+    found: list[Upstream] = []
+    for key in user_keys.entries():
+        found.append(
+            Upstream(
+                name=f"user:{key.id}",
+                protocol=key.protocol,
+                base_url=key.base_url,
+                models=key.models,
+                credential=("file", str(user_keys.key_dir() / f"{key.id}.key")),
+                origin="你自己的 key",
+                note="你自己的 key —— 平台不会自己花，要你点了同意",
+                tier=user_keys.USER_TIER,
+                extra={
+                    "key_id": key.id,
+                    "label": key.label,
+                    "approval": key.approval,
+                },
+            )
+        )
+    return found
 
 
 def _port_key(base_url: str) -> tuple[str, str] | None:

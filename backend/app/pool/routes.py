@@ -18,16 +18,59 @@ Two rules:
 
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from app.api.auth_deps import Principal, require_for
+from app.api.errors import ApiError
+from app.pool import user_keys
 from app.pool.routing import plan_attempt
-from app.pool.service import PoolService
+from app.pool.service import PoolError, PoolService
 
 router = APIRouter(tags=["pool"])
+
+#: What the pool says when it refuses a request, in the platform's own wire
+#: contract (the same envelope every other rejection uses).
+#:
+#: The messages are **templates**: a refusal must not become a path for an
+#: upstream's answer (or anything else) to reach the client.  The code is the
+#: part a caller acts on.
+_POOL_MESSAGES = {
+    "pool_user_key_pending": ("the pool is waiting for the user to approve spending their own key"),
+    "relay_model_required": "a model name is required",
+    "relay_model_not_found": "no upstream serves that model",
+}
+
+
+def _as_api_error(exc: PoolError) -> ApiError:
+    """A pool refusal, in the envelope the rest of the platform uses."""
+    return ApiError(
+        exc.code,
+        exc.status,
+        _POOL_MESSAGES.get(exc.code, "the pool could not serve this request"),
+    )
+
+
+def _pool_errors(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Turn a pool refusal into a status the caller can act on.
+
+    Without this a refusal leaves as a 500 "internal error": the caller
+    cannot tell "there is no such model" from "the user has not said yes
+    yet", and a 500 invites a worker to retry the same thing forever.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return func(*args, **kwargs)
+        except PoolError as exc:
+            raise _as_api_error(exc) from exc
+
+    return wrapper
 
 
 def _guard(key: str):
@@ -79,12 +122,17 @@ def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
 
 
 @router.post("/pool/v1/chat/completions")
+@_pool_errors
 def pool_chat_completions(
     payload: dict[str, Any], principal: _guard("harness:pool"), request: Request
 ) -> Any:
     """Serve an OpenAI chat completion from the pool."""
     service = _service()
     if payload.get("stream"):
+        # Where it would go is decided **before** the stream starts: a refusal
+        # has to be a status the caller can read, not a stream that breaks
+        # halfway through.
+        service.route(str(payload.get("model") or ""))
         return StreamingResponse(
             service.chat_completions_stream(payload, consumer=_consumer(principal)),
             media_type="text/event-stream",
@@ -94,6 +142,7 @@ def pool_chat_completions(
 
 
 @router.post("/pool/v1/messages")
+@_pool_errors
 def pool_messages(
     payload: dict[str, Any], principal: _guard("harness:pool"), request: Request
 ) -> Any:
@@ -102,6 +151,7 @@ def pool_messages(
 
 
 @router.post("/pool/v1/responses")
+@_pool_errors
 def pool_responses(
     payload: dict[str, Any], principal: _guard("harness:pool"), request: Request
 ) -> Any:
@@ -113,6 +163,7 @@ def pool_responses(
     """
     service = _service()
     if payload.get("stream"):
+        service.route(str(payload.get("model") or ""))
         return StreamingResponse(
             service.responses_stream(payload, consumer=_consumer(principal)),
             media_type="text/event-stream",
@@ -139,6 +190,75 @@ def pool_plan(
         attempt_no=attempt_no,
         pool=_service(),
     )
+
+
+# ---------------------------------------------------------------- 自己的 key
+#
+# 用户自己在办公室里加的 API key：平台替它保管（没人别的能拿到），但**绝不
+# 自己花** —— 要用得用户点头。下面这几条就是那个"点头"的面。
+
+_user_guard = Annotated[Principal | None, Depends(require_for("pool:user_keys"))]
+
+
+@router.get("/pool/user-keys")
+def list_user_keys(principal: _user_guard) -> dict[str, Any]:
+    """The keys the user has given the platform, and the open question.
+
+    The key itself is **never** in this answer -- only a mask.
+    """
+    return {
+        "keys": [key.as_dict() for key in user_keys.entries()],
+        "pending": user_keys.pending().as_dict() if user_keys.pending() else None,
+    }
+
+
+@router.post("/pool/user-keys")
+def add_user_key(payload: dict[str, Any], principal: _user_guard) -> dict[str, Any]:
+    """Add one of the user's own provider keys."""
+    try:
+        key = user_keys.register(
+            label=str(payload.get("label") or ""),
+            protocol=str(payload.get("protocol") or "openai_chat"),
+            base_url=str(payload.get("base_url") or ""),
+            key=str(payload.get("key") or ""),
+            models=[str(m) for m in (payload.get("models") or [])],
+            note=str(payload.get("note") or ""),
+        )
+    except user_keys.UserKeyError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"key": key.as_dict(), "masked": user_keys.masked(key.id)}
+
+
+@router.delete("/pool/user-keys/{key_id}")
+def delete_user_key(key_id: str, principal: _user_guard) -> dict[str, Any]:
+    """Forget one of the user's own keys."""
+    if not user_keys.remove(key_id):
+        raise HTTPException(status_code=404, detail="没有这个 key")
+    return {"removed": True}
+
+
+@router.post("/pool/user-keys/{key_id}/approve")
+def approve_user_key(
+    key_id: str, payload: dict[str, Any], principal: _user_guard
+) -> dict[str, Any]:
+    """Say yes: ``once`` (this request) or ``always`` (until removed)."""
+    try:
+        key = user_keys.set_approval(key_id, str(payload.get("mode") or "once"))
+    except user_keys.UserKeyError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    user_keys.clear_request(key_id)
+    return {"key": key.as_dict()}
+
+
+@router.post("/pool/user-keys/{key_id}/deny")
+def deny_user_key(key_id: str, principal: _user_guard) -> dict[str, Any]:
+    """No: the question is closed and the key stays unspendable."""
+    try:
+        key = user_keys.set_approval(key_id, user_keys.APPROVAL_NONE)
+    except user_keys.UserKeyError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    user_keys.clear_request(key_id)
+    return {"key": key.as_dict()}
 
 
 def _consumer(principal: Any) -> str:

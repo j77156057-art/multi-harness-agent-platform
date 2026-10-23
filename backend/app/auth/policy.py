@@ -106,6 +106,12 @@ POLICY: dict[str, frozenset[str]] = {
     # §39 硬规则 2 的权限面 —— 语义事实仍在服务层查（有没有这份分配），这里只回答
     # "谁能问这个键"。
     "claim:authorized": frozenset({HUMAN, HARNESS}),
+    # 用户**自己**的 API key：只有人能加、能点头、能删。
+    #
+    # 这是加性的一行（2026-10-23）：平台替用户保管他自己在办公室里加的
+    # provider key，但平台**不自己花**它 —— 要用得用户点头。harness 主体
+    # 拿不到这个面：借别人的钱必须是人的决定。
+    "pool:user_keys": frozenset({HUMAN}),
 }
 
 #: 已知、但**任何主体类型都拿不到**的键（管理员 harness 私有面，admin-harness）。
