@@ -706,7 +706,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
             <dd>${escape(owner)}${history.length ? `· 接过：${escape(history.join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
             <dt>做得怎么样</dt>
             <dd>交了 ${row.submits.length} 次${submitter ? `（${escape(submitter)}）` : ''}；${escape(verdict)}${row.median !== null ? `；接手到交付 ${row.median}s` : ''}</dd>
-            ${task.last_failure && task.last_failure.reason ? `<dt>没完成的原因</dt><dd>${escape(task.last_failure.reason)}</dd>` : ''}
+            ${task.last_failure && task.last_failure.reason ? `<dt>没完成的原因</dt><dd>${escape(reasonText(task.last_failure.reason))}</dd>` : ''}
           </dl>
         </section>`;
       })
@@ -955,7 +955,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       : '这是你这个项目的办公室。左边是所有正在做的事，点一条看详情；右边是需要你过目的东西。';
     wrap.innerHTML = `
       <div class="flat-head-main">
-        <span class="flat-eyebrow">AGENT OFFICE · 数据版</span>
+        <span class="flat-eyebrow">这个项目的办公室</span>
         <h1>${escape(state.scope?.name || '本项目')}</h1>
         <p class="flat-guide">${guide}</p>
       </div>
@@ -966,13 +966,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
           <option value="demo">本地样例</option>
         </select>
       </div>
-      <dl class="flat-counts">
-        <div><dt>等人接</dt><dd>${counts.waiting}</dd></div>
-        <div><dt>正在做</dt><dd>${counts.active}</dd></div>
-        <div><dt>等人处理</dt><dd class="${counts.review ? 'is-bad' : ''}">${counts.review}</dd></div>
-        <div><dt>没做成</dt><dd class="${counts.failed ? 'is-bad' : ''}">${counts.failed}</dd></div>
-        <div><dt>完成了</dt><dd>${counts.done}</dd></div>
-      </dl>
+      <ul class="flat-counts">
+        <li class="${counts.waiting ? 'has-value' : ''}"><span>等人接</span><b>${counts.waiting}</b></li>
+        <li class="${counts.active ? 'has-value' : ''}"><span>正在做</span><b>${counts.active}</b></li>
+        <li class="is-review ${counts.review ? 'has-value' : ''}"><span>等人处理</span><b>${counts.review}</b></li>
+        <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>没做成</span><b>${counts.failed}</b></li>
+        <li class="${counts.done ? 'has-value' : ''}"><span>完成了</span><b>${counts.done}</b></li>
+      </ul>
       ${
         state.error
           ? `<div class="flat-error">
@@ -996,7 +996,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     filters.className = 'flat-filters';
     for (const [key, label] of [
       ['all', '全部'],
-      ['waiting', '等着开工'],
+      ['waiting', '等人接'],
       ['active', '正在做'],
       ['review', '等人处理'],
       ['failed', '没做成'],
@@ -1063,8 +1063,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'flat-task' + (state.selected?.task_id === task.task_id ? ' is-selected' : '');
-      const reason = task.last_failure?.reason ? ` · ${task.last_failure.reason}` : '';
-      const stamp = task.updated_at ? ` · 更新于 ${escape(timeOf(task.updated_at))}` : '';
+      const reason = task.last_failure?.reason ? ` · ${reasonText(task.last_failure.reason)}` : '';
+      const stamp = task.updated_at ? ` · ${escape(timeAgo(task.updated_at))}更新` : '';
       const holds = whoHolds(task);
       const who = whoWord(task, holds);
       row.innerHTML = `
@@ -1128,7 +1128,6 @@ export function mountFlatOffice({ root, project: projectOf }) {
           <h2>${escape(task.title || task.task_id)}</h2>
           <p class="flat-summary">${escape(statusSentence(task))}</p>
           <p class="flat-mono">${escape(detailHolds(task))}</p>
-          <p class="flat-mono flat-id">任务编号 ${escape(task.task_id)}</p>
         </div>
         <div class="flat-detail-actions">${humanActions(task)}</div>
       </div>
@@ -1150,8 +1149,41 @@ export function mountFlatOffice({ root, project: projectOf }) {
       </section>
       ${isFailed(task) ? failureLog(task) : ''}
       ${showLiveOutput() ? liveOutputBlock() : ''}
+      <details class="flat-tech">
+        <summary>技术信息（任务编号等）</summary>
+        <p>任务编号 ${escape(task.task_id)}</p>
+      </details>
       <p class="flat-detail-foot">以上就是这条活的全部记录。想看整体，去右栏的「要做的事」和「看成员表现」。</p>`;
     return panel;
+  }
+
+  /**
+   * 路径只留文件名。
+   *
+   * 界面上印一整条 `D:\study\tools\agent\new agent\.worktrees\mavis\data\...`
+   * 是给写代码的人看的，不是给看进度的人看的 —— 而且它把整张卡片撑变形了。
+   * 完整路径留在 title 里（鼠标悬上去能看到）。
+   */
+  function fileNameOf(path) {
+    const text = String(path || '').trim();
+    if (!text) return '';
+    const parts = text.split(/[\\/]/);
+    return parts[parts.length - 1] || text;
+  }
+
+  /**
+   * 相对时间：「5 天前」比「2026/10/19 04:59:31」好读。
+   * 超过一周才给绝对时间 —— 那时候"几周前"也没多大意义了。
+   */
+  function timeAgo(value) {
+    const when = new Date(value);
+    if (Number.isNaN(when.getTime())) return '';
+    const seconds = Math.max(0, (Date.now() - when.getTime()) / 1000);
+    if (seconds < 60) return '刚刚';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+    if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)} 天前`;
+    return timeOf(value);
   }
 
   /**
@@ -1165,7 +1197,43 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const title = String(task.title || task.task_id);
     const name = String((state.scope && state.scope.name) || '').trim();
     const prefix = name ? `${name} · ` : '';
-    return prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
+    const trimmed = prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
+    return stripHarnessSuffix(trimmed);
+  }
+
+  /**
+   * 标题末尾的「（qoder）」这种窗口名：详情里已经说清是谁做的，
+   * 列表里再挂一遍只是噪音 —— 而且它是机器名，不是标题的一部分。
+   */
+  function stripHarnessSuffix(title) {
+    const roster = (state.status && state.status.harnesses) || [];
+    const known = new Set();
+    for (const item of roster) {
+      if (item && item.harness_id) known.add(String(item.harness_id));
+      if (item && item.name) known.add(String(item.name));
+    }
+    const match = /[（(]([^（()）]{1,40})[）)]\s*$/.exec(title);
+    if (!match) return title;
+    const inner = match[1].trim();
+    if (!known.has(inner)) return title;
+    return title.slice(0, match.index).trim();
+  }
+
+  /**
+   * 失败原因说人话。
+   *
+   * 平台给的是机器写的句子（`harness CLI exited 1`）。看进度的人不该读这个 ——
+   * 认得的换成中文；**认不出的原样留着**（宁可原样，也不要编一个错的说法）。
+   */
+  function reasonText(reason) {
+    const text = String(reason || '').trim();
+    if (!text) return '';
+    const exit = /^harness CLI exited (\d+)$/.exec(text);
+    if (exit) return `窗口的命令退出了（退出码 ${exit[1]}）`;
+    if (/^harness timeout:/.test(text)) return '窗口跑超时了，没在时间内做完';
+    if (/quota|rate.?limit|insufficient/i.test(text)) return '额度用完了';
+    if (/^(provider|upstream)/i.test(text)) return '模型那边出了问题';
+    return text;
   }
 
   /**
@@ -1176,7 +1244,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
    */
   function statusSentence(task) {
     const who = whoHolds(task);
-    const failure = task.last_failure?.reason;
+    const failure = reasonText(task.last_failure?.reason);
     switch (String(task.status)) {
       case 'awaiting_human':
         return '这条活在等你回答。回答之后，它会回到干活的人手里。';
@@ -1344,9 +1412,12 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const chainHtml = nodes.length > 1
       ? `<p class="flat-chain">${nodes
           .map((node, index) => {
-            const label = node.current ? `${node.id}（本条）` : node.id;
+            // 链上写**这条活叫什么**，不写它的编号 —— 编号是给查问题的人看的。
+            const task = (state.tasks || []).find((item) => item.task_id === node.id);
+            const label = task ? listTitle(task) : node.id;
             const mark = node.current ? ' is-current' : '';
-            return `${index ? '<span class="flat-arrow">▶</span>' : ''}<span class="flat-node${mark}">${escape(label)}</span>`;
+            const tip = node.current ? '（本条）' : '';
+            return `${index ? '<span class="flat-arrow">▶</span>' : ''}<span class="flat-node${mark}" title="${escape(node.id)}">${escape(label)}${tip}</span>`;
           })
           .join('')}</p>
         <p class="flat-note">${escape(chainNote(chain))}</p>`
@@ -1356,16 +1427,17 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ? `<h4>这条活的每一次尝试</h4>
         <ol class="flat-attempts">${attempts
           .map((row) => `<li>
-            <span class="flat-attempt-no">${row.no != null ? `第 ${row.no} 次` : '第 ? 次'}</span>
-            <span class="flat-attempt-id">${escape(row.id)}</span>
+            <span class="flat-attempt-no" title="${escape(row.id || '')}">${row.no != null ? `第 ${row.no} 次` : '第 ? 次'}</span>
             <span class="flat-attempt-owner">${escape(row.owner || '不知道是谁领的')}</span>
             <span class="flat-attempt-outcome">${escape(row.outcome || '（没记录）')}</span>
             <span class="flat-attempt-at">${escape(timeOf(row.at))}</span>
-            ${row.revisedFrom ? `<span class="flat-attempt-from">从 ${escape(row.revisedFrom)} 改过来</span>` : ''}
+            ${row.revisedFrom ? `<span class="flat-attempt-from">从上一轮改过来</span>` : ''}
           </li>`)
           .join('')}</ol>`
       : '';
 
+    // 什么也没有就别画一个空框（"这条活的来路"里只留一个标题，看着像坏了）。
+    if (!chainHtml && !attemptHtml) return '';
     return `<section class="flat-spec flat-lineage">
       <h3>这条活的来路</h3>
       ${chainHtml}
@@ -1411,7 +1483,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       } else if (name === 'verify_passed') {
         row.outcome = '校验通过';
       } else if (name === 'abandon') {
-        row.outcome = `没交出来：${event.payload?.reason || '（没写理由）'}`;
+        row.outcome = `没交出来：${reasonText(event.payload?.reason) || '（没写理由）'}`;
       } else if (name === 'release' || name === 'human.release') {
         row.outcome = `交回队列：${event.payload?.reason || '（没写理由）'}`;
       }
@@ -1947,7 +2019,6 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <h3>要做的事</h3>
         ${brief.planId
           ? `<p><b>${escape(brief.title)}</b></p>
-             <p class="flat-note">方案 ${escape(brief.planId)}</p>
              <p class="flat-note">${(state.tasks || []).length} 件事${unclaimed.length ? `（${unclaimed.length} 件还没人接）` : ''}</p>
              <button type="button" data-act="open-brief">看全部要做的事</button>`
           : `<p class="flat-note">${(state.tasks || []).length} 件事</p>
@@ -1988,7 +2059,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <h3>等我批准的方案</h3>
         ${plan
           ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
-             <p class="flat-note">${escape((plan.document || {}).markdown_path || '')}</p>
+             <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
+               fileNameOf((plan.document || {}).markdown_path),
+             )}</p>
              <button type="button" data-act="approve-plan">批准，开始做</button>
              <button type="button" data-act="reject-plan" title="驳回这份方案：退回给管理员，改一版再来找你">驳回方案</button>`
           : '<p class="flat-empty">没有等你批准的方案。</p>'}

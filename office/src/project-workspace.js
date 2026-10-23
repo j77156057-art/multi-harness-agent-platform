@@ -60,23 +60,21 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   root.innerHTML = `
     <section class="project-lobby" aria-labelledby="projectLobbyTitle">
-      <header class="project-lobby-head">
-        <div class="project-brand"><span class="project-brand-mark">AO</span><div><strong>Agent Office</strong><span>项目工作区</span></div></div>
-        <span class="project-isolation"><i></i> 项目历史（存在这台电脑上）</span>
-      </header>
       <div class="project-lobby-body">
-        <div class="project-lobby-copy"><p class="eyebrow">PROJECT DESK / 01</p><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点击「新建项目」填写项目名称、数据源与成员，确认后直接进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
+        <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填上名字和成员，就能进这个项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
           <p class="project-lobby-hint" data-worker-hint hidden></p>
-          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里挑管理员和成员</li></ol>
+          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>填写项目名称与成员</li><li><span>2</span>直接进入开工配置</li><li><span>3</span>开工向导里挑管理员和成员</li></ol>
         </div>
-        <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><span class="eyebrow">HISTORY</span><h2 id="projectHistoryTitle">项目历史</h2></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
+        <div class="project-lobby-side">
+        <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><h2 id="projectHistoryTitle">项目历史</h2><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
         <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
-          <div class="project-section-head"><div><span class="eyebrow">ON THE PLATFORM</span><h2 id="projectPlatformTitle">平台上已有的项目</h2></div><span data-platform-count></span></div>
+          <div class="project-section-head"><h2 id="projectPlatformTitle">平台上已有的项目</h2><span data-platform-count></span></div>
           <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」就能进那个项目的办公室 —— 不用重新建一个。</p>
           <div class="project-platform-list" data-platform-list></div>
         </section>
+        </div>
       </div>
-      <footer class="project-lobby-foot"><span>项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到这份历史</span></footer>
+      <footer class="project-lobby-foot"><span>这份项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到它</span></footer>
     </section>`;
 
   // 4176 是跨提供方评审实例，和 4174 不同源，项目历史本来就不共享。这里把
@@ -576,12 +574,13 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.projectId = project.id;
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
-      const action = project.phase === 'scene' ? '进入办公室' : '先配置一下';
+      const action = project.phase === 'scene' ? '进入办公室' : '去配置';
       card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status ${project.phase}">${status}</span><button type="button" class="project-card-open">${action}</button>`;
       card.querySelector('strong').textContent = project.name;
-      // Only the date fits next to the status chip; the identity gets its own
-      // column so the line never ellipsizes to "2026/10/…".
-      card.querySelector('.project-card-main span').textContent = `${project.id} · ${project.createdAt.split(' ')[0]}`;
+      // 卡的副行只说"什么时候建的"：项目编号是给查问题的人看的，不该占着这一行
+      // （完整的编号留在 title 里，鼠标悬上去能看到）。
+      card.querySelector('.project-card-main span').textContent = `${project.createdAt.split(' ')[0]} 建`;
+      card.querySelector('.project-card-main span').title = project.id;
       card.querySelector('button').addEventListener('click', () => {
         activeId = project.id;
         persistActive();

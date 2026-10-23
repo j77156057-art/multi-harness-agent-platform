@@ -76,9 +76,8 @@
 }
 
 .flat-eyebrow {
-  font-size: 10px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: .02em;
   color: var(--ao-ink-faint);
 }
 
@@ -125,33 +124,46 @@
   font-size: 12px;
 }
 
+/* 顶栏那五个计数：做成一枚枚小徽章。
+   以前是"标签在上、数字悬在下面"，五个数字散在一条线上，像没排完的草稿。 */
 .flat-counts {
   display: flex;
-  gap: 18px;
+  gap: 6px;
   margin: 0 0 0 auto;
+  list-style: none;
+  padding: 0;
+  flex-wrap: wrap;
 }
 
-.flat-counts div {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  align-items: flex-end;
-}
-
-.flat-counts dt {
-  font-size: 11px;
-  color: var(--ao-ink-faint);
+.flat-counts li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 999px;
+  background: #f7f9fb;
   white-space: nowrap;
 }
 
-.flat-counts dd {
-  margin: 0;
-  font-size: 18px;
+.flat-counts span {
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-counts b {
+  font-size: 13px;
   font-weight: 650;
+  color: var(--ao-ink-soft);
   font-variant-numeric: tabular-nums;
 }
 
-.flat-counts dd.is-bad { color: var(--ao-bad); }
+/* 有数的才显色：0 不该跟"2 件没做成"一样响。 */
+.flat-counts li.has-value { background: #fff; border-color: #dfe4ea; }
+.flat-counts li.is-review.has-value { border-color: #e6d5c4; background: #fbf4ec; }
+.flat-counts li.is-review b { color: var(--ao-warn); }
+.flat-counts li.is-failed.has-value { border-color: #e8cccc; background: #fbf0f0; }
+.flat-counts li.is-failed b { color: var(--ao-bad); }
 
 /* ---------------------------------------------------------------- 任务表 */
 
@@ -171,7 +183,8 @@
   justify-content: space-between;
 }
 
-.flat-filters { display: flex; gap: 4px; flex-wrap: wrap; }
+/* 五个筛选项：排成整齐的两行（3 + 2），不要一个孤零零掉到第二行。 */
+.flat-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; width: 100%; }
 
 .flat-filters button {
   border: 1px solid transparent;
@@ -361,6 +374,32 @@
   opacity: .75;
 }
 
+/* 机器名收在「技术信息」里：平时不占版面，要查的人点开就有。 */
+.flat-tech {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-tech > summary {
+  cursor: pointer;
+  color: var(--ao-ink-faint);
+  font-size: 11.5px;
+  list-style: none;
+}
+
+.flat-tech > summary::-webkit-details-marker { display: none; }
+.flat-tech > summary::before { content: '▸ '; color: var(--ao-ink-faint); }
+.flat-tech[open] > summary::before { content: '▾ '; }
+
+.flat-tech p {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  overflow-wrap: anywhere;
+}
+
 /* 详情底部的收尾一句：下面没内容了，别让人以为页面坏了。 */
 .flat-detail-foot {
   margin: 14px 0 0;
@@ -394,20 +433,21 @@
 
 .flat-spec:last-child { border-bottom: none; }
 
+/* 详情里每一段的小标题：中文就是中文，不必套大写英文的排版。 */
 .flat-spec h3 {
   margin: 0 0 6px;
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--ao-ink-faint);
-  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ao-ink-soft);
+  font-weight: 650;
 }
 
 .flat-spec h4 {
-  margin: 10px 0 4px;
-  font-size: 11px;
+  margin: 12px 0 5px;
+  font-size: 12px;
   color: var(--ao-ink-soft);
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .flat-spec p {
@@ -430,8 +470,8 @@
   overflow-wrap: anywhere;
 }
 
-.flat-note { font-size: 12px; color: var(--ao-ink-soft); overflow-wrap: anywhere; }
-.flat-empty { font-size: 12px; color: var(--ao-ink-faint); margin: 4px 0; }
+.flat-note { font-size: 12px; line-height: 1.6; color: var(--ao-ink-soft); overflow-wrap: anywhere; }
+.flat-empty { font-size: 12px; line-height: 1.6; color: var(--ao-ink-faint); margin: 4px 0; }
 
 .flat-output {
   margin: 0;
@@ -494,8 +534,9 @@
 
 /* 来路 */
 
-.flat-lineage { background: #fbfcfd; border: 1px solid var(--ao-line-soft); border-radius: 6px; margin-bottom: 14px; padding: 10px 12px; }
-.flat-lineage h3 { margin: 0 0 6px; }
+/* 「这条活的来路」：一张有边框的浅底卡，和详情里其它段落区分开。 */
+.flat-lineage { background: #fbfcfd; border: 1px solid var(--ao-line); border-radius: 10px; margin-bottom: 14px; padding: 12px 14px; }
+.flat-lineage h3 { margin: 0 0 8px; }
 
 .flat-chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; font-size: 11.5px; }
 
@@ -511,19 +552,20 @@
 .flat-node.is-current { border-color: #cfe0ef; background: var(--ao-accent-soft); color: var(--ao-accent); }
 .flat-arrow { color: #b0b8c1; }
 
-.flat-attempts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 11.5px; }
+/* 每次尝试一行：谁领的、什么时候、结果如何。
+   attempt id（FD-xxx.a1）是机器名，不上界面 —— 放在 title 里给要查的人看。 */
+.flat-attempts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
 
 .flat-attempts li {
   display: grid;
-  grid-template-columns: 48px 190px 90px minmax(0, 1fr) 120px;
-  gap: 8px;
+  grid-template-columns: 52px 110px minmax(0, 1fr) 120px;
+  gap: 10px;
   align-items: baseline;
-  padding: 3px 0;
+  padding: 4px 0;
   border-bottom: 1px solid var(--ao-line-soft);
 }
 
-.flat-attempt-no { color: var(--ao-ink-faint); }
-.flat-attempt-id { color: var(--ao-ink-soft); font-family: ui-monospace, Consolas, monospace; }
+.flat-attempt-no { color: var(--ao-ink-soft); font-weight: 600; }
 .flat-attempt-owner { color: var(--ao-ink); }
 .flat-attempt-outcome { color: var(--ao-ink-soft); overflow-wrap: anywhere; }
 .flat-attempt-at { color: var(--ao-ink-faint); text-align: right; }
@@ -536,21 +578,25 @@
 
 /* ------------------------------------------------------------------ 右栏 */
 
+/* 右栏的卡片：白底 + 极轻的影，标题是一句中文而不是一行小号大写。
+   以前卡片底色 #fbfcfd 淡到几乎看不出边界，标题又是 11px 大写英文风 ——
+   整栏看上去像还没排版的半成品。 */
 .flat-card {
-  border: 1px solid var(--ao-line-soft);
-  border-radius: 6px;
-  padding: 10px 11px;
-  background: #fbfcfd;
+  border: 1px solid var(--ao-line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .04);
   min-width: 0;
 }
 
 .flat-card h3 {
   margin: 0 0 8px;
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--ao-ink-faint);
-  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #3c4754;
+  font-weight: 650;
 }
 
 .flat-card h4 { margin: 10px 0 4px; font-size: 11px; color: var(--ao-ink-soft); font-weight: 600; }
@@ -1128,7 +1174,8 @@
     grid-row: 3;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    align-items: start;
+    /* 同一行的卡片一样高 —— 参差不齐的边线最像"没排完"。 */
+    align-items: stretch;
     max-height: 40vh;
     overflow: auto;
   }
