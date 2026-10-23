@@ -1,7 +1,8 @@
 # 提案：免费档目录变更哨（pool-free-set-watch）
 
-状态：**提案，待仓库主人复核**；未开工、未写代码。规范条目（新检查 ID/
-事件名）不动真相源，获批后再落。
+状态：**已实施**（2026-10-23，仓库主人指示"继续完成其他的"后开工）；
+规范条目（新检查 ID/事件名）不动真相源，获批后再落。裁决三问的现行
+默认见任务卡"实施采用的现行默认"，可推翻重配。
 
 ## 问题
 
@@ -23,16 +24,19 @@ TTL + `tier` 标签），但**目录变了没人喊**——消费方（如平台
 不主动轮询烧 CLI 槽验证活性（一次探测就是一次真实调用），活性由消费端
 冷却机制喂探针。配置可选加"目录增删超过 N 个模型必须人审"的阈值。
 
-## 实现面（获批后）
+## 实现面（实装记录）
 
-- 新增 `backend/app/pool/free_set_watch.py`：`snapshot_free_ids(pool)` +
-  `check(pool, alerts)`；由既有 sweeper/巡检调度点调用一次（不改 alerts、
-  不改 routes）。
-- 快照存 `<data>/pool/free-set.json`（连同上次 hash）；变更才出队投递。
-- 允许修改：`backend/app/pool/free_set_watch.py`、调用点（sweeper 所在
-  共享文件届时单开合并）、上述快照文件路径；不改表、不改事件、不加路由。
-- 验收：scripted——同目录不告警；增/删/换各出一条告警且 payload 带旧/新
-  名单；alerts 幂等（同 hash 重复不重复投）。
+- 新增 `backend/app/pool/free_set_watch.py`：`free_set(pool)` +
+  `check(pool, enqueuer)`；独立入口 `python -m app.pool.free_set_watch`
+  （budget runner 同款形状）。**不挂** sweeper 家族——sweeps.py 明文
+  不变量"sweeps 永不做 outbound（连告警排队都不做）"，独立模块入口
+  才合平台规矩；投递仍归 `python -m app.alerts`。
+- 快照存 `<data>/pool/free-set.json`（名字清单+指纹）；无基线=建账本
+  不告警；未变不重写文本；坏快照算基线丢失。
+- 允许修改：`backend/app/pool/free_set_watch.py`、对应测试、`docs/**`
+  登记；不改表、不改事件、不加路由，不碰 alerts/scheduler 文件。
+- 验收：scripted 7 条（首跑基线；同名单静默；变更加/删各一条带新旧
+  名单；重查不重投；回滚重演已投变迁不重投；坏快照不误报；点名刷新）。
 
 ## 待裁决的问题（给仓库主人）
 

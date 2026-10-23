@@ -4,36 +4,58 @@
 
 任务编号：pool-free-set-watch
 负责 Harness：Codex
-开始时间：未开工（提案登记 2026-10-23）
+开始时间：2026-10-23 18:5x +08:00（仓库主人指示"继续完成其他的"后开工）
 工作区：.worktrees/codex/
 依赖任务：assistant-react-loop-p2（通道已按"目录驱动"实现，本卡是平台侧抽样哨）
 真相源引用：MVP-ADAPTER-003（模型目录/池子面同族）；新检查 ID（如
 `CORE-POOLWATCH-001`）待规范复审后回填，不在本卡自造
-当前状态：待仓库主人复核（提案 docs/proposals/pool-free-set-watch.md）
+当前状态：doing（实现＋scripted 测试已就位；运行入口备好未部署）
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
 |---|---|
 | 依赖 | 池子目录动态发现（现成）；alerts 入队/投递（现成） |
 | test_id | `MVP-ADAPTER-003` |
-| 允许修改 | `backend/app/pool/free_set_watch.py`（新增）、调度调用点（共享文件届时单开合并）、`docs/**` 登记 |
-| 禁止修改 | `docs/spec/0.3-R10.md`、`docs/traceability.md`（无新 ID 校验前）、表结构/事件/路由（一律不加） |
+| 允许修改 | `backend/app/pool/free_set_watch.py`（新增）、`backend/tests/test_pool_free_set_watch.py`（新增）、本卡、认领、`docs/proposals/pool-free-set-watch.md`、`TASKS.md` |
+| 禁止修改 | `docs/spec/0.3-R10.md`、`docs/traceability.md`（无新 ID 校验前）、表结构/事件/路由（一律不加）、`backend/app/scheduler/**`、`backend/app/alerts/**` |
 
 ## 做什么
-免费档目录快照 diff（内容 hash 去重键），变更走 alerts 现成面告警；不主动
-探测烧 CLI 槽，活性靠消费端冷却喂探针。
+
+免费档目录快照 diff（内容指纹做去重键），变更走 alerts 现成面告警；
+不主动探测烧 CLI 槽（一次探测就是一次真实调用），活性由消费端冷却喂探针。
 
 ## 为什么
+
 免费额度会失效、免费模型会下架、新的会出现——目录会变，人需要被喊；
-目录本身已是动态的，缺的是"变了有人说"。
+目录本身已是动态的（PoolService.models() 带 tier 标签），缺的是"变了有人说"。
 
-## 修法
-见提案：`snapshot_free_ids` + `check(pool, alerts)`，快照落在
-`<data>/pool/free-set.json`。
+## 修法（含实施中发现的两条平台事实）
 
-## 完成标准
-scripted：同目录不告警；增/删/换各出一条告警（payload 带旧/新名单）；
-同 hash 重复不重复投。
+- 模块：`backend/app/pool/free_set_watch.py`——`free_set(pool)`（滤
+  `tier=="free"`）、`check(pool, enqueuer)`（快照
+  `<data>/pool/free-set.json`、diff、入队 `pool.free_set_changed`，
+  source_key=当轮名单指纹）、`WatchReport.as_json()`；
+- **运行入口**：`python -m app.pool.free_set_watch [--once|--loop]`，
+  同款 budget runner 形状（--check/--once/--loop、exit 0/1/2）；
+- **平台事实 1**：sweeper 家族有不变量"sweeps 永不做 outbound（连告警
+  排队都不做）"（sweeps.py sweep_budget 注释），所以哨**不挂**
+  run_all_sweeps，独立模块入口才合平台规矩；
+- **平台事实 2**：投递不入本卡——入队后由 `python -m app.alerts` 投
+  （收件人沿 alerts 现有 webhook，budget 同款的分工）。
+
+## 实施采用的现行默认（三条裁决未决，可推翻）
+
+1. 收件人：沿 alerts webhook（未加新通道）；
+2. 阈值 N=1：任一名单变化即投一条；
+3. 新检查 ID 未自造，truth source 待复核。
+
+## 完成标准（scripted 7 条，全不烧真额度）
+
+首跑建基线不喊人；同名单静默且账本不重写；删/添各投一条（payload 带
+旧/新名单与 added/removed）；同名单重查不重投、回滚快照重演已投变迁
+不重投（去重键=内容指纹）；坏快照算基线丢失不误报；点名刷新可透传。
 
 ## 状态
-待复核。未写代码。
+
+实现与测试已就位（本轮提交）。部署：运维侧需要哪个进程跑
+`--loop`（或 cron 打 `--once`）待仓库主人定；未部署前哨不上工。

@@ -135,7 +135,7 @@
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p2 | Codex | assistant-react-loop | doing（P2：池子直连免费档模型通道 + assistant worker 私聊轮询；admin/worker 只复用零修改，权限矩阵核实零行新增） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
-| pool-free-set-watch | Codex | — | waiting（提案：免费档目录变更哨，快照 diff + alerts 现成投递；待仓库主人复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
+| pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
 | assistant-react-loop-p3 | Codex | assistant-react-loop | doing（P3 第一刀：审核助攻 review_pack 工具＋prompt 审核协议；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | review-contract-gate | Codex | assistant-react-loop-p3 | waiting（提案：评审契约守门，落点 tasks/service.py 共享在途；待复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
 
