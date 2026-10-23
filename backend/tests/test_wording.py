@@ -254,6 +254,21 @@ def test_an_unknown_reason_with_a_task_id_in_front_is_left_alone() -> None:
     assert result["text"] == raw
 
 
+def test_the_admin_harness_word_becomes_the_admin_window() -> None:
+    """「管理员 Harness 改派」是这台机器上的说法 —— 界面该说"管理员窗口"。"""
+    cleaned = service.humanize_text(
+        "管理员 Harness 改派：FD-93c9e4fa07914dbc → FD-0b0bcc415aa9fe2f"
+    )
+    assert "管理员窗口改派" in cleaned
+    assert "Harness" not in cleaned
+
+
+def test_english_prose_about_a_test_harness_is_left_alone() -> None:
+    """英文散文里的 harness 是"测试台"，不是"窗口"。"""
+    raw = "Now let me run the test harness before committing."
+    assert service.humanize_text(raw) == raw
+
+
 def test_the_cache_is_a_file_under_the_data_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

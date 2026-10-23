@@ -2549,6 +2549,108 @@ export function mountFlatOffice({ root, project: projectOf }) {
     return wrap;
   }
 
+  /**
+   * 群聊摘要：最近群里在说什么。
+   *
+   * 群聊里 180 条消息，大多是平台的回执（管理员窗口 121 条、你 55 条、成员 4 条）。
+   * 人真正要知道的只有三件事：**一共多少、谁说的、最近一条是什么**。
+   *
+   * 每句都是算出来的，不猜：
+   *   · 条数与分工 —— 按 sender_type 和平台名册算；
+   *   · 最近一条 —— 时间 + 那句话（洗过机器标记；任务号换成任务名、窗口 id 换成登记名）；
+   *   · 今天有没有新动静 —— 按本机时区的今天算（跟顶上那段「今天」一个口径）。
+   */
+  function chatDigest() {
+    const messages = state.messages || [];
+    if (!messages.length) return '';
+    const adminId = state.status && state.status.admin && state.status.admin.identity;
+    let you = 0, admin = 0, others = 0;
+    for (const message of messages) {
+      if (message.sender_type === 'human') you += 1;
+      else if (adminId && message.sender_id === adminId) admin += 1;
+      else others += 1;
+    }
+    const adminName = adminId ? harnessName(adminId) : '管理员窗口';
+    const who = [];
+    if (admin) who.push(`${adminName} ${admin} 条`);
+    if (you) who.push(`你 ${you} 条`);
+    if (others) who.push(`其他成员 ${others} 条`);
+
+    const last = messages[messages.length - 1];
+    const today = new Date();
+    const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const fresh = messages.filter((message) => {
+      const at = Date.parse(message.created_at || '');
+      return Number.isFinite(at) && at >= dayStart;
+    });
+
+    const bits = [`群里 ${messages.length} 条消息：${who.join('、')}`];
+    if (fresh.length) {
+      bits.push(`今天新来了 ${fresh.length} 条 —— 最后一条是 ${timeAgo(last.created_at)}`);
+    } else {
+      bits.push(`今天没有新消息 —— 最后一条是 ${timeAgo(last.created_at)}`);
+    }
+    const said = readableMessageBody(last, { firstLineOnly: true });
+    if (said) bits.push(said);
+    return `${bits.join('。')}。`;
+  }
+
+  /**
+   * 消息正文（人话版）。
+   *
+   * 正文是机器写的（"管理员 Harness 改派：FD-… → FD-…（… → opencode）"），所以：
+   * 先让平台把机器标记洗掉，再把**任务号**换成任务名、**窗口 id**换成登记名 ——
+   * 人读到的是"哪条活、哪个窗口"，不是编号。
+   *
+   * 改派那条消息里前后两个编号常常是**同一条活的两代**（接替关系），换出来的
+   * 名字也就一样 —— 那就只留一个，别摆成"甲 → 甲"。
+   */
+  function readableMessageBody(message, { firstLineOnly = false } = {}) {
+    const raw = String((message && message.body) || '').trim();
+    if (!raw) return '';
+    const washed = translated(raw) || raw;
+    let text = firstLineOnly ? washed.split('\n')[0].trim() : washed;
+    // 任务号 → 任务名（人起的名字）
+    const names = new Map();
+    for (const task of state.tasks || []) {
+      const id = String(task.task_id || '');
+      if (!id) continue;
+      names.set(id, listTitle(task));
+      names.set(id.slice(3, 10), listTitle(task));
+    }
+    // 同一条活的两代（接替关系）：「甲 → 乙」其实是同一条活，只留一个名字 ——
+    // 不然会摆成「甲 → 甲」，那句话等于没说。
+    for (const [idA, titleA] of names) {
+      if (!text.includes(idA)) continue;
+      for (const [idB, titleB] of names) {
+        if (idA === idB || titleA !== titleB || !text.includes(idB)) continue;
+        text = text.split(`${idA} → ${idB}`).join(`「${titleA}」`);
+        text = text.split(`${idA} -> ${idB}`).join(`「${titleA}」`);
+      }
+    }
+    for (const [id, title] of names) {
+      if (!id || !text.includes(id)) continue;
+      text = text.split(id).join(`「${title}」`);
+    }
+    // 窗口 id → 登记名。**长的先换**：codex-window-admin 与 codex 都登记着，
+    // 先换短的会把长的截成"Codex CLI-window-admin"。
+    // 前后都不能再接字母/数字/横线 —— 免得把 codex-window-admin 截断，
+    // 也免得把 "pi" 换成 "Pi CLI" 时顺手改掉 "pipe" 里的 pi。
+    const roster = [...((state.status && state.status.harnesses) || [])]
+      .filter((harness) => harness.harness_id && String(harness.harness_id).length >= 2)
+      .sort((a, b) => String(b.harness_id).length - String(a.harness_id).length);
+    for (const harness of roster) {
+      const id = String(harness.harness_id);
+      const name = harness.name || id;
+      // 前后都不能再接字母/数字/横线 —— 免得把 codex-window-admin 截断。
+      text = text.replace(
+        new RegExp(`(^|[^A-Za-z0-9_-])${id}(?![A-Za-z0-9_-])`, 'g'),
+        (match, before) => `${before}${name}`,
+      );
+    }
+    return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  }
+
   /** 群聊：办公室的对话就在平台的群里（不是本地的假消息）。 */
   /**
    * 项目群聊：收起来只占一条。
@@ -2575,6 +2677,10 @@ export function mountFlatOffice({ root, project: projectOf }) {
     toggle.setAttribute('aria-expanded', String(Boolean(state.chatExpanded)));
     head.append(title, count, toggle);
     wrap.append(head);
+    const digest = document.createElement('p');
+    digest.className = 'flat-chat-digest';
+    digest.textContent = chatDigest();
+    if (digest.textContent) wrap.append(digest);
     const list = document.createElement('div');
     list.className = 'flat-chat-list';
     if (!state.messages.length) {
@@ -2587,9 +2693,10 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const item = document.createElement('article');
       const isHuman = message.sender_type === 'human';
       item.className = 'flat-msg' + (isHuman ? ' is-human' : '');
-      const who = isHuman ? '你' : message.sender_id || '平台';
+      const who = isHuman ? '你' : harnessName(message.sender_id) || '平台';
       const at = String(message.created_at || '').replace('T', ' ').slice(5, 16);
-      item.innerHTML = `<b>${escape(who)}</b><span class="flat-msg-at">${escape(at)}</span><p>${escape(message.body || '')}</p>`;
+      const body = readableMessageBody(message) || message.body || '';
+      item.innerHTML = `<b>${escape(who)}</b><span class="flat-msg-at">${escape(at)}</span><p>${escape(body)}</p>`;
       list.append(item);
     }
     wrap.append(list);
@@ -3049,8 +3156,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const plan = state.plan && state.plan.draft ? state.plan.draft : null;
     const path = plan && plan.document ? plan.document.markdown_path : '';
     if (path) texts.push(path);
-    if (!texts.length) return;
-    await humanize(texts);
+    if (texts.length) await humanize(texts);
+    // 群聊的消息正文也是机器写的（"管理员 Harness 改派：FD-… → FD-…"）。
+    // 只问**最近这几十条**（下面就摆这些），问过的走缓存，不重复问。
+    const recent = (state.messages || []).slice(-40).map((message) => String(message.body || '')).filter(Boolean);
+    if (recent.length) await humanize(recent, 'text');
   }
 
   async function refresh() {

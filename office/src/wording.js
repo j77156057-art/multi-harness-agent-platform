@@ -79,7 +79,7 @@ export async function summarize(text, maxChars = 60) {
 export function translated(text) {
   const raw = String(text || '').trim();
   if (!raw) return '';
-  for (const kind of ['auto', 'reason', 'event', 'status', 'harness', 'path', 'id']) {
+  for (const kind of ['auto', 'reason', 'event', 'status', 'harness', 'path', 'id', 'text']) {
     const hit = cache.get(`${kind}:${raw}`);
     if (hit) return hit;
   }

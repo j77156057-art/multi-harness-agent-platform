@@ -142,7 +142,7 @@ async function submitFormalGoal(request, catalog) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
     body: JSON.stringify({
-      body: `项目目标（${projectName}）：${goal}\n管理员 Agent 将据此拆解任务；成员：${workers.join('、')}。`,
+      body: `项目目标（${projectName}）：${goal}\n管理员窗口将据此拆解任务；成员：${workers.join('、')}。`,
       refs: ['project-goal', `project-goal-json:${JSON.stringify(envelope)}`],
     }),
     cache: 'no-store',
