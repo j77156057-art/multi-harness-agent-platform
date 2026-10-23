@@ -66,6 +66,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       </header>
       <div class="project-lobby-body">
         <div class="project-lobby-copy"><p class="eyebrow">PROJECT DESK / 01</p><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点击「新建项目」填写项目名称、数据源与成员，确认后直接进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
+          <p class="project-lobby-hint" data-worker-hint hidden></p>
           <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里挑管理员和成员</li></ol>
         </div>
         <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><span class="eyebrow">HISTORY</span><h2 id="projectHistoryTitle">项目历史</h2></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
@@ -274,6 +275,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     } catch {}
   }
   void loadRecoverableProject();
+  // 名册要在大厅打开时就读一次：「已经有几个能干活的了」这句话依赖它。
+  // 以前只有注册之后才刷新，所以大厅里从来没人看到过这句提示。
+  void loadFormalStatus();
 
   function renderFormalRegistration(state) {
     formalState = state;
@@ -300,14 +304,47 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
   }
 
+  /**
+   * 「连接工作窗口」这扇门对第一次用的人没用 ——
+   * 它是"本机还没登记机器人"时的补救动作。
+   *
+   * 所以平台上已经有能干活的人时，这句话直接说明白，让人跳过它；
+   * 真的一个都没有时，才提醒他可能得先登记。
+   */
+  function renderWorkerHint() {
+    const hint = root.querySelector('[data-worker-hint]');
+    if (!hint) return;
+    const roster = formalState?.harnesses || [];
+    const admin = actingAdministratorId(formalState);
+    const workers = roster.filter(
+      (item) =>
+        item.status === 'online' &&
+        !isAdministratorHarness(item, admin) &&
+        !isPlatformAssistantHarness(item) &&
+        Number(item.credential_count ?? 1) > 0,
+    );
+    if (workers.length) {
+      hint.textContent = `已经有 ${workers.length} 个能干活的了（${workers
+        .map((item) => item.name || item.harness_id)
+        .join('、')}）。要加新的，再点「连接工作窗口」。`;
+    } else if (roster.length) {
+      hint.textContent = '本机登记了窗口，但它们现在都不能接活（没登录、没凭据或掉线了）。点「连接工作窗口」看看。';
+    } else {
+      hint.textContent = '本机还没有登记任何工作窗口。点「连接工作窗口」可以检查本机装了哪些 AI 工具、把它们登记进来。';
+    }
+    hint.hidden = false;
+  }
+
   async function loadFormalStatus() {
     try {
       const response = await fetch('/api/formal/status', {cache: 'no-store'});
       const state = response.ok ? await response.json() : null;
       renderFormalRegistration(state);
+      renderWorkerHint();
       return state;
     } catch {
       renderFormalRegistration(null);
+      renderWorkerHint();
       return null;
     }
   }

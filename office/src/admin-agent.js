@@ -103,8 +103,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
   const dialog = document.createElement('dialog');
   dialog.id = 'adminAgentDialog'; dialog.className = 'agent-dialog';
-  dialog.innerHTML = `<header class="agent-head"><div><h2>平台助手 · 巡检与上报</h2>
-    <p>只读正式平台回执：巡检是确定性比对，不做规划、不分派、不改任务归属。超时或长时间无进展时报给本项目的管理员 Harness。</p>
+  dialog.innerHTML = `<header class="agent-head"><div><h2>平台助手 · 盯着项目</h2>
+    <p>只看不改：它把平台上的事实列出来，不做规划、不分派、不改谁负责。超时或长时间没进展时，报给本项目的管理员。</p>
     <details class="agent-rules"><summary>职责边界（点开查看）</summary>
       <p>平台助手负责：定时巡检、进度记录、停滞判定、催促与上报。收件人是本项目的管理员 Harness。</p>
       <p>不属于平台助手：拆解任务表、裁决竞争、重新分工、续期重开取消、领取与提交审核 —— 这些是管理员 Harness 与正式分派面板的事。求助/接单（split / request_help / accept_help / reject_help / release / abandon）始终是 Harness 侧权限，助手不代任何成员发起。</p>
@@ -379,7 +379,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     };
 
     // 1. 巡检摘要
-    const patrol = section('巡检摘要', `面板每 ${POLL_MS / 1000} 秒刷新；进度窗口 ${WINDOW_LABEL}，连续 ${STALL_WINDOWS} 个窗口无实质进展提醒，连续 ${ESCALATE_WINDOWS} 个窗口交管理员。`);
+    const patrol = section('进度总览', `面板每 ${POLL_MS / 1000} 秒刷新；进度窗口 ${WINDOW_LABEL}，连续 ${STALL_WINDOWS} 个窗口无实质进展提醒，连续 ${ESCALATE_WINDOWS} 个窗口交管理员。`);
     const summary = document.createElement('p'); summary.className = 'agent-kv';
     const scopeNote = memberScope
       ? `${memberScope.size} 个成员`
@@ -441,9 +441,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
     // 1b. 谁现在能用 —— 只读观察面：可用/降级/无凭据/最近失败原因 + 当前模型。
     // 这里不派单、不改派、不代谁决定要不要换模型；换不换是管理员和人的事。
-    const who = section('谁现在能用',
-      '平台侧的事实：有没有平台凭据（在册不等于能领活）、当前登记的模型、最近一次尝试失败的原因。'
-      + '模型读自各 CLI 自己的配置，平台不替它猜；读不到就写「未知」。');
+    const who = section('谁能干活',
+      '谁现在能接活、用的哪个模型、最近一次为什么失败。'
+      + '模型是各 CLI 自己的配置里读到的，读不到就写「未知」。');
     if (availabilityError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `平台读不到可用性（${availabilityError}）：现在说不出"谁能用"，不是"没人能用"。`;
@@ -474,9 +474,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(who);
 
     // 1c. 额度池 —— 平台自己的池子：谁的额度在里面、谁的额度被谁花了。
-    const poolSection = section('平台额度池',
-      '平台把各 harness 自己的模型额度收进一个池子：某个窗口的 provider 挂了，'
-      + '平台就把这次尝试转到池子里还活着的那份额度上。额度可以换，干活的执行槽不换。');
+    const poolSection = section('额度',
+      '谁家的额度都放进一个池子里。'
+      + '某个窗口的额度用完了，就换池子里还活着的那份额度接着做。');
     if (poolError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `读不到额度池（${poolError}）。`;
@@ -521,8 +521,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(poolSection);
 
     // 2. 停滞提醒 —— 助手只判定与上报，不在这里处置（续期/重开/取消/改派都是管理员的事）。
-    const stalls = section('停滞提醒（交管理员处理）',
-      `心跳只证明存活；只有平台回执上的状态/attempt/receipt 变化才算实质进展。连续 ${STALL_WINDOWS} 个窗口无进展标为卡点，连续 ${ESCALATE_WINDOWS} 个窗口则必须上报管理员 Harness。这里不提供处置按钮。`);
+    const stalls = section('卡住的事',
+      `窗口还在线不代表它在干活 —— 只有平台记录上的状态变了才算真进展。连续 ${STALL_WINDOWS} 次没动静就标成卡住，再久就报给管理员。这里不提供处置按钮。`);
     if (!inflight.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有在办任务。'; stalls.append(p); }
     for (const item of inflight) {
       const row = document.createElement('article'); row.className = 'agent-row' + (item.escalated ? ' is-escalate' : item.stalled ? ' is-stall' : '');
@@ -539,10 +539,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     // 办公室只列事实并**转达请求**：改派由管理员 Harness 决定并执行，UI 不派单。
     const failedTasks = tasks.filter(t => t.status === 'abandoned' || t.status === 'stale');
     const usableWindows = availability.filter(item => item.usable);
-    const takeover = section('失败与接手',
-      '这里只列平台侧的事实：哪条活失败了或停滞了、现在还有哪些窗口能领活（带它们当前的模型）。'
-      + '要换人请按「请管理员换个人做」——按钮递的是**请求**，改派由管理员 Harness 决定并执行；'
-      + '办公室不派单、不改任务归属。');
+    const takeover = section('没做成的活',
+      '哪条活没做成、哪些窗口现在还能接活（连它们用的哪个模型）。'
+      + '要换人请按「请管理员换个人做」——那只是**请求**，换不换由管理员决定；'
+      + '办公室自己不派单。');
     if (!failedTasks.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
       p.textContent = '本项目没有失败或停滞的任务。';
@@ -611,10 +611,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(takeover);
 
     // 2c. 方案定稿 —— 管理员细化 → 传阅 → 完善后的那一版，等**人**最终审核。
-    const planSection = section('方案定稿（等人最终审核）',
-      '管理员把要求细化成一版方案，传阅给成员提意见，再把意见并进这一版。'
-      + '下面就是给人看的最终稿（Markdown + HTML 也落在 exports/plans/ 下）。'
-      + '**只有人点了「批准，开始做」，任务才会被创建并可以被领取。**');
+    const planSection = section('等你批准的方案',
+      '管理员把要求拆成一版方案，给成员传阅收意见，再并进这一版。'
+      + '下面是给人看的最终稿。'
+      + '**只有人点了「批准，开始做」，任务才会被创建、才能有人接。**');
     if (planError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `读不到方案：${planError}`;
@@ -642,7 +642,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(planSection);
 
     // 3. 能力观测
-    const rank = section('能力观测', '只统计平台回执上的可核验跃迁（提交/返修/放弃）。这是观测指标，不是能力认证，也不是许可。');
+    const rank = section('谁干得好', '只统计平台回执上的可核验跃迁（提交/返修/放弃）。这是观测指标，不是能力认证，也不是许可。');
     // 全零的成员没有可看的指标，列出来只会把「本项目」撑成一长串名字。
     const measured = ranking.filter(r => r.total > 0);
     if (!measured.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '本项目还没有可核验的跃迁可统计。'; rank.append(p); }
@@ -658,7 +658,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     rankTable.append(rbody); rank.append(rankTable); body.append(rank);
 
     // 4. 需要管理员处理的线索 —— 这里只给判断与上报，不做分工动作。
-    const plan = section('需要管理员处理的线索',
+    const plan = section('要管理员处理的事',
       '助手只出线索：卡点、无人可派、重复派发。改派、拆分、重开、取消由管理员 Harness 决定；求助/接单始终走 Harness 侧流程，助手不代任何成员发起。');
     if (!suggestions.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有需要管理员重新规划的事项。'; plan.append(p); }
     for (const item of suggestions) {
@@ -689,8 +689,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(plan);
 
     // 5. 积压登记（附首次时间）+ 催促记忆
-    const backlogSec = section('积压登记（附首次时间）',
-      `积压项记录首次出现时间与已积压时长；超过 ${URGE_WINDOWS} 个进度窗口后，Agent 按目标 Harness 当前负担决定是否催促：负担 ≥ ${LOAD_HOLD} 条则暂缓，不打断其任务。催促记入记忆清单，冷却 ${Math.round(REMIND_COOLDOWN_MS / 60000)} 分钟，避免重复催促。`);
+    const backlogSec = section('攒着的事',
+      `这里记着每件事从什么时候开始积压。超过 ${URGE_WINDOWS} 次没进展才提醒，而且那个窗口要是手上活太多就先不打扰；同一个窗口 ${Math.round(REMIND_COOLDOWN_MS / 60000)} 分钟内只提醒一次。`);
     // 只登记真的有数量的积压项；全是 0 时整张表都是噪音。
     const backlogged = derived.filter(d => d.count > 0);
     if (!backlogged.length) {
@@ -783,7 +783,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     backlogSec.append(form); body.append(backlogSec);
 
     // 6. 中转播报
-    const relay = section('中转播报（拟人语气）', '事件与进度都是真的；只有语气参考人设。平台只接受管理员身份发布，所以消息作者是平台助手，不是成员本人。');
+    const relay = section('播报', '事件与进度都是真的；只有语气参考人设。平台只接受管理员身份发布，所以消息作者是平台助手，不是成员本人。');
     const draft = draftNarration();
     if (!draft.lines.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '还没有巡检到可播报的状态跃迁。'; relay.append(p); }
     else {
@@ -795,7 +795,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(relay);
 
     // 7. 待审查提醒 —— 审核是管理员 Harness 的动作，助手只提醒、不打开审核面。
-    const review = section('待审查提醒', '机器验证不能替代人工验收。审核（领取 / 提交结论）是管理员 Harness 的动作；助手这里只列出待审任务，并把清单报给管理员。');
+    const review = section('等着审的', '机器验证不能替代人工验收。审核（领取 / 提交结论）是管理员 Harness 的动作；助手这里只列出待审任务，并把清单报给管理员。');
     const awaiting = tasks.filter(t => t.status === 'awaiting_review');
     if (!awaiting.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有待审查任务。'; review.append(p); }
     for (const task of awaiting) {

@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 
+import { parseTranscript } from '../src/cli-transcript.js';
+
 const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
@@ -324,6 +326,10 @@ export function createFormalGateway(config={}){
             const stderr=String(output.stderr||'');
             if(!stdout.trim()&&!stderr.trim())return null;
             const round=outcomes.get(t.task_id+'|'+attemptId)||{outcome:'',reason:''};
+            // 机器日志在**服务端**就拆成人话与"做了哪些步"：浏览器只要结论，
+            // 不用把几十万字的会话日志拉过去再自己拆（真数据里一条活的 stdout
+            // 能有 26 KB，几十条活就是几百 KB）。
+            const transcript=parseTranscript(stdout);
             return {
               attempt_no:n,
               attempt_id:attemptId,
@@ -332,7 +338,11 @@ export function createFormalGateway(config={}){
               reason:round.reason,
               harness_id:output.harness_id||null,
               current:Boolean(output.current),
-              stdout:stdout.slice(-4000),
+              // 人话：它说了什么（最后一段在前）与它做了哪些步。
+              texts:transcript.texts.map((item)=>({kind:item.kind,text:item.text})),
+              tools:transcript.tools.slice(-12).map((item)=>({label:item.label,status:item.status})),
+              // 原始记录只留尾巴，给想看原文的人（展开才看）。
+              stdout_tail:stdout.slice(-2000),
               stderr:stderr.slice(-1500),
             };
           }));

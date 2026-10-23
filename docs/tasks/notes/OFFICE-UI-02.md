@@ -129,6 +129,43 @@ test_id：MVP-UI-012
 还没做的（留档）：输出窗口里大半是机器 JSON，真结论常被长文截断吃掉；
 平台助手整段仍是术语；「连接工作窗口」那扇门对小白没用（登记机器人是运维的事）。
 
+### 六、从机器日志里抽人话（输出窗口的真问题）
+
+"各个窗口都说了什么"里原本是一屏 JSONL。查了三家 CLI 的输出格式（不是猜，是查过）：
+
+- Claude Code `--output-format stream-json`：每行一个对象，
+  `{"type":"assistant","message":{"content":[{"type":"text","text":...}]}}`，
+  收尾有 `{"type":"result","result":"<最终结论>"}`；
+- Codex `exec --json`：`{"type":"item.completed","item":{"type":"agent_message","text":...}}`
+  （老版本叫 assistant_message），命令是 `item.type === "command_execution"`；
+- OpenCode：`{"type":"text","part":{"text":...}}`、`{"type":"tool","tool":"shell",...}`。
+
+于是写了 `office/src/cli-transcript.js`：按**字段形状**认（不认 CLI 名字），认不出来
+就原样返回，绝不猜。解析放在**网关侧**——一条活的 stdout 在真数据里有 26 KB，
+几十条活就是几百 KB，浏览器自己拉再拆会卡死；网关拆完只给"它说了什么 + 它做了
+哪些步 + 原文尾巴"，响应从 79 KB 降到 67 KB。
+
+真数据实测：18 次尝试里 12 次抽到了人话（「## 完成报告」「Done. Committed on the
+current branch as ...」），页面第一屏就是那篇 Markdown 报告，而不是一堆 JSON。
+
+踩到的坑：OpenCode 的文字在 `part.text` 里，不在顶层——照顶层读会读到 undefined，
+什么也抽不出来。另一个坑：网关把 stdout 截成最后 4000 字时，第一行必然是**半截
+JSON**，所以"坏行不炸"这条是必须的。
+
+### 七、平台助手的段落标题
+
+11 个标题全是内部名（巡检摘要 / 谁现在能用 / 平台额度池 / 失败与接手 / 方案定稿…），
+换成：进度总览 / 谁能干活 / 额度 / 没做成的活 / 等你批准的方案 / 谁干得好 /
+要管理员处理的事 / 攒着的事 / 播报 / 等着审的 / 卡住的事。每段下面的说明也重写
+成人话。`verify-platform-assistant.mjs` 按标题找段落的断言同步改了——断的是
+"这一节只该有人的动作"这件事，不是标题必须长什么样。
+
+### 八、那扇没用的门
+
+「连接工作窗口」是"本机还没登记机器人"时的补救动作，对第一次用的人没用。现在
+大厅里直接说明白：「已经有 7 个能干活的了（Claude Code、Codex CLI…）。要加新的，
+再点「连接工作窗口」。」一个都没有时才提醒他可能得先登记。
+
 ## 边界：什么**不**补，和为什么
 
 按 R10 §39 与 `docs/tasks/notes/OFFICE-UI-01.md`（"派单、拆解、裁决、合并一律

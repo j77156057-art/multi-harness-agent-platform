@@ -210,3 +210,15 @@ body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
 }
 
 .project-platform-open:hover { background: #f3f8f3; }
+/* 大厅里那句"已经有几个能干活的了"——先说清楚，让人跳过那扇门。 */
+.project-lobby-hint {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #cfe0ef;
+  border-radius: 6px;
+  background: #eaf1f8;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #1c2430;
+  max-width: 46ch;
+}

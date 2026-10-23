@@ -10,6 +10,7 @@
 import './outputs.css';
 import { DONE_STATES, FAILED_STATES, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
+import { headlineText, parseTranscript } from './cli-transcript.js';
 
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
@@ -104,13 +105,39 @@ function grouped() {
 /** 一次尝试说出来的话。 */
 /** 一次尝试说出来的话。 */
 function words(task, attempt) {
-  const stdout = String(attempt.stdout || '');
   const stderr = String(attempt.stderr || '');
-  const lines = stdout.split('\n');
-  const long = lines.length > 12;
+  // 网关在服务端已经把机器日志拆好了（texts/tools）；老网关没有这一层时，
+  // 客户端自己拆一次（同一个解析器）。
+  const texts = Array.isArray(attempt.texts) ? attempt.texts : null;
+  const tools = Array.isArray(attempt.tools) ? attempt.tools : null;
+  const stdout = String(attempt.stdout || '');
+  const transcript = texts
+    ? { isJson: true, texts, tools: tools || [] }
+    : parseTranscript(stdout);
   const key = `${task.task_id}:${attempt.attempt_id}`;
   const expanded = state.expanded.has(key);
-  let shown = long && !expanded ? lines.slice(-12).join('\n') : stdout;
+
+  // 机器日志（JSONL）先给人话：结论 + 做了哪些事；原文收在后面。
+  if (transcript.isJson && transcript.texts.length) {
+    const headline = headlineText(transcript);
+    const others = transcript.texts.slice(0, -1).reverse();
+    const steps = transcript.tools.slice(-8).reverse();
+    const raw = attempt.stdout_tail ?? stdout.slice(-2000);
+    return `
+      <div class="outputs-said">
+        <div class="outputs-said-head">它最后说了</div>
+        <pre class="outputs-words">${escape(headline || '（这段里没有可读的文字）')}</pre>
+        ${steps.length ? `<div class="outputs-said-head">它做了什么（最近 ${steps.length} 步）</div><ul class="flat-list outputs-tools">${steps.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
+        ${others.length ? `<details class="outputs-more-block"><summary>它之前还说了 ${others.length} 段</summary>${others.map((item) => `<pre class="outputs-words">${escape(item.text)}</pre>`).join('')}</details>` : ''}
+        ${raw.trim() ? `<details class="outputs-more-block"><summary>看原始记录（机器日志）</summary><pre class="outputs-raw">${escape(raw)}</pre></details>` : ''}
+      </div>
+      ${stderr.trim() ? `<pre class="outputs-err">${escape(stderr)}</pre>` : ''}`;
+  }
+
+  const plain = stdout || String(attempt.stdout_tail || '');
+  const lines = plain.split('\n');
+  const long = lines.length > 12;
+  let shown = long && !expanded ? lines.slice(-12).join('\n') : plain;
   // 真数据实测：有些窗口吐出的是**一整行超长的 JSON**（会话日志），按行截断
   // 等于没截 —— 4000 字直接糊在脸上。再按字数兜一道底。
   let clipped = long && !expanded;

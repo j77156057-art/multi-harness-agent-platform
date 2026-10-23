@@ -153,6 +153,50 @@
   color: #8a5b2f;
 }
 
+/* 机器日志先给人话：结论、做了哪些事，原文收在后面。 */
+.outputs-said { display: grid; gap: 6px; }
+
+.outputs-said-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b6673;
+  margin-top: 2px;
+}
+
+.outputs-tools { margin: 0; padding-left: 18px; }
+.outputs-tools li { font-size: 12px; color: #3d4652; }
+.outputs-tools li span { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+
+.outputs-more-block {
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 9px;
+}
+
+.outputs-more-block > summary {
+  font-size: 12px;
+  color: #5b6673;
+  cursor: pointer;
+}
+
+.outputs-more-block .outputs-words { margin-top: 6px; }
+
+.outputs-raw {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #3d4652;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+
 .outputs-words.is-clipped { max-height: 132px; }
 
 .outputs-err {

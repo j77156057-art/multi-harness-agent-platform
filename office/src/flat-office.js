@@ -23,6 +23,7 @@ import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
 import { STATE_LABEL, DONE_STATES } from './state-labels.js';
+import { headlineText, parseTranscript } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
 const escape = escapeHtml;
@@ -1051,9 +1052,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
           : ''}
       </section>
       ${isFailed(task) ? failureLog(task) : ''}
-      ${showLiveOutput()
-        ? `<section class="flat-spec"><h3>它自己输出的内容${state.output?.output?.current ? '（当前这一轮）' : ''}</h3><pre class="flat-output">${escape(outputText())}</pre></section>`
-        : ''}
+      ${showLiveOutput() ? liveOutputBlock() : ''}
       <p class="flat-detail-foot">以上就是这条活的全部记录。想看整体，去右栏的「要做的事」和「看成员表现」。</p>`;
     return panel;
   }
@@ -1437,6 +1436,29 @@ export function mountFlatOffice({ root, project: projectOf }) {
       : state.output;
     const text = typeof raw === 'string' ? raw : String(raw?.stdout || raw?.text || '');
     return text.slice(-4000) || '（它还没输出过东西）';
+  }
+
+  /**
+   * 「它自己输出的内容」：机器日志先给人话（结论 + 做了什么），原文收在后面。
+   * 和「各个窗口都说了什么」那个页面用的是同一个解析器（`cli-transcript.js`）。
+   */
+  function liveOutputBlock() {
+    const raw = state.output && typeof state.output === 'object'
+      ? state.output.output || state.output
+      : state.output;
+    const stdout = typeof raw === 'string' ? raw : String(raw?.stdout || '');
+    const transcript = parseTranscript(stdout);
+    const title = `它自己输出的内容${state.output?.output?.current ? '（当前这一轮）' : ''}`;
+    if (transcript.isJson && transcript.texts.length) {
+      const tools = transcript.tools.slice(-6).reverse();
+      return `<section class="flat-spec"><h3>${title}</h3>
+        <p class="flat-note">它最后说了</p>
+        <pre class="flat-output">${escape(headlineText(transcript) || '（这段里没有可读的文字）')}</pre>
+        ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
+        <details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
+      </section>`;
+    }
+    return `<section class="flat-spec"><h3>${title}</h3><pre class="flat-output">${escape(outputText())}</pre></section>`;
   }
 
   /** 人自己的动作。平台与管理员 harness 都不代劳这些。 */
