@@ -10,7 +10,9 @@
 真相源引用：R10 §15（事件、事实源和 Outbox —— 谁接过一条活看的是 claim/start 这类
 事件）；§10（状态机：任务有哪些状态）；§22（前端）；`office/src/flat-office.js`
 （列表与分组）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：列表按「人」归堆：`office/scripts/verify-office-by-person.mjs` 通过；真跑（8850 真数据，18 件活）分出 4 块，块头写清是谁、忙闲、条数；办公室冒烟 27/30。
 test_id：MVP-UI-020
 
 | 项 | 内容 |

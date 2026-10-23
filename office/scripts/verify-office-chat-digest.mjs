@@ -30,7 +30,6 @@ const TYPES = {
 };
 
 const now = new Date();
-const hoursAgo = (n) => new Date(now.getTime() - n * 3600 * 1000).toISOString();
 // 「今天」按**本机时区**算：拿本地零点当基准，别用"N 小时前"（凌晨跑的时候
 // 那可能是昨天）。
 const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -44,7 +43,7 @@ const TASKS = [
     status: 'in_progress',
     owner: 'm1',
     attempt_no: 1,
-    updated_at: hoursAgo(1),
+    updated_at: at(1),
     state_changed_seq: 3,
   },
 ];

@@ -10,7 +10,9 @@
 真相源引用：R10 §15（事件、事实源和 Outbox）；§10（状态机：任务有哪些状态）；
 §22（前端）；`office/src/flat-office.js`（办公室头顶）；`backend/app/pool/service.py`
 （额度池的用量时间线）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
+commit：`96bdbaf`（这一轮与前几轮一起合入 main）
+验证结果：讲故事的「今天」：`office/scripts/verify-office-today.mjs` 通过（断言按本机时区算，午夜前后都稳）；办公室冒烟 27/30。
 test_id：MVP-UI-021
 
 | 项 | 内容 |
