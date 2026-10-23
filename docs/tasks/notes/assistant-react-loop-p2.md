@@ -109,3 +109,10 @@ direct，引用 `[c1]`＋run id 可回查）→ trace 落账。回答是诚实�
 凭据卫生：操作员 human token 按 key 惯例归档 `data/office-operator.key`
 （label 记"operator re-issue (assistant provision)"），`D:\Temp` 临时
 件已清；明文仅此一份，库里只存哈希。
+
+**绿章（2026-10-23 最终树，含本修复）**：全量 pytest 1027 用例全点 `.`、
+进度 `[100%]`、零 F/E/s/x、无 short test summary info（输出留档
+`D:\Temp\opencode\full_pytest_final.txt`；末行"N passed"因 Start-Process
+重定向缓冲伪影未落档，用例级证据完整）；ruff check＋format 全仓绿、
+docstate 98 项 0 失败、discipline 44 项 0 失败（1 告警＝既有根工作区
+占用提示）。修复提交：`1c65241`。
