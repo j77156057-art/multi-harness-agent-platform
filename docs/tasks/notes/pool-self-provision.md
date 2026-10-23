@@ -34,4 +34,5 @@ commit：`09236a6`（只读候选发现、alerts 指纹去重与 scripted 验收
 
 - `tests/test_pool_provision.py` 与既有 `tests/test_pool_free_set_watch.py`：11 条通过。
 - pool 相关全套测试：70 条通过；ruff、docstate、discipline 通过。
+- 全量 pytest：`[100%]` 全部通过（无失败；总耗时约 193.7 秒）。
 - 候选只读、首轮基线、指纹去重、缺 tier 不猜 free、未知 CLI 不执行均有 scripted 证据。
