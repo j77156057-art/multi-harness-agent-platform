@@ -14,7 +14,6 @@ canned "回复了" for work that did not happen.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -134,19 +133,24 @@ class AssistantWorker:
     def _is_private_call(self, message: dict[str, Any]) -> bool:
         """A *private* question addressed to the assistant.
 
-        Public group chatter that mentions the assistant is deliberately not a
-        trigger: the assistant has no seat; it speaks when spoken to, in
+        The office read face serves direct messages with ``refs=['direct']``
+        and never repeats the mention list -- "visible to me AND direct" is
+        the target signal (privacy: the direct thread is shown to its
+        participants only; a message the assistant can see in its box was
+        addressed to it, and its own sent replies are filtered by sender).
+        Public group chatter that mentions the assistant is deliberately not
+        a trigger: the assistant has no seat; it speaks when spoken to, in
         private. (Admin conclusions quoted publicly stay data it may read via
         its read tools when asked, not events it reacts to.)
         """
-        refs = message.get("refs") or []
-        mentions = message.get("mentions") or []
-        return ("direct" in refs) and (self.harness_id in mentions)
+        if "direct" not in (message.get("refs") or []):
+            return False
+        return str(message.get("sender_id") or "") != self.harness_id
 
     # -------------------------------------------------------------- answer
 
     def answer(self, message: dict[str, Any], *, seq: int) -> _TurnReceipt:
-        sender = str(message.get("author_id") or "")
+        sender = str(message.get("sender_id") or message.get("author_id") or "")
         body = str(message.get("body") or "").strip()
         loop = AssistantLoop(
             self.model,
@@ -202,7 +206,9 @@ class AssistantWorker:
             )
             return
         # The admin worker's precedent: reporting must not die with its message.
-        with contextlib.suppress(httpx.HTTPStatusError):
+        # But silence is not honesty: a refused DM is printed to the run log so
+        # the operator can see the office heard a question and could not reply.
+        try:
             self.client.post(
                 f"/groups/{self.group_id}/messages",
                 {
@@ -213,12 +219,24 @@ class AssistantWorker:
                     "direct": True,
                 },
             )
+        except httpx.HTTPStatusError as exc:
+            print(
+                json.dumps(
+                    {
+                        "deliver_error": type(exc).__name__,
+                        "status": exc.response.status_code,
+                        "to": recipient,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
 
 
 # --------------------------------------------------------------------- main
 
 
-def main() -> None:
+def parse_worker_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="平台助手（office-assistant）自循环 worker")
     parser.add_argument("--url", default="http://127.0.0.1:8848")
     parser.add_argument("--token-file", type=Path, required=True)
@@ -231,28 +249,38 @@ def main() -> None:
     parser.add_argument(
         "--models",
         default=",".join(FREE_MODELS),
-        help="池子模型链（逗号分隔；默认免费档五家，按序回退）",
+        help="免费档 pinned 兜底链（逗号分隔；默认五家）。现役链是实况"
+        "目录驱动（TTL 拉目录滤 free），这个参数只做全冷停机前的兜底",
     )
     parser.add_argument("--max-calls", type=int, default=8)
     parser.add_argument("--max-seconds", type=float, default=540.0)
-    args = parser.parse_args()
+    return parser.parse_args(argv)
 
+
+def build_worker(args: argparse.Namespace, client: PlatformClient) -> AssistantWorker:
+    """Wire the CLI options into the worker; split out so the wiring is testable."""
     from app.assistant.loop import Budget
 
-    token = args.token_file.read_text(encoding="utf-8").strip()
-    client = PlatformClient(args.url, token)
+    fallback = tuple(m.strip() for m in args.models.split(",") if m.strip())
     state_path = args.state_file or Path(settings.data_dir) / "assistant" / "worker-state.json"
-    worker = AssistantWorker(
+    return AssistantWorker(
         client=client,
         group_id=args.group,
         harness_id=args.assistant_id,
-        model=PoolModelChannel(client, models=tuple(m.strip() for m in args.models.split(","))),
+        model=PoolModelChannel(client, fallback=fallback),
         state=AssistantState.load(state_path),
         state_path=state_path,
         budget=Budget(max_calls=args.max_calls, max_seconds=args.max_seconds),
         trace_dir=Path(settings.data_dir) / "assistant" / "trace",
         dry_run=args.dry_run,
     )
+
+
+def main() -> None:
+    args = parse_worker_args()
+
+    client = PlatformClient(args.url, args.token_file.read_text(encoding="utf-8").strip())
+    worker = build_worker(args, client)
     try:
         while True:
             try:

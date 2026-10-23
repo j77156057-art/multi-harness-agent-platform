@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from app.assistant.loop import Budget
-from app.assistant.model import PoolModelChannel
+from app.assistant.model import FREE_MODELS, PoolModelChannel
 from app.assistant.prompts import UNTRUSTED_PREFIX
 from app.assistant.worker import AssistantState, AssistantWorker
 
@@ -89,11 +89,19 @@ def _worker(
 
 
 def _message(seq: int, body: str, *, sender: str = "codex-window-admin", direct: bool = True):
+    """The shape the office read face actually serves.
+
+    Pinning it on purpose: the read face is `sender_type`/`sender_id` + `refs`,
+    and it does NOT repeat the mention list (privacy: visibility IS the
+    addressing for direct messages).  A stub shaped like the POST echo
+    (`author_id` + `mentions`) is how the worker originally shipped a silent
+    skip against the live office.
+    """
     return {
         "created_seq": seq,
-        "author_id": sender,
+        "sender_type": "harness",
+        "sender_id": sender,
         "body": body,
-        "mentions": [ME],
         "refs": ["direct"] if direct else [],
     }
 
@@ -120,6 +128,17 @@ def test_the_first_run_anchors_at_the_latest_message_and_replays_nothing(tmp_pat
     assert worker.state.initialized is True
     assert worker.state.cursor_seq == 9
     assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))["cursor_seq"] == 9
+
+
+def test_the_assistants_own_replies_do_not_trigger_a_new_turn(tmp_path):
+    """读面把 direct 的"发给谁"藏在可见性里：自己发的也 direct——必须按 sender 过滤。"""
+    client = FakeClient({9: [_message(12, "回给管理员的私聊", sender=ME)]})
+    model = ScriptedModel([])
+    state = AssistantState(initialized=True, cursor_seq=9)
+    worker = _worker(client, model, tmp_path / "state.json", state=state)
+    assert worker.poll_once() is False
+    assert client.posts == [] and model.prompts == [], "自己的回话进循环就是自触发死循环"
+    assert worker.state.cursor_seq == 12
 
 
 # ---------------------------------------------------------- the happy answer
@@ -234,3 +253,41 @@ def test_the_cursor_survives_a_restart(tmp_path):
     )
     assert worker2.poll_once() is False
     assert len(client.posts) == 1
+
+
+# ------------------------------------------------------------- the CLI wiring
+
+
+def test_the_cli_wires_the_live_channel_with_a_pinned_fallback(tmp_path):
+    """--models 是 pinned 兜底；通道本体是目录驱动链——接线错了 worker 起不来。"""
+
+    from app.assistant.worker import build_worker, parse_worker_args
+
+    token_file = tmp_path / "office-assistant.key"
+    token_file.write_text("apt_fake_token", encoding="utf-8")
+
+    class _StubClient:
+        def get(self, path: str, **params: Any) -> dict[str, Any]:
+            return {}
+
+        def post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+            return {}
+
+        def close(self) -> None: ...
+
+    args = parse_worker_args(
+        [
+            "--token-file",
+            str(token_file),
+            "--group",
+            GROUP,
+            "--state-file",
+            str(tmp_path / "s.json"),
+        ]
+    )
+    assert args.models == ",".join(FREE_MODELS), "默认兜底链就是免费档五家"
+    worker = build_worker(args, _StubClient())
+    assert isinstance(worker.model, PoolModelChannel)
+    assert worker.model.fallback == tuple(FREE_MODELS), "兜底链按参数接进通道"
+    assert worker.group_id == GROUP and worker.harness_id == ME
+    assert str(worker.state_path) == str(tmp_path / "s.json"), "--state-file 按参数走"

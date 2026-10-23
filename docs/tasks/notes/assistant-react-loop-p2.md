@@ -72,3 +72,40 @@ github.com:443 被墙期间，经 **api.github.com 的 Git Data API** 推送成�
 卡内引用的提交号均为本地 sha；443 恢复后要么以远端为准 rebase 对齐，
 要么 `--force-with-lease` 覆盖（内容相同，安全）。推送脚本：
 `api.github.com /repos/*/git/blobs|trees|commits|refs`（gh token，repo scope）。
+
+### 首跑真平台验证（2026-10-23 晚）
+
+**身份走平台正门，没有绕任何门**：`app.auth issue --type human` 铸操作员
+human token → `POST /api/v1/harnesses` 登记 office-assistant
+（registration_id `reg-75cf9472b62e48569619c006a061e83a`，
+registered_by=office-operator）。office-admin 等 harness 主体天然无
+`harness:register`（该权限只给 human——"自报不算授权"，policy 刻意未给
+管理员 harness 委托），所以必须经操作员之手。助手 token
+`app.auth issue --type harness` 后落 `data/office-assistant.key`，
+`/auth/whoami` 确认 `harness/office-assistant`。运行中 8848 服务用根
+`data/`；worker 以 `AP_DATA_DIR` 指向同一真相。
+
+**端到端事件链**：worker 首跑锚定（cursor=1046，不回放历史）→
+codex-window-admin 直发真问题（seq 1059，direct @office-assistant）→
+ReAct 轮次：免费档 `codebuddy/hy3` 服役、1 次模型调用、池子回执在案、
+自检 pass（`run-20261023-200627-bf34b2`）→ 私聊回复落地（seq 1060，
+direct，引用 `[c1]`＋run id 可回查）→ trace 落账。回答是诚实的"未记上"
+欠条——没读过池子就不编读数（小模型一次成 final 未先取证据，质量问题
+记观察，不属机械门缺陷）。
+
+**真跑抓出三处 scripted 假件与真读面的形状偏差**（这正是首跑的目的）：
+
+1. `main()` 仍传 `PoolModelChannel(models=…)` 旧形参（P2 收尾通道已目录
+   驱动），CLI 直接过不了构造——scripted 测试走构造注入没摸到接线。拆
+   `parse_worker_args`/`build_worker`，补接线用例钉住。
+2. 私聊判定对着**读面不发的字段**：真形状是 `sender_type/sender_id`＋
+   `refs`，GET 不重复 `mentions`（直发的寻址即可见性）。旧判定
+   `author_id`＋`mentions` 全落空 → 静默跳过、cursor 照推进，看起来正常。
+   改可见性判定："对我可见的 direct 且非我本人发的＝发给我的"；自己的
+   回话按 sender 过滤防自触发死循环；fixture 换真形状＋新用例钉住。
+3. `_deliver` 把投递失败静默吞掉（假件没盖住真服务面的 403 一类）——
+   改为不崩轮次但打 `deliver_error` 行：拒绝静默。
+
+凭据卫生：操作员 human token 按 key 惯例归档 `data/office-operator.key`
+（label 记"operator re-issue (assistant provision)"），`D:\Temp` 临时
+件已清；明文仅此一份，库里只存哈希。
