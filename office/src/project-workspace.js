@@ -322,9 +322,14 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         Number(item.credential_count ?? 1) > 0,
     );
     if (workers.length) {
-      hint.textContent = `已经有 ${workers.length} 个能干活的了（${workers
+      // 名单不要全铺出来 —— 一屏七个名字读起来像日志。写"有几个"，
+      // 名字让「连接工作窗口」那扇门自己去列。
+      const names = workers
         .map((item) => item.name || item.harness_id)
-        .join('、')}）。要加新的，再点「连接工作窗口」。`;
+        .slice(0, 3)
+        .join('、');
+      const more = workers.length > 3 ? ` 等 ${workers.length} 个` : '';
+      hint.textContent = `已经有 ${workers.length} 个窗口能干活了（${names}${more}）。要加新的，点「连接工作窗口」。`;
     } else if (roster.length) {
       hint.textContent = '本机登记了窗口，但它们现在都不能接活（没登录、没凭据或掉线了）。点「连接工作窗口」看看。';
     } else {

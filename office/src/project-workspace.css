@@ -76,9 +76,30 @@ body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
 .project-section-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
 .project-section-head > span { color: #8a94a0; font-size: 11.5px; }
 .project-history-list { display: grid; gap: 8px; padding-top: 12px; }
-.project-empty { min-height: 210px; display: grid; align-content: center; justify-items: center; gap: 7px; color: #8a94a0; font-size: 11px; }
-.project-empty strong { color: #3d4753; font-size: 13px; }
-.project-empty-icon { width: 37px; height: 37px; display: grid; place-items: center; border: 1px dashed #c9d3dd; border-radius: 9px; color: #2f5d8c; font-size: 22px; }
+/* 空状态：一条安静的一行，不是半屏。
+   （以前 210px 高的大虚线加号框，占掉整页最显眼的位置 —— 那是最像 demo 的地方。） */
+.project-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  color: #8a94a0;
+  font-size: 12px;
+}
+
+.project-empty strong { color: #4c5a68; font-size: 12.5px; }
+
+.project-empty-icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #c6d0da;
+  border-radius: 7px;
+  color: #2f5d8c;
+  font-size: 15px;
+}
 .project-recover { margin-top: 7px; padding: 7px 11px; border: 1px solid #c9d3dd; border-radius: 5px; background: #fff; color: #2f5d8c; font: inherit; font-size: 11px; cursor: pointer; }
 .project-recover:hover { background: #f4f8fc; }
 .project-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto auto; gap: 11px; align-items: center; min-height: 70px; padding: 10px 4px; border-bottom: 1px solid #eef0f3; }
@@ -206,18 +227,21 @@ body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
 .project-platform-main strong { font-size: 13px; font-weight: 600; color: #1c2430; }
 .project-platform-main span { font-size: 11px; color: #8a94a0; }
 
+/* 「打开」：一排一模一样的方框按钮看着像表格；做成安静的链接动作。 */
 .project-platform-open {
-  padding: 7px 13px;
-  border: 1px solid #c9d3dd;
-  border-radius: 5px;
-  background: #fff;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
   color: #2f5d8c;
   font: inherit;
-  font-size: 11px;
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-.project-platform-open:hover { background: #f4f8fc; }
+.project-platform-open::after { content: ' →'; color: #a9b4c0; }
+.project-platform-open:hover { background: none; text-decoration: underline; text-underline-offset: 3px; }
 /* 大厅里那句"已经有几个能干活的了"——先说清楚，让人跳过那扇门。 */
 .project-lobby-hint {
   margin: 10px 0 0;
