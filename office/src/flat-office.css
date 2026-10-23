@@ -25,12 +25,14 @@
 
 /* ------------------------------------------------------------------ 顶条 */
 
+/* 办公室的头部：一条**有底色**的带子，不是一行浮在白底上的字。
+   页面要有主角 —— 主角就是这条带子：这是什么项目、现在该干什么。 */
 .flat-head {
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 12px 20px;
-  background: #fff;
+  padding: 14px 20px 13px;
+  background: linear-gradient(180deg, #eef4fb 0%, #f8fafc 62%, #fff 100%);
   border-bottom: 1px solid var(--ao-line);
   /* 真数据实测：1280px 宽下，导语 + 数据源 + 五个计数把这一行挤爆了 ——
      计数标签被压成竖排（"等人接"一个字一行）。宁可换行，不要挤成竖排。 */
@@ -81,11 +83,13 @@
   color: var(--ao-ink-faint);
 }
 
+/* 项目的名字是这一屏的主角：够大、够深。 */
 .flat-head-main h1 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -.01em;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  color: #16202b;
 }
 
 .flat-head-main p {
@@ -114,6 +118,8 @@
   gap: 6px;
   font-size: 11.5px;
   color: var(--ao-ink-faint);
+  /* 切换放在最右：信息在左，操作在右。 */
+  margin-left: 4px;
 }
 
 .flat-source select {
@@ -652,16 +658,59 @@
   min-width: 0;
 }
 
+/* 卡片标题：图标 + 文字。每张卡有自己的身份，扫一眼就知道是哪张。 */
 .flat-card h3 {
-  margin: 0 0 8px;
-  padding-left: 8px;
-  border-left: 3px solid #dbe4ee;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 9px;
   font-size: 13px;
   letter-spacing: normal;
   text-transform: none;
   color: #35404d;
   font-weight: 650;
 }
+
+.flat-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--ao-accent);
+  opacity: .85;
+}
+
+/* 每类卡一个身份色（图标那一小块）。 */
+.flat-card-brief .flat-icon { color: #2f5d8c; }
+.flat-card-members .flat-icon { color: #6b7684; }
+.flat-card-admin .flat-icon { color: #1f7a4d; }
+.flat-card-waiting .flat-icon { color: #a8562a; }
+.flat-card-fold .flat-icon { color: #6b7684; }
+
+/* 「等你处理」那一张：页面里唯一要人动手的事，所以给它最重的样子。 */
+.flat-card-waiting {
+  border-color: #e6d2bb;
+  background: #fffdf8;
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .05);
+}
+
+.flat-waiting-list { gap: 6px; }
+
+.flat-waiting-list button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid #eee3d4;
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flat-waiting-list button:hover { border-color: #dcc4a4; background: #fffaf2; }
+.flat-waiting-list b { font-size: 12.5px; font-weight: 600; color: var(--ao-ink); }
+.flat-waiting-list span { font-size: 11px; color: var(--ao-ink-faint); }
 
 .flat-card h4 { margin: 10px 0 4px; font-size: 11px; color: var(--ao-ink-soft); font-weight: 600; }
 .flat-card p, .flat-card li, .flat-list, .flat-note { overflow-wrap: anywhere; }

@@ -990,24 +990,24 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const status = state.status || {};
     // 顶部第一句要回答两个问题：**这是哪儿**，**我现在该看什么**。
     // 没有它，一进来就是一屏表格 —— 知道在看，但不知道该干什么。
-    const waitingOnMe = (state.tasks || []).filter((task) =>
+    const waiting = (state.tasks || []).filter((task) =>
       ['awaiting_human', 'escalated'].includes(String(task.status)),
+    );
+    const waitingOnMe = waiting.length;
+    const working = (state.tasks || []).filter((task) =>
+      ['claimed', 'in_progress', 'verifying'].includes(String(task.status)),
     ).length;
+    // 主角是"现在该干什么"，不是"一共有多少条"。所以先说人话，再给数字。
     const guide = waitingOnMe
-      ? `有 <b>${waitingOnMe}</b> 件事在等你处理。左边是所有正在做的事，点一条看详情。`
-      : '这是你这个项目的办公室。左边是所有正在做的事，点一条看详情；右边是需要你过目的东西。';
+      ? `有 <b>${waitingOnMe}</b> 件事在等你处理${working ? `，另有 ${working} 件正在做` : ''}。点开就能看。`
+      : working
+        ? `有 <b>${working}</b> 件正在做${counts.done ? `，${counts.done} 件已经完成` : ''}。没有要你处理的事。`
+        : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
         <h1>${escape(state.scope?.name || '本项目')}</h1>
         <p class="flat-guide">${guide}</p>
-      </div>
-      <div class="flat-source">
-        <label for="flatSourceSelect" title="现在看的是哪一份数据：正式平台上的，还是本机的样例">看的数据</label>
-        <select id="flatSourceSelect" title="正式平台上的项目 / 本机的样例数据">
-          <option value="platform">正式平台</option>
-          <option value="demo">本地样例</option>
-        </select>
       </div>
       <ul class="flat-counts">
         <li class="${counts.waiting ? 'has-value' : ''}"><span>等人接</span><b>${counts.waiting}</b></li>
@@ -1016,6 +1016,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>没做成</span><b>${counts.failed}</b></li>
         <li class="${counts.done ? 'has-value' : ''}"><span>完成了</span><b>${counts.done}</b></li>
       </ul>
+      <div class="flat-source">
+        <label for="flatSourceSelect" title="现在看的是哪一份数据：正式平台上的，还是本机的样例">看的数据</label>
+        <select id="flatSourceSelect" title="正式平台上的项目 / 本机的样例数据">
+          <option value="platform">正式平台</option>
+          <option value="demo">本地样例</option>
+        </select>
+      </div>
       ${
         state.error
           ? `<div class="flat-error">
@@ -1829,6 +1836,36 @@ export function mountFlatOffice({ root, project: projectOf }) {
   }
 
   /**
+   * 「等你处理的事」—— 右栏的第一张卡。
+   *
+   * 右栏原来第一张是"要做的事"（全部 9 件事的摘要），真正**要人动手**的那几件
+   * 藏在列表里。把它顶到最上面，点一下就跳到那条活 —— 这一屏的第一张卡就
+   * 是"我现在该干什么"。
+   */
+  function waitingCard() {
+    const waiting = (state.tasks || []).filter((task) =>
+      ['awaiting_human', 'escalated'].includes(String(task.status)),
+    );
+    if (!waiting.length) return '';
+    const rows = waiting
+      .slice(0, 5)
+      .map((task) => {
+        const parts = titleParts(task);
+        return `<li><button type="button" data-act="open-task" data-task="${escape(task.task_id)}">
+            <b>${escape(parts.main)}</b>
+            <span>${escape(STATE_LABEL[task.status] || task.status)} · ${escape(
+              task.last_failure?.reason ? reasonText(task.last_failure.reason) : '等你给个说法',
+            )}</span>
+          </button></li>`;
+      })
+      .join('');
+    return `<section class="flat-card flat-card-waiting">
+        <h3>${cardIcon('bell')}等你处理</h3>
+        <ul class="flat-list flat-waiting-list">${rows}</ul>
+      </section>`;
+  }
+
+  /**
    * 平台**来问**你一件事时，摆在右栏最上面的一张卡。
    *
    * 为什么单独一张卡、放在最上面：平台在等一个决定的时候，那件事是**现在**
@@ -1863,6 +1900,26 @@ export function mountFlatOffice({ root, project: projectOf }) {
    * 「平台来问你了」那张卡片**不在这里**：它挂在右栏最上面（`askCard`）——
    * 埋在这张长卡片的底下，谁都找不到。
    */
+  /**
+   * 小图标（内联 SVG）。
+   *
+   * 右栏六张卡长得一模一样，是"看不出这是哪个产品"的大头 —— 一张卡一个身份，
+   * 眼睛才有地方落。图标都是线稿，跟整体的细线风格一致。
+   */
+  const CARD_ICONS = {
+    brief: '<path d="M8 6h11M8 12h11M8 18h7"/><circle cx="4" cy="6" r="1.3"/><circle cx="4" cy="12" r="1.3"/><circle cx="4" cy="18" r="1.3"/>',
+    people: '<circle cx="9" cy="8" r="3"/><path d="M3.5 19c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5"/><path d="M16 5.4a3 3 0 0 1 0 5.7M18 19c-.2-2.2-1.1-3.6-2.8-4.3"/>',
+    chat: '<path d="M4 5.5h16v10H9.5L4.5 19z"/>',
+    gauge: '<path d="M4 17.5a8 8 0 1 1 16 0"/><path d="M12 17.5l4.2-5.2"/>',
+    workers: '<circle cx="8" cy="8" r="3"/><path d="M2.5 19c.6-3 2.7-4.5 5.5-4.5"/><circle cx="17" cy="9" r="2.4"/><path d="M15.5 19c.3-2.4 1.6-3.6 3.5-3.9"/>',
+    stamp: '<path d="M5 19.5h14M6.5 16.5h11v-3.2l-2.8-.9-1-4.9a2 2 0 0 0-4 0l-1 4.9-2.2.7z"/>',
+    bell: '<path d="M6.5 9.5a5.5 5.5 0 1 1 11 0c0 3.6 1.4 5 1.4 5H5.1s1.4-1.4 1.4-5z"/><path d="M10 18a2.1 2.1 0 0 0 4 0"/>',
+    key: '<circle cx="8" cy="12" r="3.6"/><path d="M11.6 12H21l-2 2.2M17.5 12v2.6"/>',
+  };
+
+  const cardIcon = (name) =>
+    `<svg class="flat-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${CARD_ICONS[name] || ''}</svg>`;
+
   function userKeysBlock() {
     const keys = state.userKeys || [];
     // 协议名是人给 key 起的**机器名**（「openai_chat」），界面上要让人看懂。
@@ -2089,8 +2146,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
 
     wrap.innerHTML = `
       ${askCard()}
+      ${waitingCard()}
       <section class="flat-card flat-card-brief">
-        <h3>要做的事</h3>
+        <h3>${cardIcon('brief')}要做的事</h3>
         ${brief.planId
           ? `<p><b>${escape(brief.title)}</b></p>
              <p class="flat-note">${(state.tasks || []).length} 件事${unclaimed.length ? `（${unclaimed.length} 件还没人接）` : ''}</p>
@@ -2099,7 +2157,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
              <p class="flat-empty">还没有方案正文。</p>`}
       </section>
       <section class="flat-card flat-card-members">
-        <h3>成员</h3>
+        <h3>${cardIcon('people')}成员</h3>
         ${helps.length
           ? `<p class="flat-note">${helps.length} 条求助待处理</p>
              <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span></li>`).join('')}</ul>`
@@ -2107,7 +2165,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <button type="button" data-act="open-members">看成员表现</button>
       </section>
       <section class="flat-card flat-card-admin">
-        <h3>与管理员对话</h3>
+        <h3>${cardIcon('chat')}与管理员对话</h3>
         ${admin
           ? `<p><b>${escape(admin)}</b></p>
              <p class="flat-note">${!started
@@ -2130,7 +2188,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <button type="button" data-act="open-outputs" title="另开一个窗口，看每个窗口做完活之后都说了什么">看他们说了什么</button>
       </section>
       <section class="flat-card">
-        <h3>等我批准的方案</h3>
+        <h3>${cardIcon('stamp')}等我批准的方案</h3>
         ${plan
           ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
              <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
@@ -2403,6 +2461,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
         const list = root.querySelector('.flat-chat-list');
         if (list) list.scrollTop = list.scrollHeight;
       }
+      return;
+    }
+    if (button.dataset.act === 'open-task' && button.dataset.task) {
+      // 「等你处理」那一张：点一下就跳到那条活。
+      void select(button.dataset.task);
       return;
     }
     if (button.dataset.act === 'open-brief') {

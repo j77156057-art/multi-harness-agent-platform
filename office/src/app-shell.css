@@ -45,6 +45,17 @@ body {
 
 /* ------------------------------------------------------------------ 顶栏 */
 
+/* 品牌带：整个应用顶上的一条渐变。
+   一打开页面就知道"这是 Agent Office"，不是一张白纸上的表格。 */
+.ao-app::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  z-index: 60;
+  background: linear-gradient(90deg, #4a86c4 0%, #2f5d8c 42%, #1d3a59 100%);
+}
+
 .ao-topbar {
   position: sticky;
   top: 0;
