@@ -29,11 +29,13 @@ const TYPES = {
   '.svg': 'image/svg+xml',
 };
 
-// 本机时区的"今天"（各小时都取一点，跨时区也落在今天里）。
+// 本机时区的"今天"。**别用"N 小时前"**：过了午夜，"1 小时前"就落到昨天去了，
+// 这条断言会在午夜前后翻车（真踩过）。拿本地零点当基准最稳。
 const now = new Date();
-const hoursAgo = (n) => new Date(now.getTime() - n * 3600 * 1000).toISOString();
-const todayISO = hoursAgo(1);
-const yesterdayISO = hoursAgo(30);
+const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+const at = (offsetMinutes) => new Date(midnight.getTime() + offsetMinutes * 60000).toISOString();
+const todayISO = at(1);
+const yesterdayISO = at(-60);
 
 const TASKS = [
   { task_id: 'FD-1', title: '示例项目 · 今天新来的', group_id: 'g', status: 'ready', owner: null, attempt_no: 0, created_at: todayISO, updated_at: todayISO, state_changed_seq: 1 },
@@ -43,11 +45,14 @@ const TASKS = [
   { task_id: 'FD-5', title: '示例项目 · 前天做完的', group_id: 'g', status: 'merged', owner: 'm1', attempt_no: 1, created_at: yesterdayISO, updated_at: yesterdayISO, state_changed_seq: 5 },
 ];
 
-// 额度时间线：从昨天傍晚到此刻，每小时一个桶（**盖过今天零点**，这样"今天"
-// 才算得全；平台真给的是最近 24 小时，早晨时会盖不满，那时说的是"最近一天"）。
+// 额度时间线：从昨天到此刻，每小时一个桶（**盖过今天零点**，这样"今天"才算得全；
+// 平台真给的是最近 24 小时，早晨时会盖不满，那时说的是"最近一天"）。
+// 桶的时间按**本地小时**取，同样避开"N 小时前"在午夜附近的坑。
 const BUCKETS = [];
 for (let i = 25; i >= 0; i -= 1) {
-  BUCKETS.push({ at: hoursAgo(i + 1).replace(/\d{2}:\d{2}:\d{2}/, '00:00:00'), requests: i === 0 ? 3 : 0, upstreams: {}, consumers: {} });
+  const bucket = new Date(midnight.getTime() - i * 3600 * 1000);
+  bucket.setMinutes(0, 0, 0);
+  BUCKETS.push({ at: bucket.toISOString(), requests: i === 0 ? 3 : 0, upstreams: {}, consumers: {} });
 }
 
 const STATUS = {

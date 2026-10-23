@@ -10,7 +10,7 @@
 真相源引用：R10 §19（群聊和上下文 —— 群聊是平台上的事实，不是本地的假消息）；
 §15（事件、事实源）；`backend/app/wording/service.py`（机器文本的人话表）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`96bdbaf`）
 test_id：MVP-UI-023
 
 | 项 | 内容 |
@@ -56,8 +56,8 @@ test_id：MVP-UI-023
 | 门禁 | 结果 |
 |---|---|
 | `office/scripts/verify-office-chat-digest.mjs`（新增） | ok |
-| `backend/tests/test_wording.py` | 全绿（加了"管理员 Harness → 管理员窗口"一条） |
-| 办公室冒烟 | 见下 |
+| `backend/tests/test_wording.py` | 全绿（加了"管理员 Harness → 管理员窗口"两条） |
+| 办公室冒烟 | 27/30（3 条环境依赖） |
 | `tools/docstate` / `tools/discipline` / `ruff` | 全过 |
 | 真跑 | 8850 真数据副本（180 条群聊） |
 
@@ -75,3 +75,20 @@ Qoder · 成员2」。
 
 办公室自己发的项目目标消息里写着"管理员 Agent 将据此拆解任务" —— 那是**管理员窗口**，
 不是"Agent"。改掉（`office/src/main.js`）。
+
+## 合入 main 时解的冲突
+
+合并到 main（`96bdbaf`）时，主分支上已经有别人推进过的代码，9 个文件撞了：
+
+- **Pi 适配器**（main 侧有、我的分支没有）：`harnesses/pi.py`、`ADAPTER_TYPES` 里的
+  `"pi"`、工单里 Pi 的那段话、`ScopedRunner` 对 Pi 也 `platform_commit`、
+  `CliHarness.process_environment()`（Pi 隔离自己的 agent 目录）—— 这些都补回了
+  分支那一份里。
+- **超时不再 abandon**（分支侧有、main 没有，R10-fix-15 的可续跑超时）：保留分支的
+  语义，main 那边的 `except HarnessTimeout: abandon(...)` 没有搬过来。
+- `verify/worker.py`：两边其实是同一个修复（Windows 下要带 SystemRoot），分支那侧
+  把它拆成了 `runner_env()` —— 取分支的版本。
+- `TASKS.md`：分支的版本少了 main 上的 `FORMAL-PI-ADAPTER-01` 那一行和它的认领
+  链接 —— 补回去了。
+
+合完跑 `./scripts.sh check` 全绿才提交 merge commit（工具自己管的，我没绕）。
