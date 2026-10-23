@@ -133,6 +133,7 @@
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
+| assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -208,6 +209,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- review-provider-record → docs/claims/opencode--review-provider-record.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
+<!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
 
 
 
@@ -235,6 +237,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-01 | [卡](docs/tasks/notes/OFFICE-UI-01.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
+| assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |
