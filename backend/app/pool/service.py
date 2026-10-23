@@ -117,6 +117,19 @@ _DISCOVERY: dict[tuple[Any, ...], tuple[float, list[Upstream]]] = {}
 _MODELS: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
 
 
+def invalidate_discovery() -> None:
+    """Forget the cached upstream list and model list.
+
+    Called when something the discovery reads **changes** -- today that is the
+    user adding or removing one of their own keys.  Without this, a key added
+    a second ago could stay invisible for up to the discovery TTL, and the
+    worker would be told "no upstream serves that model" instead of "the user
+    has to say yes".
+    """
+    _DISCOVERY.clear()
+    _MODELS.clear()
+
+
 def _usage_blobs(event: dict[str, Any]) -> list[dict[str, Any]]:
     """Every usage object in one SSE event, wherever the protocol puts it.
 
@@ -217,8 +230,19 @@ class PoolService:
         return self._upstreams
 
     def _discovery_key(self) -> tuple[Any, ...]:
-        """What the discovery depends on -- the cache is shared, so the key must say it."""
-        return (str(self.home), self.relay_ports, str(POOL_CONFIG_PATH.resolve()))
+        """What the discovery depends on -- the cache is shared, so the key must say it.
+
+        The **data dir** is part of it since 2026-10-23: the user's own keys
+        live under it (``data/user-keys/``), so two data dirs are two different
+        sets of upstreams.  Leaving it out meant one data dir's keys could be
+        served to another (and the keys of a *different* test/run leak in).
+        """
+        return (
+            str(self.home),
+            self.relay_ports,
+            str(POOL_CONFIG_PATH.resolve()),
+            str(settings.data_dir),
+        )
 
     def models(self, *, refresh: bool = False) -> list[dict[str, Any]]:
         """The unified model list: every model the relay can serve, and from where.

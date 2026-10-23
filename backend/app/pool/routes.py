@@ -29,7 +29,7 @@ from app.api.auth_deps import Principal, require_for
 from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.routing import plan_attempt
-from app.pool.service import PoolError, PoolService
+from app.pool.service import PoolError, PoolService, invalidate_discovery
 
 router = APIRouter(tags=["pool"])
 
@@ -226,6 +226,8 @@ def add_user_key(payload: dict[str, Any], principal: _user_guard) -> dict[str, A
         )
     except user_keys.UserKeyError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    # 新加的 key 立刻算数：不然它要等发现缓存过期（30 秒）才被池子看见。
+    invalidate_discovery()
     return {"key": key.as_dict(), "masked": user_keys.masked(key.id)}
 
 
@@ -234,6 +236,8 @@ def delete_user_key(key_id: str, principal: _user_guard) -> dict[str, Any]:
     """Forget one of the user's own keys."""
     if not user_keys.remove(key_id):
         raise HTTPException(status_code=404, detail="没有这个 key")
+    # 删掉的 key 也不能再留在发现缓存里。
+    invalidate_discovery()
     return {"removed": True}
 
 

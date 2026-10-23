@@ -230,6 +230,61 @@ def test_an_once_approval_is_spent_by_the_request_that_used_it(store: Path) -> N
     assert user_keys.approved(key.id), "「以后都用它」不该被一次请求用掉"
 
 
+def test_a_new_key_is_visible_to_the_pool_at_once(store: Path) -> None:
+    """刚加的 key 立刻算数 —— 不用等发现缓存过期。
+
+    发现结果有 30 秒的缓存，而缓存键以前**不含数据目录**：一个数据目录里
+    刚加的 key，可能被另一个目录（或上一次）的缓存挡住，worker 只会看到
+    "没有这个上游"，而不是"用户在等点头"。
+    """
+    from app.pool.service import PoolService, invalidate_discovery
+
+    service = PoolService()
+    before = [str(model["id"]) for model in service.models()]
+    user_keys.register(
+        label="我的",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["brand-new-model"],
+    )
+    assert "brand-new-model" not in before
+    invalidate_discovery()
+    after = [str(model["id"]) for model in service.models()]
+    assert "brand-new-model" in after, "加完就该被池子看见"
+
+
+def test_two_data_dirs_do_not_share_the_discovery_cache(
+    store: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一个数据目录里的 key 不能被另一个目录看到。"""
+    from app.pool.service import PoolService
+
+    user_keys.register(
+        label="目录一的",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["model-of-first-dir"],
+    )
+    first = [str(model["id"]) for model in PoolService().models()]
+    assert "model-of-first-dir" in first
+
+    other = tmp_path / "other-data"
+    other.mkdir()
+    monkeypatch.setattr(settings, "data_dir", str(other), raising=False)
+    user_keys.register(
+        label="目录二的",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-2",
+        models=["model-of-second-dir"],
+    )
+    second = [str(model["id"]) for model in PoolService().models()]
+    assert "model-of-second-dir" in second
+    assert "model-of-first-dir" not in second, "两个数据目录的 key 不能串"
+
+
 def test_the_refusal_reaches_the_caller_as_a_status(store: Path) -> None:
     """The worker must be able to read *why* the pool refused.
 
