@@ -6,7 +6,7 @@
 | Harness | Codex |
 | 认领时间 | 2026-10-23 16:40 +08:00 |
 | 分支 | `agent/local/codex/OFFICE-UI-01/a1` |
-| 状态 | doing（P1 已交付：`aaa8da5`；P2：模型通道＋assistant worker＋权限面核实） |
+| 状态 | doing（P2 已实现并过门禁：**提交 `a6cdf57`**；待 push/合并） |
 
 ## 做什么（P2）
 把 P1 的引擎接到**真模型**和**真消息**上：
