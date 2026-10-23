@@ -58,6 +58,7 @@ body {
   padding: 0 20px;
   background: var(--ao-surface);
   border-bottom: 1px solid var(--ao-border);
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .04);
 }
 
 .ao-brand {
@@ -67,17 +68,20 @@ body {
   min-width: 0;
 }
 
+/* 品牌标记：一个有质感的方块，不是一块贴上去的灰色。
+   （以前是扁扁的深灰蓝，配色一淡就消失在顶栏里。） */
 .ao-mark {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--ao-radius);
-  background: var(--ao-accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(150deg, #3a72ab 0%, #23486f 62%, #1d3a59 100%);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: .04em;
+  letter-spacing: .06em;
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .22), inset 0 1px 0 rgba(255, 255, 255, .16);
 }
 
 .ao-brand-text {

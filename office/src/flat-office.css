@@ -106,29 +106,34 @@
   font-weight: 650;
 }
 
+/* 「数据源」是给人看的当前数据来源，不是一个裸下拉框。
+   做成一枚安静的胶囊，鼠标悬上去有话说清楚它是干什么的。 */
 .flat-source {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--ao-ink-faint);
 }
 
 .flat-source select {
-  border: 1px solid #cdd3da;
-  border-radius: 5px;
-  padding: 3px 6px;
+  border: 1px solid #dde1e7;
+  border-radius: 999px;
+  padding: 3px 9px;
   background: #fff;
-  color: var(--ao-ink);
+  color: var(--ao-ink-soft);
   font: inherit;
   font-size: 12px;
+  cursor: pointer;
 }
 
-/* 顶栏那五个计数：做成一枚枚小徽章。
-   以前是"标签在上、数字悬在下面"，五个数字散在一条线上，像没排完的草稿。 */
+.flat-source select:hover { border-color: #c3ccd6; }
+
+/* 顶栏那五个计数：紧凑的一排，数字才是有信息的那个。
+   以前每枚徽章都带边框、字距又散，一眼看过去像占位符。 */
 .flat-counts {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   margin: 0 0 0 auto;
   list-style: none;
   padding: 0;
@@ -138,11 +143,11 @@
 .flat-counts li {
   display: inline-flex;
   align-items: baseline;
-  gap: 5px;
-  padding: 3px 9px;
-  border: 1px solid var(--ao-line-soft);
-  border-radius: 999px;
-  background: #f7f9fb;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f4f6f8;
   white-space: nowrap;
 }
 
@@ -159,10 +164,11 @@
 }
 
 /* 有数的才显色：0 不该跟"2 件没做成"一样响。 */
-.flat-counts li.has-value { background: #fff; border-color: #dfe4ea; }
-.flat-counts li.is-review.has-value { border-color: #e6d5c4; background: #fbf4ec; }
+.flat-counts li.has-value { background: #fff; border-color: #e3e6ea; }
+.flat-counts li.has-value b { color: var(--ao-ink); }
+.flat-counts li.is-review.has-value { border-color: #eddfd1; background: #fbf4ec; }
 .flat-counts li.is-review b { color: var(--ao-warn); }
-.flat-counts li.is-failed.has-value { border-color: #e8cccc; background: #fbf0f0; }
+.flat-counts li.is-failed.has-value { border-color: #ededed; background: #fbf0f0; }
 .flat-counts li.is-failed b { color: var(--ao-bad); }
 
 /* ---------------------------------------------------------------- 任务表 */
@@ -239,6 +245,28 @@
   cursor: pointer;
 }
 
+/* 每条活左边一条**状态色条**：一屏扫过去就知道哪几条在等人、哪几条已经完了。
+   （以前只有选中那条有颜色，一眼看不出"哪几件卡着"。） */
+.flat-task-ready,
+.flat-task-queued,
+.flat-task-draft { border-left-color: #d7dde4; }
+
+.flat-task-claimed,
+.flat-task-in_progress,
+.flat-task-verifying { border-left-color: #9dc0e0; }
+
+.flat-task-awaiting_review,
+.flat-task-changes_requested,
+.flat-task-escalated,
+.flat-task-awaiting_human { border-left-color: #e0b98f; }
+
+.flat-task-abandoned,
+.flat-task-stale,
+.flat-task-cancelled { border-left-color: #e3b3b3; }
+
+.flat-task-merged,
+.flat-task-approved { border-left-color: #a9d3bd; }
+
 .flat-task:hover { border-color: #d7dce2; background: #fbfcfd; }
 
 .flat-task.is-selected {
@@ -247,44 +275,73 @@
   background: var(--ao-accent-soft);
 }
 
+/* 状态：一个**小圆点 + 文字**，不是彩色胶囊。
+   以前一屏五六个彩色胶囊，像状态仪表盘；现在颜色只落在那个点上，
+   需要人处理的那几个（等人处理 / 没做成）才留一点底色。 */
 .flat-chip {
   justify-self: start;
-  display: inline-block;
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
   border-radius: 999px;
-  border: 1px solid var(--ao-line);
-  background: #f4f6f8;
-  color: var(--ao-ink-soft);
-  font-size: 11px;
+  border: 1px solid transparent;
+  background: #f1f3f5;
+  color: #55606d;
+  font-size: 11.5px;
   font-weight: 600;
   white-space: nowrap;
 }
 
+.flat-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 .flat-chip-ready,
 .flat-chip-queued,
-.flat-chip-draft { border-color: #d8dde3; color: #55606d; }
+.flat-chip-draft { color: #6b7684; }
 
 .flat-chip-claimed,
 .flat-chip-in_progress,
-.flat-chip-verifying { border-color: #cfe0ef; background: var(--ao-accent-soft); color: var(--ao-accent); }
+.flat-chip-verifying { color: #2f5d8c; }
 
 .flat-chip-awaiting_review,
 .flat-chip-changes_requested,
 .flat-chip-escalated,
-.flat-chip-awaiting_human { border-color: #e6d5c4; background: #fbf4ec; color: var(--ao-warn); }
+.flat-chip-awaiting_human { border-color: #eddfd1; background: #fbf4ec; color: var(--ao-warn); }
 
 .flat-chip-abandoned,
 .flat-chip-stale,
-.flat-chip-cancelled { border-color: #e8cccc; background: #fbf0f0; color: var(--ao-bad); }
+.flat-chip-cancelled { border-color: #ededed; background: #fbf0f0; color: var(--ao-bad); }
 
 .flat-chip-merged,
-.flat-chip-approved { border-color: #cfe3d8; background: #f2faf6; color: var(--ao-good); }
+.flat-chip-approved { border-color: #dceee4; background: #f2faf6; color: var(--ao-good); }
 
 .flat-task-title {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.35;
   color: var(--ao-ink);
+}
+
+/* 标题里的那串技术枚举（"lucide 解析、开工自测…"）降成副句。 */
+.flat-task-sub {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ao-ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.flat-detail-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ao-ink-faint);
 }
 
 .flat-task-meta,
@@ -433,13 +490,16 @@
 
 .flat-spec:last-child { border-bottom: none; }
 
-/* 详情里每一段的小标题：中文就是中文，不必套大写英文的排版。 */
+/* 详情里每一段的小标题：中文就是中文，不必套大写英文的排版。
+   左边一条细竖条 —— 段落之间不用靠一堆细线分隔。 */
 .flat-spec h3 {
-  margin: 0 0 6px;
-  font-size: 12.5px;
+  margin: 0 0 7px;
+  padding-left: 9px;
+  border-left: 3px solid #dbe4ee;
+  font-size: 13px;
   letter-spacing: normal;
   text-transform: none;
-  color: var(--ao-ink-soft);
+  color: #35404d;
   font-weight: 650;
 }
 
@@ -495,10 +555,11 @@
 
 .flat-event { border-bottom: 1px solid var(--ao-line-soft); }
 
+/* 事件行：时间、动作、谁 —— 三列挨着点，别把一条线拉得太开。 */
 .flat-event > details > summary {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 150px minmax(0, 1.2fr);
-  gap: 8px;
+  grid-template-columns: 76px 190px 120px minmax(0, 1fr);
+  gap: 10px;
   align-items: baseline;
   padding: 4px 0;
   cursor: pointer;
@@ -593,10 +654,12 @@
 
 .flat-card h3 {
   margin: 0 0 8px;
+  padding-left: 8px;
+  border-left: 3px solid #dbe4ee;
   font-size: 13px;
   letter-spacing: normal;
   text-transform: none;
-  color: #3c4754;
+  color: #35404d;
   font-weight: 650;
 }
 
@@ -656,12 +719,14 @@
    以前把消息横着塞进 190px 的窄带，消息被切一半、还多一条横向滚动条 —— 不算了。
 */
 
+/* 群聊那条带子：一条**收起来的输入条**，不是一条大白框。
+   以前是整页宽的直角输入框 + 一个方按钮，看着像没做完的表单。 */
 .flat-chat {
   display: grid;
   grid-template-rows: auto auto;
   gap: 0;
-  padding: 0 20px 10px;
-  background: #fff;
+  padding: 0 20px 12px;
+  background: #fbfcfd;
   border-top: 1px solid var(--ao-line);
   min-height: 0;
   overflow: hidden;
@@ -678,11 +743,11 @@
 
 .flat-chat-head h3 {
   margin: 0;
-  font-size: 11px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--ao-ink-faint);
-  font-weight: 600;
+  font-size: 12.5px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #35404d;
+  font-weight: 650;
 }
 
 .flat-chat-count { font-size: 11px; color: var(--ao-ink-faint); }
@@ -743,30 +808,41 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  padding-top: 8px;
+  padding-top: 0;
 }
 
 .flat-chat-form input {
   flex: 1 1 auto;
   min-width: 0;
-  border: 1px solid #cdd3da;
-  border-radius: 5px;
-  padding: 5px 9px;
+  height: 34px;
+  border: 1px solid #d7dde4;
+  border-radius: 17px;
+  padding: 0 14px;
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   background: #fff;
+  box-shadow: inset 0 1px 2px rgba(20, 30, 45, .03);
+}
+
+.flat-chat-form input:focus {
+  outline: none;
+  border-color: #a9c6e2;
+  box-shadow: 0 0 0 3px rgba(47, 93, 140, .12);
 }
 
 .flat-chat-form button {
+  height: 34px;
+  padding: 0 16px;
   border: 1px solid var(--ao-accent);
-  border-radius: 5px;
+  border-radius: 17px;
   background: var(--ao-accent);
   color: #fff;
   font: inherit;
-  font-size: 12px;
-  padding: 5px 12px;
+  font-size: 12.5px;
   cursor: pointer;
 }
+
+.flat-chat-form button:hover { background: #27507a; }
 
 /* ---------------------------------------------- 可以收起来的卡片（默认收起） */
 
@@ -1032,22 +1108,36 @@
 .flat-table td:nth-child(n + 2) { font-variant-numeric: tabular-nums; }
 .flat-table tbody tr:hover { background: #fbfcfd; }
 
+/* 右栏卡片里的按钮：淡淡的一个动作入口，不是一排方框。
+   （每张卡下面一个描边按钮，看起来就像还没接线的占位。） */
 .flat-card-admin button,
 .flat-card-brief button,
 .flat-card-members button {
-  border: 1px solid #cdd3da;
-  border-radius: 5px;
-  background: #fff;
-  color: #1c2430;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ao-accent);
   font: inherit;
   font-size: 12px;
-  padding: 4px 12px;
+  padding: 0;
   cursor: pointer;
+}
+
+.flat-card-admin button::after,
+.flat-card-brief button::after,
+.flat-card-members button::after {
+  content: ' →';
+  color: var(--ao-ink-faint);
 }
 
 .flat-card-admin button:hover,
 .flat-card-brief button:hover,
-.flat-card-members button:hover { background: #f2f4f6; }
+.flat-card-members button:hover {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .flat-card-admin p { margin: 0 0 6px; font-size: 12px; }
 
 /* ------------------------------------------- 任务书里的"活账"卡片 */

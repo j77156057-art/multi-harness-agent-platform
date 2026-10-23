@@ -600,6 +600,23 @@ export function mountFlatOffice({ root, project: projectOf }) {
    * 写着"没人做（之前是 OpenCode）"—— 一件做完的事说成没人做，读者会以为它
    * 还在等人。所以先看这条活**处在什么状态**，再说人。
    */
+  /**
+   * 标题拆成**主句**与**副句**。
+   *
+   * 管理员写的标题常是"修开工链路：lucide 解析、开工自测、目标截断、向导文案" ——
+   * 冒号前是"这件事是什么"，冒号后是"怎么做"（一串技术枚举）。一屏里三条
+   * 这么长的标题叠着，看的人只会觉得是日志。主句当标题，副句降成一行小字。
+   */
+  function titleParts(task) {
+    const title = listTitle(task);
+    const cut = title.indexOf('：');
+    if (cut <= 0 || cut > 24) return { main: title, sub: '' };
+    const main = title.slice(0, cut).trim();
+    const sub = title.slice(cut + 1).trim();
+    if (!main || !sub || sub.length > 80) return { main: title, sub: '' };
+    return { main, sub };
+  }
+
   function whoWord(task, holds) {
     const status = String(task.status || '');
     if (DONE_STATES.has(status)) {
@@ -630,6 +647,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
   function attemptWord(task) {
     const used = Number(task.attempt_no || 0);
     const max = Number(task.max_attempts || 0);
+    // 「第 0 次尝试」是句废话 —— 一次都没试过就别数了。
+    if (!used) return '还没开始试';
     if (!max) return `已经试了 ${used} 次`;
     return `第 ${used} 次尝试（最多 ${max} 次）`;
   }
@@ -984,8 +1003,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <p class="flat-guide">${guide}</p>
       </div>
       <div class="flat-source">
-        <label for="flatSourceSelect">数据源</label>
-        <select id="flatSourceSelect">
+        <label for="flatSourceSelect" title="现在看的是哪一份数据：正式平台上的，还是本机的样例">看的数据</label>
+        <select id="flatSourceSelect" title="正式平台上的项目 / 本机的样例数据">
           <option value="platform">正式平台</option>
           <option value="demo">本地样例</option>
         </select>
@@ -1086,14 +1105,18 @@ export function mountFlatOffice({ root, project: projectOf }) {
     for (const task of filtered) {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'flat-task' + (state.selected?.task_id === task.task_id ? ' is-selected' : '');
+      row.className =
+        'flat-task flat-task-' + escape(task.status || 'ready') +
+        (state.selected?.task_id === task.task_id ? ' is-selected' : '');
       const reason = task.last_failure?.reason ? ` · ${reasonText(task.last_failure.reason)}` : '';
       const stamp = task.updated_at ? ` · ${escape(timeAgo(task.updated_at))}更新` : '';
       const holds = whoHolds(task);
       const who = whoWord(task, holds);
+      const parts = titleParts(task);
       row.innerHTML = `
         <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
-        <span class="flat-task-title">${escape(listTitle(task))}</span>
+        <span class="flat-task-title">${escape(parts.main)}</span>
+        ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
         <span class="flat-task-meta">${escape(who)} · ${escape(attemptWord(task))}${escape(reason)}</span>
         <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
       row.addEventListener('click', (event) => {
@@ -1149,7 +1172,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
       <div class="flat-detail-head">
         <div>
           <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
-          <h2>${escape(task.title || task.task_id)}</h2>
+          <h2>${escape(titleParts(task).main)}</h2>
+          ${titleParts(task).sub ? `<p class="flat-detail-sub">${escape(titleParts(task).sub)}</p>` : ''}
           <p class="flat-summary">${escape(statusSentence(task))}</p>
           <p class="flat-mono">${escape(detailHolds(task))}</p>
         </div>
@@ -1222,7 +1246,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const name = String((state.scope && state.scope.name) || '').trim();
     const prefix = name ? `${name} · ` : '';
     const trimmed = prefix && title.startsWith(prefix) ? title.slice(prefix.length) : title;
-    return stripHarnessSuffix(trimmed);
+    // 平台的任务标题是「项目名 · 任务名」。scope 手里只有项目 id，对不上名字时
+    // 就按**第一段**剥 —— 否则一屏里三条任务顶着同一个长标题，像复制粘贴的。
+    const withoutProject =
+      trimmed === title && title.includes(' · ') ? title.slice(title.indexOf(' · ') + 3).trim() : trimmed;
+    return stripHarnessSuffix(withoutProject);
   }
 
   /**
