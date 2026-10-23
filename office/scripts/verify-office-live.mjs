@@ -55,10 +55,16 @@ const STATUS = {
 };
 
 // 输出会**长出来**：每取一次多一行，模拟 worker 正在写日志。
+// 真实日志就是这样：连着好几行只差一个计数（"第 12 步：改代码"、"第 13 步：改代码"…），
+// 逐行看每行都不同，说的却是同一件事。
 let ticks = 0;
 const lines = () => {
   ticks += 1;
-  return Array.from({ length: ticks }, (_, index) => `第 ${index + 1} 行：正在写代码`).join('\n');
+  const out = [];
+  for (let index = 1; index <= ticks; index += 1) {
+    out.push(index % 3 === 0 ? `第 ${index} 步：跑测试` : `第 ${index} 步：改了一行代码`);
+  }
+  return out.join('\n');
 };
 
 const server = http.createServer((req, res) => {
@@ -153,7 +159,18 @@ try {
   await page.waitForTimeout(9000);
   const after = await page.locator('#flatLive').innerText();
   assert.notEqual(after, before, '输出长了，页面要自己跟上（4 秒一轮）');
-  assert.match(after, /第 \d+ 行/, '看到的是新长出来的那几行');
+  assert.match(after, /第 \d+ 步/, '看到的是新长出来的那几行');
+
+  // 4. 只差计数的那几行折成一条、新的在上面 —— 一屏几十行一样的，像卡带。
+  const steps = page.locator('.flat-live-steps li');
+  const stepCount = await steps.count();
+  assert.ok(stepCount > 0 && stepCount <= 8, `只给最近几步（现在 ${stepCount} 步）`);
+  const numbers = await steps.evaluateAll((nodes) =>
+    nodes.map((node) => Number((node.innerText.match(/第\s*(\d+)\s*步/) || [])[1] || 0)),
+  );
+  assert.ok(numbers[0] === Math.max(...numbers), '新的在上面');
+  const folded = await page.locator('.flat-live-steps li em').count();
+  assert.ok(folded >= 1, '只差计数的那几行折成一条（×N）');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-live: ok');

@@ -519,8 +519,32 @@
   .flat-pulse { animation: none; }
 }
 
-/* 正在跑的那条活：它的输出块。 */
+/* 正在跑的那条活：它刚做的几步。 */
 .flat-live { background: #fbfcfd; border-radius: 10px; padding: 12px 14px; }
+
+.flat-live-steps { gap: 4px; }
+
+.flat-live-steps li {
+  display: block;
+  padding: 3px 8px;
+  border-left: 2px solid #dbe4ee;
+  background: #fff;
+  border-radius: 0 5px 5px 0;
+}
+
+.flat-live-steps li span {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ao-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.flat-live-steps li em {
+  font-style: normal;
+  color: var(--ao-ink-faint);
+  font-size: 11px;
+}
 
 .flat-live-stamp {
   display: flex;

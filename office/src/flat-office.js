@@ -1741,19 +1741,83 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ? `<p class="flat-live-stamp"><i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自己更新</p>`
       : '';
     if (transcript.isJson && transcript.texts.length) {
-      const tools = transcript.tools.slice(-6).reverse();
+      const tools = foldRepeats(transcript.tools.slice(-6).reverse(), (tool) => tool.label);
       return `<section class="flat-spec flat-live" id="flatLive">${stamp}
         <h3>${title}${state.output?.output?.current ? '（当前这一轮）' : ''}</h3>
         <p class="flat-note">它最后说了</p>
         <pre class="flat-output">${escape(headlineText(transcript) || '（这段里没有可读的文字）')}</pre>
-        ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
+        ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.text)}${tool.count > 1 ? ` <em>×${tool.count}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
         <details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
       </section>`;
     }
+    // 不是结构化日志（就是一段纯文本）：**别把整段倒出来**。
+    //
+    // 活的输出是每几秒长一行的，一屏几十行几乎一样 —— 看着像卡带，人根本
+    // 读不出"它做到哪了"。这里只给**最近几步**，连着重复的折成一条（×N）。
+    const steps = recentSteps(stdout);
     return `<section class="flat-spec flat-live" id="flatLive">${stamp}
       <h3>${title}</h3>
-      <pre class="flat-output">${escape(outputText())}</pre>
+      ${
+        steps.length
+          ? `<p class="flat-note">它刚做的（最近 ${steps.length} 步，新的在上面）</p>
+             <ul class="flat-list flat-live-steps">${[...steps]
+               .reverse()
+               .map(
+                 (step) =>
+                   `<li><span>${escape(clip(step.text, 140))}${
+                     step.count > 1 ? ` <em>×${step.count}</em>` : ''
+                   }</span></li>`,
+               )
+               .join('')}</ul>`
+          : '<p class="flat-empty">它还没输出过东西。</p>'
+      }
+      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(stdout.slice(-4000)) + '</pre></details>' : ''}
     </section>`;
+  }
+
+  /**
+   * 最近的若干步：**连着重复的折成一条**。
+   *
+   * worker 干活时日志是一行行长出来的，其中常常连着好几行一样（进度、重试、
+   * 同一句话重复打印）。整段倒出来，人只看到一片重复 —— 所以这里按"连续
+   * 相同"折叠（×N），再只留最后几步。
+   */
+  function recentSteps(stdout, limit = 8) {
+    const lines = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    return foldRepeats(lines, (line) => line).slice(-limit);
+  }
+
+  /** 连续相同的折成一条（×N）。 */
+  function foldRepeats(items, keyOf) {
+    const folded = [];
+    for (const item of items) {
+      const text = String(keyOf(item) ?? '');
+      const last = folded[folded.length - 1];
+      if (last && last.key === stepKey(text)) {
+        last.count += 1;
+        last.text = text;
+        continue;
+      }
+      folded.push({ text, key: stepKey(text), count: 1, item });
+    }
+    return folded;
+  }
+
+  /**
+   * 一行日志的"内容"（**把计数拿掉**）。
+   *
+   * worker 写出来的东西常常是"第 12 步：改代码"这样带计数的行 —— 逐行看每一行
+   * 都不同，但**说的是同一件事**。只按原文比，看不出重复；所以比的是去掉计数
+   * 之后的内容。
+   */
+  function stepKey(text) {
+    return String(text || '')
+      .replace(/^\s*(第\s*)?\d+\s*(步|行|次|个|项)?\s*[：:、,，.。\-–]?\s*/, '')
+      .replace(/[\s#]*\d+\s*$/, '')
+      .trim();
   }
 
   /** 人自己的动作。平台与管理员 harness 都不代劳这些。 */
