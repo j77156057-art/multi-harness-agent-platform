@@ -145,12 +145,20 @@ test_id：MVP-UI-012
 几十条活就是几百 KB，浏览器自己拉再拆会卡死；网关拆完只给"它说了什么 + 它做了
 哪些步 + 原文尾巴"，响应从 79 KB 降到 67 KB。
 
-真数据实测：18 次尝试里 12 次抽到了人话（「## 完成报告」「Done. Committed on the
+真数据实测：18 次尝试里 15 次抽到了人话（「## 完成报告」「Done. Committed on the
 current branch as ...」），页面第一屏就是那篇 Markdown 报告，而不是一堆 JSON。
+剩下 3 次是真的没有：一次 stdout 是空的，一次只有 168 条 system 事件，一次只有
+工具调用没有文本。
 
-踩到的坑：OpenCode 的文字在 `part.text` 里，不在顶层——照顶层读会读到 undefined，
-什么也抽不出来。另一个坑：网关把 stdout 截成最后 4000 字时，第一行必然是**半截
-JSON**，所以"坏行不炸"这条是必须的。
+工具步骤也翻成人话：「跑了命令：npm test」「写了文件：commit-msg.txt」
+「搜了代码：TODO」——CLI 的工具名（shell/read/write/grep…）认得出就换成人话，
+认不出的**只报原名**（挑一个字段来解释它是在猜，猜错比不解释更糟）。
+
+踩到的坑：① OpenCode 的文字在 `part.text` 里、不在顶层——照顶层读会读到 undefined，
+什么也抽不出来；② OpenCode 的工具细节也在 `part` 里（`{"type":"tool_use","part":
+{"tool":"read","state":{...}}}`），而 Claude Code 把 `input` 放顶层——两处都要找；
+③ 网关把 stdout 截成最后 4000 字时第一行必然是**半截 JSON**，所以"坏行不炸"这条
+是必须的。
 
 ### 七、平台助手的段落标题
 

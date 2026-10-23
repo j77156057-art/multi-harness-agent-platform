@@ -19,6 +19,59 @@
 const MAX_TEXT = 4000;
 const MAX_TOOL_LABEL = 160;
 
+/**
+ * CLI 的工具名 → 人话。
+ *
+ * 这些是各家 CLI 自己的词汇（OpenCode 叫 shell/read/write，Claude Code 叫
+ * Bash/Read/Write），直接摆出来对第一次用的人没有意义。认不出的照原样显示 ——
+ * 猜错比不翻译更糟。
+ */
+const TOOL_VERB = {
+  shell: '跑了命令',
+  bash: '跑了命令',
+  read: '读了文件',
+  write: '写了文件',
+  edit: '改了文件',
+  multiedit: '改了文件',
+  apply_patch: '改了文件',
+  grep: '搜了代码',
+  glob: '找了文件',
+  list: '看了目录',
+  ls: '看了目录',
+  task: '派了个活',
+  agent: '派了个活',
+  webfetch: '抓了网页',
+  websearch: '搜了网',
+  todowrite: '记了待办',
+  todoread: '看了待办',
+};
+
+/** 工具的输入里，哪个字段最值得说。 */
+const PREFERRED_INPUT = ['path', 'file_path', 'filePath', 'command', 'pattern', 'query', 'url', 'description'];
+
+/** 只留文件名：完整路径对读者没有意义，还占地方。 */
+const shortPath = (value) => {
+  const text = String(value ?? '');
+  const parts = text.split(/[\\/]/).filter(Boolean);
+  const name = parts.length ? parts[parts.length - 1] : text;
+  return clip(name, 48);
+};
+
+/**
+ * 把一次工具调用说成人话：「写了文件 commit-msg.txt」「跑了命令 npm test」。
+ */
+function describeTool(tool, input) {
+  const raw = String(tool ?? '').trim();
+  const verb = TOOL_VERB[raw.toLowerCase()] || raw;
+  if (!input || typeof input !== 'object') return verb;
+  const key = PREFERRED_INPUT.find((candidate) => input[candidate] !== undefined && input[candidate] !== null);
+  if (!key) return verb;
+  const value = input[key];
+  if (key === 'command') return `${verb}：${clip(String(value).trim(), 60)}`;
+  if (key === 'path' || key === 'file_path' || key === 'filePath') return `${verb}：${shortPath(value)}`;
+  return `${verb}：${clip(String(value), 48)}`;
+}
+
 const clip = (value, limit) => {
   const text = String(value ?? '');
   return text.length > limit ? `${text.slice(0, limit)}…` : text;
@@ -92,18 +145,17 @@ function collect(event, texts, tools) {
     pushText(texts, event.text ?? event.part?.text, '话');
     return;
   }
-  if (type === 'tool') {
-    const tool = event.tool || 'tool';
-    const status = event.state?.status || '';
-    const input = event.state?.input;
-    const hint = input && typeof input === 'object'
-      ? Object.entries(input).slice(0, 2).map(([k, v]) => `${k}=${clip(v, 40)}`).join(' ')
-      : '';
-    pushTool(tools, hint ? `${tool}(${hint})` : tool, status);
-    return;
-  }
-  if (type === 'tool_use') {
-    pushTool(tools, event.tool, '');
+  // OpenCode 的工具事件同样把细节放在 part 里：
+  //   {"type":"tool_use","part":{"type":"tool","tool":"read","state":{"input":{...}}}}
+  if (type === 'tool' || type === 'tool_use') {
+    const part = event.part || {};
+    const tool = event.tool || part.tool || 'tool';
+    const state = event.state || part.state || {};
+    const status = state.status || '';
+    // 输入参数的位置三家不一样：Claude Code 放顶层（event.input），
+    // OpenCode 放在 part.state.input —— 两个地方都找。
+    const input = state.input || event.input || part.input;
+    pushTool(tools, describeTool(tool, input), status);
     return;
   }
   if (type === 'command_execution') {
