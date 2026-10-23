@@ -17,9 +17,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from app.assistant.loop import AssistantLoop, Budget
-from app.assistant.prompts import SYSTEM_PROMPT, UNTRUSTED_PREFIX
-from app.assistant.tools import build_registry
+from app.assistant.prompts import SYSTEM_PROMPT, UNTRUSTED_PREFIX, reflect_prompt
+from app.assistant.tools import ToolRefused, build_registry
 
 GROUP = "office-formal-2"
 
@@ -123,6 +125,7 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
         "task.get",
         "task.diff",
         "task.verification",
+        "task.review_pack",
         "group.tasks",
         "say",
     }
@@ -344,6 +347,142 @@ def test_a_format_failure_is_observed_not_crashed(tmp_path):
     result = _loop(tmp_path, model, client).run("问题", ["上下文。"])
     assert result["status"] == "done"
     assert any("no balanced JSON" in p for p in model.prompts[1:])
+
+
+# ------------------------------------------------- the review-assist pack
+
+
+def _review_pack_client() -> FakeClient:
+    """Canned bodies for the three reads behind one review pack.
+
+    FakeClient matches by prefix and takes the *first* hit, so the more
+    specific paths must stand before the bare ``/tasks/<id>`` key.
+    """
+    return FakeClient(
+        {
+            "/tasks/office-render/diff": {
+                "task_id": "office-render",
+                "available": True,
+                "reason": None,
+                "branch": "agent/local/x/a1",
+                "base_commit": "aaaa",
+                "head_commit": "bbbb",
+                "files_changed": 2,
+                "insertions": 9,
+                "deletions": 1,
+                "files": ["backend/app/out.py", "backend/tests/test_out.py"],
+                "patch": None,
+                "truncated": False,
+            },
+            "/tasks/office-render/verification": {
+                "verification": {
+                    "status": "pass",
+                    "failure_reason": None,
+                    "verify_profile": "default",
+                    "receipt_id": "r1",
+                }
+            },
+            "/tasks/office-render": {
+                "task_id": "office-render",
+                "status": "awaiting_review",
+                "title": "渲染输出",
+                "spec": {
+                    "acceptance": [
+                        {"id": "MVP-RENDER-1", "check": "human", "description": "人审核认可"},
+                        {"id": "CORE-T-2", "check": "pytest", "description": "测试绿"},
+                        {"id": "T-3", "description": "没写 check 的条款"},
+                    ]
+                },
+            },
+        }
+    )
+
+
+def test_the_review_pack_lays_contracts_diff_and_receipt_side_by_side():
+    client = _review_pack_client()
+    pack = _registry(client)["task.review_pack"].handler({"task_id": "office-render"})
+    assert pack["status"] == "awaiting_review"
+    assert [c["id"] for c in pack["acceptance"]] == ["MVP-RENDER-1", "CORE-T-2", "T-3"]
+    assert pack["check_kinds"] == {"human": 1, "pytest": 1, "": 1}, "没写 check 的条款也要被数出来"
+    assert pack["diff"]["available"] is True and pack["diff"]["files_changed"] == 2
+    assert pack["verification"] == {
+        "status": "pass",
+        "failure_reason": None,
+        "verify_profile": "default",
+        "receipt_id": "r1",
+    }
+    paths = [path for path, _ in client.reads]
+    assert paths == [
+        "/tasks/office-render",
+        "/tasks/office-render/diff",
+        "/tasks/office-render/verification",
+    ], "一次取证，三读齐"
+
+
+def test_the_review_pack_passes_the_patch_request_through_to_the_diff_only():
+    client = _review_pack_client()
+    _registry(client)["task.review_pack"].handler(
+        {"task_id": "office-render", "include_patch": True}
+    )
+    diff_reads = [params for path, params in client.reads if path.endswith("/diff")]
+    assert diff_reads == [{"include_patch": True}]
+
+
+def test_the_review_pack_honours_an_unavailable_diff_and_a_missing_receipt():
+    client = FakeClient(
+        {
+            "/tasks/office-render/diff": {
+                "task_id": "office-render",
+                "available": False,
+                "reason": "no attempt has published a commit",
+            },
+            "/tasks/office-render/verification": {"verification": None},
+            "/tasks/office-render": {"task_id": "office-render", "spec": None},
+        }
+    )
+    pack = _registry(client)["task.review_pack"].handler({"task_id": "office-render"})
+    assert pack["diff"]["available"] is False
+    assert pack["diff"]["reason"] == "no attempt has published a commit"
+    assert pack["verification"] is None
+    assert pack["acceptance"] == [], "没有验收条款就老实给空表，不编"
+
+
+def test_the_review_pack_refuses_a_non_identifier_task_id():
+    with pytest.raises(ToolRefused):
+        _registry(FakeClient())["task.review_pack"].handler({"task_id": "../etc/passwd"})
+
+
+def test_the_review_assist_runs_inside_the_loop_with_resolvable_citations(tmp_path):
+    client = _review_pack_client()
+    model = ScriptedModel(
+        [
+            json.dumps(
+                {
+                    "thought": "拿审核素材包",
+                    "tool": "task.review_pack",
+                    "args": {"task_id": "office-render"},
+                }
+            ),
+            _final("验收 3 条，测试回执绿，diff 2 文件 [s1]。裁决待审核人。", ["s1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run(
+        "帮我把 office-render 改动对到验收",
+        ["审核人在群里请我摆证据。"],
+    )
+    assert result["status"] == "done"
+    body = (tmp_path / "trace").glob("*")
+    assert any(True for _ in body), "trace 落账"
+
+
+def test_the_prompts_carry_the_review_assist_boundary():
+    assert "审核助攻" in SYSTEM_PROMPT
+    assert "由审核人裁决" in SYSTEM_PROMPT
+    assert "未记上" in SYSTEM_PROMPT
+    checklist = reflect_prompt({"text": "草稿", "cites": ["c1"]})
+    assert "每条验收条款都指到了出处" in checklist
+    assert "未记上" in checklist
 
 
 # ------------------------------------------------------------------ trace

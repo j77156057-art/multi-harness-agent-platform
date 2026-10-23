@@ -89,6 +89,65 @@ def build_registry(
     def task_verification(args: dict[str, Any]) -> dict[str, Any]:
         return client.get(f"/tasks/{_required_id(args, 'task_id')}/verification")
 
+    def task_review_pack(args: dict[str, Any]) -> dict[str, Any]:
+        """One read that lays the review-assist evidence side by side.
+
+        The *narration* of a review is the assistant's job (what evidence
+        backs which acceptance contract); the assembly here stays mechanical:
+        the contracts as the plan pinned them, the diff reading with its
+        honest ``available`` flag, and the latest verification receipt.  No
+        verdict is computed anywhere -- approve/request_changes stays with
+        the human reviewer.
+        """
+        task_id = _required_id(args, "task_id")
+        include_patch = bool(args.get("include_patch") or False)
+        task = client.get(f"/tasks/{task_id}")
+        spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
+        raw_contracts = spec.get("acceptance")
+        contracts: list[dict[str, str]] = []
+        if isinstance(raw_contracts, list):
+            for item in raw_contracts:
+                if not isinstance(item, dict):
+                    continue
+                contracts.append(
+                    {
+                        "id": str(item.get("id") or ""),
+                        "check": str(item.get("check") or ""),
+                        "description": str(item.get("description") or ""),
+                    }
+                )
+        diff = client.get(f"/tasks/{task_id}/diff", include_patch=include_patch)
+        verification = client.get(f"/tasks/{task_id}/verification")
+        diff_keys = (
+            "available",
+            "reason",
+            "branch",
+            "base_commit",
+            "head_commit",
+            "files_changed",
+            "insertions",
+            "deletions",
+            "files",
+            "patch",
+            "truncated",
+        )
+        if isinstance(diff, dict):
+            diff_pack = {key: diff.get(key) for key in diff_keys}
+        else:
+            diff_pack = {"available": False, "reason": "diff read shape was not an object"}
+        check_kinds: dict[str, int] = {}
+        for contract in contracts:
+            check_kinds[contract["check"]] = check_kinds.get(contract["check"], 0) + 1
+        return {
+            "task_id": task_id,
+            "status": str(task.get("status") or ""),
+            "title": str(task.get("title") or ""),
+            "acceptance": contracts,
+            "check_kinds": check_kinds,
+            "diff": diff_pack,
+            "verification": verification.get("verification"),
+        }
+
     def group_tasks(args: dict[str, Any]) -> dict[str, Any]:
         params: dict[str, Any] = {}
         status = str(args.get("status") or "").strip()
@@ -122,6 +181,13 @@ def build_registry(
             task_diff,
         ),
         Tool("task.verification", "read", "任务的验证读数", task_verification),
+        Tool(
+            "task.review_pack",
+            "read",
+            "审核助攻素材包：验收条款逐条 + diff 读数 + 验证回执（一次取证；"
+            "include_patch 才带补丁文本）",
+            task_review_pack,
+        ),
         Tool("group.tasks", "read", "本群任务表（可选 status 过滤）", group_tasks),
         Tool(
             "say",
