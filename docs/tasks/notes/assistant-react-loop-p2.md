@@ -73,6 +73,22 @@ github.com:443 被墙期间，经 **api.github.com 的 Git Data API** 推送成�
 要么 `--force-with-lease` 覆盖（内容相同，安全）。推送脚本：
 `api.github.com /repos/*/git/blobs|trees|commits|refs`（gh token，repo scope）。
 
+### 收敛（2026-10-23 晚，分叉终结）
+
+github.com:443 仍被墙，改用 **Git Data API 逐字节复刻**把整个分叉段
+（`478ca7a` 之后 13 颗等价提交）重建为**本地 sha 完全相同**的对象：
+
+- 复刻法：blob（base64 原样）、tree（`ls-tree` 全项 POST，sha 必须与本地
+  相同否则中止）、commit（消息**连尾换行逐字透传**＋author/committer 原名
+  原邮箱原时刻——GitHub 原样存消息不补换行，这一条是从 sha 分叉上逼近
+  出来的金律）；每颗提交断言"远端生成 sha == 本地 sha"。
+- 收敛保险：force 前核对远端分叉段与本地历史**逐条消息一一对应**（防丢
+  任何他人提交）；只动 `agent/local/codex/OFFICE-UI-01/a1` 这条 codex
+  本地分支。
+- 结果：远端 ref 已收敛到本地 `3f06b84`（绿章提交）。**上表的等价对照
+  从此作废**——此后远端与本地同 sha，按常规渲染；分叉时期的老对象留在
+  GitHub 悬空，仅作考古。后续推送继续走本脚本（常规增量，非 force）。
+
 ### 首跑真平台验证（2026-10-23 晚）
 
 **身份走平台正门，没有绕任何门**：`app.auth issue --type human` 铸操作员
