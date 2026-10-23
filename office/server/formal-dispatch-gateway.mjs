@@ -59,7 +59,7 @@ export function createFormalGateway(config={}){
     if(!trimmed||trimmed.startsWith('['))throw fail(503,'administrator_credential_unavailable');
     return fs.readFileSync(trimmed,'utf8');
   }
-  async function call(path,body,credential,method){
+  async function call(path,body,credential,method,timeoutMs){
     // `undefined` = the operator; `null`/`''` used to mean "open" by accident,
     // so an explicit call site must pass a credential and defaulting is done here,
     // once.
@@ -70,7 +70,7 @@ export function createFormalGateway(config={}){
     let response;
     try{response=await fetch(new URL('/api/v1'+path,upstream),{method:method||(body?'POST':'GET'),
       headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},
-      ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000),redirect:'error'});}
+      ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeoutMs||10000),redirect:'error'});}
     catch{throw fail(503,'formal_backend_unavailable');}
     // 1 MB was too tight for a read that pages 200 events: one attempt's output
     // once went into the event log and the task history grew past it, so the
@@ -399,7 +399,9 @@ export function createFormalGateway(config={}){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>200000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body))throw fail(400,'invalid_json');
-        const result=await call('/'+route.replace(/^\//,''),body);
+        // 规则层很快；模型层要跑管理员那台 CLI（几十秒），所以给更长的时限。
+        const timeoutMs=route.endsWith('/summarize')?120000:10000;
+        const result=await call('/'+route.replace(/^\//,''),body,undefined,undefined,timeoutMs);
         json(res,200,result);return true;
       }
       if(req.method==='GET'&&route==='/events'){

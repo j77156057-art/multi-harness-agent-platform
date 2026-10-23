@@ -112,7 +112,9 @@ try {
   const briefText = await brief.innerText();
   assert.match(briefText, /谁接的/, '任务书里每条任务都写着谁接的');
   assert.match(briefText, /做得怎么样/, '任务书里每条任务都写着做得怎么样');
-  assert.match(briefText, /claude-code/, '接过的人在任务书里');
+  // 人名用**登记名**（"Claude Code"），不是窗口 id（"claude-code"）——
+  // 断的是"接过的人看得见"这件事，不是他长什么样。
+  assert.match(briefText, /Claude Code/, '接过的人在任务书里（写的是登记名）');
   assert.match(briefText, /打回返修/, '审核结论在任务书里');
   assert.match(briefText, /CLI 不可用/, '没完成的原因在任务书里');
   assert.match(briefText, /任务书正文/, '方案原文仍然在后面');

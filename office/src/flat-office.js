@@ -176,6 +176,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
     messages: [],
     userKeys: [],
     userKeyPending: null,
+    // 方案原文那句人话（平台翻的）；跟着方案原文走，方案换了就重翻。
+    briefSummary: '',
+    briefSummaryFor: '',
     // 哪些折叠卡片是开着的。
     //
     // 右栏每 15 秒重画一次（为了看到新数据）。不记住这件事，用户刚点开
@@ -708,21 +711,22 @@ export function mountFlatOffice({ root, project: projectOf }) {
               ? `现在没人做（接过 ${task.attempt_no} 次，接手的人不在近期这段记录里）`
               : '还没人接过';
         const history = row.claims.map((c) => c.actor_id).filter((v, i, a) => a.indexOf(v) === i);
+        const who = (id) => (id ? harnessName(id) : '');
         const verdict = row.lastReview
-          ? `${REVIEW_VERDICT[row.lastReview.event_name] || row.lastReview.event_name}（${row.lastReview.actor_id || '平台'}）`
+          ? `${REVIEW_VERDICT[row.lastReview.event_name] || row.lastReview.event_name}（${who(row.lastReview.actor_id) || '平台'}）`
           : '还没有审核结论';
         const submitter = row.submits.length
-          ? row.submits.map((s) => s.actor_id).filter((v, i, a) => a.indexOf(v) === i).join('、')
+          ? row.submits.map((s) => s.actor_id).filter((v, i, a) => a.indexOf(v) === i).map(who).join('、')
           : null;
         return `<section class="flat-brief-task">
           <header>
             <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
             <b>${escape(task.title || task.task_id)}</b>
-            <span class="flat-mono">${escape(task.task_id)}</span>
+            <span class="flat-mono" title="任务编号 ${escape(task.task_id)}">${escape(translated(task.task_id) || task.task_id)}</span>
           </header>
           <dl>
             <dt>谁接的</dt>
-            <dd>${escape(owner)}${history.length ? `· 接过：${escape(history.join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
+            <dd>${escape(owner)}${history.length ? `· 接过：${escape(history.map(who).join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
             <dt>做得怎么样</dt>
             <dd>交了 ${row.submits.length} 次${submitter ? `（${escape(submitter)}）` : ''}；${escape(verdict)}${row.median !== null ? `；接手到交付 ${row.median}s` : ''}</dd>
             ${task.last_failure && task.last_failure.reason ? `<dt>没完成的原因</dt><dd>${escape(reasonText(task.last_failure.reason))}</dd>` : ''}
@@ -741,7 +745,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       : '<p class="flat-brief-action flat-note">没有待领取的活：要么已经都在人手上，要么已经收尾了。</p>';
     return `${dispatchNote}<p class="flat-note">共 ${rows.length} 条任务：进行中 ${running} · 已完成 ${done}。下面每一条都写着：现在谁拿着、接过几次、交了几次、审核结论。</p>
       <p class="flat-note">当前持有者与尝试次数是平台自己的字段，一定准；接过的人与交付次数取自**近期这一段事件**，这个群的事件已经超过一页，更早的接手记录不在窗口里。</p>
-      <p class="flat-brief-summary" data-brief-summary hidden></p>${cards}${original}`;
+      <p class="flat-brief-summary" data-brief-summary${state.briefSummary ? '' : ' hidden'}>${escape(state.briefSummary || '')}</p>${cards}${original}`;
   }
 
   /**
@@ -2381,14 +2385,18 @@ export function mountFlatOffice({ root, project: projectOf }) {
         body: briefBody(brief),
       });
       // 方案原文是"源码一样"的段落：让**平台**翻成一句人话（翻不出来就还是原文）。
+      // 摘要存在 state 里 —— 只写进 DOM 的话，下一次刷新（15 秒）就把它抹掉了。
       if (brief.markdown) {
-        void summarize(brief.markdown).then((summary) => {
-          if (!summary || !briefDialog.open) return;
-          const box = briefDialog.querySelector('[data-brief-summary]');
-          if (!box) return;
-          box.textContent = summary;
-          box.hidden = false;
-        });
+        if (state.briefSummaryFor !== brief.markdown) {
+          state.briefSummaryFor = brief.markdown;
+          state.briefSummary = '';
+          void summarize(brief.markdown).then((summary) => {
+            if (summary && state.briefSummaryFor === brief.markdown) {
+              state.briefSummary = summary;
+              render();
+            }
+          });
+        }
       }
       return;
     }
@@ -2595,6 +2603,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const texts = [];
     for (const task of state.tasks || []) {
       if (task.last_failure?.reason) texts.push(task.last_failure.reason);
+      if (task.task_id) texts.push(task.task_id);
     }
     for (const event of state.events || []) {
       if (event?.event_name) texts.push(event.event_name);
