@@ -110,6 +110,18 @@
   font-weight: 650;
 }
 
+/* 「今天」：把徽章上的总数讲成一句话 —— 今天这个项目发生了什么。
+   放在导语下面：导语说"现在该你做什么"，这段说"今天已经发生了什么"。
+   两段都是灰的，所以这段带一条竖线，跟导语分开一点。 */
+.flat-head-main p.flat-today {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--ao-line);
+  font-size: 12px;
+  color: var(--ao-ink-soft);
+  max-width: 46rem;
+}
+
 /* 「数据源」是给人看的当前数据来源，不是一个裸下拉框。
    做成一枚安静的胶囊，鼠标悬上去有话说清楚它是干什么的。 */
 .flat-source {

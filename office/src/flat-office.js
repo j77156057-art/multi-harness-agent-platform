@@ -1070,6 +1070,73 @@ export function mountFlatOffice({ root, project: projectOf }) {
     return name.replace(/[（(][^（()）]{0,30}[)）]\s*$/, '').trim() || name;
   }
 
+  /**
+   * 「今天」这一段人话。
+   *
+   * 顶上原来给的是**计数徽章** —— 那是**总共**几条，不是今天，而且得自己加。
+   * 这里补一段话：这个项目**今天**发生了什么。
+   *
+   * 每句都是平台上的事实算出来的：
+   *   · 今天新来的 —— 任务 created_at 落在今天；
+   *   · 今天做完的 —— 状态是已完成、updated_at 落在今天；
+   *   · 今天没做成的 —— 状态是没做成、updated_at 落在今天；
+   *   · 现在在干的 —— 状态是 claimed/in_progress/verifying；
+   *   · 额度 —— 平台给的 24 小时用量时间线。额度是**全平台**的，不是这个项目的；
+   *     时间线盖不满今天的时候就说"最近一天"，不假装它是"今天"。
+   *
+   * "今天"按**本机时区**算：办公室跑在人的浏览器里，他说的"今天"就是他那边
+   * 的今天（平台的时间戳是 UTC，直接比会差八小时）。
+   */
+  function todayStory() {
+    const now = new Date();
+    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const isToday = (stamp) => {
+      const at = Date.parse(stamp || '');
+      return Number.isFinite(at) && at >= dayStart;
+    };
+    const tasks = state.tasks || [];
+    const fresh = tasks.filter((task) => isToday(task.created_at));
+    const done = tasks.filter((task) => DONE_STATES.has(String(task.status)) && isToday(task.updated_at));
+    const failed = tasks.filter((task) => FAILED_STATES.has(String(task.status)) && isToday(task.updated_at));
+    const working = tasks.filter((task) => ['claimed', 'in_progress', 'verifying'].includes(String(task.status)));
+    const windows = new Set(working.map((task) => task.owner).filter(Boolean));
+
+    const bits = [];
+    if (fresh.length) bits.push(`新接了 ${fresh.length} 件事`);
+    if (done.length) bits.push(`做完了 ${done.length} 件`);
+    if (failed.length) bits.push(`没做成 ${failed.length} 件`);
+
+    const sentences = [];
+    if (bits.length) {
+      sentences.push(`今天${bits.join('、')}。`);
+    } else {
+      // 今天没动静 —— 也要说清楚"多久没动静了"，否则人不知道是刚清空还是躺了三天。
+      const latest = tasks.reduce((best, task) => {
+        const at = Date.parse(task.updated_at || '') || 0;
+        return at > best.at ? { at, task } : best;
+      }, { at: 0, task: null });
+      sentences.push(latest.task
+        ? `今天这个项目还没有动静 —— 最新的一条是 ${timeAgo(latest.task.updated_at)}更新的。`
+        : '今天这个项目还没有动静 —— 这个项目还没有任务。');
+    }
+    if (working.length) {
+      sentences.push(`现在 ${windows.size || working.length} 个窗口在干活。`);
+    }
+    // 额度是全平台的用量，单独一句，别混进"这个项目"的账里。
+    const timeline = state.pool && state.pool.timeline;
+    if (timeline && Array.isArray(timeline.buckets) && timeline.buckets.length) {
+      const from = Date.parse(timeline.buckets[0].at);
+      const covered = Number.isFinite(from) && from <= dayStart;
+      const used = timeline.buckets
+        .filter((bucket) => Date.parse(bucket.at) >= dayStart)
+        .reduce((sum, bucket) => sum + Number(bucket.requests || 0), 0);
+      sentences.push(covered
+        ? `额度池今天用了 ${used} 次。`
+        : `额度池最近一天用了 ${used} 次。`);
+    }
+    return sentences.join('');
+  }
+
   function header(counts) {
     const wrap = document.createElement('header');
     wrap.className = 'flat-head';
@@ -1094,6 +1161,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <span class="flat-eyebrow">这个项目的办公室</span>
         <h1>${escape(projectName())}</h1>
         <p class="flat-guide">${guide}</p>
+        <p class="flat-today">${escape(todayStory())}</p>
       </div>
       <ul class="flat-counts">
         <li class="${counts.waiting ? 'has-value' : ''}"><span>等人接</span><b>${counts.waiting}</b></li>
