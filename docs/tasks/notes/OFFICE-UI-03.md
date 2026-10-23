@@ -99,10 +99,16 @@ key 是**运行期凭据**，不是业务状态：建表就得进 schema、就�
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_pool_user_keys.py` | 9/9 PASS |
+| `backend/tests/test_pool_user_keys.py` | 12/12 PASS |
+| 池子相关全部用例（6 个文件，按全量套件的顺序） | 79/79 PASS |
+| **后端全量** `pytest` | **938 项全绿**（退出码 0；这套在这台共享机器上要 40 分钟） |
 | `office/scripts/verify-office-user-keys.mjs` | ok（Chromium 实测，拦截 API） |
+| 既有办公室冒烟 | 全 ok；只剩 3 条**环境依赖**的：<br>`verify-anchors`（要 5197 端口的 Godot 原型 dev server）、<br>`verify-harness-connections`（要本机装好的 CLI）、<br>`verify-project-workspace`（断言平台在册窗口数，我这个实例只有 7 个有凭据的） |
+| `office/` 构建 | `npm run build` 通过（171 kB JS / 53.8 kB CSS） |
+| `tools/docstate` | 98 项 0 失败 |
+| `tools/discipline` | 44 项 0 失败（1 条告警：根工作区被占，是仓库主人自己的改动） |
+| `ruff check` / `ruff format --check` | 全过 |
 | 真平台实跑 | 见下方「真跑记录」 |
-| `./scripts.sh check` | 见提交记录 |
 
 ## 真跑记录（真平台 8849 + 真令牌 + 本地假 provider 4180）
 
