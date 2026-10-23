@@ -486,6 +486,43 @@ def test_the_prompts_carry_the_review_assist_boundary():
     assert "未记上" in checklist
 
 
+def test_the_prompt_enumerates_the_whitelist_verbatim():
+    """报给模型的白名单必须与注册表逐字一致。
+
+    真平台首跑里，小模型幻觉出 `pool.list`（不在白名单）——引擎拒绝是
+    对的，但读了轮次就白烧。约束：prompt 里每个清单外的"工具名"都可能
+    被小模型照抄，所以 prompt 的工具清单必须从注册表**机械生成校验**：
+    新增读面工具没同步 prompt、或 prompt 写了不存在的名字，都会在这里红。
+    """
+    from app.assistant.tools import build_registry
+
+    class _EmptyClient:
+        def get(self, path: str, **params: object) -> dict:
+            return {}
+
+        def post(self, path: str, body: dict) -> dict:
+            return {}
+
+        def close(self) -> None: ...
+
+    registry = build_registry(_EmptyClient(), group_id="g", author_id="me")
+    reads = {name for name, tool in registry.items() if tool.kind == "read"}
+    writes = {name for name, tool in registry.items() if tool.kind != "read"}
+    assert writes == {"say"}, "say 是唯一写，白名单里有别的写就是越权"
+
+    # 每个 read 工具名都在 prompt 里被逐字引用（带反引号），且写明逐字使用。
+    for name in reads:
+        assert f"`{name}`" in SYSTEM_PROMPT, f"白名单工具 {name} 未列进 system prompt"
+    assert "必须逐字使用" in SYSTEM_PROMPT
+    assert "清单之外的名字一律不存在" in SYSTEM_PROMPT
+
+    # prompt 里出现过的 `task.x` 样式清单名不许超出白名单（防 prompt 幻觉）。
+    import re
+
+    mentioned = set(re.findall(r"`(task\.[a-z_]+|pool\.[a-z_]+|group\.[a-z_]+)`", SYSTEM_PROMPT))
+    assert mentioned <= set(registry), f"prompt 引用了不存在的工具名: {mentioned - set(registry)}"
+
+
 # --------------------------------------------------- the diagnose pack
 
 

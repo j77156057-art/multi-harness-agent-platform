@@ -126,7 +126,16 @@ direct，引用 `[c1]`＋run id 可回查）→ trace 落账。回答是诚实�
 （label 记"operator re-issue (assistant provision)"），`D:\Temp` 临时
 件已清；明文仅此一份，库里只存哈希。
 
-**绿章（2026-10-23 最终树，含本修复）**：全量 pytest 1027 用例全点 `.`、
+**常驻试跑（2026-10-23 晚开跑）**：`--interval 20` 挂入真平台后台。
+自动接单链路验证：真问题（seq 1061）无人干预被领走 → 私聊回复
+（seq 1062，`[s1]/[c1]`＋run id `run-20261023-211954-97cb38`）。轮次里
+出现两个新质量观察（诚实机制都正确兜住、无违反）：①小模型幻觉出
+不在白名单的 `pool.list`——引擎如实拒绝不猜替代品（白名单闭合起效），
+暴露 prompt 未列白名单名导致空烧一步，已修：**SYSTEM_PROMPT 逐字枚举
+白名单工具名**（"must 逐字使用/清单外一律不存在"），并加机械锚定用例
+（prompt 清单必须与 build_registry 同步，新工具忘了列、prompt 写了
+不存在的名都会红）；②第三论 reflect 对 `hy3` 的判定格式不可解——如实
+`self_check: unavailable`，draft 过门后照发，未编 pass。
 进度 `[100%]`、零 F/E/s/x、无 short test summary info（输出留档
 `D:\Temp\opencode\full_pytest_final.txt`；末行"N passed"因 Start-Process
 重定向缓冲伪影未落档，用例级证据完整）；ruff check＋format 全仓绿、
