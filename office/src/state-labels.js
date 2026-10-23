@@ -44,3 +44,42 @@ export const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
 
 /** 状态词 + 兜底（平台给了不认识的状态就照实显示它，不编）。 */
 export const stateLabel = (status) => STATE_LABEL[status] || String(status || '');
+
+/**
+ * 事件名说人话。
+ *
+ * 平台的 event_name 是机器名（`claim` / `submit_result` / `plan.approve`…）。
+ * 事件列表是给人看"这条活经历了什么"的，印机器名等于让人自己翻译。
+ * 不认识的事件名照实显示（宁可原样，也不要编一个错的动作）。
+ */
+export const EVENT_LABEL = {
+  claim: '有人领了这条活',
+  claim_for_revision: '领回去返工',
+  start: '开工了',
+  submit_result: '交上去了',
+  abandon: '放弃了',
+  release: '放开了',
+  cancel: '取消了',
+  reassign: '换人做了',
+  'human.resume': '你回答了',
+  'human.release': '你放行了',
+  'human.reopen': '你重新打开了',
+  'human.cancel': '你取消了',
+  'human.escalate': '你把它交上来了',
+  'plan.approve': '方案批准了',
+  'plan.reject': '方案被驳回了',
+  'review.claim': '有人领了审查',
+  'review.submit': '审查交上去了',
+  request_changes: '要求返工',
+  reopen_for_changes: '打回去返工',
+  verify_passed: '校验通过了',
+  merge_success: '合进主分支了',
+  merge_conflict: '合并撞车了',
+  merge_conflict_needs_owner: '合并撞车了，要你定',
+  permission_denied: '有人被拒绝了',
+  'task.created': '活建好了',
+  'task.dispatched': '派下去了',
+};
+
+/** 事件名 + 兜底。 */
+export const eventLabel = (name) => EVENT_LABEL[name] || String(name || '');

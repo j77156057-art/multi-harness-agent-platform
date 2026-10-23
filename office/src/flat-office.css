@@ -497,7 +497,7 @@
 
 .flat-event > details > summary {
   display: grid;
-  grid-template-columns: 44px 190px 150px minmax(0, 1fr);
+  grid-template-columns: 88px minmax(0, 1fr) 150px minmax(0, 1.2fr);
   gap: 8px;
   align-items: baseline;
   padding: 4px 0;
@@ -516,7 +516,8 @@
 
 .flat-event > details[open] > summary::before { content: "▾"; }
 
-.flat-event-seq { color: var(--ao-ink-faint); font-variant-numeric: tabular-nums; }
+/* 事件行第一列现在是**时间**（不是事件编号）—— 人读得懂的那一列。 */
+.flat-event-seq { color: var(--ao-ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flat-event summary b { font-weight: 600; color: var(--ao-ink); }
 .flat-event summary em { color: var(--ao-ink-soft); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flat-event-hint { color: var(--ao-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -22,7 +22,7 @@ import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-ro
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
-import { STATE_LABEL, DONE_STATES } from './state-labels.js';
+import { STATE_LABEL, DONE_STATES, eventLabel } from './state-labels.js';
 import { headlineText, parseTranscript } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
@@ -91,9 +91,25 @@ const timeOf = (value) => {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
 };
 
-/** 只要到分钟：额度曲线上的刻度，精确到秒没有意义。 */
-const timeMinute = (value) => {
+/**
+ * 事件行里的**短时间**：`10/18 20:20`。
+ *
+ * 事件列表那一列很窄，完整的 `2026/10/18 20:20:08` 放不下（窄屏会横向溢出）。
+ * 完整时间留在 title 里。
+ */
+const timeShort = (value) => {
   if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const month = String(date.getMonth() + 1);
+  const day = String(date.getDate());
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${month}/${day} ${hours}:${minutes}`;
+};
+
+/** 只要到分钟：额度曲线上的刻度，精确到秒没有意义。 */
+const timeMinute = (value) => {  if (!value) return '—';
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? '—'
@@ -1299,12 +1315,15 @@ export function mountFlatOffice({ root, project: projectOf }) {
     const payload = event.payload && typeof event.payload === 'object' ? event.payload : null;
     const hint = eventHint(event);
     const fields = payload ? payloadFields(payload) : [];
+    // 事件列表是给人看"这条活经历了什么"的：时间、人话的动作、谁做的。
+    // 事件编号（seq）留�� title 里 —— 它是给查问题的人看的，不是给人读的。
+    const who = actorName(event);
     return `<li class="flat-event">
       <details>
-        <summary>
-          <span class="flat-event-seq">${escape(event.seq)}</span>
-          <b>${escape(event.event_name)}</b>
-          <em>${escape(event.actor_id || '')}</em>
+        <summary title="事件编号 ${escape(event.seq ?? '')} · ${escape(timeOf(event.created_at))}">
+          <span class="flat-event-seq">${escape(timeShort(event.created_at))}</span>
+          <b>${escape(eventLabel(event.event_name))}</b>
+          <em>${escape(who)}</em>
           ${hint ? `<span class="flat-event-hint">${escape(hint)}</span>` : ''}
         </summary>
         ${fields.length
@@ -1316,6 +1335,15 @@ export function mountFlatOffice({ root, project: projectOf }) {
     </li>`;
   }
 
+  /** 事件是谁做的：人写"你"，窗口写它的登记名。 */
+  function actorName(event) {
+    const id = String(event.actor_id || '');
+    if (!id) return '';
+    if (String(event.actor_type || '') === 'human') return '你';
+    if (id === 'office-operator') return '你';
+    return harnessName(id);
+  }
+
   /** 事件名旁边那一句话：先说人话，让人知道要不要点开。 */
   function eventHint(event) {
     const payload = event.payload || {};
@@ -1323,7 +1351,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (payload.completion && typeof payload.completion.summary === 'string') {
       return clip(payload.completion.summary, 48);
     }
-    if (typeof payload.previous_status === 'string') return `上一步是 ${payload.previous_status}`;
+    if (typeof payload.previous_status === 'string') return `上一步是 ${STATE_LABEL[payload.previous_status] || payload.previous_status}`;
     if (typeof payload.failure_reason === 'string' && payload.failure_reason.trim()) {
       return clip(payload.failure_reason, 48);
     }
