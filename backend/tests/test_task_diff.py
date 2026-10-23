@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from app.api.app import create_app
 from app.git.diff import parse_numstat, truncate_patch
 from app.git.publish import PublishProxy
-from app.git.repo import run_git
+from app.git.repo import CanonicalRepo, run_git
 from app.tasks.service import NotFound
 from tests.git_support import commit_in, make_fixture, provision, seed_and_claim
 
@@ -145,6 +145,39 @@ def test_unknown_task_or_attempt_is_not_found(tmp_path):
         fixture.service.diff_for_task("NOPE", repo=fixture.repo)
     with pytest.raises(NotFound):
         fixture.service.diff_for_task("T-1", attempt_id="T-1.a99", repo=fixture.repo)
+
+
+def test_a_store_that_cannot_be_opened_answers_false_not_an_exception(tmp_path):
+    repo = CanonicalRepo(tmp_path / "missing" / "canonical.git")
+
+    assert repo.is_initialized() is False
+    assert repo.has_object("0" * 40) is False
+
+
+def test_an_uninitialized_canonical_repo_is_unavailable_not_a_500(tmp_path):
+    """A misconfigured canonical path must not turn the office's diff card into a 500.
+
+    The honest reading is the same unavailable one the endpoint already uses:
+    ``available: false`` with a reason that does not claim to know where the
+    commits went, empty files, no patch.  The route serves that reading at 200.
+    """
+    fixture, item, _worktree, head = _published(tmp_path)
+    broken = CanonicalRepo(tmp_path / "not" / "the" / "canonical" / "repo")
+    assert broken.is_initialized() is False
+
+    reading = fixture.service.diff_for_task("T-1", include_patch=True, repo=broken)
+    assert reading["available"] is False
+    assert reading["reason"] == "canonical repository is not initialized"
+    assert reading["base_commit"] is not None and reading["head_commit"] == head
+    assert reading["files"] == [] and reading["patch"] is None
+
+    client = TestClient(create_app(fixture.database, broken), base_url=LOOPBACK)
+    ok = client.get(f"/api/v1/tasks/T-1/diff?include_patch=1&attempt_id={item.attempt_id}")
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["available"] is False
+    assert body["reason"] == "canonical repository is not initialized"
+    assert body["patch"] is None
 
 
 def test_the_route_serves_the_same_reading(tmp_path):
