@@ -46,6 +46,7 @@ class Step:
     tool: str | None = None
     args: dict[str, Any] | None = None
     observation: dict[str, Any] | None = None
+    usage: dict[str, Any] | None = None
     taken_at: float = field(default_factory=lambda: time.time())
 
     def as_json(self) -> dict[str, Any]:
@@ -56,6 +57,7 @@ class Step:
             "tool": self.tool,
             "args": self.args,
             "observation": self.observation,
+            "usage": self.usage,
             "taken_at": self.taken_at,
         }
 
@@ -134,6 +136,7 @@ class _Run:
     draft: dict[str, Any] | None = None
     reflected: bool = False
     started: float = field(default_factory=time.monotonic)
+    usage: dict[str, Any] | None = None
 
 
 class AssistantLoop:
@@ -188,6 +191,11 @@ class AssistantLoop:
             )
             prompt = self._transcript(stage, state)
             parsed = _model_json(str(self.model.step(prompt) or ""))
+            # The channel's upstream receipt, if this call earned one. The
+            # loop never assumes a receipt that is not there: no receipt,
+            # the step trace says nothing about tokens.
+            usage = getattr(self.model, "last_usage", None)
+            state.usage = usage if isinstance(usage, dict) else None
             if parsed is None:
                 self._append(
                     state,
@@ -202,13 +210,14 @@ class AssistantLoop:
             result = (
                 self._reflect(state, parsed) if stage == "reflect" else self._act(state, parsed)
             )
+            state.usage = None  # the receipt belongs to the turn that earned it
             if result is not None:
                 break
         result.update(
             run_id=self.run_id,
             calls_used=state.calls,
             steps=len(state.steps),
-            trace=self._write_final(result),
+            trace=self._write_final(result, state),
         )
         return result
 
@@ -342,6 +351,8 @@ class AssistantLoop:
         }
 
     def _append(self, state: _Run, **kwargs: Any) -> Step:
+        if "usage" not in kwargs:
+            kwargs["usage"] = state.usage
         step = Step(no=len(state.steps) + 1, **kwargs)
         state.steps.append(step)
         self._trace_step(step)
@@ -379,7 +390,7 @@ class AssistantLoop:
     def _trace_step(self, step: Step) -> None:
         self._trace_write(json.dumps(step.as_json(), ensure_ascii=False))
 
-    def _write_final(self, result: dict[str, Any]) -> str:
+    def _write_final(self, result: dict[str, Any], state: _Run) -> str:
         self._trace_write(
             json.dumps(
                 {
@@ -390,12 +401,26 @@ class AssistantLoop:
                     "self_check": result.get("self_check"),
                     "calls_used": result.get("calls_used"),
                     "steps": result.get("steps"),
-                    "token_accounting": "未记上（池子按调用记账；引擎本地不估算）",
+                    "token_accounting": self._usage_receipt(state),
+                    "model": getattr(self.model, "last_model", None),
                 },
                 ensure_ascii=False,
             )
         )
         return str(self._trace_path()) if self._trace_path().exists() else "unavailable"
+
+    @staticmethod
+    def _usage_receipt(state: _Run) -> dict[str, Any] | str:
+        # Not a local estimate: what the pool's receipt said, or the honest
+        # "not on the books" when no receipt was seen.
+        received = [s.usage for s in state.steps if s.usage]
+        if received:
+            return {
+                "pool_receipt": "记账上（池子收据）",
+                "calls_with_usage": len(received),
+                "last": received[-1],
+            }
+        return "未记上（池子按调用记账；引擎本地不估算）"
 
     def _trace_write(self, line: str) -> None:
         try:

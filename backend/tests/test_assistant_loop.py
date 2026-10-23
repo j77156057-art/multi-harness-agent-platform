@@ -237,6 +237,55 @@ def test_a_disabled_self_check_skips_the_reflection_round(tmp_path):
     assert len(model.prompts) == 1, "免自检时不该再烧一次模型调用"
 
 
+# ---------------------------------------------------------- usage receipts
+
+
+def test_a_channel_receipt_lands_in_the_trace_untouched(tmp_path):
+    client = FakeClient()
+
+    class ReceiptModel:
+        """A scripted model that claims the pool receipt it 'earned'."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.last_usage: dict[str, Any] | None = None
+            self.last_model: str | None = None
+
+        def step(self, prompt: str) -> str:
+            self.calls += 1
+            self.last_usage = {"prompt_tokens": 5600, "completion_tokens": 42}
+            self.last_model = "qoder/Qwen3.8-Flash"
+            return _final("答案 [c1]。", ["c1"]) if self.calls >= 1 else "{}"
+
+    model = ReceiptModel()
+    result = _loop(tmp_path, model, client).run("问题", ["上下文。"])
+    assert result["status"] == "done"
+    lines = [
+        json.loads(line) for line in Path(result["trace"]).read_text(encoding="utf-8").splitlines()
+    ]
+    step_lines = lines[:-1]
+    assert all(s["usage"] == {"prompt_tokens": 5600, "completion_tokens": 42} for s in step_lines)
+    accounting = lines[-1]["token_accounting"]
+    assert accounting["pool_receipt"] == "记账上（池子收据）"
+    assert accounting["last"]["completion_tokens"] == 42
+    assert lines[-1]["model"] == "qoder/Qwen3.8-Flash"
+
+
+def test_no_receipt_keeps_the_honest_unrecorded_marker(tmp_path):
+    client = FakeClient()
+    model = ScriptedModel(
+        [
+            _final("答 [c1]。", ["c1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run("问题", ["上下文。"])
+    lines = [
+        json.loads(line) for line in Path(result["trace"]).read_text(encoding="utf-8").splitlines()
+    ]
+    assert lines[-1]["token_accounting"].startswith("未记上")
+
+
 # ------------------------------------------------------- the injection rule
 
 

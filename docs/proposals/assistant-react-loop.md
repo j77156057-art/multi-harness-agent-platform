@@ -59,6 +59,11 @@
 - **P1（本期）**：引擎+工具表+prompt+机械门+反思层接口；全 scripted 测试
   （预算封顶、工具白名单、引用可回查、注入围栏、trace 收据）。台面只垫
   代码面，不接 worker 进程。
+- **P2（2026-10-23 开工）**：池子直连模型通道（免费档五家，CLI 槽经
+  `_cli_chat` 出货，零 USD；metered 不设自动回退——烧钱是人决定的事）＋
+  assistant worker（admin/worker 只 import 复用零修改；管理员先例的诚实
+  私聊交账）＋ 权限面核实（结论：读面公共读、`harness:pool` 已放行全体
+  harness，矩阵零行新增）。
 - **P2**：assistant worker 进程（从 admin/worker 削）+ 池子直连模型通道 +
   证据束取样器（Diagnostic：消费 failure.json → 人话根因）+ 权限矩阵登记。
 - **P3**：审核助攻（diff↔验收标准对照）、验收标准可测性守门、日记与
