@@ -11,8 +11,9 @@ opencode 明明还有更多免费模型的"后开工）
 依赖任务：pool-free-set-watch（免费档易变三件套之"发现面"扩展）
 真相源引用：R10 §19.2（额度池语义）；AGENTS.md §1/§2/§4/§5/§5b；母卡
 `docs/tasks/notes/pool-free-set-watch.md`（发现面/变更哨/活性三件套分工）
-当前状态：doing（实装＋7 条 scripted＋全量 pytest 绿＋真发现面 9 家实勘
-＋哨上岗 1 条真告警；commit 与验收结果随本轮登记提交回填）
+当前状态：done（实装＋7 条 scripted＋全量 pytest 绿＋真发现面 9 家实勘＋
+哨上岗 1 条真告警）
+commit：`0a7b637`（实装、测试、登记一轮提交）
 test_id：`MVP-ADAPTER-003`
 
 | 项 | 值 |
@@ -59,6 +60,19 @@ CLI 槽可声明一枚 `enumerate` 规则：CLI 自己能列清单（如
 3. 哨上岗证明：`--once` 检出免费档 5→13、入队 1 条真告警；
 4. ruff（check+format）、`tools/docstate`（98/0）、`tools/discipline`
    （44/0＋1 根工作区占用告警）、pytest 定点＋全量绿。
+
+### 验收结果
+
+| 项 | 结果 |
+|---|---|
+| scripted 7 条 | ✅ `tests/test_pool_cli_enumerate.py` 全绿（pytest 定点） |
+| ruff check＋format | ✅ 修复 2 处后全绿，重跑 pytest 确认未破 |
+| tools/docstate | ✅ 98 项检查 0 失败 |
+| tools/discipline | ✅ 44 项 0 失败＋1 条根工作区占用告警（不判红） |
+| pytest 定点＋全量 | ✅ 定点绿；全量 `[100%]` 全点、退出码 0（留档 `D:\Temp\opencode\p3_full_pytest.txt`） |
+| 真发现面实勘 | ✅ `discover_cli_slots()` 免费档 9 家与 `opencode models` 花名册逐一对照 |
+| 哨上岗 | ✅ `--once`：5→13 家、alerts 入队恰 1 条、快照指纹 `e349cd68…`→`f844659e…` |
+| commit | `0a7b637`（一轮提交）＋本轮登记 `见 git log` |
 
 ## 状态
 

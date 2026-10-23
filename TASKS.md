@@ -138,7 +138,7 @@
 | pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
 | assistant-react-loop-p3 | Codex | assistant-react-loop | doing（P3 第一刀：审核助攻 review_pack 工具＋prompt 审核协议；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | review-contract-gate | Codex | assistant-react-loop-p3 | waiting（提案：评审契约守门，落点 tasks/service.py 共享在途；待复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
-| cli-roster-enumerate | Codex | — | doing（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
