@@ -984,6 +984,17 @@ export function mountFlatOffice({ root, project: projectOf }) {
     syncBriefDialog();
   }
 
+  /**
+   * 项目名（给人看的那一份）。
+   *
+   * 平台上的项目名有时带内部批注（"重开-112（平台项目 112）"）—— 那是写给
+   * 运维看的括号说明，界面上留着就像日志。去掉括号里的话，名字本身留下。
+   */
+  function projectName() {
+    const name = String((state.scope && state.scope.name) || '').trim() || '本项目';
+    return name.replace(/[（(][^（()）]{0,30}[)）]\s*$/, '').trim() || name;
+  }
+
   function header(counts) {
     const wrap = document.createElement('header');
     wrap.className = 'flat-head';
@@ -1006,7 +1017,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
-        <h1>${escape(state.scope?.name || '本项目')}</h1>
+        <h1>${escape(projectName())}</h1>
         <p class="flat-guide">${guide}</p>
       </div>
       <ul class="flat-counts">
@@ -1851,11 +1862,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
       .slice(0, 5)
       .map((task) => {
         const parts = titleParts(task);
+        const ago = task.updated_at ? timeAgo(task.updated_at) : '';
+        const waited = ago && ago !== '刚刚' ? ` · 已经等了 ${ago.replace(/前$/, '')}` : '';
         return `<li><button type="button" data-act="open-task" data-task="${escape(task.task_id)}">
             <b>${escape(parts.main)}</b>
             <span>${escape(STATE_LABEL[task.status] || task.status)} · ${escape(
               task.last_failure?.reason ? reasonText(task.last_failure.reason) : '等你给个说法',
-            )}</span>
+            )}${escape(waited)}</span>
           </button></li>`;
       })
       .join('');
