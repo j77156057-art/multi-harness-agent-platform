@@ -172,6 +172,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
     status: null,
     scope: null,
     filter: 'all',
+    // 列表的看法：'person' = 按窗口归堆（谁忙谁闲），'time' = 平铺按时间排。
+    groupBy: 'person',
     error: null,
     messages: [],
     userKeys: [],
@@ -653,13 +655,86 @@ export function mountFlatOffice({ root, project: projectOf }) {
     return `第 ${used} 次尝试（最多 ${max} 次）`;
   }
 
-  function whoHolds(task) {
-    if (task.owner) return { now: harnessName(task.owner), before: null };
+  /**
+   * 谁手上：现在谁在做（**id**）、之前是谁做的（**id**）。
+   *
+   * 分组要按 id 归堆（两个人可能同名，名字不能当钥匙），所以这里给的是 id；
+   * 要人看的名字由 `whoHolds` 那一层换。
+   */
+  function holderIds(task) {
+    if (task.owner) return { now: task.owner, before: null };
     const holders = holdersOf(task.task_id);
+    return { now: null, before: holders.length ? holders[holders.length - 1] : null };
+  }
+
+  function whoHolds(task) {
+    const ids = holderIds(task);
     return {
-      now: null,
-      before: holders.length ? harnessName(holders[holders.length - 1]) : null,
+      now: ids.now ? harnessName(ids.now) : null,
+      before: ids.before ? harnessName(ids.before) : null,
     };
+  }
+
+  /**
+   * 按「谁」把活归堆。
+   *
+   * 现在谁在做就归谁；做完了、没做成的归**最后做的那个人** —— 一条活做完没人
+   * 接手，它还是那个人的活。没人碰过的归「还没人接」。
+   *
+   * 每堆带三个数：手上（在做的）、做完了、没做成。**忙闲是从"手上"推出来的**，
+   * 不是猜的：手上有人在做的活就是在忙，没有就是闲着。
+   */
+  function groupByPerson(tasks) {
+    const groups = new Map();
+    for (const task of tasks || []) {
+      const ids = holderIds(task);
+      const key = ids.now || ids.before || '';
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          name: key ? harnessName(key) : '还没人接',
+          tasks: [],
+          active: 0,
+          done: 0,
+          failed: 0,
+          waiting: 0,
+        };
+        groups.set(key, group);
+      }
+      group.tasks.push(task);
+      const status = String(task.status || '');
+      if (['claimed', 'in_progress', 'verifying'].includes(status)) group.active += 1;
+      else if (DONE_STATES.has(status)) group.done += 1;
+      else if (FAILED_STATES.has(status)) group.failed += 1;
+      else group.waiting += 1;
+    }
+    const list = [...groups.values()];
+    // 顺序是一句话：**谁在干活 → 活还缺人 → 谁有空**。
+    const rank = (group) => (group.active > 0 ? 0 : group.key ? 2 : 1);
+    list.sort((a, b) => {
+      if (rank(a) !== rank(b)) return rank(a) - rank(b);
+      if (a.active !== b.active) return b.active - a.active;
+      return b.tasks.length - a.tasks.length;
+    });
+    return list;
+  }
+
+  /** 这一堆是忙是闲（依据：手上有几条在做的活）。 */
+  function groupMood(group) {
+    if (group.active > 0) return { text: '在忙', kind: 'is-busy' };
+    if (!group.key) return { text: '等人接', kind: 'is-waiting' };
+    return { text: '闲着', kind: 'is-idle' };
+  }
+
+  /** 这一堆的数：手上几条、做完了几条、没做成几条。 */
+  function groupFacts(group) {
+    const bits = [];
+    if (group.active) bits.push(`手上 ${group.active} 条`);
+    if (group.waiting) bits.push(`等着 ${group.waiting} 条`);
+    if (group.done) bits.push(`做完了 ${group.done} 条`);
+    if (group.failed) bits.push(`没做成 ${group.failed} 条`);
+    return bits.join(' · ');
   }
 
   /** 审核结论的说人话（事件名 -> 人话）。 */
@@ -1045,6 +1120,37 @@ export function mountFlatOffice({ root, project: projectOf }) {
     return wrap;
   }
 
+  /**
+   * 列表里的一条活。
+   *
+   * `hideWho` 用于按人归堆的视图：块头已经写了是谁，这里就不用每行再写一遍。
+   * 「还没人接」那一堆例外 —— 那里没有名字，行里得说清"现在没人做"。
+   */
+  function taskRow(task, { hideWho = false } = {}) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className =
+      'flat-task flat-task-' + escape(task.status || 'ready') +
+      (state.selected?.task_id === task.task_id ? ' is-selected' : '');
+    const reason = task.last_failure?.reason ? ` · ${reasonText(task.last_failure.reason)}` : '';
+    const stamp = task.updated_at ? ` · ${escape(timeAgo(task.updated_at))}更新` : '';
+    const holds = whoHolds(task);
+    const who = whoWord(task, holds);
+    const parts = titleParts(task);
+    const whoPart = hideWho ? '' : escape(who);
+    row.innerHTML = `
+      <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
+      <span class="flat-task-title">${escape(parts.main)}</span>
+      ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
+      <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="它正在做"></i>' : ''}${whoPart}${whoPart ? ' · ' : ''}${escape(attemptWord(task))}${escape(reason)}</span>
+      <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
+    row.addEventListener('click', (event) => {
+      if (event.target.closest('[data-jump="log"]')) return;
+      void select(task.task_id);
+    });
+    return row;
+  }
+
   function body(filtered, pager) {
     const wrap = document.createElement('div');
     wrap.className = 'flat-body';
@@ -1108,7 +1214,31 @@ export function mountFlatOffice({ root, project: projectOf }) {
       sizeSelect.append(option);
     }
     sortWrap.append(sortLabel, sortSelect, sizeLabel, sizeSelect);
-    bar.append(sortWrap);
+
+    // 两种看法：**按人**归堆（谁忙谁闲）or 平铺按时间排。
+    // 默认按人 —— 办公室的日常问题是"今天该找谁""这个窗口是不是压了一堆活"，
+    // 这两个问题按状态排答不上来。
+    const viewWrap = document.createElement('div');
+    viewWrap.className = 'flat-view';
+    for (const [value, label] of [['person', '按人'], ['time', '按时间']]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = label;
+      button.setAttribute('aria-pressed', String(state.groupBy === value));
+      button.addEventListener('click', () => {
+        state.groupBy = value;
+        state.page = 1;
+        render();
+      });
+      viewWrap.append(button);
+    }
+
+    // 工具（看法、排序、每页）排成一行靠右，别各占一行散在下面。
+    const tools = document.createElement('div');
+    tools.className = 'flat-tools';
+    tools.append(viewWrap, sortWrap);
+    bar.append(tools);
+
     list.append(bar);
 
     if (!filtered.length) {
@@ -1120,28 +1250,29 @@ export function mountFlatOffice({ root, project: projectOf }) {
       list.append(empty);
     }
 
-    for (const task of filtered) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className =
-        'flat-task flat-task-' + escape(task.status || 'ready') +
-        (state.selected?.task_id === task.task_id ? ' is-selected' : '');
-      const reason = task.last_failure?.reason ? ` · ${reasonText(task.last_failure.reason)}` : '';
-      const stamp = task.updated_at ? ` · ${escape(timeAgo(task.updated_at))}更新` : '';
-      const holds = whoHolds(task);
-      const who = whoWord(task, holds);
-      const parts = titleParts(task);
-      row.innerHTML = `
-        <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
-        <span class="flat-task-title">${escape(parts.main)}</span>
-        ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
-        <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="它正在做"></i>' : ''}${escape(who)} · ${escape(attemptWord(task))}${escape(reason)}</span>
-        <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
-      row.addEventListener('click', (event) => {
-        if (event.target.closest('[data-jump="log"]')) return;
-        void select(task.task_id);
-      });
-      list.append(row);
+    // 列表：按「人」归堆（默认），或者平铺按时间排。
+    if (state.groupBy === 'person') {
+      for (const group of groupByPerson(filtered)) {
+        const box = document.createElement('section');
+        box.className = 'flat-group';
+        box.dataset.group = group.key || 'none';
+        const mood = groupMood(group);
+        const facts = groupFacts(group);
+        const head = document.createElement('header');
+        head.className = 'flat-group-head';
+        head.innerHTML = `
+          <span class="flat-group-name">${escape(group.name)}</span>
+          <span class="flat-group-mood ${mood.kind}">${escape(mood.text)}</span>
+          ${facts ? `<span class="flat-group-facts">${escape(facts)}</span>` : ''}`;
+        box.append(head);
+        const groupBody = document.createElement('div');
+        groupBody.className = 'flat-group-body';
+        for (const task of group.tasks) groupBody.append(taskRow(task, { hideWho: Boolean(group.key) }));
+        box.append(groupBody);
+        list.append(box);
+      }
+    } else {
+      for (const task of filtered) list.append(taskRow(task));
     }
     const pagerBar = document.createElement('div');
     pagerBar.className = 'flat-pager';
@@ -2835,11 +2966,16 @@ export function mountFlatOffice({ root, project: projectOf }) {
       }
       // 先把**任务表**画出来，再去补右栏与群聊：额度池要问 provider 的余额
       // （几秒），等它回来才出第一屏，看着就像卡住了。
-      const [status, tasks] = await Promise.all([
+      //
+      // 但**事件**必须跟任务表一起到：按人归堆要知道每条活是谁接的（从领取事件
+      // 看），分两批到的话第一屏会先摆成"一堆没人接"，等事件到了再重排 —— 一闪。
+      const [status, tasks, events] = await Promise.all([
         api('/status').catch(() => null),
         api('/tasks').catch(() => ({ tasks: [] })),
+        api('/events?limit=400').catch(() => ({ events: [] })),
       ]);
       state.status = status;
+      state.events = events.events || [];
       const all = tasks.tasks || [];
       state.tasks = scope ? all.filter(scope.matches) : all;
       // 这里**不**清 state.error：一次失败的提示要留到人下一次动手为止。
@@ -2849,12 +2985,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
         void select(first.task_id);
       }
       render();
-      const [availability, pool, plan, messages, events] = await Promise.all([
+      const [availability, pool, plan, messages] = await Promise.all([
         api('/availability').catch(() => ({ availability: [] })),
         api('/pool').catch(() => null),
         api('/plan').catch(() => null),
         api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
-        api('/events?limit=400').catch(() => ({ events: [] })),
         loadUserKeys(),
       ]);
       state.availability = availability.availability || [];

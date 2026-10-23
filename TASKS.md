@@ -134,6 +134,7 @@
 | OFFICE-UI-02 | Mavis | OFFICE-UI-01 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
 | OFFICE-UI-03 | Mavis | OFFICE-UI-02 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
 | OFFICE-UI-04 | Mavis | OFFICE-UI-02 | →doing | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-018` |
+| OFFICE-UI-05 | Mavis | OFFICE-UI-02 | →doing（列表按「人」归堆：每个窗口一块，块头写清是谁、几条、忙还是闲） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-020` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -210,6 +211,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-02 → docs/claims/mavis--OFFICE-UI-02.md -->
 <!-- OFFICE-UI-03 → docs/claims/mavis--OFFICE-UI-03.md -->
 <!-- OFFICE-UI-04 → docs/claims/mavis--OFFICE-UI-04.md -->
+<!-- OFFICE-UI-05 → docs/claims/mavis--OFFICE-UI-05.md -->
 
 
 
@@ -238,6 +240,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-02 | [卡](docs/tasks/notes/OFFICE-UI-02.md) | | |
 | OFFICE-UI-03 | [卡](docs/tasks/notes/OFFICE-UI-03.md) | | |
 | OFFICE-UI-04 | [卡](docs/tasks/notes/OFFICE-UI-04.md) | | |
+| OFFICE-UI-05 | [卡](docs/tasks/notes/OFFICE-UI-05.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |

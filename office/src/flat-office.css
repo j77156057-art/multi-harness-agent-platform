@@ -251,6 +251,92 @@
   cursor: pointer;
 }
 
+/* ------------------------------------------------------------------ 按人归堆
+ *
+ * 列表按**窗口**归堆：块头说清是谁、手上几条、忙还是闲，块里是它接的活。
+ * 办公室的日常问题是"今天该找谁""这个窗口是不是压了一堆活" —— 按状态排答不
+ * 上来，按人看才答得上来。
+ */
+.flat-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.flat-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #f4f6f8;
+}
+
+.flat-group-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ao-ink);
+}
+
+/* 忙闲：不是装饰，是"这个窗口手上有没有在做的活"的可读说法。 */
+.flat-group-mood {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid #dfe3e8;
+  color: var(--ao-ink-soft);
+  background: #fff;
+}
+
+.flat-group-mood.is-busy { border-color: #bfe0cd; background: #eef8f2; color: #1f7a4d; }
+.flat-group-mood.is-waiting { border-color: #e8cccc; background: #fbf0f0; color: #b03a3a; }
+.flat-group-mood.is-idle { border-color: #dfe3e8; background: #fff; color: var(--ao-ink-faint); }
+
+.flat-group-facts {
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.flat-group-body {
+  display: grid;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+/* 工具（看法、排序、每页）：左栏窄，放不下就折成两行 —— 一行看法，一行排序。 */
+.flat-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.flat-view { display: flex; align-items: center; gap: 4px; }
+
+.flat-view button {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.flat-view button:hover { background: #f1f3f5; }
+
+.flat-view button[aria-pressed="true"] {
+  background: var(--ao-accent-soft);
+  border-color: #cfe0ef;
+  color: var(--ao-accent);
+  font-weight: 600;
+}
+
 /* 每条活左边一条**状态色条**：一屏扫过去就知道哪几条在等人、哪几条已经完了。
    （以前只有选中那条有颜色，一眼看不出"哪几件卡着"。） */
 .flat-task-ready,

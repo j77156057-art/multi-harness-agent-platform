@@ -137,8 +137,14 @@ try {
   await page.waitForTimeout(300);
 
   // 3.5 任务行里也要看得到谁接过（即使现在没人拿着）
+  // 按人归堆之后，"谁接过"写在**块头**上（行里不重复写一遍）：
+  // 没人拿着的那条要落在接过它的那块下面，而且行里说清"现在没人做"。
+  const groups = await page.locator('#aoWorkspace .flat-group').allInnerTexts();
+  const abandonedGroup = groups.find((text) => text.includes('被放弃的那条'));
+  assert.ok(abandonedGroup, '没人拿着的那条还在列表里');
+  assert.match(abandonedGroup, /Claude Code/, '它落在接过它的那块下面');
   const rows = await page.locator('#aoWorkspace .flat-task').allInnerTexts();
-  assert.ok(rows.some((r) => r.includes('之前是')), '没人拿着的任务也写明之前是谁接的');
+  assert.ok(rows.some((r) => r.includes('已放弃')), '行里的状态签说清这条没做成');
 
   // 3.8 没人接的活：请管理员派出去（办公室不代点，只发一条 @管理员 的群消息）
   const posted = [];
