@@ -1,0 +1,1655 @@
+/* 办公室（数据版）—— 企业级外观。
+ *
+ * 布局是**一张表 + 一份详情 + 一栏现状**，下面一条可收起的对话台：
+ *
+ *   ┌ 计数条：待领取 / 进行中 / 待审 / 失败 / 完成 ─────────────┐
+ *   │ 任务表        │ 选中任务：工单·验收·事件·原话 │ 额度与成员 │
+ *   └ 项目群聊（一条带子，展开才是历史） ─────────────────────┘
+ *
+ * 颜色只用中性灰 + 一个强调色；状态用**文字 + 色签**，不靠颜色单独表意。
+ * 布局规则统一放在文件末尾的「布局（收口）」里，不与前面的规则互相覆盖。
+ */
+
+.flat-office {
+  --ao-line: #e3e6ea;
+  --ao-line-soft: #eef0f3;
+  --ao-ink: #1c2430;
+  --ao-ink-soft: #5b6673;
+  --ao-ink-faint: #8a94a0;
+  --ao-accent: #2f5d8c;
+  --ao-accent-soft: #eaf1f8;
+  --ao-good: #1f7a4d;
+  --ao-warn: #a8562a;
+  --ao-bad: #b03a3a;
+}
+
+/* ------------------------------------------------------------------ 顶条 */
+
+/* 办公室的头部：一条**有底色**的带子，不是一行浮在白底上的字。
+   页面要有主角 —— 主角就是这条带子：这是什么项目、现在该干什么。 */
+.flat-head {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 14px 20px 13px;
+  background: linear-gradient(180deg, #eef4fb 0%, #f8fafc 62%, #fff 100%);
+  border-bottom: 1px solid var(--ao-line);
+  /* 真数据实测：1280px 宽下，导语 + 数据源 + 五个计数把这一行挤爆了 ——
+     计数标签被压成竖排（"等人接"一个字一行）。宁可换行，不要挤成竖排。 */
+  flex-wrap: wrap;
+}
+
+.flat-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 刚才那一下没成：一条能看见的提示。
+   以前这些失败只写进 state.error，而 state.error **从来没有被渲染过** ——
+   于是所有失败都是静默的，人只看到"点了没反应"。 */
+.flat-error {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 7px 11px;
+  border: 1px solid #e6c3c3;
+  border-radius: 6px;
+  background: #fdf1f1;
+  color: #8d2f2f;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.flat-error button {
+  margin-left: auto;
+  border: 1px solid #d9a9a9;
+  border-radius: 5px;
+  background: #fff;
+  color: #8d2f2f;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flat-eyebrow {
+  font-size: 11px;
+  letter-spacing: .02em;
+  color: var(--ao-ink-faint);
+}
+
+/* 项目的名字是这一屏的主角：够大、够深。 */
+.flat-head-main h1 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -.015em;
+  color: #16202b;
+}
+
+.flat-head-main p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ao-ink-soft);
+}
+
+/* 顶部那一句导语：这是哪儿、我该看什么。 */
+.flat-head-main p.flat-guide {
+  font-size: 12.5px;
+  color: var(--ao-ink-soft);
+  max-width: 46rem;
+}
+
+.flat-head-main p.flat-guide b {
+  color: var(--ao-bad);
+  font-weight: 650;
+}
+
+/* 「今天」：把徽章上的总数讲成一句话 —— 今天这个项目发生了什么。
+   放在导语下面：导语说"现在该你做什么"，这段说"今天已经发生了什么"。
+   两段都是灰的，所以这段带一条竖线，跟导语分开一点。 */
+.flat-head-main p.flat-today {
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--ao-line);
+  font-size: 12px;
+  color: var(--ao-ink-soft);
+  max-width: 46rem;
+}
+
+/* 「数据源」是给人看的当前数据来源，不是一个裸下拉框。
+   做成一枚安静的胶囊，鼠标悬上去有话说清楚它是干什么的。 */
+.flat-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+  /* 切换放在最右：信息在左，操作在右。 */
+  margin-left: 4px;
+}
+
+.flat-source select {
+  border: 1px solid #dde1e7;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: #fff;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.flat-source select:hover { border-color: #c3ccd6; }
+
+/* 顶栏那五个计数：紧凑的一排，数字才是有信息的那个。
+   以前每枚徽章都带边框、字距又散，一眼看过去像占位符。 */
+.flat-counts {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 0 auto;
+  list-style: none;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.flat-counts li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f4f6f8;
+  white-space: nowrap;
+}
+
+.flat-counts span {
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-counts b {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ao-ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 有数的才显色：0 不该跟"2 件没做成"一样响。 */
+.flat-counts li.has-value { background: #fff; border-color: #e3e6ea; }
+.flat-counts li.has-value b { color: var(--ao-ink); }
+.flat-counts li.is-review.has-value { border-color: #eddfd1; background: #fbf4ec; }
+.flat-counts li.is-review b { color: var(--ao-warn); }
+.flat-counts li.is-failed.has-value { border-color: #ededed; background: #fbf0f0; }
+.flat-counts li.is-failed b { color: var(--ao-bad); }
+
+/* ---------------------------------------------------------------- 任务表 */
+
+.flat-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  min-width: 0;
+}
+
+.flat-taskbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* 五个筛选项：排成整齐的两行（3 + 2），不要一个孤零零掉到第二行。 */
+.flat-filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; width: 100%; }
+
+.flat-filters button {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.flat-filters button:hover { background: #f1f3f5; }
+
+.flat-filters button[aria-pressed="true"] {
+  background: var(--ao-accent-soft);
+  border-color: #cfe0ef;
+  color: var(--ao-accent);
+  font-weight: 600;
+}
+
+.flat-sort {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-sort select {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  padding: 2px 6px;
+  background: #fff;
+  color: var(--ao-ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.flat-task {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 9px 10px;
+  border: 1px solid var(--ao-line-soft);
+  border-left: 3px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ 按人归堆
+ *
+ * 列表按**窗口**归堆：块头说清是谁、手上几条、忙还是闲，块里是它接的活。
+ * 办公室的日常问题是"今天该找谁""这个窗口是不是压了一堆活" —— 按状态排答不
+ * 上来，按人看才答得上来。
+ */
+.flat-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.flat-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #f4f6f8;
+}
+
+.flat-group-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--ao-ink);
+}
+
+/* 忙闲：不是装饰，是"这个窗口手上有没有在做的活"的可读说法。 */
+.flat-group-mood {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid #dfe3e8;
+  color: var(--ao-ink-soft);
+  background: #fff;
+}
+
+.flat-group-mood.is-busy { border-color: #bfe0cd; background: #eef8f2; color: #1f7a4d; }
+.flat-group-mood.is-waiting { border-color: #e8cccc; background: #fbf0f0; color: #b03a3a; }
+.flat-group-mood.is-idle { border-color: #dfe3e8; background: #fff; color: var(--ao-ink-faint); }
+
+.flat-group-facts {
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.flat-group-body {
+  display: grid;
+  gap: 6px;
+  padding-left: 2px;
+}
+
+/* 工具（看法、排序、每页）：左栏窄，放不下就折成两行 —— 一行看法，一行排序。 */
+.flat-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.flat-view { display: flex; align-items: center; gap: 4px; }
+
+.flat-view button {
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.flat-view button:hover { background: #f1f3f5; }
+
+.flat-view button[aria-pressed="true"] {
+  background: var(--ao-accent-soft);
+  border-color: #cfe0ef;
+  color: var(--ao-accent);
+  font-weight: 600;
+}
+
+/* 每条活左边一条**状态色条**：一屏扫过去就知道哪几条在等人、哪几条已经完了。
+   （以前只有选中那条有颜色，一眼看不出"哪几件卡着"。） */
+.flat-task-ready,
+.flat-task-queued,
+.flat-task-draft { border-left-color: #d7dde4; }
+
+.flat-task-claimed,
+.flat-task-in_progress,
+.flat-task-verifying { border-left-color: #9dc0e0; }
+
+.flat-task-awaiting_review,
+.flat-task-changes_requested,
+.flat-task-escalated,
+.flat-task-awaiting_human { border-left-color: #e0b98f; }
+
+.flat-task-abandoned,
+.flat-task-stale,
+.flat-task-cancelled { border-left-color: #e3b3b3; }
+
+.flat-task-merged,
+.flat-task-approved { border-left-color: #a9d3bd; }
+
+.flat-task:hover { border-color: #d7dce2; background: #fbfcfd; }
+
+.flat-task.is-selected {
+  border-color: #cfe0ef;
+  border-left-color: var(--ao-accent);
+  background: var(--ao-accent-soft);
+}
+
+/* 状态：一个**小圆点 + 文字**，不是彩色胶囊。
+   以前一屏五六个彩色胶囊，像状态仪表盘；现在颜色只落在那个点上，
+   需要人处理的那几个（等人处理 / 没做成）才留一点底色。 */
+.flat-chip {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #f1f3f5;
+  color: #55606d;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.flat-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.flat-chip-ready,
+.flat-chip-queued,
+.flat-chip-draft { color: #6b7684; }
+
+.flat-chip-claimed,
+.flat-chip-in_progress,
+.flat-chip-verifying { color: #2f5d8c; }
+
+.flat-chip-awaiting_review,
+.flat-chip-changes_requested,
+.flat-chip-escalated,
+.flat-chip-awaiting_human { border-color: #eddfd1; background: #fbf4ec; color: var(--ao-warn); }
+
+.flat-chip-abandoned,
+.flat-chip-stale,
+.flat-chip-cancelled { border-color: #ededed; background: #fbf0f0; color: var(--ao-bad); }
+
+.flat-chip-merged,
+.flat-chip-approved { border-color: #dceee4; background: #f2faf6; color: var(--ao-good); }
+
+.flat-task-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ao-ink);
+}
+
+/* 标题里的那串技术枚举（"lucide 解析、开工自测…"）降成副句。 */
+.flat-task-sub {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ao-ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.flat-detail-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ao-ink-faint);
+}
+
+.flat-task-meta,
+.flat-task-foot {
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.flat-task-foot { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+
+.flat-task-jump {
+  color: var(--ao-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* 分页 */
+
+.flat-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--ao-line-soft);
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-pager-btns { display: flex; align-items: center; gap: 8px; }
+
+.flat-pager button {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 9px;
+  cursor: pointer;
+}
+
+.flat-pager button[disabled] { opacity: .45; cursor: default; }
+
+/* ------------------------------------------------------------------ 详情 */
+
+.flat-detail { padding: 16px 18px; min-width: 0; }
+
+.flat-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ao-line-soft);
+}
+
+.flat-detail-head h2 {
+  margin: 4px 0 2px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.flat-mono {
+  margin: 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* 详情里那句「这条活现在怎么样了」——比状态词更该被先看到。 */
+.flat-summary {
+  margin: 2px 0 4px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ao-ink);
+}
+
+/* 任务编号：留着有用（报问题时能说清是哪一条），但别抢眼。 */
+.flat-id {
+  opacity: .75;
+}
+
+/* 机器名收在「技术信息」里：平时不占版面，要查的人点开就有。 */
+.flat-tech {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-tech > summary {
+  cursor: pointer;
+  color: var(--ao-ink-faint);
+  font-size: 11.5px;
+  list-style: none;
+}
+
+.flat-tech > summary::-webkit-details-marker { display: none; }
+.flat-tech > summary::before { content: '▸ '; color: var(--ao-ink-faint); }
+.flat-tech[open] > summary::before { content: '▾ '; }
+
+.flat-tech p {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  color: var(--ao-ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* 「技术信息」里的原始块：机器写的那些（现场报告、CLI 原话）。 */
+.flat-tech pre {
+  margin: 4px 0 0;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ao-ink-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* 「上一次没做完」：人话那一句在前面，机器那坨收在后面。 */
+.flat-handoff h3 { color: #8a5b2f; }
+.flat-handoff p { color: var(--ao-ink); }
+
+/* 它自己最后说的那句（从机器日志里挑出来的原话）。 */
+.flat-handoff p.flat-handoff-said {
+  color: var(--ao-ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* 详情底部的收尾一句：下面没内容了，别让人以为页面坏了。 */
+.flat-detail-foot {
+  margin: 14px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--ao-line-soft);
+  font-size: 12px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-detail-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+.flat-detail-actions button {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ao-ink);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.flat-detail-actions button:hover { background: #f2f4f6; }
+
+.flat-spec {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ao-line-soft);
+  min-width: 0;
+}
+
+.flat-spec:last-child { border-bottom: none; }
+
+/* 「它正在做」的心跳点：一个会呼吸的小点。 */
+.flat-pulse {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #2f5d8c;
+  box-shadow: 0 0 0 0 rgba(47, 93, 140, .45);
+  animation: flat-pulse 1.8s ease-out infinite;
+  vertical-align: middle;
+}
+
+@keyframes flat-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 93, 140, .45); }
+  70% { box-shadow: 0 0 0 7px rgba(47, 93, 140, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 93, 140, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flat-pulse { animation: none; }
+}
+
+/* 正在跑的那条活：它刚做的几步。 */
+.flat-live { background: #fbfcfd; border-radius: 10px; padding: 12px 14px; }
+
+.flat-live-steps { gap: 4px; }
+
+.flat-live-steps li {
+  display: block;
+  padding: 3px 8px;
+  border-left: 2px solid #dbe4ee;
+  background: #fff;
+  border-radius: 0 5px 5px 0;
+}
+
+.flat-live-steps li span {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ao-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.flat-live-steps li em {
+  font-style: normal;
+  color: var(--ao-ink-faint);
+  font-size: 11px;
+}
+
+.flat-live-stamp {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 6px;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-live .flat-output { max-height: 220px; }
+
+/* 详情里每一段的小标题：中文就是中文，不必套大写英文的排版。
+   左边一条细竖条 —— 段落之间不用靠一堆细线分隔。 */
+.flat-spec h3 {
+  margin: 0 0 7px;
+  padding-left: 9px;
+  border-left: 3px solid #dbe4ee;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #35404d;
+  font-weight: 650;
+}
+
+.flat-spec h4 {
+  margin: 12px 0 5px;
+  font-size: 12px;
+  color: var(--ao-ink-soft);
+  font-weight: 650;
+}
+
+.flat-spec p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ao-ink);
+  /* 长的无空白串（报告、JSON、路径）不能撑出容器 → 不出横向滚动条。 */
+  overflow-wrap: anywhere;
+}
+
+.flat-spec ul { margin: 0; padding-left: 18px; font-size: 12px; color: var(--ao-ink-soft); }
+
+.flat-spec code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  background: #f1f3f5;
+  border-radius: 3px;
+  padding: 1px 4px;
+  overflow-wrap: anywhere;
+}
+
+.flat-note { font-size: 12px; line-height: 1.6; color: var(--ao-ink-soft); overflow-wrap: anywhere; }
+.flat-empty { font-size: 12px; line-height: 1.6; color: var(--ao-ink-faint); margin: 4px 0; }
+
+.flat-output {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  background: #f7f8fa;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #2c3542;
+}
+
+/* 事件轨迹 */
+
+.flat-events { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+
+.flat-event { border-bottom: 1px solid var(--ao-line-soft); }
+
+/* 事件行：时间、动作、谁 —— 三列挨着点，别把一条线拉得太开。 */
+.flat-event > details > summary {
+  display: grid;
+  grid-template-columns: 76px 190px 120px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+}
+
+.flat-event > details > summary::-webkit-details-marker { display: none; }
+
+.flat-event > details > summary::before {
+  content: "▸";
+  color: #b0b8c1;
+  font-size: 10px;
+}
+
+.flat-event > details[open] > summary::before { content: "▾"; }
+
+/* 事件行第一列现在是**时间**（不是事件编号）—— 人读得懂的那一列。 */
+.flat-event-seq { color: var(--ao-ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.flat-event summary b { font-weight: 600; color: var(--ao-ink); }
+.flat-event summary em { color: var(--ao-ink-soft); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flat-event-hint { color: var(--ao-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.flat-event-payload {
+  margin: 2px 0 8px 52px;
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 2px 10px;
+  font-size: 11.5px;
+}
+
+.flat-event-payload dt { color: var(--ao-ink-faint); }
+.flat-event-payload dd { margin: 0; color: var(--ao-ink-soft); word-break: break-word; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 来路 */
+
+/* 「这条活的来路」：一张有边框的浅底卡，和详情里其它段落区分开。 */
+.flat-lineage { background: #fbfcfd; border: 1px solid var(--ao-line); border-radius: 10px; margin-bottom: 14px; padding: 12px 14px; }
+.flat-lineage h3 { margin: 0 0 8px; }
+
+.flat-chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 6px; font-size: 11.5px; }
+
+.flat-node {
+  border: 1px solid var(--ao-line);
+  border-radius: 999px;
+  padding: 1px 9px;
+  color: var(--ao-ink-soft);
+  background: #fff;
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.flat-node.is-current { border-color: #cfe0ef; background: var(--ao-accent-soft); color: var(--ao-accent); }
+.flat-arrow { color: #b0b8c1; }
+
+/* 每次尝试一行：谁领的、什么时候、结果如何。
+   attempt id（FD-xxx.a1）是机器名，不上界面 —— 放在 title 里给要查的人看。 */
+.flat-attempts { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12px; }
+
+.flat-attempts li {
+  display: grid;
+  grid-template-columns: 52px 110px minmax(0, 1fr) 120px;
+  gap: 10px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--ao-line-soft);
+}
+
+.flat-attempt-no { color: var(--ao-ink-soft); font-weight: 600; }
+.flat-attempt-owner { color: var(--ao-ink); }
+.flat-attempt-outcome { color: var(--ao-ink-soft); overflow-wrap: anywhere; }
+.flat-attempt-at { color: var(--ao-ink-faint); text-align: right; }
+.flat-attempt-from { grid-column: 3 / -1; color: var(--ao-warn); }
+
+/* 失败的真实日志 */
+
+.flat-fail-log { background: #fdf7f5; border: 1px solid #ecd9d3; border-radius: 6px; padding: 10px 12px; margin: 12px 0; }
+.flat-fail-log h3 { color: var(--ao-bad); }
+
+/* ------------------------------------------------------------------ 右栏 */
+
+/* 右栏的卡片：白底 + 极轻的影，标题是一句中文而不是一行小号大写。
+   以前卡片底色 #fbfcfd 淡到几乎看不出边界，标题又是 11px 大写英文风 ——
+   整栏看上去像还没排版的半成品。 */
+.flat-card {
+  border: 1px solid var(--ao-line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .04);
+  min-width: 0;
+}
+
+/* 卡片标题：图标 + 文字。每张卡有自己的身份，扫一眼就知道是哪张。 */
+.flat-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 9px;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #35404d;
+  font-weight: 650;
+}
+
+.flat-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: var(--ao-accent);
+  opacity: .85;
+}
+
+/* 每类卡一个身份色（图标那一小块）。 */
+.flat-card-brief .flat-icon { color: #2f5d8c; }
+.flat-card-members .flat-icon { color: #6b7684; }
+.flat-card-admin .flat-icon { color: #1f7a4d; }
+.flat-card-waiting .flat-icon { color: #a8562a; }
+.flat-card-fold .flat-icon { color: #6b7684; }
+
+/* 「等你处理」那一张：页面里唯一要人动手的事，所以给它最重的样子。 */
+.flat-card-waiting {
+  border-color: #e6d2bb;
+  background: #fffdf8;
+  box-shadow: 0 1px 2px rgba(20, 30, 45, .05);
+}
+
+.flat-waiting-list { gap: 6px; }
+
+.flat-waiting-list button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  border: 1px solid #eee3d4;
+  border-radius: 7px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flat-waiting-list button:hover { border-color: #dcc4a4; background: #fffaf2; }
+.flat-waiting-list b { font-size: 12.5px; font-weight: 600; color: var(--ao-ink); }
+.flat-waiting-list span { font-size: 11px; color: var(--ao-ink-faint); }
+
+.flat-card h4 { margin: 10px 0 4px; font-size: 11px; color: var(--ao-ink-soft); font-weight: 600; }
+.flat-card p, .flat-card li, .flat-list, .flat-note { overflow-wrap: anywhere; }
+
+.flat-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 12px; }
+
+.flat-list li { display: flex; flex-direction: column; gap: 1px; }
+.flat-list b { font-weight: 600; color: var(--ao-ink); }
+.flat-list span { color: var(--ao-ink-faint); font-size: 11px; }
+
+.flat-inventory { border: 1px solid var(--ao-line-soft); border-radius: 6px; padding: 9px 10px; background: #fff; }
+
+.flat-tier-row { padding: 6px 0; border-top: 1px solid var(--ao-line-soft); }
+.flat-tier-row:first-of-type { border-top: none; }
+.flat-tier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; }
+.flat-tier-head b { font-weight: 600; }
+.flat-tier-head span { color: var(--ao-ink-faint); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
+
+.flat-gauge { position: relative; height: 12px; margin: 5px 0 4px; border: 1px solid var(--ao-line); border-radius: 999px; background: #f1f3f5; overflow: hidden; }
+.flat-gauge i { display: block; height: 100%; background: #7fb394; }
+.flat-gauge span { position: absolute; right: 6px; top: 0; font-size: 10px; line-height: 11px; color: var(--ao-ink); }
+
+.flat-tier { display: inline-block; border: 1px solid var(--ao-line); border-radius: 999px; padding: 0 7px; font-size: 10px; color: var(--ao-ink-soft); }
+.flat-tier-free { border-color: #cfe3d8; color: var(--ao-good); }
+.flat-tier-reserve { border-color: #e6d5c4; color: var(--ao-warn); }
+.flat-tier-metered { border-color: #d9d3e0; color: #5b4a7a; }
+
+.flat-pool-item { border: 1px solid var(--ao-line-soft); border-radius: 6px; padding: 6px 8px; margin-bottom: 5px; background: #fff; }
+.flat-pool-item > summary { cursor: pointer; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12px; }
+.flat-pool-item > summary b { font-weight: 600; }
+.flat-pool-item > summary span { color: var(--ao-ink-faint); font-size: 11px; }
+.flat-pool-item > summary em { margin-left: auto; font-style: normal; color: var(--ao-ink-faint); font-size: 11px; }
+
+.flat-facts { margin: 6px 0 2px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; font-size: 11px; }
+.flat-facts dt { color: var(--ao-ink-faint); }
+.flat-facts dd { margin: 0; color: var(--ao-ink-soft); word-break: break-all; }
+
+.flat-pool-models,
+.flat-pool-consumers { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 11px; color: var(--ao-ink-soft); }
+.flat-pool-models li { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+
+/* 用量曲线 */
+
+.flat-timeline { border: 1px solid var(--ao-line-soft); border-radius: 6px; padding: 8px 9px 6px; background: #fff; margin-bottom: 10px; }
+.flat-timeline-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--ao-ink-faint); margin-bottom: 6px; }
+.flat-timeline-head em { font-style: normal; color: var(--ao-good); }
+.flat-spark { display: flex; align-items: flex-end; gap: 1px; height: 36px; }
+.flat-spark i { flex: 1 1 0; min-width: 1px; background: #e6e9ed; border-radius: 1px 1px 0 0; }
+.flat-spark i.has { background: #7fb394; }
+.flat-timeline-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--ao-ink-faint); margin-top: 3px; }
+
+/* ------------------------------------------------------------------ 群聊
+
+   收成一条带子：折叠时只占一行（标题 + 输入框），展开时是一列可纵向滚动的历史。
+   以前把消息横着塞进 190px 的窄带，消息被切一半、还多一条横向滚动条 —— 不算了。
+*/
+
+/* 群聊那条带子：一条**收起来的输入条**，不是一条大白框。
+   以前是整页宽的直角输入框 + 一个方按钮，看着像没做完的表单。 */
+.flat-chat {
+  display: grid;
+  /* 头、摘要、消息列表、表单 —— 摘要那行是"最近群里在说什么"。 */
+  grid-template-rows: auto auto auto;
+  gap: 0;
+  padding: 0 20px 12px;
+  background: #fbfcfd;
+  border-top: 1px solid var(--ao-line);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.flat-chat.is-expanded { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+
+/* 群聊摘要：多少条、谁说的、最近一条是什么。 */
+.flat-chat-digest {
+  margin: 0 0 6px;
+  padding: 6px 9px;
+  border-left: 2px solid var(--ao-line);
+  background: #f4f7fa;
+  border-radius: 0 6px 6px 0;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ao-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.flat-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+}
+
+.flat-chat-head h3 {
+  margin: 0;
+  font-size: 12.5px;
+  letter-spacing: normal;
+  text-transform: none;
+  color: #35404d;
+  font-weight: 650;
+}
+
+.flat-chat-count { font-size: 11px; color: var(--ao-ink-faint); }
+
+.flat-chat-toggle {
+  margin-left: auto;
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+
+.flat-chat-toggle:hover { background: #f2f4f6; }
+
+.flat-chat-list {
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  min-height: 0;
+  max-height: 34vh;
+  padding: 8px 4px 6px 0;
+  border-top: 1px solid var(--ao-line-soft);
+}
+
+.flat-chat.is-expanded .flat-chat-list { display: flex; }
+
+.flat-msg {
+  border-left: 2px solid var(--ao-line);
+  padding: 0 0 0 10px;
+  min-width: 0;
+}
+
+.flat-msg.is-human { border-left-color: var(--ao-accent); }
+.flat-msg b { font-size: 11px; color: var(--ao-ink-soft); font-weight: 600; }
+.flat-msg-at { margin-left: 8px; font-size: 11px; color: var(--ao-ink-faint); }
+
+.flat-msg p {
+  margin: 1px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ao-ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.flat-chat-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding-top: 0;
+}
+
+.flat-chat-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d7dde4;
+  border-radius: 17px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 12.5px;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(20, 30, 45, .03);
+}
+
+.flat-chat-form input:focus {
+  outline: none;
+  border-color: #a9c6e2;
+  box-shadow: 0 0 0 3px rgba(47, 93, 140, .12);
+}
+
+.flat-chat-form button {
+  height: 34px;
+  padding: 0 16px;
+  border: 1px solid var(--ao-accent);
+  border-radius: 17px;
+  background: var(--ao-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.flat-chat-form button:hover { background: #27507a; }
+
+/* ---------------------------------------------- 可以收起来的卡片（默认收起） */
+
+/* 额度池、可用窗口这些是**给运维看的事实**，第一次用的人不需要它们摆在眼前：
+   一屏之内全是"额度来源 / prompt tokens / credits"，小白只会当成噪音。
+   所以默认折起来，标题上留一行摘要（多少来源、用了多少次），想看再点。 */
+.flat-card-fold { padding: 0; }
+
+.flat-card-fold > details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ao-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.flat-card-fold > details > summary::-webkit-details-marker { display: none; }
+
+.flat-card-fold > details > summary::after {
+  content: '▸';
+  margin-left: auto;
+  color: var(--ao-ink-faint);
+  font-size: 11px;
+}
+
+.flat-card-fold > details[open] > summary::after { content: '▾'; }
+.flat-card-fold > details > summary:hover { background: #f7f9fb; }
+
+.flat-card-fold > details > *:not(summary) { margin-left: 14px; margin-right: 14px; }
+.flat-card-fold > details > *:not(summary):last-child { margin-bottom: 12px; }
+
+.flat-card-fold > button { margin: 0 14px 12px; }
+
+/* 任务书顶上那句人话：平台把方案原文翻成的一句话。 */
+.flat-brief-summary {
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid #cfe0ef;
+  border-radius: 7px;
+  background: #eaf1f8;
+  color: #24486b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.flat-brief-summary::before {
+  content: '这份方案讲的是：';
+  color: #5b6673;
+}
+
+/* ------------------------------------------- 与管理员对话（对话框）
+
+   平台只有群消息 + @mention 这一个通道（R10 §19），所以这个对话框是
+   "我@给管理员的" + "管理员回我的"的一个视图，不是私聊。对话框挂在 body 上，
+   不跟着办公室重画。
+*/
+
+.flat-dialog {
+  width: min(92vw, 720px);
+  max-width: 720px;
+  height: min(78vh, 640px);
+  max-height: 78vh;
+  padding: 0;
+  border: 1px solid var(--ao-line, #e3e6ea);
+  border-radius: 10px;
+  background: #fff;
+  color: #1c2430;
+  box-shadow: 0 18px 48px rgba(20, 30, 45, .2);
+  overflow: hidden;
+}
+
+/* 处置对话框只有一个输入框：给它固定的高对话框就是一大片空白，
+   让人以为没加载出来。高度跟着内容走。
+
+   两个坑：
+   1) `height:auto` 不够 —— 模态对话框是 `inset:0; margin:auto` 定位的，
+      auto 高度会**拉满**视口，再被 max-height 截到 78vh，于是还是一片空白。
+      要 `fit-content` 才是"按内容"。
+   2) 通用规则给的行模板是 `auto minmax(0,1fr) auto`，那条 1fr 会把多余
+      高度分给各行；行高也得一起改成按内容算。 */
+.flat-dialog.is-compact {
+  height: fit-content;
+  max-height: 78vh;
+  align-content: start;
+}
+
+.flat-dialog.is-compact[open] {
+  grid-template-rows: auto auto auto;
+}
+
+.flat-dialog::backdrop { background: rgba(20, 28, 38, .38); }
+
+.flat-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+
+.flat-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.flat-dialog-head h2 { margin: 0 0 4px; font-size: 15px; font-weight: 650; }
+.flat-dialog-head .flat-note { margin: 0; max-width: 52ch; }
+.flat-dialog-head b { font-weight: 600; }
+
+.flat-dialog-close {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #5b6673;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.flat-dialog-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px 16px;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* 处置对话框的表单件：答复 / 原因 / 预算豁免。 */
+.flat-field {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #3d4652;
+}
+
+.flat-field textarea {
+  width: 100%;
+  border: 1px solid #d9dde3;
+  border-radius: 5px;
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  background: #fff;
+  color: #1f2732;
+}
+
+.flat-field textarea:focus {
+  outline: 2px solid #2f5d8c33;
+  border-color: #2f5d8c;
+}
+
+.flat-check {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #3d4652;
+}
+
+/* `hidden` 属性默认是 display:none，但上面这条 display:grid 把它盖掉了 ——
+   于是"顺便再给一次机会"那个勾选框在**每一**个对话框里都露出来。
+   显式写回去，它就只在该问的时候才问。 */
+.flat-check[hidden] {
+  display: none;
+}
+
+.flat-check .flat-note {
+  margin: 0;
+}
+
+.flat-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.flat-thread-msg {
+  border-left: 2px solid #e3e6ea;
+  padding-left: 10px;
+  font-size: 13px;
+}
+
+.flat-thread-msg.is-mine { border-left-color: #2f5d8c; }
+.flat-thread-msg.is-admin { border-left-color: #1f7a4d; }
+.flat-thread-msg b { font-size: 11px; color: #5b6673; font-weight: 600; }
+.flat-thread-at { margin-left: 8px; font-size: 11px; color: #8a94a0; }
+.flat-thread-msg p { margin: 2px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.flat-dialog-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid #eef0f3;
+}
+
+.flat-dialog-form input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+.flat-dialog-form button {
+  border: 1px solid #2f5d8c;
+  border-radius: 5px;
+  background: #2f5d8c;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 16px;
+  cursor: pointer;
+}
+
+/* ------------------------------------------- 任务书 / 成员动态表 */
+
+.flat-brief {
+  margin: 0;
+  padding: 14px 16px;
+  background: #f7f8fa;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #2c3542;
+}
+
+.flat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.flat-table th,
+.flat-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid #eef0f3;
+  white-space: nowrap;
+}
+
+.flat-table th {
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: #8a94a0;
+  font-weight: 600;
+}
+
+.flat-table td:nth-child(n + 2) { font-variant-numeric: tabular-nums; }
+.flat-table tbody tr:hover { background: #fbfcfd; }
+
+/* 右栏卡片里的按钮：淡淡的一个动作入口，不是一排方框。
+   （每张卡下面一个描边按钮，看起来就像还没接线的占位。） */
+.flat-card-admin button,
+.flat-card-brief button,
+.flat-card-members button {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ao-accent);
+  font: inherit;
+  font-size: 12px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.flat-card-admin button::after,
+.flat-card-brief button::after,
+.flat-card-members button::after {
+  content: ' →';
+  color: var(--ao-ink-faint);
+}
+
+.flat-card-admin button:hover,
+.flat-card-brief button:hover,
+.flat-card-members button:hover {
+  background: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.flat-card-admin p { margin: 0 0 6px; font-size: 12px; }
+
+/* ------------------------------------------- 任务书里的"活账"卡片 */
+
+.flat-brief-task {
+  border: 1px solid #eef0f3;
+  border-left: 3px solid #e3e6ea;
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+
+.flat-brief-task header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.flat-brief-task header b { font-size: 13px; font-weight: 600; }
+.flat-brief-task header .flat-mono { font-size: 11px; }
+
+.flat-brief-task dl {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 3px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.flat-brief-task dt { color: #8a94a0; }
+.flat-brief-task dd { margin: 0; color: #1c2430; line-height: 1.5; overflow-wrap: anywhere; }
+
+.flat-brief-sub {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: #8a94a0;
+  font-weight: 600;
+}
+
+/* ------------------------------------------- 请管理员派单（批量入口） */
+
+.flat-brief-action {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid #cfe0ef;
+  border-radius: 6px;
+  background: #eaf1f8;
+  font-size: 12px;
+  color: #1c2430;
+}
+
+.flat-brief-action b { font-weight: 650; }
+.flat-brief-action .flat-note { margin: 0; }
+
+.flat-brief-action button {
+  border: 1px solid #2f5d8c;
+  border-radius: 5px;
+  background: #2f5d8c;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.flat-brief-action button:hover { background: #27507a; }
+
+/* ---------------------------------------------------------------- 布局（收口）
+
+   放在文件最后：一处说清三列怎么排，媒体查询里也只改列数。
+*/
+
+.flat-office {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr) 296px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  height: 100%;
+  min-height: 0;
+  background: #f6f7f9;
+  color: var(--ao-ink);
+}
+
+.flat-head { grid-column: 1 / -1; grid-row: 1; }
+
+.flat-body {
+  grid-column: 1 / 3;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 14px;
+  padding: 14px 20px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.flat-rail {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  align-self: start;
+  max-height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+
+.flat-chat { grid-column: 1 / -1; grid-row: 3; }
+
+.flat-tasks,
+.flat-detail {
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--ao-line);
+  border-radius: 8px;
+  height: 100%;
+}
+
+@media (max-width: 1180px) {
+  .flat-office {
+    grid-template-columns: 280px minmax(0, 1fr);
+    /* 右栏排到下面一行，而不是没有：额度池（连同"自己的 API key"）不能因为
+       窗口窄就消失 —— 那里是唯一能加自己的 key 的地方。 */
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+  .flat-body { grid-template-columns: 280px minmax(0, 1fr); }
+  .flat-rail {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    /* 同一行的卡片一样高 —— 参差不齐的边线最像"没排完"。 */
+    align-items: stretch;
+    max-height: 40vh;
+    overflow: auto;
+  }
+  .flat-chat { grid-row: 4; }
+}
+
+@media (max-width: 860px) {
+  .flat-office { grid-template-columns: minmax(0, 1fr); }
+  .flat-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
+  .flat-tasks { height: auto; max-height: 40vh; }
+  .flat-detail { height: auto; }
+  .flat-rail { grid-template-columns: minmax(0, 1fr); max-height: 46vh; }
+  .flat-chat-form { display: none; }
+}
+
+/* --------------------------------------- 自己的 API key（额度池卡片里的一块） */
+
+.flat-userkeys { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ao-line-soft); }
+.flat-userkeys h3 { margin: 0 0 4px; font-size: 13px; font-weight: 650; }
+.flat-userkeys .flat-note { margin: 0 0 8px; }
+
+.flat-userkeys-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+
+.flat-userkey {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.flat-userkey b { font-size: 12.5px; font-weight: 600; }
+.flat-userkey span { font-size: 11px; color: var(--ao-ink-faint); overflow-wrap: anywhere; }
+.flat-userkey .flat-note { grid-column: 1; margin: 0; }
+
+.flat-userkey button {
+  grid-row: 1 / span 2;
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #5b6673;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.flat-userkey button:hover { background: #f2f4f6; }
+
+/* 平台来问的那一句。 */
+/* 平台在问的那张卡：摆在右栏最上面，一眼能看见。 */
+.flat-card-ask {
+  border-color: #e8d9b8;
+  background: #fdf7ea;
+}
+
+.flat-card-ask h3 { color: #6b5320; }
+
+.flat-userkey-ask {
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid #e8d9b8;
+  border-radius: 7px;
+  background: #fdf7ea;
+}
+
+.flat-userkey-ask p { margin: 0 0 4px; font-size: 12.5px; line-height: 1.55; color: #4a3a1c; }
+.flat-userkey-ask p.flat-note { margin-bottom: 8px; }
+.flat-userkey-ask .flat-dialog-actions { justify-content: flex-start; }
+
+.flat-userkey-ask button {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+
+.flat-userkey-ask button[data-act="approve-user-key"] {
+  border-color: #2f5d8c;
+  background: #2f5d8c;
+  color: #fff;
+}
+
+.flat-userkeys-add > summary {
+  font-size: 12px;
+  color: #2f5d8c;
+  cursor: pointer;
+}
+
+.flat-userkeys-form { display: grid; gap: 6px; margin-top: 8px; }
+.flat-userkeys-form label { display: grid; gap: 3px; font-size: 11.5px; color: #5b6673; }
+
+.flat-userkeys-form input,
+.flat-userkeys-form select {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1c2430;
+}
+
+.flat-userkeys-form button {
+  justify-self: start;
+  border: 1px solid #2f5d8c;
+  border-radius: 5px;
+  background: #2f5d8c;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.flat-userkeys-form [data-userkey-error] { margin: 0; color: #b03a3a; }

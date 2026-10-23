@@ -12,7 +12,9 @@ from app.api.errors import ApiError, envelope, install_error_handlers
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo
+from app.pool import routes as pool_routes
 from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT
+from app.wording import routes as wording_routes
 
 API_PREFIX = "/api/v1"
 
@@ -105,7 +107,14 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     api.include_router(routes.adapter)
     api.include_router(routes.human)
     api.include_router(routes.review)
+    api.include_router(routes.allocation)
     api.include_router(routes.read)
+    # The platform's quota pool: a harness CLI is pointed at these routes when
+    # its own provider is out of quota, and the platform answers with a model
+    # from the pool.  It is a model surface, not a dispatcher.
+    api.include_router(pool_routes.router)
+    # 平台自己的"翻译"：把机器写的文本翻成人话（界面上只显示人话）。
+    api.include_router(wording_routes.router)
     app.include_router(api)
 
     @app.get("/", include_in_schema=False)

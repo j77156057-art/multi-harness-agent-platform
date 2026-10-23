@@ -98,13 +98,19 @@ class CommandRunner(Protocol):
     def __call__(self, profile: VerifyProfile, cwd: Path) -> RunResult: ...
 
 
-def default_runner(profile: VerifyProfile, cwd: Path) -> RunResult:
-    """Run the profile's argv in a stripped environment.
+def runner_env(cwd: Path) -> dict[str, str]:
+    """The stripped environment a profile command runs in.
 
     R10 §16 forbids injecting git and scheduler credentials, mounting state.db,
     and any secret not declared in both the task and the profile. The environment
     is built from nothing rather than filtered, so a variable added elsewhere
     cannot leak in by default.
+
+    ``SystemRoot``/``WINDIR`` are the one deliberate exception: neither is secret
+    material, and on Windows Python's ``asyncio``/socket internals do not
+    initialise without them -- ``anyio`` raises ``KeyError('asyncio')`` -- so a
+    profile that runs a command would fail on the platform instead of on the code
+    under test. They are copied, never invented, and only when already present.
     """
     env = {
         "PATH": os.environ.get("PATH", ""),
@@ -116,14 +122,16 @@ def default_runner(profile: VerifyProfile, cwd: Path) -> RunResult:
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     if os.name == "nt":
-        # Node's CSPRNG initialization on Windows reads SystemRoot. Without
-        # it, a stripped environment makes `node` abort with an assertion
-        # failure before the profile command runs. These are not secrets and
-        # do not widen the isolation boundary.
         for name in ("SystemRoot", "WINDIR"):
             value = os.environ.get(name)
             if value:
                 env[name] = value
+    return env
+
+
+def default_runner(profile: VerifyProfile, cwd: Path) -> RunResult:
+    """Run the profile's argv in a stripped environment (``runner_env``)."""
+    env = runner_env(cwd)
     try:
         proc = subprocess.run(
             list(profile.command),

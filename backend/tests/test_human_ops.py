@@ -277,12 +277,114 @@ def test_release_returns_an_escalated_task_to_ready(tmp_path):
     assert _event_names(database) == ["human.release"]
 
 
+def test_release_takes_the_dead_attempt_with_it(tmp_path):
+    """放回队列 = 没有主人、也没有当前 attempt。
+
+    留着那个死掉的 attempt 的话，这条任务看着是 ready，却**没人能领**
+    （可领列表会跳过还挂着 attempt 的任务）——一个隐形僵尸。
+    """
+    database = _rig(tmp_path, status="escalated", attempt=True, owner="harness-1", escalated_at=NOW)
+
+    _service(database).release(task_id="T-1", decided_by="ops")
+
+    row = _task(database)
+    assert row["status"] == "ready"
+    assert row["owner"] is None, "the queue has no owner"
+    assert row["current_attempt_id"] is None, "the dead attempt goes with it"
+
+
+def test_a_human_can_give_one_more_attempt_to_a_spent_budget(tmp_path):
+    """R10 §8: 预算用完的活只有人能给它一次机会。
+
+    平台不给自己豁免，管理员 harness 也不代劳——这条动作**不改任务状态**
+    （任务还在原地），只是让 claim 的预算闸门放行一次；审计落在决定行上。
+    """
+    database = _rig(tmp_path, status="changes_requested", attempt=True, owner="harness-1")
+    _exhaust_budget(database)
+
+    outcome = _service(database).grant_attempt_budget_override(
+        task_id="T-1", decided_by="ops", reason="give it one more try"
+    )
+
+    assert outcome["attempt_budget_override"] is True
+    assert outcome["budget_override_by"] == "ops"
+    row = _task(database)
+    assert row["status"] == "changes_requested", "the state does not move"
+    assert row["budget_override_by"] == "ops", "the claim guard learns about it"
+
+
+def test_the_budget_override_needs_a_spent_budget(tmp_path):
+    database = _rig(tmp_path, status="changes_requested", attempt=True, owner="harness-1")
+
+    with pytest.raises(Conflict, match="only applies after"):
+        _service(database).grant_attempt_budget_override(task_id="T-1", decided_by="ops")
+
+    assert _task(database)["budget_override_by"] is None
+
+
 def test_release_refuses_a_task_that_is_not_escalated(tmp_path):
     database = _rig(tmp_path, status="awaiting_human", attempt=False, owner=None)
 
     with pytest.raises(Conflict):
         _service(database).release(task_id="T-1", decided_by="ops")
 
+    assert _event_names(database) == []
+
+
+def _exhaust_budget(database) -> None:
+    with database.transaction() as conn:
+        conn.execute("UPDATE tasks SET attempt_no = 3, max_attempts = 3 WHERE task_id = 'T-1'")
+
+
+def test_release_refuses_to_bypass_an_exhausted_budget_without_the_override(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+    _exhaust_budget(database)
+
+    with pytest.raises(Conflict, match="budget_override"):
+        _service(database).release(task_id="T-1", decided_by="ops")
+
+    row = _task(database)
+    assert row["status"] == "escalated"
+    assert row["budget_override_by"] is None
+    assert _event_names(database) == []
+
+
+def test_release_with_the_budget_override_records_the_decision(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+    _exhaust_budget(database)
+
+    result = _service(database).release(
+        task_id="T-1",
+        decided_by="ops",
+        budget_override=True,
+        reason="approved by the owner",
+    )
+
+    row = _task(database)
+    assert row["status"] == "ready"
+    assert row["budget_override_by"] == "ops"
+    assert result["budget_override_by"] == "ops"
+    (decision,) = _decisions(database)
+    assert decision["scope"] == "budget_override"
+    assert decision["actor"] == "ops"
+    assert decision["question"] == "attempt budget override"
+    assert decision["answer"] == "approved by the owner"
+    assert decision["decided_seq"] is not None
+    (event,) = database.read(
+        "SELECT payload_json FROM task_events WHERE event_name = 'human.release'"
+    )
+    payload = json.loads(event["payload_json"])
+    assert payload["attempt_budget_override"] is True
+    assert payload["budget_override_by"] == "ops"
+
+
+def test_budget_override_is_refused_before_the_budget_is_exhausted(tmp_path):
+    database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
+
+    with pytest.raises(Conflict, match="attempt budget"):
+        _service(database).release(task_id="T-1", decided_by="ops", budget_override=True)
+
+    assert _task(database)["status"] == "escalated"
     assert _event_names(database) == []
 
 
@@ -343,6 +445,31 @@ def test_cancel_picks_the_event_by_current_state(tmp_path, status, expected_even
     assert _event_names(database) == [expected_event]
     if status == "queued":
         assert _task(database)["queue_reason"] is None
+
+
+def test_cancel_records_the_actor_type_it_was_called_with(tmp_path):
+    """管理员 harness 取消必须记成 harness，不能写成 human。
+
+    人类路由不传 ``actor_type``（默认 ``human``）；管理员 harness 路由传
+    ``_actor_type(principal)``。这条测试钉住事件里的真实主体，否则"谁取消的"
+    会在审计里变成一句假话。
+    """
+    database = _rig(tmp_path, status="ready", attempt=False, owner=None)
+
+    _service(database).cancel(
+        task_id="T-1",
+        decided_by="codex-window-admin",
+        reason="duplicate dispatch",
+        actor_type="harness",
+    )
+
+    assert _task(database)["status"] == "cancelled"
+    row = database.read(
+        "SELECT actor_type, actor_id FROM task_events"
+        " WHERE aggregate_id = 'T-1' ORDER BY seq DESC LIMIT 1"
+    )[0]
+    assert row["actor_type"] == "harness"
+    assert row["actor_id"] == "codex-window-admin"
 
 
 @pytest.mark.parametrize(
@@ -551,6 +678,40 @@ def test_the_human_surface_over_http(tmp_path):
     refused = client.post("/api/v1/human/release", json={"task_id": "T-1", "decided_by": "ops"})
     assert refused.status_code == 409
     assert refused.json()["error"]["code"] == "request.conflict"
+
+
+def test_human_release_carries_the_budget_override_over_http(tmp_path):
+    client, database, _adapter, _context = _http_rig(tmp_path)
+    with database.transaction() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'escalated', attempt_no = 3, max_attempts = 3,"
+            " owner = NULL, current_attempt_id = NULL, escalated_at = ? WHERE task_id = 'T-1'",
+            (NOW.isoformat(),),
+        )
+        conn.execute(
+            "UPDATE leases SET released_at = ? WHERE task_id = 'T-1' AND released_at IS NULL",
+            (NOW.isoformat(),),
+        )
+
+    refused = client.post("/api/v1/human/release", json={"task_id": "T-1", "decided_by": "ops"})
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "request.conflict"
+
+    released = client.post(
+        "/api/v1/human/release",
+        json={
+            "task_id": "T-1",
+            "decided_by": "ops",
+            "budget_override": True,
+            "reason": "approved by the owner",
+        },
+    )
+    assert released.status_code == 200, released.text
+    assert released.json()["budget_override_by"] == "ops"
+    assert _task(database)["budget_override_by"] == "ops"
+    (decision,) = _decisions(database)
+    assert decision["scope"] == "budget_override"
+    assert decision["answer"] == "approved by the owner"
 
 
 # ------------------------------------------------------------------- CLI e2e

@@ -82,6 +82,10 @@ def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# 定向消息的签名（R10 §19）：带这个 ref 的消息只给发送方与收件方看。
+DIRECT_REF = "direct"
+
+
 def _normalise_refs(refs: list[str] | None) -> list[str]:
     """Validate the message refs array (openapi post_message / Message schema).
 
@@ -101,6 +105,37 @@ def _normalise_refs(refs: list[str] | None) -> list[str]:
 
 def _hash(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _findings_json(findings: list[dict[str, object]]) -> str | None:
+    """The findings payload ``findings_hash`` anchors.
+
+    ``None`` for an empty list keeps "no findings" distinguishable from "not
+    yet recorded" the same way the hash column already does.
+    """
+    return json.dumps(findings, ensure_ascii=False, sort_keys=True) if findings else None
+
+
+def _reviewer_provider(
+    conn: sqlite3.Connection, *, reviewer_harness_id: str, reviewer_kind: str
+) -> str:
+    """The registry's provider for this reviewer -- not a self-declaration.
+
+    Both insert paths used to write the literal ``"unknown"``, which made every
+    harness review indistinguishable in the audit trail even though the
+    registry knew the provider: the live administrator review
+    ``rv-1fb66923834e4b4eb0ec10fa1db8f209`` (office-admin, qoder) was recorded
+    as ``unknown``. The query runs on the caller's connection because both call
+    sites are inside a write transaction.
+    """
+    if reviewer_kind == "human":
+        return "human"
+    row = conn.execute(
+        "SELECT provider FROM harnesses WHERE harness_id = ?", (reviewer_harness_id,)
+    ).fetchone()
+    if row is None or not row["provider"]:
+        return "unknown"
+    return str(row["provider"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,12 +300,90 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- plans
 
-    def approve_plan(self, *, plan_id: str, decided_by: str) -> PlanOutcome:
-        """Human approval. Tasks move to ready, or ready_waiting_deps.
+    def revise_plan(self, *, plan_id: str, snapshot: dict[str, object]) -> PlanOutcome:
+        """A **new snapshot** of a draft plan: the revision after the circulation.
+
+        The tasks keep their ids -- they are the same tasks, better specified --
+        and they point at the new snapshot, so the workers see the revision.
+        The plan stays a **draft**: the human still has the final word, and
+        nothing can be claimed before that.
+
+        (A plan's own approval reads the newest snapshot, so a revision is
+        exactly "the plan changed"; the tasks' own ``plan_snapshot_id`` has to
+        follow, or the workers would keep reading the old specification.)
+        """
+        with self.database.transaction() as conn:
+            plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
+            if plan is None:
+                raise NotFound(f"unknown plan: {plan_id}")
+            if str(plan["status"]) != "draft":
+                raise Conflict(f"plan {plan_id} is {plan['status']}, not draft")
+            raw = dict(snapshot)
+            raw.setdefault("plan_id", plan_id)
+            try:
+                spec = PlanSpec.from_mapping(raw)
+            except (TypeError, ValueError) as exc:
+                raise InvalidInput(f"plan snapshot is malformed: {exc}") from exc
+            validation = PlanValidator().validate(spec)
+            if not validation.ok:
+                raise InvalidInput("; ".join(validation.errors))
+            for item in raw.get("tasks", ()):
+                targets = item.get("assigned_harness_ids", [])
+                for target in targets:
+                    member = conn.execute(
+                        "SELECT * FROM harnesses WHERE harness_id = ?", (target,)
+                    ).fetchone()
+                    if member is None or not member["registration_version"]:
+                        raise InvalidInput("assigned Harness has no registration")
+            snapshot_id = f"snap-{uuid.uuid4().hex}"
+            plan_hash = _hash(raw)
+            now = _now()
+            conn.execute(
+                "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"
+                " content_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                (snapshot_id, plan_id, plan_hash, _canonical(raw), now),
+            )
+            conn.execute("UPDATE plans SET plan_hash = ? WHERE plan_id = ?", (plan_hash, plan_id))
+            for item in raw.get("tasks", ()):
+                task_id = str(item.get("id", "")).strip()
+                row = conn.execute(
+                    "SELECT status FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                if row is None:
+                    raise Conflict(f"task {task_id} is not part of plan {plan_id}")
+                if str(row["status"]) != TaskStatus.DRAFT.value:
+                    raise Conflict(f"task {task_id} is {row['status']}, not draft")
+                conn.execute(
+                    "UPDATE tasks SET plan_snapshot_id = ?, assigned_harness_ids_json = ?,"
+                    " require_human_assign = ? WHERE task_id = ?",
+                    (
+                        snapshot_id,
+                        _canonical(item.get("assigned_harness_ids", [])),
+                        int(bool(item.get("require_human_assign", False))),
+                        task_id,
+                    ),
+                )
+        return PlanOutcome(
+            plan_id=plan_id,
+            snapshot_id=snapshot_id,
+            plan_hash=plan_hash,
+            ready=(),
+            waiting=(),
+        )
+
+    def approve_plan(
+        self, *, plan_id: str, decided_by: str, decided_by_type: str = "human"
+    ) -> PlanOutcome:
+        """Approve a plan. Tasks move to ready, or ready_waiting_deps.
 
         The server picks the edge: R10 §10 has separate events for "approved with
         everything merged" and "approved with an unmet upstream", so clients must
         not choose one.
+
+        ``decided_by_type`` is the *real* subject type of the decision maker. It
+        must not be defaulted to ``human`` when the caller is an administrator
+        harness: the audit trail would then say a human approved a plan that a
+        harness actually approved.
         """
         with self.database.transaction() as conn:
             plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
@@ -301,7 +414,11 @@ class SchedulerService:
                 if str(row["status"]) != TaskStatus.DRAFT.value:
                     raise Conflict(f"task {task_id} is {row['status']}, not draft")
                 event = self._approve_one(
-                    conn, task_id=task_id, depends_on=depends_on, decided_by=decided_by
+                    conn,
+                    task_id=task_id,
+                    depends_on=depends_on,
+                    decided_by=decided_by,
+                    decided_by_type=decided_by_type,
                 )
                 if event is EventKind.PLAN_APPROVE:
                     ready.append(task_id)
@@ -355,6 +472,7 @@ class SchedulerService:
         task_id: str,
         depends_on: list[str],
         decided_by: str,
+        decided_by_type: str = "human",
     ) -> EventKind:
         unmet: list[str] = []
         for upstream in depends_on:
@@ -366,7 +484,7 @@ class SchedulerService:
             event_name=event.value,
             aggregate_type="task",
             aggregate_id=task_id,
-            actor_type="human",
+            actor_type=decided_by_type,
             actor_id=decided_by,
             payload={"plan_dependencies_unmet": unmet},
             connection=conn,
@@ -381,7 +499,17 @@ class SchedulerService:
         )
         return event
 
-    def reject_plan(self, *, plan_id: str, decided_by: str, reason: str) -> list[str]:
+    def reject_plan(
+        self,
+        *,
+        plan_id: str,
+        decided_by: str,
+        reason: str,
+        decided_by_type: str = "human",
+    ) -> list[str]:
+        """Reject a plan. ``decided_by_type`` is the real subject type (see
+        :meth:`approve_plan`): an administrator harness must not be recorded as
+        a human."""
         with self.database.transaction() as conn:
             plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
             if plan is None:
@@ -406,7 +534,7 @@ class SchedulerService:
                     event_name=EventKind.PLAN_REJECT.value,
                     aggregate_type="task",
                     aggregate_id=task_id,
-                    actor_type="human",
+                    actor_type=decided_by_type,
                     actor_id=decided_by,
                     payload={"reason": reason},
                     connection=conn,
@@ -898,7 +1026,9 @@ class SchedulerService:
 
     # ---------------------------------------------------------------- review
 
-    def _assert_review_policy(self, *, task: sqlite3.Row, owner: str, reviewer: str) -> None:
+    def _assert_review_policy(
+        self, *, task: sqlite3.Row, owner: str, reviewer: str, reviewer_kind: str
+    ) -> None:
         """R10 §21 review_policy enforcement (rules-tighten, drill F5).
 
         ``cross_provider`` is the only policy v1 produces; anything else is
@@ -915,6 +1045,10 @@ class SchedulerService:
                 f"review policy {policy!r} is not implemented",
                 code="review.policy_unknown",
             )
+        if reviewer_kind == "human":
+            return
+        if reviewer_kind != "harness":
+            raise Conflict("unknown reviewer kind", code="review.reviewer_unknown")
         registry = HarnessRegistry(self.database)
         owner_row = registry.current(owner)
         reviewer_row = registry.current(reviewer)
@@ -940,6 +1074,7 @@ class SchedulerService:
         reviewer_harness_id: str,
         review_id: str | None = None,
         lease_seconds: int | None = None,
+        reviewer_kind: str = "harness",
     ) -> dict[str, object]:
         """R10 §21 ``review.claim``: take the review lease for one attempt.
 
@@ -968,23 +1103,39 @@ class SchedulerService:
             # In MVP the development owner *is* the harness id (MVP-04 sets
             # tasks.owner to harness_id), so this one comparison covers both
             # "the owner reviews itself" and "the same harness reviews itself".
-            if reviewer_harness_id == owner:
+            if reviewer_kind == "harness" and reviewer_harness_id == owner:
                 raise Conflict(
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
-            self._assert_review_policy(task=task, owner=owner, reviewer=reviewer_harness_id)
+            self._assert_review_policy(
+                task=task,
+                owner=owner,
+                reviewer=reviewer_harness_id,
+                reviewer_kind=reviewer_kind,
+            )
 
-            existing = conn.execute(
+            # A previous claim for this (task, attempt, reviewer) is always
+            # taken over, never re-inserted: the unique key is
+            # (task, attempt, reviewer, review_revision), so a second INSERT for
+            # the same tuple looks like a duplicate revision. A live lease is
+            # reused as-is; every other row falls through to the receipt check
+            # and is revived below.
+            prior = conn.execute(
                 "SELECT * FROM reviews WHERE task_id = ? AND attempt_id = ?"
-                " AND reviewer_harness_id = ? AND status = 'claimed'",
+                " AND reviewer_harness_id = ? ORDER BY review_revision DESC LIMIT 1",
                 (task_id, attempt_id, reviewer_harness_id),
             ).fetchone()
-            if existing is not None:
+            if (
+                prior is not None
+                and str(prior["status"]) == "claimed"
+                and prior["lease_until"] is not None
+                and parse_iso(str(prior["lease_until"])) > datetime.now(UTC)
+            ):
                 return {
-                    "review_id": str(existing["review_id"]),
-                    "reviewed_commit": existing["reviewed_commit"],
-                    "lease_until": existing["lease_until"],
+                    "review_id": str(prior["review_id"]),
+                    "reviewed_commit": prior["reviewed_commit"],
+                    "lease_until": prior["lease_until"],
                     "reused": True,
                 }
 
@@ -1000,20 +1151,56 @@ class SchedulerService:
                 )
             moment = datetime.now(UTC)
             reviewed_commit = str(receipt["commit"])
-            new_id = review_id or f"rv-{uuid.uuid4().hex}"
             lease_until = iso(
                 moment + timedelta(seconds=lease_seconds or settings.review_lease_seconds)
             )
+            if prior is not None:
+                if str(prior["status"]) not in {"claimed", "expired"}:
+                    raise Conflict(
+                        f"{task_id} already has a {prior['status']} review for"
+                        f" {attempt_id} by {reviewer_harness_id}",
+                        code="review.already_decided",
+                    )
+                # A claim whose lease ran out is revived instead of re-inserted.
+                # The lease sweep marks the row ``expired`` so that "the next
+                # reviewer claim starts clean" (its own docstring); that only
+                # works if the next claim takes the same row -- and therefore
+                # the same review_revision -- again.
+                conn.execute(
+                    "UPDATE reviews SET status = 'claimed', lease_until = ?,"
+                    " reviewed_commit = ?, fencing_epoch = ?, verdict = NULL,"
+                    " findings_hash = NULL, findings_json = NULL, completed_seq = NULL"
+                    " WHERE review_id = ?",
+                    (
+                        lease_until,
+                        reviewed_commit,
+                        int(task["current_epoch"]),
+                        str(prior["review_id"]),
+                    ),
+                )
+                return {
+                    "review_id": str(prior["review_id"]),
+                    "reviewed_commit": reviewed_commit,
+                    "lease_until": lease_until,
+                    "reused": True,
+                }
+
+            new_id = review_id or f"rv-{uuid.uuid4().hex}"
             conn.execute(
                 "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                 " reviewer_provider, status, lease_until, fencing_epoch, reviewed_commit,"
                 " verdict, findings_hash, review_revision, created_seq)"
-                " VALUES (?, ?, ?, ?, 'unknown', 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
+                " VALUES (?, ?, ?, ?, ?, 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
                 (
                     new_id,
                     task_id,
                     attempt_id,
                     reviewer_harness_id,
+                    _reviewer_provider(
+                        conn,
+                        reviewer_harness_id=reviewer_harness_id,
+                        reviewer_kind=reviewer_kind,
+                    ),
                     lease_until,
                     int(task["current_epoch"]),
                     reviewed_commit,
@@ -1037,6 +1224,8 @@ class SchedulerService:
         review_revision: int,
         findings: list[dict[str, object]],
         review_id: str | None = None,
+        reviewer_kind: str = "harness",
+        require_lease: bool = False,
     ) -> dict[str, object]:
         """Record a reviewer verdict.
 
@@ -1062,7 +1251,7 @@ class SchedulerService:
                 findings=scan_findings,
                 aggregate_type="task",
                 aggregate_id=task_id,
-                actor_type="harness",
+                actor_type=reviewer_kind,
                 actor_id=reviewer_harness_id or "unknown",
                 task_id=task_id,
                 attempt_id=attempt_id,
@@ -1089,13 +1278,16 @@ class SchedulerService:
             ).fetchone()
             if attempt is None:
                 raise NotFound(f"unknown attempt: {attempt_id}")
-            if str(attempt["owner"]) == reviewer_harness_id:
+            if reviewer_kind == "harness" and str(attempt["owner"]) == reviewer_harness_id:
                 raise Conflict(
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
             self._assert_review_policy(
-                task=task, owner=str(attempt["owner"]), reviewer=reviewer_harness_id
+                task=task,
+                owner=str(attempt["owner"]),
+                reviewer=reviewer_harness_id,
+                reviewer_kind=reviewer_kind,
             )
             held = (
                 conn.execute(
@@ -1105,6 +1297,17 @@ class SchedulerService:
                 if review_id is not None
                 else None
             )
+            if require_lease and (held is None or str(held["status"]) != "claimed"):
+                raise Conflict("a live review lease is required", code="review.lease_required")
+            if (
+                held is not None
+                and str(held["status"]) == "claimed"
+                and str(held["reviewed_commit"]) != reviewed_commit
+            ):
+                raise Conflict(
+                    "reviewed commit differs from the claimed commit",
+                    code="review.commit_mismatch",
+                )
             if held is not None and held["status"] == "claimed":
                 deadline = held["lease_until"]
                 if deadline is not None and parse_iso(str(deadline)) <= datetime.now(UTC):
@@ -1139,10 +1342,12 @@ class SchedulerService:
                 review_id = str(existing["review_id"])
                 conn.execute(
                     "UPDATE reviews SET status = 'completed', verdict = ?, findings_hash = ?,"
-                    " reviewed_commit = ?, fencing_epoch = ? WHERE review_id = ?",
+                    " findings_json = ?, reviewed_commit = ?, fencing_epoch = ?"
+                    " WHERE review_id = ?",
                     (
                         verdict,
                         _hash(findings),
+                        _findings_json(findings),
                         reviewed_commit,
                         int(task["current_epoch"]),
                         review_id,
@@ -1153,18 +1358,23 @@ class SchedulerService:
                 conn.execute(
                     "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                     " reviewer_provider, status, fencing_epoch, reviewed_commit, verdict,"
-                    " findings_hash, review_revision, created_seq)"
-                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, NULL)",
+                    " findings_hash, findings_json, review_revision, created_seq)"
+                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, NULL)",
                     (
                         review_id,
                         task_id,
                         attempt_id,
                         reviewer_harness_id,
-                        "unknown",
+                        _reviewer_provider(
+                            conn,
+                            reviewer_harness_id=reviewer_harness_id,
+                            reviewer_kind=reviewer_kind,
+                        ),
                         int(task["current_epoch"]),
                         reviewed_commit,
                         verdict,
                         _hash(findings),
+                        _findings_json(findings),
                         review_revision,
                     ),
                 )
@@ -1184,7 +1394,7 @@ class SchedulerService:
                 event_name=event.value,
                 aggregate_type="task",
                 aggregate_id=task_id,
-                actor_type="harness",
+                actor_type=reviewer_kind,
                 actor_id=reviewer_harness_id,
                 payload={
                     "review_id": review_id,
@@ -1193,6 +1403,14 @@ class SchedulerService:
                     "findings_hash": _hash(findings),
                 },
                 connection=conn,
+            )
+            # Anchor the review row to the event that completed it. The column
+            # exists for exactly this and was never written, so "the latest
+            # review for this task" had no defined order -- and the replay path
+            # above returned ``completed_seq: null`` as its ``seq``.
+            conn.execute(
+                "UPDATE reviews SET completed_seq = ? WHERE review_id = ?",
+                (record.seq, review_id),
             )
             apply_transition(
                 conn,
@@ -1390,6 +1608,7 @@ class SchedulerService:
         mentions: list[str],
         task_id: str | None = None,
         refs: list[str] | None = None,
+        direct: bool = False,
     ) -> dict[str, object]:
         if not body.strip():
             raise InvalidInput("body must not be empty")
@@ -1413,6 +1632,12 @@ class SchedulerService:
                 event_seq=seq,
             )
         normalised_refs = _normalise_refs(refs)
+        if direct:
+            # 定向消息（R10 §19）：收件人就是 mentions 里的那些窗口，但这条消息
+            # 只能被发送方与收件方看到。“定向”这个词自己就是签名，不新增事件名。
+            if not mentions:
+                raise InvalidInput("direct message needs at least one recipient")
+            normalised_refs = _normalise_refs([*normalised_refs, DIRECT_REF])
         with self.database.transaction() as conn:
             group = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
             if group is None:
@@ -1456,18 +1681,48 @@ class SchedulerService:
             "refs": normalised_refs,
         }
 
-    def list_messages(self, group_id: str, *, since_seq: int = 0, limit: int = 100) -> list[dict]:
+    def list_messages(
+        self,
+        group_id: str,
+        *,
+        since_seq: int = 0,
+        limit: int = 100,
+        viewer: str | None = None,
+    ) -> list[dict]:
         rows = self.database.read(
             "SELECT * FROM task_messages WHERE group_id = ? AND created_seq > ?"
             " ORDER BY created_seq ASC LIMIT ?",
             (group_id, since_seq, limit),
         )
         messages = [dict(row) for row in rows]
+        messages = [m for m in messages if self._message_visible_to(m, viewer)]
         for message in messages:
             # refs is a JSON TEXT column (004); the wire contract wants an array,
             # and pre-004 rows default to '[]', never null.
             message["refs"] = json.loads(str(message["refs"]))
         return messages
+
+    def _message_visible_to(self, message: dict[str, object], viewer: str | None) -> bool:
+        """定向消息只能被发送方与收件方看到（R10 §19）。
+
+        普通群消息对整群可见；带 direct 签名的那条只对两端可见。
+        收件人从 message_deliveries 取（与 mention 同一套投递记录）。
+        """
+        try:
+            refs = json.loads(str(message.get("refs") or "[]"))
+        except (TypeError, ValueError):
+            refs = []
+        if DIRECT_REF not in refs:
+            return True
+        if not viewer:
+            return False
+        if str(message.get("sender_id") or "") == str(viewer):
+            return True
+        rows = self.database.read(
+            "SELECT recipient_id FROM message_deliveries WHERE message_id = ?",
+            (message.get("message_id"),),
+        )
+        return any(str(row["recipient_id"]) == str(viewer) for row in rows)
 
     # ----------------------------------------------------------------- reads
 
@@ -1501,13 +1756,50 @@ class SchedulerService:
         )
         if isinstance(spec, dict) and isinstance(spec.get("title"), str) and spec["title"].strip():
             task["title"] = spec["title"]
+        # The lineage: which task this one takes over.  It lives in the
+        # snapshot (the task's immutable contract), so it is read here rather
+        # than guessed from a message.
+        if isinstance(spec, dict):
+            supersedes = spec.get("supersedes")
+            if isinstance(supersedes, str) and supersedes.strip():
+                task["supersedes"] = supersedes
         return task
 
     def get_task(self, task_id: str) -> dict[str, object]:
         rows = self.database.read("SELECT * FROM tasks WHERE task_id = ?", (task_id,))
         if not rows:
             raise NotFound(f"unknown task: {task_id}")
-        return self._add_task_title(dict(rows[0]))
+        task = self._add_task_title(dict(rows[0]))
+        # 规格（工单/验收/路径）也在快照里：**人审核方案要看的正是这段**，
+        # 只给标题等于让人拿着标题去审。
+        spec = self._specs_for([task]).get(task_id)
+        if spec is not None:
+            task["spec"] = spec
+        return task
+
+    def _specs_for(self, tasks: list[dict]) -> dict[str, dict]:
+        """The task specs, read in **one** query (same shape as the titles)."""
+        snapshot_ids = {
+            str(task.get("plan_snapshot_id")) for task in tasks if task.get("plan_snapshot_id")
+        }
+        if not snapshot_ids:
+            return {}
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = self.database.read(
+            f"SELECT snapshot_id, content_json FROM plan_snapshots"
+            f" WHERE snapshot_id IN ({placeholders})",
+            tuple(sorted(snapshot_ids)),
+        )
+        specs: dict[str, dict] = {}
+        for row in rows:
+            try:
+                snapshot = json.loads(str(row["content_json"]))
+            except ValueError:
+                continue
+            for item in snapshot.get("tasks", ()) or ():
+                if isinstance(item, dict) and item.get("id"):
+                    specs[str(item["id"])] = item
+        return specs
 
     def diff_for_task(
         self,
@@ -1617,7 +1909,103 @@ class SchedulerService:
                 "SELECT * FROM tasks WHERE group_id = ? AND status = ? ORDER BY task_id",
                 (group_id, status),
             )
-        return [self._add_task_title(dict(row)) for row in rows]
+        tasks = [dict(row) for row in rows]
+        titles = self._titles_for(tasks)
+        failures = self._last_failures(tasks)
+        for task in tasks:
+            fields = titles.get(str(task.get("task_id")))
+            if fields:
+                title = fields.get("title")
+                if title:
+                    task["title"] = title
+                supersedes = fields.get("supersedes")
+                if supersedes:
+                    task["supersedes"] = supersedes
+            # Why the task fell over.  The office's「失败与接手」panel has to
+            # say *why*, not just "abandoned": the reason is the last
+            # abandon/release event, read in one query for the whole list.
+            failure = failures.get(str(task.get("task_id")))
+            if failure:
+                task["last_failure"] = failure
+        return tasks
+
+    def _last_failures(self, tasks: list[dict]) -> dict[str, dict]:
+        """The newest failure/abandon reason per task, in one query."""
+        ids = [str(task.get("task_id")) for task in tasks if task.get("task_id")]
+        if not ids:
+            return {}
+        placeholders = ",".join("?" for _ in ids)
+        rows = self.database.read(
+            "SELECT aggregate_id, payload_json, created_at FROM task_events"
+            f" WHERE event_name IN ('abandon', 'release')"
+            f" AND aggregate_id IN ({placeholders}) ORDER BY seq DESC",
+            tuple(ids),
+        )
+        out: dict[str, dict] = {}
+        for row in rows:
+            key = str(row["aggregate_id"])
+            if key in out:
+                continue
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except ValueError:
+                payload = {}
+            reason = str(payload.get("reason") or "") if isinstance(payload, dict) else ""
+            out[key] = {"reason": reason, "at": str(row["created_at"] or "")}
+        return out
+
+    def _titles_for(self, tasks: list[dict]) -> dict[str, dict[str, str | None]]:
+        """Titles (and lineage) for many tasks, read in **one** query.
+
+        Reading them one by one cost one database connection per task (the
+        read helper opens a connection per query), so a group of 44 tasks spent
+        ~350 ms in the title projection alone -- and the office polls this list
+        every few seconds. One query for every snapshot in play, then a dict.
+
+        The **lineage** (``supersedes``) comes from the same snapshot and the
+        same query: the snapshot is the task's immutable contract, and "this
+        task takes over that one" is part of that contract -- so the office
+        can show where a task came from without reading a second source.
+        """
+        snapshot_ids = {
+            str(task.get("plan_snapshot_id")) for task in tasks if task.get("plan_snapshot_id")
+        }
+        if not snapshot_ids:
+            return {}
+        placeholders = ",".join("?" for _ in snapshot_ids)
+        rows = self.database.read(
+            f"SELECT snapshot_id, content_json FROM plan_snapshots"
+            f" WHERE snapshot_id IN ({placeholders})",
+            tuple(sorted(snapshot_ids)),
+        )
+        titles: dict[str, dict[str, str | None]] = {}
+        for row in rows:
+            try:
+                snapshot = json.loads(str(row["content_json"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+            specs = snapshot.get("tasks", []) if isinstance(snapshot, dict) else []
+            for spec in specs:
+                if not isinstance(spec, dict):
+                    continue
+                task_id = spec.get("id")
+                title = spec.get("title")
+                if (
+                    task_id
+                    and isinstance(title, str)
+                    and title.strip()
+                    and str(task_id) not in titles
+                ):
+                    supersedes = spec.get("supersedes")
+                    titles[str(task_id)] = {
+                        "title": title,
+                        "supersedes": (
+                            str(supersedes)
+                            if isinstance(supersedes, str) and supersedes.strip()
+                            else None
+                        ),
+                    }
+        return titles
 
     def list_projects(self) -> list[dict]:
         """Every project, oldest first -- the frontend rail's top level."""

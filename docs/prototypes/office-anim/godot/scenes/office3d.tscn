@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://coffice3d9an01"]
-
-[ext_resource type="Script" path="res://scripts/office3d.gd" id="1_office"]
-
-[node name="Office3D" type="Node3D"]
-script = ExtResource("1_office")

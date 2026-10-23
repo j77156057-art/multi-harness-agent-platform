@@ -325,3 +325,26 @@ def _commit_in_worktree(tmp_path: Path, database: Database, attempt_id: str, tas
 
 def _status(database: Database, task_id: str) -> str:
     return str(database.read("SELECT status FROM tasks WHERE task_id = ?", (task_id,))[0]["status"])
+
+
+def test_say_can_post_a_direct_message(tmp_path):
+    """CLI 的 say 能发定向消息（R10 §19）：带 --direct 就是定向。"""
+    client, _database = make_client(tmp_path)
+    _ok(client, "project-create", "P-1", "--name", "demo")
+    _ok(client, "group-create", "G-1", "--project", "P-1", "--name", "group")
+
+    posted = _ok(
+        client,
+        "say",
+        "--group",
+        "G-1",
+        "--author",
+        "harness-1",
+        "--body",
+        "给群主的一句",
+        "--mention",
+        "human-1",
+        "--direct",
+    )
+    assert "direct" in posted["refs"], "定向标记写在 refs 里"
+    assert posted["mentions"] == ["human-1"], "收件人就是 mentions 里的那个"

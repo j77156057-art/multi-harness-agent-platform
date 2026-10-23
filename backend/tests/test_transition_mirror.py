@@ -14,9 +14,9 @@ from docstate.docstate import extract_transitions
 from app.spec import PSEUDO_STATES, EventKind, TaskStatus
 from app.state.machine import default_transition_table
 
-# R10 §10 迁移表展开后的三元组总数（86 行，含 1 个 child_created 伪状态出口）。
+# R10 §10 迁移表展开后的三元组总数（87 行，含 1 个 child_created 伪状态出口）。
 # 这是规范事实而非实现选择：R10 正文改动时必须显式更新本断言并经评审。
-EXPECTED_EXPANDED_TRIPLES = 138
+EXPECTED_EXPANDED_TRIPLES = 140
 
 
 def _spec_triples(spec_path) -> set[tuple[str, str, str]]:

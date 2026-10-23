@@ -107,8 +107,8 @@ def document_counts(spec_path) -> dict[str, int]:
     from docstate.docstate import extract_allowlist, load_spec
 
     sets = extract_allowlist(load_spec(str(spec_path)))
-    counts = {key: len(sets[key]) for key in ("M", "O", "R")}
-    counts["UNION"] = len(sets["M"] | sets["O"] | sets["R"])
+    counts = {key: len(sets[key]) for key in ("M", "O", "R", "A")}
+    counts["UNION"] = len(sets["M"] | sets["O"] | sets["R"] | sets["A"])
     return counts
 
 
@@ -135,9 +135,9 @@ def test_recorded_counts_match_r10(spec_path):
     assert constants_match_document(
         spec_path
     ), f"spec.py 常量与 §37.7 实际集合不一致：常量={dict(R10_ALLOWLIST_COUNTS)} 文档={actual}"
-    assert {key: EXPECTED_COUNTS[key] for key in ("M", "O", "R", "UNION")} == actual
+    assert {key: EXPECTED_COUNTS[key] for key in ("M", "O", "R", "A", "UNION")} == actual
     assert EXPECTED_COUNTS["LOOPS"] == R10_ALLOWLIST_COUNTS["LOOPS"] == 10
-    assert R10_TRANSITION_EDGE_COUNT == 86
+    assert R10_TRANSITION_EDGE_COUNT == 87
 
 
 def test_mirror_detects_a_drifted_constant(spec_path, monkeypatch):
@@ -194,6 +194,79 @@ def test_permission_denied_is_accepted_by_the_event_store(tmp_path):
             actor_type="human",
             actor_id="operator",
         )
+
+
+def test_allocation_events_are_registered_exactly_once_in_the_a_set(spec_path):
+    """R10-fix-13：A 集合登记 18 项，且与代码侧 AllocationEvent 逐项相等。"""
+    from docstate.docstate import extract_allowlist, load_spec
+
+    from app.spec import AllocationEvent
+
+    sets = extract_allowlist(load_spec(str(spec_path)))
+    code_events = {e.value for e in AllocationEvent}
+
+    assert len(code_events) == R10_ALLOWLIST_COUNTS["A"] == 18
+    assert code_events == sets["A"], (
+        f"A 集合两侧不一致：代码缺 {sorted(sets['A'] - code_events)} / "
+        f"代码多 {sorted(code_events - sets['A'])}"
+    )
+    # 四集合两两不重叠：A 事件不得同时是任务迁移或巡检观测事件。
+    for other in ("M", "O", "R"):
+        assert not (code_events & sets[other]), f"A ∩ {other} 非空"
+
+
+def test_a_events_are_accepted_by_the_event_store_but_unknown_names_are_not(tmp_path):
+    """登记后运行期合法：EventStore 的白名单直接来自 §37.7 四块文本。
+
+    这是 §38.11 的"零运行时行为变化"的另一半：名字可写，但未登记的名字依然被拒。
+    """
+    import pytest
+
+    from app.events.store import EventStore
+    from tests.claim_support import make_database
+
+    store = EventStore(make_database(tmp_path))
+    record = store.append(
+        event_name="allocation.decision_made",
+        aggregate_type="group",
+        aggregate_id="G-1",
+        actor_type="harness",
+        actor_id="office-admin",
+        payload={"task_id": "T-1"},
+    )
+    assert record.event_name == "allocation.decision_made"
+    with pytest.raises(ValueError, match="not registered"):
+        store.append(
+            event_name="allocation.decision_made_typo",
+            aggregate_type="group",
+            aggregate_id="G-1",
+            actor_type="harness",
+            actor_id="office-admin",
+        )
+
+
+def test_section_39_edges_match_the_a_set_both_ways(spec_path):
+    """§39 的边 ↔ A 集合双向封闭（规范侧 + 代码侧状态镜像）。"""
+    from docstate.docstate import extract_allocation_transitions, load_spec
+
+    from app.spec import ALLOCATION_STATES, CIRCULATION_STATES, AllocationEvent
+
+    text = load_spec(str(spec_path))
+    rows = extract_allocation_transitions(text)
+    events = [e for _, e, _, _ in rows]
+    nexts = {n for _, _, _, n in rows}
+
+    assert len(rows) == 22, f"§39 应有 22 条边，实际 {len(rows)}"
+    assert set(events) == {e.value for e in AllocationEvent}
+    assert nexts <= CIRCULATION_STATES | ALLOCATION_STATES
+    # 两台机器的每个状态都可被某条边到达 —— 没有"声明了却没人能进"的状态
+    # （这正是 `draft` 被移出传阅机的原因：表里没有它的入边）。
+    assert nexts == CIRCULATION_STATES | ALLOCATION_STATES
+    # §39 的 next 与 §10 的任务状态只允许共享字面 `cancelled`：传阅记录、分配轮次和
+    # 任务各自都有 `cancelled` 终态，这是三张表各自的终态字面，不是同一台状态机。
+    # 其余任何重叠都意味着"分配状态混进了 tasks.status"，违反 §117。
+    overlap = nexts & {s.value for s in TaskStatus}
+    assert overlap == {"cancelled"}, f"§39 与 §10 状态混用：{sorted(overlap)}"
 
 
 def test_pseudo_states_not_in_task_status():

@@ -91,6 +91,7 @@
 | `claim.base_commit_not_ancestor` | 409 | 已有任务的 `base_commit` 为空，或不是当前 integration HEAD 的显式祖先 | §11 | `—` | false | — |
 | `claim.base_commit_immutable` | 409 | 请求试图为已 Claim 任务改写 `base_commit` | §11、§13 | `审计` | false | — |
 | `claim.upstream_invalidated` | 409 | 上游被 revert，`upstream_invalidated_seq` 已写，下游 Claim 被冻结 | §21、§26 | `upstream_invalidated`(O) 已存在 | false | MERGE-REVERT-002 |
+| `claim.not_authorized` | 409 | 所在群开着分配门禁（`AP_ALLOCATION_REQUIRED_GROUPS`）时，**第一份** attempt 没有一份"已 accepted 且尚未用掉"的分配作授权；返工（`changes_requested`）不受此门禁约束 | §39 硬规则 2 | `—` | false | — |
 | `idempotency.conflict` | 409 | 同一 `claim_request_id`/`idempotency_key`，但 `task_ids`、参数或 `payload_hash` 不一致 | §11、§12 | `idempotency_conflict`(O) | false | CORE-CLAIM-001 |
 
 **不是错误的两个 Claim 结果**（见 README D-1）：

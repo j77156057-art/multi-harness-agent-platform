@@ -18,7 +18,7 @@ import pytest
 
 from app.config import settings
 from app.db.connection import Database
-from app.git.repo import run_git
+from app.git.repo import CanonicalRepo, run_git
 from app.runtime import __main__ as runtime_cli
 from app.runtime.driver import (
     RuntimeDriver,
@@ -34,8 +34,12 @@ from tests.merge_support import (
     PROFILE,
     approve,
     build_chain,
+    health_of,
     status_of,
 )
+
+PASSING = ["python", "-c", "import sys; sys.exit(0)"]
+FAILING = ["python", "-c", "import sys; sys.exit(1)"]
 
 
 def runtime_policy(*, integration_profile: str | None = PROFILE) -> RuntimePolicy:
@@ -412,6 +416,81 @@ def test_policy_file_round_trip_and_refusals(tmp_path):
         load_runtime_policy(unknown)
 
 
+def _commit_repo_policy(work, repo: CanonicalRepo) -> None:
+    run_git("add", "verify-profiles.json", cwd=work)
+    run_git(
+        "-c",
+        "user.name=test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-m",
+        "repo policy",
+        cwd=work,
+    )
+    commit = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    repo.import_objects(work, commit)
+    repo.update_ref(repo.integration_ref, commit)
+
+
+def test_repo_policy_follows_the_repository(tmp_path):
+    """A repo carries its own verify profiles; the platform keeps the roots.
+
+    The merge gate used to run the platform's ``backend-default`` (pytest) for
+    every project, so a JavaScript repository could never merge. The profiles
+    now come from the repository under test, while the command-root allowlist
+    stays human-maintained in the platform policy.
+    """
+    platform = tmp_path / "policy.json"
+    platform.write_text(
+        json.dumps(
+            {
+                "command_roots": ["python"],
+                "profiles": {PROFILE: {"command": CHECK_FLAG}},
+                "integration_profile": PROFILE,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = CanonicalRepo(tmp_path / "canonical.git")
+    run_git("init", "--bare", "--initial-branch", "integration", str(repo.path))
+    work = tmp_path / "work"
+    run_git("init", "--initial-branch", "integration", str(work))
+    policy_file = work / "verify-profiles.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "profiles": {"office-preview": {"command": CHECK_FLAG}},
+                "integration_profile": "office-preview",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_repo_policy(work, repo)
+
+    loaded = load_runtime_policy(platform, repo=repo)
+    assert loaded.repo_source == "integration:verify-profiles.json"
+    assert loaded.effective_integration_profile() == "office-preview"
+    # The repo adds a profile; the platform's profiles and roots stay.
+    assert set(loaded.verify.profiles) == {PROFILE, "office-preview"}
+    assert loaded.verify.command_roots == frozenset({"python"})
+
+    # A repo may name a command, never widen the human allowlist.
+    policy_file.write_text(
+        json.dumps(
+            {
+                "profiles": {"office-preview": {"command": ["bash", "-c", "true"]}},
+                "integration_profile": "office-preview",
+            }
+        ),
+        encoding="utf-8",
+    )
+    _commit_repo_policy(work, repo)
+    with pytest.raises(RuntimePolicyError, match="allowlist"):
+        load_runtime_policy(platform, repo=repo)
+
+
 # ---------------------------------------------------------------------- CLI
 
 
@@ -480,3 +559,75 @@ def test_cli_once_runs_a_round(tmp_path, monkeypatch, capsys):
     assert payload["actions"] == 1
     assert payload["verify"][0]["status"] == "passed"
     assert status_of(chain) == "awaiting_review"
+
+
+def _recheck_policy_file(tmp_path, chain, *, command: list[str]) -> object:
+    policy_file = tmp_path / "policy.json"
+    policy_file.write_text(
+        json.dumps(
+            {
+                "command_roots": ["python"],
+                "profiles": {PROFILE: {"command": command}},
+                "integration_profile": PROFILE,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return policy_file
+
+
+def test_cli_recheck_health_checks_without_writing(tmp_path, monkeypatch, capsys):
+    """`--recheck-health` 默认只验证：健康行一动不动。"""
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=PASSING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["result"] == "passed"
+    assert payload["recheck"]["applied"] is False
+    assert health_of(chain) == "escalated"
+
+
+def test_cli_recheck_health_applies_only_after_a_passing_check(tmp_path, monkeypatch, capsys):
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=PASSING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1", "--apply"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["applied"] is True
+    assert health_of(chain) == "green"
+
+
+def test_cli_recheck_health_reports_a_failing_check(tmp_path, monkeypatch, capsys):
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE integration_health SET status='escalated' WHERE project_id='P-1'")
+    monkeypatch.setattr(
+        settings, "runtime_policy_file", _recheck_policy_file(tmp_path, chain, command=FAILING)
+    )
+    monkeypatch.setattr(settings, "db_path", chain.database.path)
+    monkeypatch.setattr(settings, "canonical_repo", chain.repo.path)
+
+    code = runtime_cli.main(["--recheck-health", "P-1", "--apply"])
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert payload["recheck"]["result"] == "failed"
+    assert payload["recheck"]["applied"] is False
+    assert health_of(chain) == "escalated"

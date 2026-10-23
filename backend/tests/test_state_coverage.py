@@ -73,6 +73,11 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "claimed",
             "tests.test_sweeper_deps_resources::test_a_queued_task_resumes_to_claimed_when_the_resource_frees",
         ),
+        (
+            "attempt_budget_exhausted",
+            "escalated",
+            "tests.test_lease::test_budget_exhaustion_escalates_from_waiting_states",
+        ),
     ],
     "ready": [
         ("claim", "claimed", "tests.test_claim::test_claim_grants_owner_attempt_and_lease"),
@@ -80,6 +85,11 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "claim_deferred_resource",
             "queued",
             "tests.test_claim::test_deferred_resource_queues_without_owner_attempt_or_lease",
+        ),
+        (
+            "attempt_budget_exhausted",
+            "escalated",
+            "tests.test_lease::test_budget_exhaustion_escalates_from_waiting_states",
         ),
     ],
     "verifying": [

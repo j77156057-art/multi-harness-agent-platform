@@ -6,7 +6,7 @@
 **未登记的省略视为违规。**
 
 真相源：`docs/spec/0.3-R10.md` §10（23 个正式状态 + 1 个伪状态；
-迁移表 86 行，按 `a/b/c` 多状态写法展开后为 **138 个 state-event-next 三元组**）
+迁移表 87 行，按 `a/b/c` 多状态写法展开后为 **140 个 state-event-next 三元组**）
 代码镜像：`backend/app/spec.py`（枚举）、`backend/app/state/machine.py`（迁移表）
 
 ---
@@ -45,7 +45,7 @@ R10 §10 的 **23 个正式状态全部投影**为 `TaskStatus` 枚举值；伪�
 
 ---
 
-## 3. 迁移边投影：86 行 = 138 个展开三元组，全量零省略
+## 3. 迁移边投影：87 行 = 140 个展开三元组，全量零省略
 
 `default_transition_table()` 的行序与 R10 §10 迁移表逐行对应，
 每行用行号注释标注（如 `# R10 L421`）。多状态写法
@@ -55,7 +55,7 @@ R10 §10 的 **23 个正式状态全部投影**为 `TaskStatus` 枚举值；伪�
 
 - `backend/tests/test_transition_mirror.py`
   - 代码三元组集合 == R10 §10 展开三元组集合（缺失边/多余边都报 P1）；
-  - 展开总数固定为 138；
+  - 展开总数固定为 140；
   - §10 出现的每个状态名/事件名都必须在代码枚举内登记（禁止自造名字）；
 - `backend/tests/test_spec_mirror.py`：枚举值 ⊆ R10 §37.7 allowlist（M74/O13/R1）。
 
@@ -92,7 +92,7 @@ R10 §10 的 **23 个正式状态全部投影**为 `TaskStatus` 枚举值；伪�
 | 项 | R10 | 当前代码 | 处置 |
 |---|---|---|---|
 | 正式状态 | 23 + 1 伪 | 23 + 1 伪，全量投影 | 无省略，见 §2 |
-| 迁移三元组 | 86 行 / 138 展开 | 86 行 / 138 展开，零差异 | `test_transition_mirror.py` 对拍 |
+| 迁移三元组 | 87 行 / 140 展开 | 87 行 / 140 展开，零差异 | `test_transition_mirror.py` 对拍 |
 | 事件 allowlist | 88（M74/O13/R1） | `EventKind` 登记全部 74 个 M 事件 | `test_spec_mirror.py` 校验封闭性 |
 | 副作用执行 | 强制 | 仅声明，按 §4 批次落地 | 各 MVP 交付时回填执行证据 |
 | 三账户 ACL | 强制 | 单账户 + `--insecure-single-account` | MVP-05 交付时必须写明临时措施与补齐清单 |
@@ -107,5 +107,5 @@ R10 §10 的 **23 个正式状态全部投影**为 `TaskStatus` 枚举值；伪�
 
 1. 在 commit body 引用 R10 章节；
 2. 先改 R10 正文（规范先行），再改代码与本文件——禁止在代码里自造状态/事件名；
-3. 通过 `test_transition_mirror.py` 对拍；新增/删除边会同步改变 138 计数，
+3. 通过 `test_transition_mirror.py` 对拍；新增/删除边会同步改变 140 计数，
    必须在 commit message 中说明规范依据。

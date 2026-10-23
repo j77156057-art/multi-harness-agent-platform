@@ -1,0 +1,23 @@
+.opening-welcome{position:absolute;inset:0;z-index:9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#e9eef5c9;backdrop-filter:blur(3px);color:#314258;text-align:center}
+.opening-welcome[hidden]{display:none}
+.opening-welcome .primary{font-size:21px;padding:15px 46px;border-radius:32px;box-shadow:0 8px 30px #344c7d22}
+.opening-preview{background:transparent;border:0;color:#455b75;text-decoration:underline;cursor:pointer;padding:10px}
+#openingDialog{box-sizing:border-box;width:min(416px,calc(100vw - 24px));height:min(790px,calc(100dvh - 24px));max-width:none;max-height:none;padding:0;border:1px solid #77869c;border-radius:26px;background:#edf1f7;color:#29394d;box-shadow:0 22px 80px #11182766;overflow:hidden}
+#openingDialog[open]{display:flex;flex-direction:column}
+#openingDialog::backdrop{background:#17243a8c;backdrop-filter:blur(3px)}
+.opening-bar{flex:none;display:flex;align-items:center;justify-content:space-between;padding:8px 16px;font-size:12px}
+.opening-bar button{border:0;background:transparent;font-size:25px;color:#314258;cursor:pointer;width:36px;height:36px}
+#openingPhoneSlot{flex:1;min-height:0;margin:0 8px}
+#openingDialog .oop-frame{min-height:0}
+/* Opening pauses the office timeline, while its own phone sequence keeps playing. */
+body.paused #openingDialog .oop-perform .oop-alarm-icon,
+body.paused #openingDialog .oop-perform .oop-msg-enter{animation-play-state:running!important}
+.opening-boundary{flex:none;font-size:11px;margin:8px 12px 10px;text-align:center;color:#57667c}
+/* 向导里的「当前目录没有同一 Harness 的第二个窗口」「已选择 N 名打工人」这类提示，说的是
+   可选项与操作后果，不是错误；沿用红底警告样式会让人以为选错了。错误本身仍由 .oop-err 显示。 */
+#openingDialog .oop-stale{color:#5b6a7c;background:#f1f4f9;border-color:#dbe2ec}
+#openingDialog .oop-status{color:#57667c}
+#openingHost{position:static;display:block}
+#openingConfigBtn{border:1px solid #d5dfe9;border-radius:9px;background:#fff;color:#354b64;padding:7px 10px;cursor:pointer;white-space:nowrap}
+#openingDialog button:focus-visible,#openingStartBtn:focus-visible,#openingPreviewBtn:focus-visible,#openingConfigBtn:focus-visible{outline:3px solid #6096df;outline-offset:2px}
+@media(max-width:420px){#openingDialog{border-radius:19px}.opening-bar{padding:4px 12px}#openingDialog .oop-footer{padding:8px;gap:6px}#openingDialog .oop-btn{padding:8px 10px}.opening-boundary{margin:6px;font-size:10px}.scene-navigation{flex-wrap:wrap}}

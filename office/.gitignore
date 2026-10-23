@@ -1,0 +1,21 @@
+node_modules/
+node_modules*/
+dist/
+*.tgz
+godot-office/.godot/
+
+# Local-only proxy credentials and TLS material.
+.env
+.env.*
+!.env.example
+*.key
+*.crt
+*.pem
+
+# Runtime output must not become published evidence.
+handoff/**/runtime/
+
+# 冒烟脚本的本机输出（交付结果、截图）不进仓。
+handoff/
+screenshots/
+*.log

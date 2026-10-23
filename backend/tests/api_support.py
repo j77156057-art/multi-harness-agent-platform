@@ -100,6 +100,7 @@ def advance_to_awaiting_review(
     fencing_epoch: int,
     manager: WorktreeManager | None = None,
     filename: str = "work.txt",
+    headers: dict[str, str] | None = None,
 ) -> str:
     """Commit, publish, submit and verify — the real chain, no scaffolding.
 
@@ -128,6 +129,7 @@ def advance_to_awaiting_review(
             "fencing_epoch": fencing_epoch,
             "idempotency_key": f"pub-{task_id}-{commit[:8]}",
         },
+        headers=headers,
     )
     assert published.status_code == 200, published.text
 
@@ -139,6 +141,7 @@ def advance_to_awaiting_review(
             "fencing_epoch": fencing_epoch,
             "completion": {"commit": commit, "task_id": task_id, "attempt_id": attempt_id},
         },
+        headers=headers,
     )
     assert submitted.status_code == 200, submitted.text
 

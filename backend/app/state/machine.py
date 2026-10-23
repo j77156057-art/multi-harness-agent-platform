@@ -811,6 +811,14 @@ def default_transition_table() -> TransitionTable:
             "human_todo",
         ),
         _t(
+            (TaskStatus.READY, TaskStatus.QUEUED),
+            EventKind.ATTEMPT_BUDGET_EXHAUSTED,
+            TaskStatus.ESCALATED,
+            "attempt_no reached max_attempts without budget override",
+            "event",
+            "human_todo",
+        ),
+        _t(
             TaskStatus.AWAITING_REVIEW,
             EventKind.REVIEW_LEASE_EXPIRE,
             TaskStatus.AWAITING_REVIEW,

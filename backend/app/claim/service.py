@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
 
+from app.allocation.service import authorization_row, consume_authorization
 from app.budget.service import (
     raise_incidents,
     record_reservation,
@@ -80,6 +81,9 @@ class RejectCode(StrEnum):
     BATCH_ABORTED = "claim.batch_aborted"
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
     HARNESS_INELIGIBLE = "claim.harness_ineligible"
+    #: §39 硬规则 2 的强制口径：所在群开着分配门禁时，没有"已 accepted 的分配"就
+    #: 不能开第一份 attempt。名字与 docs/prep/MVP-08/error-codes.md 对齐。
+    NOT_AUTHORIZED = "claim.not_authorized"
 
 
 class IdempotencyConflict(RuntimeError):
@@ -182,6 +186,18 @@ def canonical_payload_hash(
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
     return "sha256:" + hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def allocation_gate_applies(task: sqlite3.Row | dict) -> bool:
+    """这个任务所在的群是否开着 §39 硬规则 2 的门禁。
+
+    按**群**开关而不是全局（群主 2026-10-17 选定）。全局强制的代价是把 57 条存量任务
+    一次性变成不可领取，连带把已经跑通的合并链和 `test_real_adapters` 全打红 —— 那不是
+    把规则做实，那是换掉领取机制。按群开关让规则在"已经进入分配治理的群"里是真的，
+    同时不动其余群：默认空集合 = 一个群都不强制，纳入哪个群是显式配置，不是默认放宽。
+    """
+    required = settings.allocation_required_groups
+    return bool(required) and str(task["group_id"]) in required
 
 
 class ClaimService:
@@ -607,12 +623,39 @@ class ClaimService:
                 outcome=OUTCOME_REJECTED,
                 error_code=f"{RejectCode.HARNESS_INELIGIBLE.value}:{refusal}",
             )
+        # §39 硬规则 2（群主 2026-10-17 选定的"分群开关"口径）：所在群开着分配门禁时，
+        # **第一份** attempt 必须由一份"已 accepted 的分配"授权。
+        #
+        # 修订（CLAIM_FOR_REVISION）刻意不走这道门：它继续的是同一份已经被授权过的作业。
+        # 若连返工都要重新分配，一次 verify 失败就会把任务钉在 changes_requested 上等
+        # 分配 —— 这正是本仓已经踩过的那类死端（见 reviews/rework 那轮的修复）。
+        # 授权在下面**真正开出 attempt** 时才标记用掉，因此"排队等资源"不消耗授权。
+        authorization = None
+        if event is EventKind.CLAIM and allocation_gate_applies(task):
+            authorization = authorization_row(
+                conn,
+                task_id=task_id,
+                harness_id=request.harness_id,
+                # 硬规则 2 列的"计划版本"：分配轮绑定的快照必须就是任务当前的快照，
+                # 否则方案换版后旧授权仍能开工（硬规则 5 要求旧授权失效）。
+                plan_snapshot_id=task["plan_snapshot_id"],
+            )
+            # 已用过的授权不再算授权：`claimed_at` 一旦写下，这份分配就"已经开过工"。
+            # 任务若后来被放弃/重开回到 ready，再领就必须由管理员重新分配 —— 这正是
+            # 门禁要守住的东西（不许自选）。不在这里拦住的话，下面 `consume_authorization`
+            # 会因为 claim_id 不同而抛错，那就从"拒绝"变成"500"了。
+            if authorization is None or authorization["claimed_at"] is not None:
+                return ClaimItem(
+                    task_id=task_id,
+                    outcome=OUTCOME_REJECTED,
+                    error_code=RejectCode.NOT_AUTHORIZED.value,
+                )
         budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
         overridden = task["budget_override_by"] is not None
         if not budget_left and not overridden:
-            # R10 §10 defines attempt_budget_exhausted only out of stale and
-            # reclaiming, so there is no legal event to write here. The claim
-            # simply cannot fire; escalation happens in the sweeper.
+            # R10 §10's attempt_budget_exhausted edge covers ready/queued as
+            # well as stale/reclaiming. A failed claim still writes no state
+            # itself; the lease sweep escalates the task on its next round.
             return ClaimItem(
                 task_id=task_id,
                 outcome=OUTCOME_REJECTED,
@@ -754,13 +797,14 @@ class ClaimService:
             fencing_epoch=fencing_epoch,
             now=moment,
         )
+        claim_id = f"tc-{uuid.uuid4().hex}"
         conn.execute(
             "INSERT INTO task_claims("
             "  claim_id, claim_request_id, task_id, attempt_id, owner, claimed_at,"
             "  released_at, release_reason"
             ") VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
             (
-                f"tc-{uuid.uuid4().hex}",
+                claim_id,
                 request.claim_request_id,
                 task_id,
                 attempt_id,
@@ -768,6 +812,14 @@ class ClaimService:
                 moment.isoformat(),
             ),
         )
+        if authorization is not None:
+            # 同一 `claim_id` 落在两张表上，"撤销一份没人用的授权"与"撤掉一个正在跑的
+            # Lease"因此可以靠 join 分开判断，不用猜（§39 撤销前置条件）。
+            consume_authorization(
+                conn,
+                allocation_id=str(authorization["allocation_id"]),
+                claim_id=claim_id,
+            )
         if budget_limit is not None:
             record_reservation(
                 conn,

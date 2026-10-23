@@ -66,11 +66,26 @@ cd backend && ../.venv/Scripts/python.exe -m app.main
 start.bat          rem 后端 → http://127.0.0.1:8848（等价 make dev）
 start.bat all      rem 后端 + 巡检循环（两个窗口）
 start.bat workers  rem 只起巡检循环（app.scheduler --loop）
+start-admin.bat    rem 管理员 harness 自循环（目标细化/分派/审核）
 start.bat help     rem 用法
 ~~~
 
 前置仍是一次性的（venv，见上一节）；缺 venv 时 `start.bat` 会打印修复命令
 并以 exit 2 退出。人类界面是 Agent Office（4174，独立仓，单独启动）。
+
+`start-admin.bat` 是管理员 harness 的运行器，不是第二个调度器：它读取群里
+新的 `project-goal` 消息，让管理员自己的模型通道细化目标，用管理员 token
+调用现有分派路由；随后对 `awaiting_review` 任务领取审核租约、读真实 diff，
+再把模型裁决提交到现有审核路由。默认身份 `codex-window-admin`、群
+`office-formal-2`，可用 `AP_ADMIN_HARNESS_ID` / `AP_ADMIN_GROUP` /
+`AP_ADMIN_TOKEN_FILE` 覆盖。首次启动默认不重放历史目标；需要时加
+`--replay-latest`。模型失败或跨提供方规则拒绝时只记录并等待，不会伪造通过。
+成员 worker 仍由各自窗口单独启动。管理员 worker 与成员 worker 一样要求后端以
+`AP_AUTH_MODE=enforce` 运行，并且 token 文件属于已注册的管理员窗口。
+先用 `start-admin.bat --once --dry-run` 做只读连接检查，不会写平台。
+若管理员是 `codex-window-admin`，它用本机 `codex` CLI；codex 的 provider 中继
+（例如 `http://127.0.0.1:8402`）必须可用，否则模型调用 fail-closed 并在群里报告，
+不会伪造结论。必要时用 `AP_ADMIN_MODEL_CHANNEL` 显式指向另一条已装 CLI 通道。
 
 运行环（Verify/Merge 的正式驱动，F6）：`python -m app.runtime --once` 跑一轮、
 `--loop` 常驻（`AP_RUNTIME_INTERVAL` 默认 10s）、`--check` 只读盘点候选；verify
@@ -107,7 +122,7 @@ make dev
 |---|---|
 | <http://127.0.0.1:8848/> | 入口页（常用链接 + Agent Office 地址） |
 | <http://127.0.0.1:8848/health> | 存活 + 配置摘要 |
-| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（90 项） |
+| <http://127.0.0.1:8848/spec/status> | 规范一致性检查（98 项） |
 | <http://127.0.0.1:8848/docs> | OpenAPI 交互文档 |
 
 启动时会自动跑规范检查；**不通过会拒绝启动**（`AP_CHECK_SPEC=0` 可临时跳过，
@@ -118,7 +133,7 @@ make dev
 ## 常用命令
 
 ~~~bash
-make docstate   # 只跑规范一致性检查（90 项断言）
+make docstate   # 只跑规范一致性检查（98 项断言）
 make test       # pytest
 make lint       # ruff check + format --check
 make fmt        # ruff 自动修复 + 格式化
@@ -190,7 +205,10 @@ backend/app/          业务代码
   config.py           环境变量配置
   main.py             FastAPI 入口
 backend/tests/        测试（含与 R10 正文的交叉验证）
-# UI：Agent Office（独立仓，4174）；本仓不再包含前端
+office/              UI：Agent Office 数据版界面（Vite + 原生 JS，4174）；
+  src/              应用外壳与办公室（任务表 / 详情 / 额度池 / 群聊 / 任务书 / 成员动态）
+  server/           预览层网关（读平台事实，按群裁剪）
+  scripts/          冒烟脚本（需 node + playwright，**不在本仓门禁内**）
 docs/
   spec/0.3-R10.md     ★ 唯一真相源（只读！改动走复审流程）
   spec/mvp-task-checklist.md  任务清单（0.4 重排版）
@@ -226,9 +244,9 @@ canonical.git         调度中心持有的 bare 仓库（git 忽略）
 
 | 门禁 | 数量 | 作用 |
 |---|---|---|
-| `docstate` | 90 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
+| `docstate` | 98 项断言 | R10 文档自洽性：allowlist 封闭性、迁移表单值 next、schema 字段、唯一键列已声明、test_id 无悬空 |
 | `discipline` | 42 项断言 | 协作纪律：`TASKS.md` 与 `docs/claims/` 互相覆盖、任务卡有 test_id 与真相源引用、已完成卡有 commit 与验证证据、**依赖图无环且与任务清单一致、关键路径长度由依赖图算出**、认领文件序号唯一连续、文档声明的断言数与实际相符、**已合入 main 的任务必须已登记/已完成/证据完整（git 历史反向核对，浅克隆 fail-closed）**、**未合入 main 但已开工的分支，其认领必须已登记（否则开工前后都无处登记）** |
-| `test_spec_mirror.py` | 11 项 | 代码侧枚举与 R10 正文的交叉验证 |
+| `test_spec_mirror.py` | 17 项 | 代码侧枚举与 R10 正文的交叉验证 |
 | `test_database_events.py` | 9 项 | 事件只追加、并发定序、失败不留孤儿事件、迁移幂等 |
 | `ruff` | check + format | 代码风格 |
 

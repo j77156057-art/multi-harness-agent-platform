@@ -105,6 +105,24 @@ class VerifyPolicy:
                 f"unknown verify profile {name!r}; registered: {sorted(self.profiles)}"
             ) from exc
 
+    def as_mapping(self) -> dict[str, object]:
+        """Serialise back to the policy JSON shape (for repo-side merging)."""
+        return {
+            "version": self.version,
+            "command_roots": sorted(self.command_roots),
+            "profiles": {
+                name: {
+                    "command": list(profile.command),
+                    "timeout_seconds": profile.timeout_seconds,
+                    "max_verify_attempts": profile.max_verify_attempts,
+                    "allow_network": profile.allow_network,
+                    "allowed_secrets": sorted(profile.allowed_secrets),
+                    "lockfile_mutating": profile.lockfile_mutating,
+                }
+                for name, profile in self.profiles.items()
+            },
+        }
+
     def fingerprint(self) -> str:
         """A stable hash of the policy, for the receipt's verify_env_hash."""
         payload = {

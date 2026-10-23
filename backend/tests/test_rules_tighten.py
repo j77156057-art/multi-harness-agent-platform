@@ -16,7 +16,12 @@ import pytest
 from app.claim.service import ClaimRequest, ClaimService
 from app.git.publish import PublishProxy
 from app.git.repo import CanonicalRepo, run_git
-from app.git.worktree import WorktreeCapacityExceeded, WorktreeError, WorktreeManager
+from app.git.worktree import (
+    WorktreeCapacityExceeded,
+    WorktreeError,
+    WorktreeManager,
+    _force_rmtree,
+)
 from app.merge.worker import MergeWorker
 from app.scheduler import sweep_worktree_recycle
 from app.tasks.service import Conflict, SchedulerService
@@ -172,6 +177,43 @@ def test_changes_requested_freeze_recycles(tmp_path, monkeypatch):
     assert report.detail["recycled"] == [chain.attempt_id]
 
 
+def test_a_stale_tasks_worktree_is_recycled(tmp_path, monkeypatch):
+    """租约一过期，那个 attempt 就死了，它的工位不能还占着容量。
+
+    漏掉 ``stale`` 的后果很直接：并发工位上限只涨不落，平台会把自己锁死
+    （"cap reached (8/8)"，新任务连工位都开不出来）。
+    """
+    _archive_root(tmp_path, monkeypatch)
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'stale', current_attempt_id = NULL WHERE task_id = 'T-1'"
+        )
+
+    report = sweep_worktree_recycle(chain.database, NOW, repo=chain.repo)
+
+    assert report.detail["recycled"] == [chain.attempt_id]
+    assert _workspace_rows(chain.database)[0]["status"] == "archived"
+
+
+def test_a_task_without_a_current_attempt_releases_its_worktree(tmp_path, monkeypatch):
+    """任务回到队列了，它手上那个 attempt 同样已经死了。
+
+    留着的话，这条任务看着是 ready，却**没人能领**（可领列表会跳过还挂着
+    attempt 的任务）——一个隐形僵尸。
+    """
+    _archive_root(tmp_path, monkeypatch)
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'ready', current_attempt_id = NULL WHERE task_id = 'T-1'"
+        )
+
+    report = sweep_worktree_recycle(chain.database, NOW, repo=chain.repo)
+
+    assert report.detail["recycled"] == [chain.attempt_id]
+
+
 def test_failed_archive_leaves_the_tree_and_reports_skipped(tmp_path, monkeypatch):
     _archive_root(tmp_path, monkeypatch)
     chain = build_chain(tmp_path)
@@ -190,6 +232,25 @@ def test_failed_archive_leaves_the_tree_and_reports_skipped(tmp_path, monkeypatc
     assert report.detail["skipped"][0]["attempt_id"] == chain.attempt_id
     assert _workspace_rows(chain.database)[0]["status"] == "active", "human gets the tree"
     assert chain.manager.workspace_for_attempt(chain.attempt_id) is not None
+
+
+def test_missing_dead_worktree_is_reconciled_and_releases_capacity(tmp_path, monkeypatch):
+    """A prior crash must not strand an active row after its tree is gone."""
+    _archive_root(tmp_path, monkeypatch)
+    chain = build_chain(tmp_path)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE tasks SET status = 'cancelled' WHERE task_id = 'T-1'")
+    worktree = chain.manager.workspace_for_attempt(chain.attempt_id)
+    assert worktree is not None
+    _force_rmtree(worktree.path)
+    _force_rmtree(worktree.gitdir)
+
+    report = sweep_worktree_recycle(chain.database, NOW, repo=chain.repo)
+
+    assert report.actions == 1
+    assert report.detail["reconciled_missing"] == [chain.attempt_id]
+    assert report.detail["skipped"] == []
+    assert _workspace_rows(chain.database)[0]["status"] == "archived"
 
 
 def test_capacity_comes_back_after_recycle(tmp_path, monkeypatch):

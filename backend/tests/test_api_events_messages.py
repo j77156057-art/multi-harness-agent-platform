@@ -6,7 +6,7 @@ assertions here are about cursor semantics, not just about rows coming back.
 
 from __future__ import annotations
 
-from tests.api_support import bootstrap, make_client, publish_plan
+from tests.api_support import bootstrap, make_client, publish_plan, scheduler
 
 
 def _prepare(client) -> None:
@@ -269,3 +269,60 @@ def test_message_body_must_not_be_blank(tmp_path):
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "request.invalid"
+
+
+def test_direct_messages_are_only_visible_to_the_two_ends(tmp_path):
+    """定向消息（R10 §19）：只有发送方与收件方看得到。
+
+    普通群消息对整群可见；定向的那条不能被第三方看到——否则它不叫私聊。
+    """
+    client, database = make_client(tmp_path)
+    _prepare(client)
+    service = scheduler(database)
+
+    posted = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={
+            "author_kind": "human",
+            "author_id": "human-1",
+            "body": "只给管理员看的一句",
+            "mentions": ["harness-1"],
+            "direct": True,
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    assert "direct" in posted.json()["refs"], "定向标记要写在 refs 里"
+
+    def bodies(viewer: str | None) -> list[str]:
+        return [m["body"] for m in service.list_messages("G-1", viewer=viewer)]
+
+    assert bodies("human-1") == ["只给管理员看的一句"], "发送方看得到"
+    assert bodies("harness-1") == ["只给管理员看的一句"], "收件方看得到"
+    assert bodies("harness-2") == [], "第三方看不到"
+    assert bodies(None) == [], "认证关闭时看不到（失败关闭）"
+
+    # 群消息不受影响：三方照看得到。
+    client.post(
+        "/api/v1/groups/G-1/messages",
+        json={"author_kind": "human", "author_id": "human-1", "body": "群里的话"},
+    )
+    assert bodies("harness-2") == ["群里的话"]
+
+    # 路由层：没有令牌的读者拿不到定向消息。
+    page = client.get("/api/v1/groups/G-1/messages").json()
+    assert [m["body"] for m in page["messages"]] == ["群里的话"]
+
+
+def test_a_direct_message_without_a_recipient_is_refused(tmp_path):
+    client, _ = make_client(tmp_path)
+    _prepare(client)
+    response = client.post(
+        "/api/v1/groups/G-1/messages",
+        json={
+            "author_kind": "human",
+            "author_id": "human-1",
+            "body": "没有收件人的定向消息",
+            "direct": True,
+        },
+    )
+    assert response.status_code == 422, response.text

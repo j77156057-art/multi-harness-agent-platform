@@ -219,6 +219,38 @@ class WorktreeManager:
         with self.database.connect() as conn:
             return self._find_active(conn, attempt_id=attempt_id)
 
+    def reconcile_missing_workspace(self, *, attempt_id: str) -> bool:
+        """Close an active row whose writable tree is already gone.
+
+        A crashed cleanup can leave the database row active after the physical
+        worktree and its separate gitdir have both disappeared.  There is no
+        branch content left to archive in that case, so keeping the row active
+        would permanently consume capacity.  This method is deliberately
+        limited to the both-missing case; a remaining path or gitdir still
+        requires the normal archive path and human-visible failure handling.
+        """
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT workspace_id, path FROM workspaces"
+                " WHERE attempt_id = ? AND status = 'active'",
+                (attempt_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            path = Path(str(row["path"]))
+            gitdir = path.parent / f"{path.name}.git"
+            # An interrupted removal may leave an empty directory behind.  It
+            # has no writable content once the separate gitdir is gone, but a
+            # non-empty directory must remain visible for human recovery.
+            path_has_content = path.exists() and any(path.iterdir())
+            if path_has_content or gitdir.exists():
+                return False
+            conn.execute(
+                "UPDATE workspaces SET status = 'archived' WHERE workspace_id = ?",
+                (str(row["workspace_id"]),),
+            )
+            return True
+
     # --------------------------------------------------------- archive/recycle
 
     def archive_and_recycle(

@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.adapter.formal_worker import adapter_for_harness
+from app.adapter.formal_worker import adapter_for_harness, base_harness_id
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
@@ -38,6 +38,30 @@ def test_formal_worker_selects_the_matching_cli(harness_id, adapter_type):
 def test_formal_worker_rejects_unknown_cli_instead_of_falling_back():
     with pytest.raises(ValueError, match="unsupported formal Harness"):
         adapter_for_harness(SimpleNamespace(), "not-registered")
+
+
+@pytest.mark.parametrize(
+    ("instance_id", "base_id", "adapter_type"),
+    [
+        ("codex-member-1", "codex", CodexAdapter),
+        ("codex-window-2", "codex", CodexAdapter),
+        ("claude-code-member-1", "claude-code", ClaudeCodeAdapter),
+        ("opencode-window-review", "opencode", OpenCodeAdapter),
+    ],
+)
+def test_formal_worker_keeps_window_identity_while_reusing_adapter(
+    instance_id, base_id, adapter_type
+):
+    assert base_harness_id(instance_id) == base_id
+    adapter = adapter_for_harness(SimpleNamespace(), instance_id)
+    assert isinstance(adapter, adapter_type)
+    assert adapter.registration.harness_id == instance_id
+
+
+@pytest.mark.parametrize("instance_id", ["codex-member", "codex-admin-1", "unknown-member-1"])
+def test_formal_worker_rejects_ambiguous_window_identity(instance_id):
+    with pytest.raises(ValueError, match="unsupported formal Harness"):
+        base_harness_id(instance_id)
 
 
 def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
@@ -78,7 +102,10 @@ def test_windowsapps_bash_uses_cmd_shim_for_opencode(tmp_path):
     )
     command = adapter.command("Reply with READY", tmp_path)
     assert command[:3] == ["cmd.exe", "/d", "/s"]
-    assert "opencode run --format json --auto" in command[4]
+    # The recipe carries ``--standalone`` since the OpenCode transport
+    # hardening (the CLI must run its **own** server, not attach to whatever
+    # background service happens to be running).  The shim itself is unchanged.
+    assert "opencode run --standalone --format json --auto" in command[4]
 
 
 def test_windowsapps_opencode_moves_multiline_order_to_attachment(tmp_path):

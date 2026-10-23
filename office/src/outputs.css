@@ -1,0 +1,231 @@
+/* 「各窗口说了什么」（独立页面）。
+ *
+ * 干活的人（窗口）做完工之后都会留下一段自己的话 —— 那是它真正跑出来的东西，
+ * 不是平台转述的"完成了"。这个页面把这些话按窗口摊开。
+ */
+
+.outputs-body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #1c2430;
+  font-family: "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.outputs-shell {
+  max-width: 900px;
+  margin: 0 auto;
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #fff;
+  border-left: 1px solid #e3e6ea;
+  border-right: 1px solid #e3e6ea;
+}
+
+.outputs-head {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.outputs-head h1 { margin: 0 0 4px; font-size: 16px; font-weight: 650; }
+.outputs-head p { margin: 0; font-size: 12px; color: #5b6673; line-height: 1.6; }
+.outputs-head b { font-weight: 600; }
+
+.outputs-note {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #cfe0ef;
+  border-radius: 6px;
+  background: #eaf1f8;
+  font-size: 12px;
+  color: #1c2430;
+}
+
+.outputs-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.outputs-tools label { font-size: 12px; color: #5b6673; }
+
+.outputs-tools select,
+.outputs-tools button {
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #1c2430;
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.outputs-count { margin-left: auto; font-size: 12px; color: #8a94a0; }
+
+.outputs-list {
+  padding: 16px 20px 28px;
+  overflow: auto;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+/* 一个窗口一块。 */
+.outputs-window { border: 1px solid #e6e9ee; border-radius: 8px; overflow: hidden; }
+
+.outputs-window > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  background: #f7f9fb;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.outputs-window > header b { font-size: 13px; font-weight: 650; }
+.outputs-window > header span { font-size: 11px; color: #8a94a0; }
+
+.outputs-item { padding: 10px 12px; border-bottom: 1px solid #f2f4f7; }
+.outputs-item:last-child { border-bottom: 0; }
+
+.outputs-item > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.outputs-item > header b { font-size: 13px; font-weight: 600; }
+.outputs-item > header time { margin-left: auto; font-size: 11px; color: #8a94a0; }
+
+.outputs-tag {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  border: 1px solid #dfe3e8;
+  color: #5b6673;
+  background: #fff;
+}
+
+.outputs-tag.is-done { border-color: #bfe0cd; background: #eef8f2; color: #1f7a4d; }
+.outputs-tag.is-stuck { border-color: #e8cccc; background: #fbf0f0; color: #b03a3a; }
+
+.outputs-words {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: #f7f9fb;
+  border: 1px solid #eef0f3;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #253040;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+
+/* 同一条活的多次尝试：收在任务下面，不要把标题重复三遍。 */
+.outputs-attempt { margin-top: 8px; }
+
+.outputs-attempt-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.outputs-attempt-head b { font-size: 12px; font-weight: 600; color: #5b6673; }
+
+/* 这一轮失败时它自己给的理由（平台事件里记着）。 */
+.outputs-reason {
+  margin: 0 0 5px;
+  font-size: 12px;
+  color: #8a5b2f;
+}
+
+/* 机器日志先给人话：结论、做了哪些事，原文收在后面。 */
+.outputs-said { display: grid; gap: 6px; }
+
+.outputs-said-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b6673;
+  margin-top: 2px;
+}
+
+.outputs-tools { margin: 0; padding-left: 18px; }
+.outputs-tools li { font-size: 12px; color: #3d4652; }
+.outputs-tools li span { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+
+.outputs-more-block {
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 9px;
+}
+
+.outputs-more-block > summary {
+  font-size: 12px;
+  color: #5b6673;
+  cursor: pointer;
+}
+
+.outputs-more-block .outputs-words { margin-top: 6px; }
+
+.outputs-raw {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #3d4652;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.outputs-words.is-clipped { max-height: 132px; }
+
+.outputs-err {
+  margin: 6px 0 0;
+  padding: 8px 11px;
+  border-radius: 6px;
+  background: #fbf0f0;
+  border: 1px solid #f0dcdc;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #7d3030;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.outputs-more {
+  margin-top: 6px;
+  border: 1px solid #cdd3da;
+  border-radius: 5px;
+  background: #fff;
+  color: #5b6673;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.outputs-empty { font-size: 12px; color: #8a94a0; }
+.outputs-error { font-size: 12px; color: #b03a3a; }

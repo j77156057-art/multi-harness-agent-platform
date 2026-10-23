@@ -47,12 +47,12 @@ class EventStore:
     def __init__(self, database: Database) -> None:
         self.database = database
         blocks = re.findall(
-            r"(?:迁移|观测|恢复)事件（[MOR]，\d+ 项）：\s*~~~text\n(.*?)\n~~~",
+            r"(?:迁移|观测|恢复|分配)事件（[MORA]，\d+ 项）：\s*~~~text\n(.*?)\n~~~",
             settings.spec_path.read_text(encoding="utf-8"),
             re.S,
         )
-        if len(blocks) != 3:
-            raise ValueError("cannot load the R10 M/O/R event allowlist")
+        if len(blocks) != 4:
+            raise ValueError("cannot load the R10 M/O/R/A event allowlist")
         self.allowed_events = frozenset(word for block in blocks for word in block.split())
 
     def append(

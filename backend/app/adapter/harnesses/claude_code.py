@@ -3,24 +3,37 @@
 The argv contract targets the ``claude -p`` print mode (verified against
 Claude Code 2.1.274 on the development machine):
 
-    claude -p --output-format json --permission-mode <mode> "<work order>"
+    claude -p --output-format stream-json --verbose --permission-mode <mode> "<work order>"
 
 * ``-p``                    non-interactive: print the result and exit
-* ``--output-format json``  one result object on stdout, easy to parse
+* ``--output-format stream-json``  one JSON event per line, **as it happens**
+* ``--verbose``             required by ``--print`` together with ``stream-json``
+                            (the CLI refuses the combination otherwise)
 * ``--permission-mode``     default ``acceptEdits``: the harness may edit and
                             commit in its worktree without a human at the
                             prompt. Passing ``bypassPermissions`` is an
                             explicit deployment decision (R10 §17), not a
                             default this adapter makes.
 
-With ``--output-format json`` stdout is a single object: ``result`` is the
-final message, ``session_id`` and ``total_cost_usd`` are kept for
-traceability.
+Why ``stream-json`` and not ``json``: with ``--output-format json`` the CLI
+writes **one** object at the very end, so a run that lasts ten minutes says
+nothing for ten minutes. ``stream-json`` writes an event per line while the
+model works (``system`` / ``assistant`` / ``user`` / ``result``), and the final
+``result`` event still carries ``result`` (the final message), ``session_id``,
+``total_cost_usd`` and ``is_error`` -- the same fields the old single-object
+format provided. The office shows those lines while the run is going, so
+"what is this harness doing" is answered by the harness itself.
+
+``parse_output`` therefore reads the last ``result`` event, and still accepts
+a single JSON object (an older CLI, or a run that emitted exactly one line).
 """
 
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -47,9 +60,21 @@ class ClaudeCodeAdapter(CliHarness):
         *,
         prefix: str = "/api/v1",
         permission_mode: str = "acceptEdits",
+        harness_id: str = "claude-code",
+        display_name: str | None = None,
     ) -> None:
-        super().__init__(client, CLAUDE_CODE_REGISTRATION, prefix=prefix)
+        registration = replace(
+            CLAUDE_CODE_REGISTRATION,
+            harness_id=harness_id,
+            name=display_name
+            or ("Claude Code" if harness_id == "claude-code" else f"Claude Code · {harness_id}"),
+        )
+        super().__init__(client, registration, prefix=prefix)
         self.permission_mode = permission_mode
+
+    #: The Claude CLI speaks Anthropic, so the pool's Anthropic surface
+    #: (``/api/v1/pool``) is the one it is pointed at.
+    pool_protocol = "anthropic"
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         argv = ["claude"]
@@ -61,26 +86,70 @@ class ClaudeCodeAdapter(CliHarness):
                 if not git_dir.is_absolute():
                     git_dir = (worktree / git_dir).resolve()
                 argv.extend(["--add-dir", str(git_dir)])
-        return [
+        command = [
             *argv,
             "-p",
             "--output-format",
-            "json",
+            "stream-json",
+            "--verbose",
             "--permission-mode",
             self.permission_mode,
-            work_order,
         ]
+        route = self.provider_route
+        if route is not None:
+            # The platform's quota pool.  The Claude CLI reads its provider
+            # from its settings, and the *settings file given on the command
+            # line* wins over the user's own settings -- so the pool is a
+            # per-attempt override and the person's configuration is never
+            # rewritten.
+            settings_path = self._write_pool_settings(worktree, route)
+            command += ["--settings", str(settings_path)]
+        command.append(work_order)
+        return command
+
+    def review_command(self, prompt: str, workdir: Path) -> list[str]:
+        """A review runs in **plan** mode: the reviewer may look, not touch."""
+        argv = self.command(prompt, workdir)
+        if "--permission-mode" in argv:
+            index = argv.index("--permission-mode")
+            argv[index + 1] = "plan"
+        return argv
+
+    def _write_pool_settings(self, worktree: Path, route: Any) -> Path:
+        bundle = Path(tempfile.mkdtemp(prefix="agent-platform-claude-pool-"))
+        self._pool_bundle = bundle
+        path = bundle / "pool-settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "env": {
+                        "ANTHROPIC_BASE_URL": route.base_url,
+                        "ANTHROPIC_AUTH_TOKEN": route.token,
+                        "ANTHROPIC_MODEL": route.model,
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return path
+
+    def cleanup_work_order(self) -> None:
+        """Remove the per-attempt pool settings file."""
+        bundle, self._pool_bundle = getattr(self, "_pool_bundle", None), None
+        if bundle is not None:
+            shutil.rmtree(bundle, ignore_errors=True)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
-        """``--output-format json`` yields one result object; be tolerant."""
-        payload = stdout.strip()
-        if not payload:
-            return {}
-        try:
-            result = json.loads(payload)
-        except json.JSONDecodeError:
-            return {}
-        if not isinstance(result, dict):
+        """Read the final ``result`` event out of the JSONL stream.
+
+        ``--output-format stream-json`` writes one event per line; the last
+        ``result`` event carries the final message and the cost. A single JSON
+        object (the old format) is still accepted, so a CLI that only emits
+        one line does not lose its final message.
+        """
+        result = _last_result_event(stdout)
+        if result is None:
             return {}
         parsed: dict[str, Any] = {}
         if isinstance(result.get("session_id"), str):
@@ -92,3 +161,28 @@ class ClaudeCodeAdapter(CliHarness):
         if result.get("is_error") is True:
             parsed["is_error"] = True
         return parsed
+
+
+def _last_result_event(stdout: str) -> dict[str, Any] | None:
+    """The last JSON object that is a ``result`` event, or the last object.
+
+    The stream is one event per line; a line may be a whole JSON object
+    (``{"type":"result",...}``) or, for a single-object run, the object
+    itself. Unparseable lines are skipped rather than fatal: the stream is
+    the harness's, and the CLI is free to add a field we do not know.
+    """
+    fallback: dict[str, Any] | None = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(value, dict):
+            continue
+        fallback = value
+        if value.get("type") == "result":
+            return value
+    return fallback

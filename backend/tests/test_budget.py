@@ -264,7 +264,12 @@ def test_deferred_resume_rechecks_the_budget(tmp_path, monkeypatch):
         database,
         "port:8188",
         attempt_id="T-0.a1",
-        lease_until=(NOW + timedelta(minutes=10)).isoformat(),
+        # The hold must be valid **now**: the module-level NOW is captured at
+        # import time, and a long suite can be more than ten minutes past it
+        # -- then the hold would have expired and the claim would be granted
+        # instead of deferred, for a reason that has nothing to do with the
+        # budget.
+        lease_until=(datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
     )
 
     # Budget passes, the resource blocks -> queued without any hold.

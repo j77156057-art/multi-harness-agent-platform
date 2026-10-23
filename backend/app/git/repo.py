@@ -59,6 +59,20 @@ def run_git(
             "GIT_COMMITTER_EMAIL": "scheduler@localhost",
         }
     )
+    # ``core.quotepath=false``: by default git *quotes* non-ASCII paths in
+    # status/diff output ("docs/\350\207\250...") and quotes paths with spaces.
+    # The scope check then compared an escaped path against the raw authorized
+    # one and refused every task whose path was not plain ASCII -- a member that
+    # wrote exactly the right file was told it had written outside its scope.
+    # Appending to any GIT_CONFIG_* the caller already set keeps both.
+    config_count = 0
+    try:
+        config_count = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
+    except ValueError:
+        config_count = 0
+    env["GIT_CONFIG_COUNT"] = str(config_count + 1)
+    env[f"GIT_CONFIG_KEY_{config_count}"] = "core.quotepath"
+    env[f"GIT_CONFIG_VALUE_{config_count}"] = "false"
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(
@@ -203,6 +217,18 @@ class CanonicalRepo:
     def has_object(self, commit: str) -> bool:
         proc = run_git("cat-file", "-e", f"{commit}^{{commit}}", cwd=self.path, check=False)
         return proc.returncode == 0
+
+    def read_file(self, ref: str, path: str) -> str | None:
+        """Read a blob from ``ref``'s tree, or return ``None`` when absent.
+
+        The runtime policy lives in the repository it governs, so the runtime
+        reads it from ``integration`` instead of assuming the platform checkout
+        is the project under test.
+        """
+        proc = run_git("show", f"{ref}:{path}", cwd=self.path, check=False)
+        if proc.returncode != 0:
+            return None
+        return proc.stdout
 
     def update_ref(self, ref: str, commit: str) -> None:
         """Point ``ref`` at ``commit``. Scheduler-internal, so no hook runs."""

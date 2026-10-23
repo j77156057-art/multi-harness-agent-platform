@@ -77,11 +77,12 @@ def sweep_expired_leases(
     of contact". The transition logic stays in ``app/lease`` — this function
     only adapts it to the runner's report shape.
     """
-    transitioned = expire_stale_leases(database, now=now)
+    budget_escalated: list[str] = []
+    transitioned = expire_stale_leases(database, now=now, escalated_out=budget_escalated)
     return SweepReport(
         sweep="expired_leases",
-        actions=len(transitioned),
-        detail={"tasks": transitioned},
+        actions=len(transitioned) + len(budget_escalated),
+        detail={"tasks": transitioned, "budget_escalated": budget_escalated},
     )
 
 
@@ -1251,6 +1252,12 @@ def sweep_worktree_recycle(
     remove). A failed archive leaves the tree in place for a human and is
     reported as skipped rather than retried blind.
 
+    ``escalated`` is included because a merge-gate failure parks the task for a
+    human: no worker will touch that attempt again, and without this the
+    workspace sits at the global cap until someone recycles it by hand. A
+    human ``release`` moves the task back to ``ready`` and the next claim
+    provisions a fresh attempt, so archiving here cannot strand a live run.
+
     Deliberately does NOT touch the current attempt of a live task: a
     restarted harness may still replay-claim it (F9), and the stale/reclaiming
     window keeps its workspace until a successor attempt exists -- which this
@@ -1261,7 +1268,13 @@ def sweep_worktree_recycle(
     rows = database.read(
         "SELECT w.attempt_id FROM workspaces w JOIN tasks t ON t.task_id = w.task_id"
         " WHERE w.status = 'active'"
-        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested')"
+        # ``stale`` 也在内：租约一过期，那个 attempt 就死了，它���工位还占着容量
+        # 只会把平台自己锁死（"并发工位上限 8/8"，新任务连工位都开不出来）。
+        # 归档仍会留底（``archive_and_recycle`` 先打包再删），证据不丢。
+        "   AND (t.status IN ('merged', 'cancelled', 'abandoned', 'changes_requested',"
+        "                    'escalated', 'stale')"
+        # 没有当前 attempt 的任务，它手上那个 attempt 同样已经死了
+        "        OR t.current_attempt_id IS NULL"
         "        OR (t.current_attempt_id IS NOT NULL"
         "            AND w.attempt_id != t.current_attempt_id))"
         " ORDER BY w.rowid"
@@ -1270,14 +1283,24 @@ def sweep_worktree_recycle(
         return SweepReport("worktree_recycle", 0, {"recycled": [], "skipped": []})
     manager = WorktreeManager(database, repo or CanonicalRepo.from_settings())
     recycled: list[str] = []
+    reconciled_missing: list[str] = []
     skipped: list[dict[str, str]] = []
     for row in rows:
         attempt_id = str(row["attempt_id"])
         try:
+            if manager.reconcile_missing_workspace(attempt_id=attempt_id):
+                reconciled_missing.append(attempt_id)
+                continue
             manager.archive_and_recycle(attempt_id=attempt_id)
             recycled.append(attempt_id)
         except WorktreeError as exc:
             skipped.append({"attempt_id": attempt_id, "reason": str(exc)})
     return SweepReport(
-        "worktree_recycle", len(recycled), {"recycled": recycled, "skipped": skipped}
+        "worktree_recycle",
+        len(recycled) + len(reconciled_missing),
+        {
+            "recycled": recycled,
+            "reconciled_missing": reconciled_missing,
+            "skipped": skipped,
+        },
     )

@@ -2,15 +2,21 @@
 
 import json
 import sys
-from fnmatch import fnmatchcase
 from pathlib import Path
+
+# Run both as a package module and as the standalone script the
+# ``formal-artifact`` profile executes, so the scope rule cannot drift from
+# ``app.adapter.formal_worker``.
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
+
+from app.adapter.scope import path_in_scope  # noqa: E402
 
 
 def verify(root: Path, patterns: list[str]) -> bool:
     files = [p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts]
-    matched = [
-        p for p in files if any(fnmatchcase(p.relative_to(root).as_posix(), x) for x in patterns)
-    ]
+    matched = [p for p in files if path_in_scope(p.relative_to(root).as_posix(), patterns)]
     return bool(matched) and all(p.stat().st_size > 0 for p in matched)
 
 

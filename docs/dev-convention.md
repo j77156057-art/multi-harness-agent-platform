@@ -26,7 +26,7 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
 
 | 约束 | 由谁检查 |
 |---|---|
-| R10 自身不自洽 | `tools/docstate` 90 项（CI + 应用启动） |
+| R10 自身不自洽 | `tools/docstate` 98 项（CI + 应用启动） |
 | `app/spec.py` 的状态/事件超出 R10 集合 | `test_spec_mirror.py` 11 项 |
 | 事件被篡改、失败留下孤儿事件、并发 seq 错乱 | `test_database_events.py` 9 项 + SQL 触发器 |
 | 已应用的迁移被改写 | `apply_migrations` 的 checksum 校验 |
@@ -106,8 +106,10 @@ R10 复审早就证明「人工判定的已闭环」与「实际自洽」差距�
   （写成 16，实际 17）。没做成自引用检查是刻意的：断言数包含该检查本身，
   自引用会让数字难以推理
 - `docstate` 只读 R10，不读 `TASKS.md`（那是 `discipline` 的事）
-- 平台仓已无独立前端（UI 统一为 Agent Office，4174）；其静态检查不在本仓
-  门禁内。`docs/` 无 markdown lint、无链接检查
+- 前端在 `office/`（Agent Office 的数据版界面，Vite + 原生 JS，4174）。它的冒烟脚本在
+  `office/scripts/verify-*.mjs`（需 node + playwright，CI 里没有 node），**不在本仓门禁内**；
+  运行它们需要本机有一个在线的正式平台（否则那些脚本会因环境失败）。
+  `docs/` 无 markdown lint、无链接检查
 - 没有 remote，所以 GitHub 侧的 branch protection / required checks 全部不存在
 
 ## H-1 状态机唯一真相源
@@ -136,7 +138,7 @@ MVP 只实现部分状态，这是**允许的**，但必须在 `docs/state-proje
 
 ## H-2 规范检查器是门禁，不是工具
 
-`tools/docstate/docstate.py` 对 R10 跑 90 项机械断言。CI 与应用启动都会跑它。
+`tools/docstate/docstate.py` 对 R10 跑 98 项机械断言。CI 与应用启动都会跑它。
 
 ```bash
 make check          # docstate + pytest + ruff
@@ -197,7 +199,7 @@ R10 §5 规定 Go + React。本项目用 Python FastAPI + Agent Office（独立�
 ~~~text
 backend/app/          业务代码
 backend/tests/        测试
-UI                    Agent Office（独立仓，4174；本仓不再包含前端）
+office/               Agent Office 前端（数据版界面，Vite + 原生 JS，4174）
 docs/spec/            R10 正文（只读！改动走复审流程）
 docs/adr/             架构决策记录
 docs/prep/            各 AI 的准备工作（共享区，不进主分支）

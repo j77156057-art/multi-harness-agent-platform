@@ -159,7 +159,10 @@ class HarnessRegistry:
                 " h.capabilities_json, r.name, r.adapter_version, r.max_parallel_tasks,"
                 " (SELECT COUNT(*) FROM leases l WHERE l.owner = h.harness_id"
                 " AND l.kind = 'development' AND l.released_at IS NULL"
-                " AND l.lease_until > ?) AS running_tasks"
+                " AND l.lease_until > ?) AS running_tasks,"
+                " (SELECT COUNT(*) FROM auth_tokens t WHERE t.subject_type = 'harness'"
+                "  AND t.subject_id = h.harness_id AND t.revoked_at IS NULL)"
+                "  AS credential_count"
                 " FROM harnesses h LEFT JOIN harness_registrations r ON"
                 " r.harness_id = h.harness_id AND r.registration_version = h.registration_version"
                 " ORDER BY h.harness_id",

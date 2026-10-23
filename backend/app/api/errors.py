@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.allocation.service import AllocationError
 from app.claim.guarded_write import (
     AttemptMismatch,
     GuardError,
@@ -123,6 +124,10 @@ def _from_exception(exc: Exception) -> ApiError:
         return ApiError("request.conflict", 409, str(exc))
     if isinstance(exc, GuardError):
         return ApiError("fencing.epoch_stale", 409, str(exc))
+    if isinstance(exc, AllocationError):
+        # §39 的拒绝（没传阅就分配 / 回避 / 版本过期 / 撤回过的申请不能被选）。
+        # 一律 409：这类拒绝是"当前状态不允许"，不是请求体格式错。
+        return ApiError("allocation.refused", 409, str(exc))
     if isinstance(exc, NotFound):
         return ApiError("resource.not_found", 404, str(exc))
     if isinstance(exc, InvalidInput):

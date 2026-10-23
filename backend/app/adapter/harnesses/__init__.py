@@ -20,16 +20,21 @@ from app.adapter.harnesses.cli import (
     WorkOutcome,
     WorkRefused,
 )
+from app.adapter.harnesses.codebuddy import CODEBUDDY_REGISTRATION, CodeBuddyAdapter
 from app.adapter.harnesses.codex import CODEX_REGISTRATION, CodexAdapter
 from app.adapter.harnesses.opencode import OPENCODE_REGISTRATION, OpenCodeAdapter
 from app.adapter.harnesses.pi import PI_REGISTRATION, PiAdapter
+from app.adapter.harnesses.qoder import QODER_REGISTRATION, QoderAdapter
 
 __all__ = [
     "CLAUDE_CODE_REGISTRATION",
+    "CODEBUDDY_REGISTRATION",
     "CODEX_REGISTRATION",
     "OPENCODE_REGISTRATION",
     "PI_REGISTRATION",
+    "QODER_REGISTRATION",
     "ClaudeCodeAdapter",
+    "CodeBuddyAdapter",
     "CliFailed",
     "CliHarness",
     "CliHarnessWorker",
@@ -41,6 +46,7 @@ __all__ = [
     "HarnessTimeout",
     "OpenCodeAdapter",
     "PiAdapter",
+    "QoderAdapter",
     "SubprocessRunner",
     "WorkOutcome",
     "WorkRefused",
