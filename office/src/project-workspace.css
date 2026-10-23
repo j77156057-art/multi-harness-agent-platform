@@ -162,3 +162,51 @@ body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
   .endpoint-row { grid-template-columns: 1fr auto; }
   .endpoint-row code { grid-column: 1 / -1; }
 }
+
+/* ------------------------------------------- 平台上已有的项目（大厅里的一段） */
+
+.project-platform {
+  min-width: 0;
+  padding: 25px 27px 23px;
+  border: 1px solid #d6e2d8;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px #254c3a0d;
+}
+
+.project-platform-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #5f6f66;
+  line-height: 1.6;
+}
+
+.project-platform-list { display: grid; gap: 8px; padding-top: 12px; }
+
+.project-platform-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #edf1ed;
+}
+
+.project-platform-item:last-child { border-bottom: 0; }
+.project-platform-main { display: grid; gap: 3px; min-width: 0; }
+.project-platform-main strong { font-size: 13px; font-weight: 600; color: #25352c; }
+.project-platform-main span { font-size: 11px; color: #819087; }
+
+.project-platform-open {
+  padding: 7px 13px;
+  border: 1px solid #b9cfc0;
+  border-radius: 5px;
+  background: #fff;
+  color: #426452;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.project-platform-open:hover { background: #f3f8f3; }

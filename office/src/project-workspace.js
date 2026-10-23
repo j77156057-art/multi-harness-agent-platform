@@ -69,6 +69,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
           <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里挑管理员和成员</li></ol>
         </div>
         <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><span class="eyebrow">HISTORY</span><h2 id="projectHistoryTitle">项目历史</h2></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
+        <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
+          <div class="project-section-head"><div><span class="eyebrow">ON THE PLATFORM</span><h2 id="projectPlatformTitle">平台上已有的项目</h2></div><span data-platform-count></span></div>
+          <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」就能进那个项目的办公室 —— 不用重新建一个。</p>
+          <div class="project-platform-list" data-platform-list></div>
+        </section>
       </div>
       <footer class="project-lobby-foot"><span>项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到这份历史</span></footer>
     </section>`;
@@ -144,13 +149,115 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 旧版本的项目只活在内存里；升级后第一次打开大厅时，可以从正式任务按项目名
   // 恢复最近一个项目。按钮只在没有本地历史时出现，且不写平台 project_id。
   let recoverable = null;
+  // 平台上已有的项目（按任务标题的「项目名 · 」前缀归堆）。
+  let platformProjects = [];
+
+  /**
+   * 任务标题是「项目名 · 任务名」，所以项目名就是前缀。
+   *
+   * 这不是平台给的项目列表（平台那边项目名常常就是编号），但它是**真实存在**
+   * 的活——按前缀归堆，人才知道自己有几个项目在跑。
+   */
+  function platformProjectsFrom(tasks) {
+    const groups = new Map();
+    for (const task of tasks) {
+      const title = typeof task.title === 'string' ? task.title : '';
+      const cut = title.indexOf(' · ');
+      if (cut <= 0) continue;
+      const name = title.slice(0, cut).trim();
+      if (!name) continue;
+      if (!groups.has(name)) groups.set(name, { name, taskIds: [], count: 0, latest: 0 });
+      const group = groups.get(name);
+      group.count += 1;
+      if (task.task_id) group.taskIds.push(String(task.task_id));
+      group.latest = Math.max(group.latest, Number(task.state_changed_seq || 0));
+    }
+    return [...groups.values()].sort((a, b) => b.latest - a.latest);
+  }
+
+  function renderPlatformProjects() {
+    const section = root.querySelector('[data-platform]');
+    const list = root.querySelector('[data-platform-list]');
+    const count = root.querySelector('[data-platform-count]');
+    if (!section || !list) return;
+    if (!platformProjects.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    count.textContent = `${platformProjects.length} 个`;
+    list.replaceChildren();
+    for (const project of platformProjects) {
+      const row = document.createElement('article');
+      row.className = 'project-platform-item';
+      const title = document.createElement('div');
+      title.className = 'project-platform-main';
+      const name = document.createElement('strong');
+      name.textContent = project.name;
+      const meta = document.createElement('span');
+      meta.textContent = `${project.count} 件事`;
+      title.append(name, meta);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'project-platform-open';
+      button.textContent = '打开';
+      button.addEventListener('click', () => openPlatformProject(project));
+      row.append(title, button);
+      list.append(row);
+    }
+  }
+
+  /** 平台上在线、且不是管理员/助手的窗口 —— 它们才是能干活的人。 */
+  function onlineMemberIds() {
+    const admin = actingAdministratorId(formalState);
+    const online = (formalState?.harnesses || [])
+      .filter(item => item.status === 'online' &&
+        !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
+      .map(item => item.harness_id);
+    return online.length ? online : members.map(member => member.id);
+  }
+
+  /**
+   * 打开平台上的一个项目：把它变成一个本机项目（这样下次还在历史里），然后进办公室。
+   */
+  function openPlatformProject(project) {
+    const existing = projects.find((item) => item.name === project.name);
+    if (existing) {
+      activeId = existing.id;
+      persistActive();
+      render();
+      onOpenProject(clone(existing));
+      return;
+    }
+    sequence += 1;
+    const local = {
+      id: `platform-${String(sequence).padStart(3, '0')}`,
+      index: String(sequence).padStart(2, '0'),
+      name: project.name,
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      // 平台上已经在做的事，不是"待开工"。
+      phase: 'scene',
+      source: 'platform',
+      members: onlineMemberIds(),
+      taskIds: project.taskIds,
+    };
+    projects.push(local);
+    activeId = local.id;
+    persistProjects();
+    persistActive();
+    render();
+    onOpenProject(clone(local));
+  }
+
   async function loadRecoverableProject() {
-    if (projects.length) return;
     try {
       const response = await fetch('/api/formal/tasks', {cache: 'no-store'});
-      if (!response.ok || projects.length) return;
+      if (!response.ok) return;
       const data = await response.json();
       const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+      platformProjects = platformProjectsFrom(tasks);
+      renderPlatformProjects();
+      if (projects.length) return;
       const candidates = tasks.filter(task => typeof task.title === 'string' && task.title.includes(' · '));
       if (!candidates.length) return;
       const latest = candidates.reduce((best, task) =>
@@ -161,7 +268,8 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         .filter(task => String(task.title).startsWith(`${name} · `))
         .map(task => task.task_id).filter(Boolean);
       recoverable = {name, taskIds};
-      recoverButton.textContent = `恢复最近项目：${name}`;
+      // 说人话：以前写「恢复最近项目：xxx」，读的人不知道"恢复"是什么。
+      recoverButton.textContent = `打开这个项目（已有 ${taskIds.length} 件事）`;
       recoverButton.hidden = false;
     } catch {}
   }
@@ -479,11 +587,6 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   recoverButton.addEventListener('click', () => {
     if (!recoverable || projects.length) return;
-    const admin = actingAdministratorId(formalState);
-    const onlineMembers = (formalState?.harnesses || [])
-      .filter(item => item.status === 'online' &&
-        !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
-      .map(item => item.harness_id);
     sequence += 1;
     const project = {
       id: `project-${String(sequence).padStart(3, '0')}`,
@@ -495,7 +598,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       // 而不是"先配置一下"——点下去直接就是办公室，写错了会让人以为还得再配一次。
       phase: 'scene',
       source: 'platform',
-      members: onlineMembers.length ? onlineMembers : members.map(member => member.id),
+      members: onlineMemberIds(),
       taskIds: recoverable.taskIds,
     };
     projects.push(project);

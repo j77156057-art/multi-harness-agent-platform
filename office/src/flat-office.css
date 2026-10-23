@@ -690,6 +690,42 @@
   cursor: pointer;
 }
 
+/* ---------------------------------------------- 可以收起来的卡片（默认收起） */
+
+/* 额度池、可用窗口这些是**给运维看的事实**，第一次用的人不需要它们摆在眼前：
+   一屏之内全是"额度来源 / prompt tokens / credits"，小白只会当成噪音。
+   所以默认折起来，标题上留一行摘要（多少来源、用了多少次），想看再点。 */
+.flat-card-fold { padding: 0; }
+
+.flat-card-fold > details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ao-ink);
+  cursor: pointer;
+  list-style: none;
+}
+
+.flat-card-fold > details > summary::-webkit-details-marker { display: none; }
+
+.flat-card-fold > details > summary::after {
+  content: '▸';
+  margin-left: auto;
+  color: var(--ao-ink-faint);
+  font-size: 11px;
+}
+
+.flat-card-fold > details[open] > summary::after { content: '▾'; }
+.flat-card-fold > details > summary:hover { background: #f7f9fb; }
+
+.flat-card-fold > details > *:not(summary) { margin-left: 14px; margin-right: 14px; }
+.flat-card-fold > details > *:not(summary):last-child { margin-bottom: 12px; }
+
+.flat-card-fold > button { margin: 0 14px 12px; }
+
 /* ------------------------------------------- 与管理员对话（对话框）
 
    平台只有群消息 + @mention 这一个通道（R10 §19），所以这个对话框是

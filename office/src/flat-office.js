@@ -1533,15 +1533,17 @@ export function mountFlatOffice({ root, project: projectOf }) {
       const usedHere = Object.entries(value.upstreams || {});
       return `<li><b>${escape(harnessName(who))}</b>：${Number(value.requests || 0)} 次 · ${usedHere.map(([name, count]) => `${escape(name)} × ${count}`).join('，') || '—'}</li>`;
     });
-    return `<section class="flat-card">
-      <h3>额度池</h3>
-      <p class="flat-note">${upstreams.length} 个额度来源 · ${models.length} 个模型 · 一共用了 ${Number(usage.requests || 0)} 次</p>
-      ${inventoryBlock()}
-      ${timelineBlock()}
-      ${items.join('')}
-      ${consumerItems.length
-        ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
-        : '<p class="flat-note">还没有人从池子里借过额度。</p>'}
+    return `<section class="flat-card flat-card-fold">
+      <details>
+        <summary>额度池 · ${upstreams.length} 个额度来源，已用 ${Number(usage.requests || 0)} 次</summary>
+        <p class="flat-note">谁还有多少额度、谁花了多少 —— 要看才展开。</p>
+        ${inventoryBlock()}
+        ${timelineBlock()}
+        ${items.join('')}
+        ${consumerItems.length
+          ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
+          : '<p class="flat-note">还没有人从池子里借过额度。</p>'}
+      </details>
     </section>`;
   }
 
@@ -1750,11 +1752,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
       ${poolCard()}
-      <section class="flat-card">
-        <h3>现在能干活的人</h3>
-        <ul class="flat-list">${usable
-          .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
-          .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
+      <section class="flat-card flat-card-fold">
+        <details>
+          <summary>现在能干活的人 · ${usable.length} 个</summary>
+          <ul class="flat-list">${usable
+            .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
+            .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
+        </details>
         <button type="button" data-act="open-outputs" title="另开一个窗口，看每个窗口做完活之后都说了什么">看他们说了什么</button>
       </section>
       <section class="flat-card">

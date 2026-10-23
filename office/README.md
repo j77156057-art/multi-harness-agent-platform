@@ -9,6 +9,37 @@
 裁决（`human.adjudicate`）、派单、细化、审查、管理链**不在群主面** ——
 那是管理员面的事（R10 §39、`docs/tasks/notes/OFFICE-UI-01.md`）。
 
+## 连上真平台（第一次跑必看）
+
+`npm run dev` / `npm run preview` 起的是**界面**，默认读不到任何任务 —— 界面会
+在顶上写「未连接正式平台」。要看到真的东西，**先把这几行环境变量设上**：
+
+```powershell
+# 正式平台跑在 8848；办公室自己跑在 4174
+$env:OFFICE_FORMAL_UPSTREAM   = 'http://127.0.0.1:8848'
+# 令牌文件：路径，不是令牌本身（令牌别复制进仓库）
+$env:OFFICE_FORMAL_TOKEN_FILE     = 'D:/study/tools/agent/new agent/data/formal-operator.key'
+$env:OFFICE_FORMAL_ADMIN_TOKEN_FILE = 'D:/study/tools/agent/new agent/data/codex-window-admin.key'
+# 这个预览服务负责哪一段
+$env:OFFICE_FORMAL_PROJECT = '112'
+$env:OFFICE_FORMAL_GROUP   = 'office-formal-2'
+```
+
+然后：
+
+```powershell
+npm ci
+npm run build
+npm run preview        # http://127.0.0.1:4174
+```
+
+- **令牌文件在哪**：`data/` 目录下的 `*.key`，一个文件一个身份。
+  `formal-operator.key` 是**人**（操作员），`codex-window-admin.key` 是**管理员窗口**。
+- **项目号/群号从哪来**：平台那边 `GET /api/v1/groups?project_id=<项目号>` 会列出
+  群；`office/.env.example` 里那组是本机现成的一套。
+- **忘了设会看到什么**：界面照常打开，但顶上写「未连接正式平台」，任务、方案、
+  额度全是空的 —— 不是坏了，是没接上。
+
 ```
 npm ci
 npm run build          # 构建到 dist/
