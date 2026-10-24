@@ -9,7 +9,7 @@
 依赖任务：OFFICE-UI-23（轨迹讲成人话）
 真相源引用：`office/src/flat-office.js`（事件行、窗口页的轨迹块、任务详情的跳转）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`1cb55af`）
 commit：`b7b8c87`（轨迹每行带「看这条活」；展开的状态活过 15 秒一次的重画；事件行重新排了列）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-039
