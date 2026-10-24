@@ -137,7 +137,7 @@
 | assistant-react-loop-p2 | Codex | assistant-react-loop | done（P2 池子免费档通道、assistant worker 私聊轮询、真实平台首跑与接线修复；全量 pytest 绿，提交 `1c65241`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
 | assistant-react-loop-p3 | Codex | assistant-react-loop | done（P3 审核助攻 review_pack 工具＋prompt 审核协议；全量 pytest 绿；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
-| review-contract-gate | Codex | assistant-react-loop-p3 | done（A+B 已实施：approve 逐条覆盖 acceptance 契约；缺失/非法 check 发布拒绝；全量 pytest `1036 passed`，commit 待本次提交回填） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| review-contract-gate | Codex | assistant-react-loop-p3 | done（A+B 已实施：approve 逐条覆盖 acceptance 契约；缺失/非法 check 发布拒绝；全量 pytest `1036 passed`，commit `10a50bb`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-diagnose-pack | Codex | assistant-react-loop-p3 | done（`task.diagnose` 失败证据束、诊断姿势 prompt；scripted/全量 pytest/ruff/docstate/discipline 全绿，提交 `17914d5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |

@@ -9,7 +9,7 @@
 依赖任务：assistant-react-loop-p3
 真相源引用：R10 §9（计划验收契约）、§21（审核）；AGENTS.md §1/§2/§4/§5/§5b
 当前状态：done（实现与验收完成）
-commit：待本次提交回填
+commit：`10a50bb`
 test_id：`MVP-ADAPTER-003`（不新增检查 ID）
 
 | 项 | 内容 |
