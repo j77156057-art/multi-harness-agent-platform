@@ -6,7 +6,7 @@
 | Harness | Mavis |
 | 认领时间 | 2026-10-24 08:05 +08:00 |
 | 分支 | `agent/local/mavis/OFFICE-UI-02/a1` |
-| 状态 | doing |
+| 状态 | done（已合入 main：`4c8ea6c` → merge `c3c1642`） |
 
 目标：**人取消一条活，管理员要知道，并就剩下的范围重新细化一版。**
 

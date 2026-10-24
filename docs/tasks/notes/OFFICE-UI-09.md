@@ -12,7 +12,9 @@
 `backend/app/admin/worker.py`（管理员自循环的现有三条消息通道）；
 `backend/app/human/service.py`（取消这条边做什么）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`4c8ea6c`）
+commit：`4c8ea6c`（这一轮随 `agent/local/mavis/OFFICE-UI-02/a1` 合入 main，merge commit `c3c1642`）
+验证结果：见文末「验证结果」表（后端断言 + 办公室冒烟 + 真跑取消通知）。
 test_id：MVP-UI-024
 
 | 项 | 内容 |
