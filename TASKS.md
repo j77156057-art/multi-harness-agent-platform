@@ -145,7 +145,8 @@
 | OFFICE-UI-12 | Mavis | OFFICE-UI-10 | done（左边改成会话列表：群聊、平台助手、每个窗口；点进去看它现在在做什么、进度） | `agent/local/mavis/OFFICE-UI-12/a1` | `MVP-UI-027` |
 | OFFICE-UI-13 | Mavis | OFFICE-UI-12 | done（任务详情上方留一条紧凑的活列表：换看另一条活不用先回任务表） | `agent/local/mavis/OFFICE-UI-13/a1` | `MVP-UI-028` |
 | OFFICE-UI-14 | Mavis | OFFICE-UI-12 | done（群聊已经是左栏的一个会话，底下那条重复的群聊条撤掉） | `agent/local/mavis/OFFICE-UI-14/a1` | `MVP-UI-029` |
-| OFFICE-UI-15 | Mavis | OFFICE-UI-12 | →doing（窗口页的任务详细清单：写明具体做什么、**不截断**、收成卡片、点开即看） | `agent/local/mavis/OFFICE-UI-15/a1` | `MVP-UI-030` |
+| OFFICE-UI-15 | Mavis | OFFICE-UI-12 | done（窗口页的任务详细清单：写明具体做什么、**不截断**、收成卡片、点开即看） | `agent/local/mavis/OFFICE-UI-15/a1` | `MVP-UI-030` |
+| OFFICE-UI-17 | Mavis | OFFICE-UI-12 | →doing（窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率） | `agent/local/mavis/OFFICE-UI-17/a1` | `MVP-UI-031` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -244,6 +245,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-13 → docs/claims/mavis--OFFICE-UI-13.md -->
 <!-- OFFICE-UI-14 → docs/claims/mavis--OFFICE-UI-14.md -->
 <!-- OFFICE-UI-15 → docs/claims/mavis--OFFICE-UI-15.md -->
+<!-- OFFICE-UI-17 → docs/claims/mavis--OFFICE-UI-17.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
@@ -292,6 +294,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-13 | [卡](docs/tasks/notes/OFFICE-UI-13.md) | | |
 | OFFICE-UI-14 | [卡](docs/tasks/notes/OFFICE-UI-14.md) | | |
 | OFFICE-UI-15 | [卡](docs/tasks/notes/OFFICE-UI-15.md) | | |
+| OFFICE-UI-17 | [卡](docs/tasks/notes/OFFICE-UI-17.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |

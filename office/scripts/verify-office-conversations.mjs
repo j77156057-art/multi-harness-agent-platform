@@ -127,7 +127,43 @@ const responses = {
       { harness_id: 'no-credential', provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 0, model: null, model_alias: null, model_source: 'not-readable', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: false, reasons: [{ code: 'no_credential', detail: 'no platform credential' }] },
     ],
   },
-  '/pool': { upstreams: [], models: [], usage: {} },
+  '/pool': {
+    upstreams: [],
+    models: [],
+    usage: {
+      upstreams: {},
+      consumers: {
+        'harness/codex-window': {
+          requests: 4,
+          prompt_tokens: 1000,
+          completion_tokens: 400,
+          cached_tokens: 200,
+          generation_rate: 42.5,
+          cache_hit_rate: 0.2,
+          duration_ms: 9400,
+        },
+      },
+      requests: 4,
+      tokens_unknown: 0,
+    },
+    timeline: {
+      bucket: 'hour',
+      hours: 24,
+      buckets: [
+        {
+          at: '2026-10-24T10:00:00+00:00',
+          requests: 4,
+          prompt_tokens: 300,
+          completion_tokens: 100,
+          cached_tokens: 50,
+          consumer_tokens: {
+            'harness/codex-window': { prompt_tokens: 300, completion_tokens: 100, cached_tokens: 50 },
+          },
+        },
+      ],
+    },
+    inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
+  },
   '/plan': { plans: [], draft: null },
 };
 
@@ -279,6 +315,17 @@ try {
   const body = await page.locator('#aoWorkspace .flat-wtask-body').first().innerText();
   assert.ok(body.includes('跑得起来'), '展开后有验收标准');
   assert.ok(body.includes('office/**'), '展开后有「只允许改这些地方」');
+
+  // 7. 窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
+  await page.waitForTimeout(1200);
+  const metrics = await page.locator('#aoWorkspace .flat-facts').allInnerTexts();
+  const metricText = metrics.join(' | ');
+  console.log('度量:', metricText);
+  assert.ok(metricText.includes('42.5 token/秒'), '写了每秒生成多少 token');
+  assert.ok(metricText.includes('1400'), '写了消耗总 token');
+  assert.ok(metricText.includes('400'), '写了最近一小时多少 token');
+  assert.ok(metricText.includes('20%'), '写了缓存命中率');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');

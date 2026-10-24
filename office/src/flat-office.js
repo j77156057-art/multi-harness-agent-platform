@@ -1317,6 +1317,29 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return value.length > 26 ? `${value.slice(0, 26)}…` : value;
   }
 
+  /**
+   * 这个窗口的 token 度量。
+   *
+   * 平台的用量账里 **consumer 就是 `harness/<id>`** —— 所以「这个窗口烧了多少」不用
+   * 另算，读那一格就行。小时桶里也有每个 consumer 的 token，用来回答「每小时多少」。
+   */
+  function windowMetrics(harnessId) {
+    const pool = state.pool || {};
+    const usage = pool.usage || {};
+    const consumers = usage.consumers || {};
+    const entry = consumers[`harness/${harnessId}`] || null;
+    const buckets = (pool.timeline && pool.timeline.buckets) || [];
+    let lastHour = null;
+    for (const bucket of buckets) {
+      const spent = (bucket.consumer_tokens || {})[`harness/${harnessId}`];
+      if (!spent) continue;
+      if (!lastHour || String(bucket.at) > String(lastHour.at)) {
+        lastHour = { at: bucket.at, ...spent };
+      }
+    }
+    return { entry, lastHour };
+  }
+
   /** 这个窗口现在怎么样（一行话）。全部是平台上的事实。 */
   function windowStatusText(harnessId) {
     const info = (state.availability || []).find((item) => item.harness_id === harnessId);
@@ -1513,6 +1536,45 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       section.innerHTML = '<h3>它做过的活（点开看这条活要做什么）</h3>';
       section.append(list);
       panel.append(section);
+    }
+
+    // token 度量：平台用量账里 consumer 就是 `harness/<id>`。
+    const metrics = windowMetrics(harnessId);
+    if (metrics.entry) {
+      const entry = metrics.entry;
+      const total = Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0);
+      const rows = [
+        [
+          '每秒生成 token',
+          entry.generation_rate == null
+            ? '（没数到）'
+            : `${entry.generation_rate} token/秒`,
+        ],
+        [
+          '消耗总 token',
+          `${total}（输入 ${Number(entry.prompt_tokens || 0)} · 输出 ${Number(entry.completion_tokens || 0)} · 命中缓存 ${Number(entry.cached_tokens || 0)}）`,
+        ],
+        [
+          '最近一小时 token',
+          metrics.lastHour
+            ? `${Number(metrics.lastHour.prompt_tokens || 0) + Number(metrics.lastHour.completion_tokens || 0)}（${String(metrics.lastHour.at).slice(0, 13).replace('T', ' ')} 那个小时）`
+            : '（这一小时没有记录）',
+        ],
+        [
+          '缓存命中率',
+          entry.cache_hit_rate == null
+            ? '（没数到）'
+            : `${Math.round(Number(entry.cache_hit_rate) * 100)}%`,
+        ],
+      ];
+      const box = document.createElement('section');
+      box.className = 'flat-spec';
+      box.innerHTML = `<h3>它的用量</h3>
+        <dl class="flat-facts">${rows
+          .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
+          .join('')}</dl>
+        <p class="flat-note">这些是平台用量账里的数：每秒生成 = 生成 token ÷ 生成耗时；命中率 = 缓存读到的 token ÷ 输入 token。数不到就写「没数到」，不写 0。</p>`;
+      panel.append(box);
     }
 
     // 它的轨迹：平台事件里 actor 是它的那几条。

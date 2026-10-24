@@ -10,7 +10,8 @@
 真相源引用：`office/src/flat-office.js`（办公室界面）、`office/src/flat-office.css`；
 平台 `/tasks/{id}` 的 `spec`（目标原文、验收标准、只允许改的路径）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`d8c6477`）
+commit：`14d788e`（窗口页的活清单改成卡片、点开见目标原文）；合入 main 的 merge commit：`d8c6477`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-030
 
@@ -55,8 +56,8 @@ test_id：MVP-UI-030
 
 | 门禁 | 结果 |
 |---|---|
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `office/scripts/verify-office-conversations.mjs` | ok（活清单在、卡片收着、点开取到目标全文且不截断） |
+| 真跑（8849 真平台 + 4174 预览） | Claude Code 窗口 3 张卡片；点开一张见完整目标原文（80 字，不截断） |
+| `office/` 构建 | ok |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本轮**没碰 `backend/**`**，后端与 main 逐字节相同） |
