@@ -37,7 +37,12 @@ import httpx
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
 from app.db.connection import Database
-from app.tasks.service import DIRECT_REF, GOAL_CHANGE_REF
+from app.tasks.service import (
+    ADD_MEMBER_JSON_REF,
+    ADD_MEMBER_REF,
+    DIRECT_REF,
+    GOAL_CHANGE_REF,
+)
 
 GOAL_REF = "project-goal"
 GOAL_ANSWER_REF = "project-goal-answer"
@@ -381,6 +386,12 @@ class AdminWorker:
                 # owner's private words there would break the channel.
                 self.handle_direct_message(message, seq=seq)
                 continue
+            if ADD_MEMBER_REF in refs:
+                # A window joined the project half way through: the administrator
+                # has to know (and the work that nobody picked up yet can go to
+                # it).
+                self.handle_add_member(message, seq=seq)
+                continue
             if self.state.pending_goal and (
                 GOAL_ANSWER_REF in refs
                 or (_sender_type(message) == "human" and str(message.get("body") or "").strip())
@@ -397,6 +408,75 @@ class AdminWorker:
                     self.handle_goal(pending)
         self.state.save(self.state_path)
         return bool(messages)
+
+    def handle_add_member(self, message: dict[str, Any], *, seq: int) -> None:
+        """A window joined the project half way through.
+
+        The administrator does three things:
+
+        * it **knows** (the message is handled once; messages replay on every
+          poll);
+        * it **says so in the group** -- the people in the group should see that
+          the team grew;
+        * it gives the newcomer the work **nobody has picked up yet** (the
+          tasks still waiting).  Work that is already running is not taken away
+          from whoever is doing it -- moving that around is the human's call
+          (the "re-point this task" request).
+        """
+        if seq in self.state.handled_request_seqs:
+            return
+        member = ""
+        for ref in message.get("refs") or []:
+            if str(ref).startswith(ADD_MEMBER_JSON_REF):
+                member = str(ref)[len(ADD_MEMBER_JSON_REF) :].strip()
+        if not member:
+            print(
+                json.dumps({"add_member_ignored": "no member id", "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        self.state.handled_request_seqs.append(seq)
+        self.state.handled_request_seqs = self.state.handled_request_seqs[-200:]
+        self.state.save(self.state_path)
+        self._post_admin_message(f"成员窗口 {member} 中途加入了这个项目。还没人领的活可以派给它。")
+        moved: list[str] = []
+        if not self.dry_run and self.admin.harness_has_credential(member):
+            try:
+                page = self.client.get(f"/groups/{self.group_id}/tasks", status="ready")
+            except httpx.HTTPStatusError:
+                page = {}
+            for task in page.get("tasks") or []:
+                task_id = str(task.get("task_id") or "")
+                if not task_id:
+                    continue
+                try:
+                    detail = self.client.get(f"/tasks/{task_id}")
+                except httpx.HTTPStatusError:
+                    continue
+                try:
+                    self._reassign_one(
+                        task_id,
+                        detail,
+                        member,
+                        str(detail.get("owner") or ""),
+                        token=str(seq),
+                    )
+                    moved.append(task_id)
+                except httpx.HTTPStatusError as exc:
+                    print(
+                        json.dumps(
+                            {"add_member_reassign_error": str(exc), "task_id": task_id},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+        print(
+            json.dumps(
+                {"member_added": member, "tasks_given": moved, "seq": seq},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     def handle_member_goal_change(self, message: dict[str, Any], *, seq: int) -> None:
         """A member says the goal has to change: the administrator hears it.

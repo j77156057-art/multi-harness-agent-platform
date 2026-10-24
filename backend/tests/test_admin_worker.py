@@ -914,3 +914,32 @@ def test_a_member_message_is_not_treated_as_an_answer(tmp_path, monkeypatch):
     worker.poll_messages()
 
     assert not admin.refine_calls, "成员的闲聊不能被当成群主的回答"
+
+
+def test_a_window_joining_midway_is_heard(tmp_path, monkeypatch):
+    """中途加入的窗口：管理员知道、在群里说一声、并把等人领的活改派给它。"""
+    admin = FakeAdmin()
+    admin.credentials["member-3"] = True
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 21,
+                "sender_type": "human",
+                "sender_id": "office-operator",
+                "body": "Qoder · 成员3 中途加入了这个项目。",
+                "refs": ["add-member", "add-member-json:member-3", "to-admin"],
+            }
+        ],
+        tasks=[{"task_id": "FD-9", "title": "还在等人领的活", "owner": "member-window"}],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    said = " ".join(str(item.get("body") or "") for item in client.messages)
+    assert "member-3" in said, "管理员要在群里说出来（团队多了一个人）"
+    assert client.cancels, "还没人领的活要改派给新来的窗口"
+    # 已经在跑的活不换人：这里只有一条等人领的活。
+    assert len(client.cancels) == 1

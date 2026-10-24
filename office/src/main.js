@@ -33,9 +33,9 @@ const status = await fetch('/api/formal/status', { cache: 'no-store' })
   .then((response) => (response.ok ? response.json() : null))
   .catch(() => null);
 
-const roster = (status?.harnesses || []).filter(
-  (item) => item.status === 'online' && item.capabilities?.includes('coding'),
-);
+// 窗口名单：**在线的与离线的都留着** —— 离线的窗口也是这个团队的一员，
+// 人要看得见它现在不在（大厅里写死「在线」是骗人）。
+const roster = (status?.harnesses || []).filter((item) => item.capabilities?.includes('coding'));
 // 管理员是**外部 Harness 窗口**（群主在开工向导里选），不是平台 Agent。
 const ADMIN_IDENTITY = status?.admin?.identity || null;
 // "已登记"不等于"能干活"：没有平台凭据的窗口既不能当管理员（细化会失败），
@@ -86,14 +86,26 @@ $('#aoRefreshBtn')?.addEventListener('click', () => {
 });
 
 const connection = $('#aoConn');
-if (status?.connected) {
+const connectionText = connection.querySelector('span');
+
+/** 顶栏的状态：平台连不连得上 + 几个窗口在线。 */
+function paintConnection({ connected, online, offline } = {}) {
+  if (connected === false) {
+    connection.classList.remove('is-live');
+    connection.classList.add('is-offline');
+    connectionText.textContent = '未连接平台';
+    return;
+  }
   connection.classList.add('is-live');
-  // 连上了就是连上了：项目 id 是给机器看的，界面上只说人话。
-  connection.querySelector('span').textContent = '已连接平台';
-} else {
-  connection.classList.add('is-offline');
-  connection.querySelector('span').textContent = '未连接平台';
+  connection.classList.remove('is-offline');
+  const windows =
+    online === undefined
+      ? ''
+      : ` · 窗口 ${online} 在线${offline ? ` · ${offline} 离线` : ''}`;
+  connectionText.textContent = `已连接平台${windows}`;
 }
+
+paintConnection({ connected: Boolean(status?.connected) });
 
 let activeProject = null;
 let openingHost = null;
@@ -205,7 +217,13 @@ openingHost = mountOpeningHost({
 
 const projectWorkspace = mountProjectWorkspace({
   root: $('#aoLobby'),
-  members: memberCandidates.map((h) => ({ id: h.harness_id, name: h.name, role: '成员窗口', status: 'online' })),
+  // 窗口的在线/离线是**平台上的事实**（不是一律 online）。
+  members: memberCandidates.map((h) => ({
+    id: h.harness_id,
+    name: h.name,
+    role: '成员窗口',
+    status: h.status === 'online' ? 'online' : 'offline',
+  })),
   onOpenProject(project) {
     activeProject = project;
     openingHost?.setProjectContext(project.name);
@@ -236,6 +254,16 @@ const projectWorkspace = mountProjectWorkspace({
         project: () => activeProject,
         // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
         onStart: () => openingHost.open(),
+        // 顶栏的状态（在线/离线）跟着每轮刷新变。
+        onStatus: paintConnection,
+        // 中途加入一个新的窗口：写进项目成员，办公室那边已经通知管理员了。
+        onAddMember: (harnessId) => {
+          if (!activeProject) return;
+          const members = Array.from(new Set([...(activeProject.members || []), harnessId]));
+          projectWorkspace.updateProject(activeProject.id, { members });
+          activeProject = { ...activeProject, members };
+          openingHost?.setProjectMembers(members);
+        },
       });
     } else {
       void office.refresh();
