@@ -12,7 +12,8 @@
 `backend/app/adapter/models.py`（窗口自带的模型是 CLI 自己配置里的事实）、
 `backend/app/adapter/registry.py`（窗口登记）；R10 §8（canonical 数据模型）、
 §37.6（表与必要字段）、§38（R10-fix 流程）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`491a9b4`（窗口页的模型选择：迁移 017 + 平台照办 + 界面选择器 + R10 §38.14 R10-fix-19）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-032
 
@@ -71,10 +72,10 @@ test_id：MVP-UI-032
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_harness_model_selection.py`（新增） | 待回填 |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_harness_model_selection.py`（新增） | ok（11 条：存得下与读得回 / 未在册的窗口 400 / 池子里没有的模型 400 / 「走池子」但没说是哪个 400 / 只有人能改 403 / 平台照办 / 没选就照旧走自带 / 人自己的 key 没点头就不花 / 模型不在池子里就回落并写明原因 / 刚挂掉的模型不用第二次 / `/pool/plan` 读的是登记里的选择） |
+| `office/scripts/verify-office-conversations.mjs` | ok（选择器在、按档分组、写明「哪家的什么模型」、保存动作真的发到平台且带的是被选中的那个模型） |
+| 真跑（8849 真平台 + 4174 预览） | 管理员窗口：当前「自带模型（gpt-6.1-sol）」→ 选「qoder 的 Qwen3.8-Flash」保存 → 平台登记记下（`harnesses.model_mode='pool'`、`model_id='qoder/Qwen3.8-Flash'`）→ 改回自带；迁移 017 已应用；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 202.28 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |

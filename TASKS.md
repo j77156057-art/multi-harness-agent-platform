@@ -146,9 +146,9 @@
 | OFFICE-UI-13 | Mavis | OFFICE-UI-12 | done（任务详情上方留一条紧凑的活列表：换看另一条活不用先回任务表） | `agent/local/mavis/OFFICE-UI-13/a1` | `MVP-UI-028` |
 | OFFICE-UI-14 | Mavis | OFFICE-UI-12 | done（群聊已经是左栏的一个会话，底下那条重复的群聊条撤掉） | `agent/local/mavis/OFFICE-UI-14/a1` | `MVP-UI-029` |
 | OFFICE-UI-15 | Mavis | OFFICE-UI-12 | done（窗口页的任务详细清单：写明具体做什么、**不截断**、收成卡片、点开即看） | `agent/local/mavis/OFFICE-UI-15/a1` | `MVP-UI-030` |
-| OFFICE-UI-16 | Mavis | OFFICE-UI-12 | →doing（窗口页的模型选择：**真能选** —— 自带模型 vs 额度池的哪个模型，写清是哪一档额度、哪家 harness 的什么模型；平台照办） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-032` |
+| OFFICE-UI-16 | Mavis | OFFICE-UI-12 | done（窗口页的模型选择：**真能选** —— 自带模型 vs 额度池的哪个模型，写清是哪一档额度、哪家 harness 的什么模型；平台照办） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-032` |
 | OFFICE-UI-17 | Mavis | OFFICE-UI-12 | done（窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率） | `agent/local/mavis/OFFICE-UI-17/a1` | `MVP-UI-031` |
-| OFFICE-UI-18 | Mavis | — | →doing（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
+| OFFICE-UI-18 | Mavis | — | done（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |

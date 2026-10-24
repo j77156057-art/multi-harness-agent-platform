@@ -10,7 +10,8 @@
 真相源引用：`office/src/cli-transcript.js`（CLI 转录的解析与人话）、
 `office/src/outputs.js`（输出页）、`office/src/flat-office.js`（办公室的输出块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`6036b5d`（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-033
 
@@ -56,8 +57,8 @@ test_id：MVP-UI-033
 
 | 门禁 | 结果 |
 |---|---|
-| `office/scripts/verify-cli-transcript.mjs` | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `office/scripts/verify-cli-transcript.mjs` | ok（13/13；新加一条：路径压短、命令说成「在 wt\69d9 里跑了 git log」、没有工作目录的命令照旧） |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖） |
+| `office/` 构建 | ok |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（这一件本身只碰前端；同一条分支上的 OFFICE-UI-16 才碰后端） |
