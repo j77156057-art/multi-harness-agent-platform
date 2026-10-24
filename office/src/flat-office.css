@@ -744,10 +744,10 @@
 
 .flat-event { border-bottom: 1px solid var(--ao-line-soft); }
 
-/* 事件行：时间、动作、谁 —— 三列挨着点，别把一条线拉得太开。 */
+/* 事件行：时间、动作、谁做的、活的名字、跳转 —— 挨着点读，别把一条线拉得太开。 */
 .flat-event > details > summary {
   display: grid;
-  grid-template-columns: 76px 190px 120px minmax(0, 1fr);
+  grid-template-columns: 20px 130px 150px minmax(0, 1fr) 130px auto;
   gap: 10px;
   align-items: baseline;
   padding: 4px 0;
@@ -769,17 +769,36 @@
 /* 事件行第一列现在是**时间**（不是事件编号）—— 人读得懂的那一列。 */
 .flat-event-seq { color: var(--ao-ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flat-event summary b { font-weight: 600; color: var(--ao-ink); }
-.flat-event summary em { color: var(--ao-ink-soft); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 谁做的、活的名字、跳转按钮各占一列；有提示时提示另起一行。 */
+.flat-event summary em { grid-column: 5; color: var(--ao-ink-soft); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flat-event-jump {
+  grid-column: 6;
+  grid-row: 1;
+  justify-self: end;
+  margin-left: 8px;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.5;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: pointer;
+  color: #2f6fb5;
+  background: rgba(47, 111, 181, 0.12);
+  border: 1px solid rgba(47, 111, 181, 0.35);
+}
+
 .flat-event-subject {
+  grid-column: 4;
   color: rgba(160, 160, 160, 0.95);
   font-size: 12px;
   margin: 0 2px;
 }
 
-.flat-event-hint { color: var(--ao-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flat-event-hint { grid-column: 2 / 7; color: var(--ao-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .flat-event-payload {
-  margin: 2px 0 8px 52px;
+  margin: 2px 0 8px 30px;
   display: grid;
   grid-template-columns: 132px minmax(0, 1fr);
   gap: 2px 10px;

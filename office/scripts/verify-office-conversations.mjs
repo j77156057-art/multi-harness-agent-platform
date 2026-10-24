@@ -297,6 +297,18 @@ try {
   assert.ok(!windowPaneDom.includes('sha256:deadbeef'), '机器字段（哈希）不摆出来');
   assert.ok(windowPaneDom.includes('它没交出东西'), '给人看的字段（原因）摆出来');
 
+  // 轨迹能点开看详细任务：点「看这条活」→ 跳到那条活的详情（目标原文在）。
+  const jump = page.locator('#aoWorkspace .flat-window button[data-open-task]').first();
+  assert.equal(await jump.count(), 1, '轨迹行有「看这条活」');
+  assert.equal(await jump.innerText(), '看这条活', '按钮写的是「看这条活」');
+  await jump.click();
+  await page.waitForTimeout(2500);
+  const detailText = await page.locator('#aoWorkspace .flat-detail').innerText();
+  assert.ok(detailText.includes('把这一轮的办公室改动收口'), '跳到的是那条活的详情（目标原文在）');
+  // 跳过去就停在详情了：回到任务表，后面的步骤照旧走。
+  await page.locator('#aoWorkspace .flat-back').click();
+  await page.waitForTimeout(800);
+
 
   // 3. 点群聊 → 中间那栏是群消息（展开的，不是空框）
   await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();
@@ -359,6 +371,16 @@ try {
   const body = await page.locator('#aoWorkspace .flat-wtask-body').first().innerText();
   assert.ok(body.includes('跑得起来'), '展开后有验收标准');
   assert.ok(body.includes('office/**'), '展开后有「只允许改这些地方」');
+
+  // 办公室每 15 秒整页重画一次：展开的那条活必须**仍然是展开的**，
+  // 否则用户正看着的详情会在下一轮刷新里从手里跑掉。
+  await page.waitForTimeout(16000);
+  const stillOpen = await page.locator('#aoWorkspace .flat-wtask').first().evaluate((el) => el.open);
+  assert.equal(stillOpen, true, '重画之后展开的活仍然是展开的');
+  assert.ok(
+    (await page.locator('#aoWorkspace .flat-wtask-goal').first().innerText()).includes('用来看清楚它到底有没有被截断'),
+    '重画之后目标原文还在（任务书重新读了一遍）',
+  );
 
   // 7. 窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率。
   await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
