@@ -9,7 +9,8 @@
 依赖任务：OFFICE-UI-12（窗口状态页）
 真相源引用：`office/src/flat-office.js`（事件行、payload 字段表、窗口页的轨迹块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`2a2f8ad`（轨迹块改名并加说明、每行补上活的名字、payload 不摆机器字段）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-038
 
@@ -49,9 +50,9 @@ test_id：MVP-UI-038
 
 | 门禁 | 结果 |
 |---|---|
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本卡**没碰 `backend/**`**，后端与 main 逐字节相同） |
+| `office/scripts/verify-office-conversations.mjs` | ok（轨迹块说了这是什么、每行带活的名字、机器字段（哈希）不摆、给人看的字段（原因）摆出来） |
+| 真跑（8849 真平台 + 4174 预览） | 管理员窗口的轨迹读起来是：「10/22 15:10 批准了「建立工位屏幕与回执字段映射」Codex · 管理员」；展开只有「评审第几轮 1」，没有哈希；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 211.48 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本卡**没碰 `backend/**`**，后端与 main 逐字节相同 —— 同一份后端代码在上一轮已跑过全量） |
