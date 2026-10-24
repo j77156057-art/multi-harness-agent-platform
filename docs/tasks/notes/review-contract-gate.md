@@ -11,6 +11,7 @@
 当前状态：done（实现与验收完成）
 commit：`10a50bb`
 test_id：`MVP-ADAPTER-003`（不新增检查 ID）
+验证结果：定点 review/plan/API 测试、全量 pytest `1036 passed`、ruff、docstate `98/98`、discipline `44/44` 全绿。
 
 | 项 | 内容 |
 |---|---|
