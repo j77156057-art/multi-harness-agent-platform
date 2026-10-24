@@ -10,7 +10,8 @@
 真相源引用：R10 §19（定向消息只有两端看得到）、§22（群主只说目标，管理员细化并分派）；
 `office/src/flat-office.js`（办公室界面）；`office/src/direct-chat.js`（私聊页）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（实现完成，待合入 main）
+commit：`441da4b`（实现）+ `3ae0275`（措辞改成书面口径）
 test_id：MVP-UI-025
 
 | 项 | 内容 |
@@ -84,7 +85,7 @@ test_id：MVP-UI-025
 | `tools/docstate` | 98 项检查，0 失败 |
 | `tools/discipline` | 44 项检查，0 失败 |
 | `ruff check` / `ruff format --check` | 全绿（218 个文件已格式化） |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本轮**没碰 `backend/**`**，后端与 main 逐字节相同） |
 | 真跑 | 8849 真平台 + 4174 预览（本次工作区的构建）：新建空项目 → 空办公室 → 点「去写第一件事」→ 开工向导真的打开；页面无 JS 报错 |
 
 真跑画面里最要紧的一处（空项目的办公室）：
