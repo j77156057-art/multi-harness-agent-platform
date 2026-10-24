@@ -325,6 +325,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
   const ADMIN_THREAD_REFS = ['to-admin', 'reassign-request', 'dispatch-request'];
   // 定向消息的签名（R10 §19）：只有发送方与收件方看得到。
   const DIRECT_REF = 'direct';
+  // 「这条要改目标」的签名（R10 §19）：成员窗口提，管理员听见并带给群主。
+  const GOAL_CHANGE_REF = 'goal-change';
 // 还在跑的状态：这些不是「上一轮」，是「现在正在做」。
 const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
@@ -3593,11 +3595,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     for (const message of groupMessages.slice(-40)) {
       const item = document.createElement('article');
       const isHuman = message.sender_type === 'human';
-      item.className = 'flat-msg' + (isHuman ? ' is-human' : '');
+      // 成员窗口提的「要改目标」：群里一眼要看见（这是等群主拍板的事）。
+      const isGoalChange = (Array.isArray(message.refs) ? message.refs : []).includes(
+        GOAL_CHANGE_REF,
+      );
+      item.className =
+        'flat-msg' + (isHuman ? ' is-human' : '') + (isGoalChange ? ' is-goal-change' : '');
       const who = isHuman ? '你' : harnessName(message.sender_id) || '平台';
       const at = String(message.created_at || '').replace('T', ' ').slice(5, 16);
       const body = readableMessageBody(message) || message.body || '';
-      item.innerHTML = `<b>${escape(who)}</b><span class="flat-msg-at">${escape(at)}</span><p>${escape(body)}</p>`;
+      item.innerHTML = `<b>${escape(who)}</b><span class="flat-msg-at">${escape(at)}</span>${
+        isGoalChange ? '<em class="flat-msg-flag">要改目标</em>' : ''
+      }<p>${escape(body)}</p>`;
       list.append(item);
     }
     wrap.append(list);

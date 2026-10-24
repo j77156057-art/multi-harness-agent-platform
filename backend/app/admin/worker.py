@@ -37,7 +37,7 @@ import httpx
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
 from app.db.connection import Database
-from app.tasks.service import DIRECT_REF
+from app.tasks.service import DIRECT_REF, GOAL_CHANGE_REF
 
 GOAL_REF = "project-goal"
 GOAL_ANSWER_REF = "project-goal-answer"
@@ -89,6 +89,13 @@ class WorkerState:
     #: A request is a *message*, and messages are replayed on every poll: the
     #: same request must not re-point the task twice.
     handled_request_seqs: list[int] = field(default_factory=list)
+    #: The last goal the administrator worked on.  Kept so that the owner's
+    #: answer to a member's "the goal has to change" can be handled (the
+    #: answer re-refines that goal instead of being dropped).
+    last_goal: dict[str, Any] | None = None
+    #: The member messages about the goal already handled (one message, one
+    #: answer -- messages are replayed on every poll).
+    handled_goal_change_seqs: list[int] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> WorkerState:
@@ -109,6 +116,10 @@ class WorkerState:
                 handled_request_seqs=[int(x) for x in data.get("handled_request_seqs") or []],
                 pending_circulation=data.get("pending_circulation"),
                 pending_refinement=data.get("pending_refinement"),
+                last_goal=data.get("last_goal"),
+                handled_goal_change_seqs=[
+                    int(x) for x in data.get("handled_goal_change_seqs") or []
+                ],
             )
         except (OSError, ValueError, TypeError):
             # A corrupt cursor must not replay every historical goal. Start
@@ -337,9 +348,22 @@ class AdminWorker:
                 continue
             self.state.last_message_seq = seq
             self.state.initialized = True
-            if _sender_type(message) != "human":
-                continue
             refs = message.get("refs") or []
+            if _sender_type(message) != "human":
+                # 不是人的话，**不是全都丢掉**（R10-fix-22）：成员窗口说「这个
+                # 目标要改」，管理员必须听见。别的闲聊只记在运行日志里，不惊动
+                # 任何人（逐条回应是要花钱的）。
+                if GOAL_CHANGE_REF in refs:
+                    self.handle_member_goal_change(message, seq=seq)
+                else:
+                    print(
+                        json.dumps(
+                            {"member_message": message.get("sender_id"), "seq": seq},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                continue
             if GOAL_REF in refs:
                 payload = _goal_payload(message)
                 if payload:
@@ -373,6 +397,53 @@ class AdminWorker:
                     self.handle_goal(pending)
         self.state.save(self.state_path)
         return bool(messages)
+
+    def handle_member_goal_change(self, message: dict[str, Any], *, seq: int) -> None:
+        """A member says the goal has to change: the administrator hears it.
+
+        The goal belongs to the owner (R10 §19): a member cannot change it.  So
+        the administrator does two things and one non-thing:
+
+        * it **knows** -- the request is recorded and not replayed;
+        * it **tells the owner**, quoting the member, in the group -- that is
+          where the owner reads, and the office shows it;
+        * it does **not** change the goal by itself.
+
+        The owner's answer is then picked up by the pending-goal path, so the
+        administrator re-refines the goal with that answer and the plan follows.
+        """
+        sender = str(message.get("sender_id") or "").strip()
+        body = str(message.get("body") or "").strip()
+        if not sender or not body or sender == self.admin_harness_id:
+            return
+        if seq in self.state.handled_goal_change_seqs:
+            return
+        self.state.handled_goal_change_seqs.append(seq)
+        self.state.handled_goal_change_seqs = self.state.handled_goal_change_seqs[-200:]
+        task_id = str(message.get("task_id") or "")
+        where = f"（{task_id}）" if task_id else ""
+        self._post_admin_message(
+            f"成员窗口 {sender}{where} 说目标要改：{body}\n"
+            "要不要改、改成什么，由群主说；管理员会照新的说法修订方案。"
+        )
+        # 群主的回答要接得住：把「当前目标」摆成待答状态。管理员本来就在等群主
+        # 回答时**合并**进去，别把那个问题顶掉（顶掉 = 那个问题永远没人答）。
+        if self.state.last_goal:
+            pending = dict(self.state.pending_goal or {}) or dict(self.state.last_goal)
+            pending["questions"] = [
+                *(pending.get("questions") or []),
+                f"成员窗口 {sender} 说目标要改：{body}",
+            ]
+            pending["seq"] = seq
+            self.state.pending_goal = pending
+        self.state.save(self.state_path)
+        print(
+            json.dumps(
+                {"member_goal_change": sender, "task_id": task_id, "seq": seq},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     def handle_direct_message(self, message: dict[str, Any], *, seq: int) -> None:
         """Answer a private question from the owner, in the same private channel.
@@ -433,6 +504,8 @@ class AdminWorker:
         seq = int(payload.get("seq") or 0)
         if not force and seq in self.state.processed_goal_seqs:
             return
+        # 记住这次的目标：成员后来提「目标要改」时，群主的回答要能据此重新细化。
+        self.state.last_goal = dict(payload)
         if self.dry_run:
             print(
                 json.dumps(
