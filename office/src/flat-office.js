@@ -176,6 +176,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     // 当前筛选下的活（任务表算好的）：详情里的紧凑列表要用同一份，
     // 免得详情里摆着一条被筛选掉的活。
     filtered: [],
+    // 读过的任务书（spec）：窗口页的活清单点开才去读，读过一次记一分钟。
+    windowSpecs: {},
     pool: null,
     plan: null,
     status: null,
@@ -1318,9 +1320,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 这个窗口现在怎么样（一行话）。全部是平台上的事实。 */
   function windowStatusText(harnessId) {
     const info = (state.availability || []).find((item) => item.harness_id === harnessId);
-    const mine = (state.tasks || []).filter(
-      (task) => holderIds(task).now === harnessId || task.owner === harnessId,
-    );
+    // 它做过的活：现在是它的，**或者**最后领过它的是它（合入后平台会清空 owner，
+    // 只看 now 会让窗口页永远是空的 —— 与任务表的归堆口径必须一致）。
+    const mine = (state.tasks || []).filter((task) => {
+      const holders = holderIds(task);
+      return holders.now === harnessId || holders.before === harnessId;
+    });
     const running = mine.filter((task) => isRunning(task));
     if (running.length) {
       return `正在做：${clip(titleParts(running[0]).main || running[0].title || '', 18)}`;
@@ -1365,14 +1370,72 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 数据都是现成的：availability（在线/模型/能不能接活/上一轮）、tasks（手上的活）、
    * events（它的轨迹），以及正在跑的那条活的实时日志（与任务详情同一个端点）。
    */
+  /**
+   * 一条活的**任务书**：目标原文、验收标准、只允许改的路径。
+   *
+   * 目标原文不在任务列表里（`/tasks` 的行只有 title/status/owner/…），
+   * 它在 `/tasks/{id}` 的 `spec.goal` 里 —— 所以**点开才去读**，读过一次
+   * 记一分钟。读不到就说读不到，不能给一个空框让人以为这条活没有目标。
+   */
+  async function loadTaskSpec(taskId) {
+    const cached = state.windowSpecs[taskId];
+    if (cached && Date.now() - cached.at < 60000) return cached.spec;
+    const data = await api(`/tasks/${encodeURIComponent(taskId)}`).catch(() => null);
+    const spec = (data && data.task && data.task.spec) || null;
+    state.windowSpecs[taskId] = { at: Date.now(), spec };
+    return spec;
+  }
+
+  /**
+   * 窗口页里的一条活：收起时是「状态 + 标题 + 做到第几次 + 现在什么状态」，
+   * 点开就是**这条活完整的目标原文**（不截断）+ 验收标准 + 只允许改的路径 +
+   * 这条活的经过。
+   */
+  function windowTaskCard(task) {
+    const card = document.createElement('details');
+    card.className = 'flat-wtask';
+    const summary = document.createElement('summary');
+    summary.innerHTML = `<span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
+      <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
+      <span class="flat-wtask-meta">${escape(attemptWord(task))} · ${escape(statusSentence(task))}</span>`;
+    card.append(summary);
+    const body = document.createElement('div');
+    body.className = 'flat-wtask-body';
+    body.textContent = '正在读这条活的任务书…';
+    card.append(body);
+    card.addEventListener('toggle', async () => {
+      if (!card.open || card.dataset.loaded) return;
+      const spec = await loadTaskSpec(task.task_id);
+      if (!card.open) return;
+      card.dataset.loaded = '1';
+      const goal = String((spec && spec.goal) || '').trim();
+      const acceptance = spec && Array.isArray(spec.acceptance)
+        ? spec.acceptance.map((item) => (item && item.description) || JSON.stringify(item)).filter(Boolean)
+        : [];
+      const paths = spec && Array.isArray(spec.exclusive_paths) ? spec.exclusive_paths : [];
+      const events = (state.events || []).filter((event) => event.aggregate_id === task.task_id);
+      body.innerHTML = `
+        <p class="flat-note">这条活要做什么</p>
+        <p class="flat-wtask-goal">${goal ? escape(goal) : '（平台没有给这条活写目标）'}</p>
+        ${acceptance.length ? `<p class="flat-note">做到什么程度算完成</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
+        ${paths.length ? `<p class="flat-note">只允许改这些地方</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
+        <p class="flat-note">这条活的经过${events.length ? `（${events.length} 步）` : ''}</p>
+        ${events.length ? `<ol class="flat-events">${events.map(eventRow).join('')}</ol>` : '<p class="flat-empty">还没有它的记录。</p>'}`;
+    });
+    return card;
+  }
+
   function windowPane(harnessId) {
     const panel = document.createElement('section');
     panel.className = 'flat-detail flat-window';
     const info = (state.availability || []).find((item) => item.harness_id === harnessId) || null;
     const name = harnessName(harnessId) || harnessId;
-    const mine = (state.tasks || []).filter(
-      (task) => holderIds(task).now === harnessId || task.owner === harnessId,
-    );
+    // 它做过的活：现在是它的，**或者**最后领过它的是它（合入后平台会清空 owner，
+    // 只看 now 会让窗口页永远是空的 —— 与任务表的归堆口径必须一致）。
+    const mine = (state.tasks || []).filter((task) => {
+      const holders = holderIds(task);
+      return holders.now === harnessId || holders.before === harnessId;
+    });
     const running = mine.filter((task) => isRunning(task));
     const done = mine.filter((task) => DONE_STATES.has(String(task.status)));
     const failed = mine.filter((task) => FAILED_STATES.has(String(task.status)));
@@ -1439,19 +1502,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       panel.append(empty);
     }
 
-    // 手上的活：点进去看详情。
+    // 这个窗口的活：**详细清单**。每条一张可展开的卡片 —— 收起时是
+    // 「状态 + 标题 + 做到第几次」，点开就是这条活完整的目标原文。
     if (mine.length) {
       const section = document.createElement('section');
       section.className = 'flat-spec';
-      section.innerHTML = `<h3>它做过的活</h3>
-        <ul class="flat-list">${mine
-          .slice(-8)
-          .reverse()
-          .map((task) => `<li><button type="button" data-open-task="${escape(task.task_id)}">
-            <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
-            <span>${escape(STATE_LABEL[task.status] || task.status)} · ${escape(attemptWord(task))}</span>
-          </button></li>`)
-          .join('')}</ul>`;
+      const list = document.createElement('div');
+      list.className = 'flat-wtasks';
+      for (const task of [...mine].reverse()) list.append(windowTaskCard(task));
+      section.innerHTML = '<h3>它做过的活（点开看这条活要做什么）</h3>';
+      section.append(list);
       panel.append(section);
     }
 

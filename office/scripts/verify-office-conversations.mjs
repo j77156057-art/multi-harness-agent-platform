@@ -77,6 +77,11 @@ const second = {
   updated_at: '2026-10-24T11:00:00Z',
 };
 
+// 一条**很长**的目标原文：末尾那句是用来证明「没有截断」的。
+const GOAL =
+  '把这一轮的办公室改动收口：每一条都要说清是谁做的、做到哪一步、失败了为什么。'
+  + '最后再补一句收尾的话，用来看清楚它到底有没有被截断。';
+
 const responses = {
   '/status': {
     configured: true,
@@ -95,6 +100,12 @@ const responses = {
     base_adapters: [],
   },
   '/tasks': { tasks: [task, second] },
+  [`/tasks/${TASK}`]: {
+    task: {
+      task_id: TASK,
+      spec: { goal: GOAL, acceptance: ['跑得起来', '说清做了什么'], exclusive_paths: ['office/**'] },
+    },
+  },
   '/events': {
     events: [
       { aggregate_id: TASK, event_name: 'claim', actor_id: MEMBER, payload: {}, created_at: '2026-10-24T10:05:00Z' },
@@ -251,6 +262,23 @@ try {
   const after = await page.locator('#aoWorkspace .flat-detail-head h2').innerText();
   console.log('切换前:', before, '→ 切换后:', after);
   assert.ok(after.includes('第二件事'), '点另一条活，详情直接切过去');
+
+  // 6. 窗口页的活：一张张可展开的卡片，点开是**完整的目标原文**（不截断）。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
+  await page.waitForTimeout(1200);
+  const cards = page.locator('#aoWorkspace .flat-wtask');
+  assert.equal(await cards.count(), 1, '这个窗口的那条活有一张卡片');
+  assert.ok((await cards.first().innerText()).includes('收一条真实任务'), '卡片写的是这条活');
+  assert.equal(await cards.first().evaluate((el) => el.open), false, '卡片默认是收起的');
+  await cards.first().locator('summary').click();
+  await page.waitForTimeout(1500);
+  const goal = (await page.locator('#aoWorkspace .flat-wtask-goal').first().innerText()).trim();
+  console.log('目标原文:', goal.slice(0, 40), '…');
+  assert.ok(goal.includes('用来看清楚它到底有没有被截断'), '目标原文是**完整**的（末尾那句在）');
+  assert.ok(goal.includes('每一条都要说清'), '目标原文的开头也在');
+  const body = await page.locator('#aoWorkspace .flat-wtask-body').first().innerText();
+  assert.ok(body.includes('跑得起来'), '展开后有验收标准');
+  assert.ok(body.includes('office/**'), '展开后有「只允许改这些地方」');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');

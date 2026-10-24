@@ -1641,6 +1641,50 @@
 
 .flat-switch span { font-size: 11px; color: var(--ao-ink-faint); }
 
+/* 窗口页的活清单：一张张可展开的卡片（收起=一行，点开=完整任务书）。 */
+.flat-wtasks { display: grid; gap: 6px; }
+
+.flat-wtask {
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.flat-wtask > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: baseline;
+  cursor: pointer;
+  list-style: none;
+}
+
+.flat-wtask > summary::-webkit-details-marker { display: none; }
+.flat-wtask > summary b { font-size: 13px; font-weight: 600; color: var(--ao-ink); }
+
+.flat-wtask-meta {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+}
+
+.flat-wtask-body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ao-line-soft);
+}
+
+/* 目标原文：整段摆出来，**不截断**。 */
+.flat-wtask-goal {
+  margin: 4px 0 10px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--ao-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* 从详情回到任务表。 */
 .flat-back {
   margin: 0 0 10px;
