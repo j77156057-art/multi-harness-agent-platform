@@ -2512,6 +2512,13 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
         !isAdministratorHarness(item, adminId) &&
         !isPlatformAssistantHarness(item),
     );
+    // 这个项目里已经勾好的成员（新建项目时在表单里选的）。成员要等「开工配置」
+    // 确认、目标提交之后才在平台上生效 —— 所以确认之前这里确实是 0 个。
+    // 说成「请去指定成员」是冤枉人：人已经指定过了。
+    const pickedMembers = (() => {
+      const project = projectOf && projectOf();
+      return project && Array.isArray(project.members) ? project.members.length : 0;
+    })();
     const plan = state.plan && state.plan.draft ? state.plan.draft : null;
     const admin = adminName();
     const { items: thread, started } = adminThread();
@@ -2558,7 +2565,11 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
           <summary>可执行成员 · ${usable.length} 个</summary>
           <ul class="flat-list">${usable
             .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
-            .join('') || '<li class="flat-empty">暂无可执行成员窗口：请在顶部「开工配置」中指定管理员与成员。</li>'}</ul>
+            .join('') || `<li class="flat-empty">${
+              pickedMembers
+                ? `已选 ${pickedMembers} 个成员窗口，在「开工配置」确认后生效。`
+                : '暂无可执行成员窗口：请在顶部「开工配置」中指定管理员与成员。'
+            }</li>`}</ul>
         </details>
         <button type="button" data-act="open-outputs" title="另开一个窗口，查看各成员的执行输出">查看成员输出</button>
       </section>
