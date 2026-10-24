@@ -63,6 +63,9 @@ function render() {
   const id = adminId();
   const name = adminName();
   const thread = directMessages();
+  // 最后一条是我自己发的、还没人回 → 说一句「在等」。管理员回话要过一次模型（慢），
+  // 不说的话，主人只看到自己那条消息挂着，会以为消息丢了。
+  const waitingForReply = Boolean(thread.length) && thread[thread.length - 1].sender_type === 'human';
   root.innerHTML = `
     <div class="direct-shell">
       <header class="direct-head">
@@ -87,6 +90,7 @@ function render() {
             : '<p class="direct-empty">还没有私聊。发一条，只有你和管理员看得到。</p>'
         }
       </div>
+      ${waitingForReply ? '<p class="direct-waiting">已发出，等管理员回话。它可能正忙着别的，回话要过一次模型，慢一点。</p>' : ''}
       ${state.error ? `<p class="direct-error">${escape(state.error)}</p>` : ''}
       <form class="direct-form" id="directForm">
         <input type="text" id="directInput" placeholder="对管理员说一句话（只有你们俩看得到）" aria-label="私聊消息" />

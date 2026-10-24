@@ -160,7 +160,7 @@ function countBy(tasks) {
   return counts;
 }
 
-export function mountFlatOffice({ root, project: projectOf }) {
+export function mountFlatOffice({ root, project: projectOf, onStart }) {
   const state = {
     tasks: [],
     selected: null,
@@ -1117,7 +1117,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       }, { at: 0, task: null });
       sentences.push(latest.task
         ? `今天这个项目还没有动静 —— 最新的一条是 ${timeAgo(latest.task.updated_at)}更新的。`
-        : '今天这个项目还没有动静 —— 这个项目还没有任务。');
+        : '今天这个项目还没有动静。');
     }
     if (working.length) {
       sentences.push(`现在 ${windows.size || working.length} 个窗口在干活。`);
@@ -1151,11 +1151,16 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ['claimed', 'in_progress', 'verifying'].includes(String(task.status)),
     ).length;
     // 主角是"现在该干什么"，不是"一共有多少条"。所以先说人话，再给数字。
+    // 一个任务都没有的项目：顶部这句话就是**唯一的路标** —— 说清现在是什么，
+    // 再说清第一步点哪里。空项目下还说「左边是所有正在做的事」是骗人的：那里一条都没有。
+    const emptyProject = !(state.tasks || []).length;
     const guide = waitingOnMe
       ? `有 <b>${waitingOnMe}</b> 件事在等你处理${working ? `，另有 ${working} 件正在做` : ''}。点开就能看。`
       : working
         ? `有 <b>${working}</b> 件正在做${counts.done ? `，${counts.done} 件已经完成` : ''}。没有要你处理的事。`
-        : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
+        : emptyProject
+          ? '这个项目还没有任务。到顶栏的「开工配置」写一句你要做的事，管理员会把它拆成任务分下去。'
+          : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
@@ -1225,6 +1230,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
 
     const list = document.createElement('section');
     list.className = 'flat-tasks';
+    // 一条任务都没有时，「全部 / 等人接 / 正在做 / 按人 / 排序 / 每页」全是**没有对象的
+    // 开关**：第一次用的人一进来先面对八个按钮，却不知道该按哪个。没有活可筛就收起来。
+    const hasAnyTask = (state.tasks || []).length > 0;
     const bar = document.createElement('div');
     bar.className = 'flat-taskbar';
     const filters = document.createElement('div');
@@ -1307,14 +1315,14 @@ export function mountFlatOffice({ root, project: projectOf }) {
     tools.append(viewWrap, sortWrap);
     bar.append(tools);
 
-    list.append(bar);
+    if (hasAnyTask) list.append(bar);
 
     if (!filtered.length) {
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
-      empty.textContent = state.tasks.length
+      empty.textContent = hasAnyTask
         ? '这个筛选下没有任务。'
-        : '本项目还没有任务。去顶栏的「开工配置」写一句你要做的事，管理员会把它拆成任务分派下去。'
+        : '还没有任务。'
       list.append(empty);
     }
 
@@ -1353,7 +1361,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <span>${state.page} / ${pager.pages}</span>
         <button type="button" data-act="page-next" ${state.page >= pager.pages ? 'disabled' : ''}>下一页</button>
       </span>`;
-    list.append(pagerBar);
+    // 没有东西可翻的时候，这一行只剩「第 0–0 条，共 0 条」和两个点不动的按钮。
+    if (hasAnyTask) list.append(pagerBar);
 
     wrap.append(list, detail());
     return wrap;
@@ -1365,8 +1374,27 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (!state.selected) {
       const hint = document.createElement('p');
       hint.className = 'flat-empty';
-      hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
+      if ((state.tasks || []).length) {
+        hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
+        panel.append(hint);
+        return panel;
+      }
+      // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的地方。
+      // 原来这里写「选一条任务看……」—— 可一条都没有，等于让人去找不存在的东西。
+      // 改成：说清这一栏将来会出现什么，再给一个能点的下一步。
+      hint.textContent = '任务会出现在这里：谁接了它、做到哪一步、为什么没做成。';
       panel.append(hint);
+      const start = document.createElement('button');
+      start.type = 'button';
+      start.className = 'flat-start';
+      start.dataset.act = 'start-project';
+      start.textContent = '去写第一件事';
+      panel.append(start);
+      const note = document.createElement('p');
+      note.className = 'flat-note';
+      // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
+      note.textContent = '点了会打开顶栏那个「开工配置」。写一句要做的事就行 —— 不用先想清楚怎么拆。';
+      panel.append(note);
       return panel;
     }
     const task = state.selected;
@@ -2530,7 +2558,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
           <summary>现在能干活的人 · ${usable.length} 个</summary>
           <ul class="flat-list">${usable
             .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
-            .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
+            .join('') || '<li class="flat-empty">还没有能干活的人：到顶栏的「开工配置」里挑管理员和成员。</li>'}</ul>
         </details>
         <button type="button" data-act="open-outputs" title="另开一个窗口，看每个窗口做完活之后都说了什么">看他们说了什么</button>
       </section>
@@ -2904,6 +2932,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
     if (button.dataset.act === 'dismiss-error') {
       render();
+      return;
+    }
+    if (button.dataset.act === 'start-project') {
+      // 空项目里的那一步：把第一次用的人直接送到「开工配置」（写一句要做的事）。
+      onStart?.();
       return;
     }
     if (button.dataset.act === 'page-prev') {

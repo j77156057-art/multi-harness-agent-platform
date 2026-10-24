@@ -1460,6 +1460,21 @@
 
 .flat-brief-action button:hover { background: #27507a; }
 
+/* 空项目里那一步：把人送到「开工配置」。用主色，因为它是这一屏唯一的路。 */
+.flat-start {
+  margin-top: 12px;
+  border: 1px solid #2f5d8c;
+  border-radius: 5px;
+  background: #2f5d8c;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.flat-start:hover { background: #27507a; }
+
 /* ---------------------------------------------------------------- 布局（收口）
 
    放在文件最后：一处说清三列怎么排，媒体查询里也只改列数。

@@ -63,7 +63,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       <div class="project-lobby-body">
         <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填上名字和成员，就能进这个项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
           <p class="project-lobby-hint" data-worker-hint hidden></p>
-          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>填写项目名称与成员</li><li><span>2</span>直接进入开工配置</li><li><span>3</span>开工向导里挑管理员和成员</li></ol>
+          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>点「新建项目」，填上名字和要一起干活的人</li><li><span>2</span>创建后直接进「开工配置」，写一句要做的事</li><li><span>3</span>在向导里挑管理员和成员，管理员会把它拆成任务分下去</li></ol>
         </div>
         <div class="project-lobby-side">
         <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><h2 id="projectHistoryTitle">项目历史</h2><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
@@ -113,7 +113,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   createDialog.setAttribute('aria-labelledby', 'projectCreateTitle');
   createDialog.innerHTML = `
     <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填完即进入开工配置，无需再点一次。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
-    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>成员 Harness（不含管理员；管理员在开工向导里选）</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
+    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>干活的人（成员窗口）—— 不含管理员，管理员在开工向导里选</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
     <footer class="project-create-foot"><span data-create-hint>创建后会直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
   root.append(createDialog);
 
@@ -386,7 +386,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     // 永远停在「读取正式注册表…/暂无正式注册 Harness」——本机明明有 10 个已注册窗口。
     registerSources(state.harnesses || []);
     const online = (state.harnesses || []).filter(item => item.status === 'online').map(item => ({
-      id: item.harness_id, name: item.name || item.harness_id, role: 'Harness 成员', status: item.status,
+      id: item.harness_id, name: item.name || item.harness_id, role: '成员窗口', status: item.status,
       // 没有平台凭据的窗口领不了任务：派给它的活会永远停在 ready。
       credential_count: Number(item.credential_count ?? 1),
     }));
@@ -394,8 +394,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item));
     const actionable = memberCandidates.filter(item => item.credential_count > 0);
     const idle = memberCandidates.filter(item => item.credential_count === 0);
-    projectScope.textContent = `正式项目范围：${state.project_id} / ${state.group_id} · ${actionable.length} 个可领活的成员窗口`
-      + (idle.length ? `（另有 ${idle.length} 个窗口登记在册但没有平台凭据，领不了活）` : '');
+    // 不摆项目号/群号：那两个串是给机器看的，第一次用的人看到只会以为界面漏了东西。
+    projectScope.textContent = `正式平台上有 ${actionable.length} 个窗口能接活`
+      + (idle.length ? `（另有 ${idle.length} 个窗口登记在册但没有凭据，接不了活）` : '') + '。';
     renderMembers(dedupByName(actionable));
   }).catch(() => { projectScope.textContent = '正式项目范围暂不可用；本窗口仍可创建本地项目。'; });
 
