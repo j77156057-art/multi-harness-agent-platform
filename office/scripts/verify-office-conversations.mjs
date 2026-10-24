@@ -456,7 +456,28 @@ try {
   assert.ok(declared.body.model, '说的是哪个模型');
   assert.ok(['free', 'metered'].includes(declared.body.tier), '说的是哪一档');
 
-  // 12. 成员提「要改目标」的消息：群里一眼要看见（等群主拍板的事）。
+  // 12. 状态栏：平台连不连得上、几个窗口在线。
+  const conn = await page.locator('#aoConn').innerText();
+  console.log('状态栏:', conn);
+  assert.ok(conn.includes('已连接平台'), '状态栏说平台连上了');
+  assert.ok(conn.includes('在线'), '状态栏给出窗口的在线数');
+
+  // 13. 中途加入新的窗口：窗口页给一个「加入这个项目」，加入后通知管理员。
+  const joinButton = page.locator('#aoWorkspace .flat-detail-actions button[data-act="add-member"]');
+  assert.equal(await joinButton.count(), 1, '没在这个项目里的窗口有「加入这个项目」');
+  await joinButton.click();
+  await page.waitForTimeout(1200);
+  const told = posted.find(
+    (item) => item.path === '/messages' && (item.body.refs || []).includes('add-member'),
+  );
+  assert.ok(told, '加入以后要通知管理员');
+  assert.ok(
+    (told.body.refs || []).some((ref) => ref.startsWith('add-member-json:')),
+    '通知里带的是哪个窗口',
+  );
+  assert.ok(await page.locator('#aoWorkspace .flat-note', { hasText: '已通知管理员' }).count() >= 1, '界面告诉人已经通知过了');
+
+  // 14. 成员提「要改目标」的消息：群里一眼要看见（等群主拍板的事）。
   await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();
   await page.waitForTimeout(1200);
   const goalChat = page.locator('#aoWorkspace .flat-msg.is-goal-change');

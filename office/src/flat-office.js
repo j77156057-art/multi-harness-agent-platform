@@ -160,7 +160,7 @@ function countBy(tasks) {
   return counts;
 }
 
-export function mountFlatOffice({ root, project: projectOf, onStart }) {
+export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, onAddMember }) {
   const state = {
     tasks: [],
     selected: null,
@@ -1601,6 +1601,35 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  /**
+   * 中途把一个窗口加进这个项目，并**通知管理员**。
+   *
+   * 加人要让人知道：管理员据此知道，并把**还没人领的活**改派给它（已经在跑的活
+   * 不换人 —— 换人是人按条决定的）。
+   */
+  async function addMemberToProject(harnessId) {
+    const adminId = adminIdentity();
+    const name = harnessName(harnessId) || harnessId;
+    try {
+      await api('/messages', {
+        body: `${name} 中途加入了这个项目。`,
+        mentions: adminId ? [adminId] : [],
+        refs: [
+          'add-member',
+          `add-member-json:${harnessId}`,
+          ...(adminId ? ['to-admin'] : []),
+        ],
+      });
+      onAddMember?.(harnessId);
+      state.memberAdded = harnessId;
+      state.error = null;
+      render();
+    } catch (error) {
+      state.error = `没能加入：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
   /** 收费模型要人点头：问一次，答了才算。 */
   const paidModelDialog = buildPanelDialog('flatPaidModel', '确认要用收费模型');
 
@@ -1898,6 +1927,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const panel = document.createElement('section');
     panel.className = 'flat-detail flat-window';
     const info = (state.availability || []).find((item) => item.harness_id === harnessId) || null;
+    // 这个项目里的成员（开工时定的 + 中途加进来的）。
+    const projectMembers = new Set(
+      [((projectOf && projectOf()) || {}).members || []].map((id) => String(id)),
+    );
     const name = harnessName(harnessId) || harnessId;
     // 它做过的活：现在是它的，**或者**最后领过它的是它（合入后平台会清空 owner，
     // 只看 now 会让窗口页永远是空的 —— 与任务表的归堆口径必须一致）。
@@ -1912,6 +1945,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     const facts = [];
     facts.push(['状态', info ? (info.status === 'online' ? '在线' : '离线') : '未知']);
+    // 还没在这个项目里的窗口：给一个「加入这个项目」——中途来的人也得能干活。
+    const isMember = projectMembers.has(harnessId);
+    // 管理员窗口不算「要加进来的成员」：它是管理员（开工时就定下了）。
+    const isAdminWindow = harnessId === adminIdentity();
+    const joinable =
+      Boolean(info) && !isMember && !isAdminWindow && info.status === 'online';
     if (info && info.model) facts.push(['用的模型', info.model]);
     if (info && info.degraded) facts.push(['降级', '这个窗口当前处于降级状态']);
     if (info && info.usable === false) {
@@ -1933,7 +1972,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           <p class="flat-summary">${escape(windowStatusText(harnessId))}</p>
         </div>
         <div class="flat-detail-actions">
+          ${state.memberAdded === harnessId ? '<span class="flat-note">已通知管理员</span>' : ''}
           ${isAssistant ? '<button type="button" data-act="open-assistant">打开平台助手面板</button>' : ''}
+          ${
+            joinable
+              ? `<button type="button" data-act="add-member" data-harness="${escape(harnessId)}">加入这个项目</button>`
+              : isMember
+                ? '<span class="flat-note">已在这个项目里</span>'
+                : ''
+          }
         </div>
       </div>
       <dl class="flat-facts">${facts.map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`).join('')}</dl>`;
@@ -3841,6 +3888,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       void declareModel(button);
       return;
     }
+    if (button.dataset.act === 'add-member') {
+      void addMemberToProject(String(button.dataset.harness || ''));
+      return;
+    }
     if (button.dataset.act === 'dismiss-error') {
       render();
       return;
@@ -4228,15 +4279,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // （会话式的用法：先看列表，再点进去）。
       render();
       const poolReadAt = Date.now();
-      const [availability, pool, plan, messages] = await Promise.all([
-        api('/availability').catch(() => ({ availability: [] })),
+      // 窗口名单与状态栏**先**落地：池子那一次读可能要十几秒（冷启动要问各家
+      // CLI 的名册），把它和名单放在同一个 Promise.all 里，慢的那个会把快的
+      // 一起拖住 —— 名单空着、状态栏没数。
+      const availability = await api('/availability').catch(() => ({ availability: [] }));
+      state.availability = availability.availability || [];
+      state.loaded = true;
+      // 顶栏的状态：平台连不连得上、几个窗口在线（平台上的事实，不猜）。
+      const online = state.availability.filter((item) => item.status === 'online').length;
+      onStatus?.({
+        connected: true,
+        online,
+        offline: state.availability.length - online,
+      });
+      const [pool, plan, messages] = await Promise.all([
         probed ? Promise.resolve(probed) : api('/pool').catch(() => null),
         api('/plan').catch(() => null),
         api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
         loadUserKeys(),
       ]);
-      state.availability = availability.availability || [];
-      state.loaded = true;
       // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
       // 写进去的更新鲜），就别用这份旧的盖上去。
       if (poolReadAt >= state.poolAt) {
