@@ -9,7 +9,7 @@
 依赖任务：OFFICE-UI-12（窗口状态页）
 真相源引用：`office/src/flat-office.js`（事件行、payload 字段表、窗口页的轨迹块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`3c26498`）
 commit：`2a2f8ad`（轨迹块改名并加说明、每行补上活的名字、payload 不摆机器字段）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-038
