@@ -21,7 +21,7 @@ import './flat-office.css';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
-import { ACTION_HINT, ACTION_LABEL, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
+import { ACTION_HINT, ACTION_LABEL, CANCEL_STATES, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
 import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state-labels.js';
 // 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
 // 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
@@ -2767,9 +2767,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
     try {
       await api(payload.route, payload.body);
       await refresh();
+      return true;
     } catch (error) {
       state.error = String(error.message || error);
       render();
+      // 失败要说出来 —— 调用方（取消那条活）要靠这个知道**没成**，
+      // 别让它以为动作已经落地了。
+      return false;
     }
   }
 
@@ -3122,6 +3126,13 @@ export function mountFlatOffice({ root, project: projectOf }) {
           render();
           return;
         }
+        if (decision === 'cancel' && !CANCEL_STATES.has(String(task.status))) {
+          // 列表里的状态可能已经过期了（这条活刚被别人收口）。先问一句，别把一个
+          // 早就结束的活再取消一遍，也别因此去惊动管理员。
+          state.error = '这条活的状态已经变了（可能刚被别人处理过），不用再取消。刷新一下看看。';
+          render();
+          return;
+        }
         const body = { task_id: task.task_id };
         if (decision === 'resume' || decision === 'reopen') {
           if (answer.text) body.answer = answer.text;
@@ -3131,10 +3142,59 @@ export function mountFlatOffice({ root, project: projectOf }) {
         } else {
           body.reason = answer.text;
         }
-        await doAction(spec.route, { route: spec.route, body });
+        const ok = await doAction(spec.route, { route: spec.route, body });
+        // 只有**真的取消了**才去通知管理员 —— 取消失败还去发消息，等于谎报。
+        if (decision === 'cancel' && ok) await notifyAdminOfCancel(task, answer.text);
       })();
     }
   });
+
+  /**
+   * 取消一条活之后，**必须**给管理员发一条群消息。
+   *
+   * 为什么：管理员 worker 只认三种群消息（`project-goal` / `project-goal-answer` /
+   * `reassign-request`）。取消不在其中 —— 不通知他，他就在一份已经不成立的计划
+   * 上继续干活（方案快照里那条还在、分配轮照旧收口）。
+   *
+   * 这条消息带 `task-cancelled` 标记，管理员那边会就**这一条原本要做的部分**重新
+   * 细化一版（或者确认不用再做了），其余按原计划继续。
+   */
+  async function notifyAdminOfCancel(task, reason) {
+    const adminId = adminIdentity();
+    const title = task.title || task.task_id;
+    // 机器读的那份（任务号 + 原因 + 标题）放 refs 里；正文是人话。
+    const envelope = {
+      task_id: task.task_id,
+      title,
+      reason: String(reason || '').trim(),
+    };
+    try {
+      await doAction('/messages', {
+        route: '/messages',
+        body: {
+          body: [
+            `不做了：${envelope.reason}`,
+            `（这一条：${title}）`,
+            '管理员会就这一条原本要做的部分重新细化一版，或者确认不用再做了；其余按原计划继续。',
+          ].join('\n'),
+          // mention 让它进管理员的收件箱，refs 让它出现在「与管理员对话」面板里。
+          mentions: adminId ? [adminId] : [],
+          task_id: task.task_id,
+          refs: [
+            'to-admin',
+            'task-cancelled',
+            `task-cancelled:${task.task_id}`,
+            `task-cancelled-json:${JSON.stringify(envelope)}`,
+          ],
+        },
+      });
+    } catch (error) {
+      // 活已经取消了（那一步成功了），通知失败不能把取消本身说成没成 —— 但得让人
+      // 知道管理员**没**被通知到。
+      state.error = `活已经取消了，但没通知到管理员：${error.message}`;
+      render();
+    }
+  }
 
   // ---------------------------------------------------------------- 数据
 

@@ -47,6 +47,13 @@ REASSIGN_REQUEST_REF = "reassign-request"
 #: The optional target window: "reassign-to:<harness_id>".  Without it the
 #: administrator picks the least loaded window that can actually take work.
 REASSIGN_TARGET_REF = "reassign-to:"
+#: The owner cancelled a task.  Cancelling is a **human** decision and it is final
+#: for that task -- but the plan it came from still lists it, so the administrator
+#: has to hear about it: otherwise it keeps working on a plan that no longer
+#: holds.  The office sends this message right after a successful cancel.
+CANCEL_REF = "task-cancelled"
+#: The machine-readable part of that message: "task-cancelled-json:{...}".
+CANCEL_JSON_REF = "task-cancelled-json:"
 #: The task states a re-point may act on: the work is not deliverable from
 #: there (failed) or not progressing (lease lost).
 REASSIGNABLE_STATES = ("abandoned", "stale", "ready", "changes_requested")
@@ -151,6 +158,40 @@ class PlatformClient:
                 response=response,
             )
         return data if isinstance(data, dict) else {"data": data}
+
+
+def _cancel_payload(message: dict[str, Any]) -> dict[str, Any] | None:
+    """The cancel notice: which task, why, and what it was called.
+
+    The office puts the human-readable sentence in the body and the machine
+    part in a ref (``task-cancelled-json:{...}``), so the group conversation
+    does not turn into raw JSON.
+    """
+    refs = message.get("refs") or []
+    if CANCEL_REF not in refs:
+        return None
+    payload: dict[str, Any] = {}
+    for ref in refs:
+        text = str(ref or "").strip()
+        if text.startswith(CANCEL_JSON_REF):
+            text = text[len(CANCEL_JSON_REF) :]
+        elif not text.startswith("{"):
+            continue
+        try:
+            candidate = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and str(candidate.get("task_id") or "").strip():
+            payload = candidate
+            break
+    task_id = str(payload.get("task_id") or "").strip()
+    if not task_id:
+        return None
+    return {
+        "task_id": task_id,
+        "title": str(payload.get("title") or "").strip(),
+        "reason": str(payload.get("reason") or "").strip(),
+    }
 
 
 def _goal_payload(message: dict[str, Any]) -> dict[str, Any] | None:
@@ -305,6 +346,9 @@ class AdminWorker:
                 continue
             if REASSIGN_REQUEST_REF in refs:
                 self.handle_reassign_request(message, seq=seq)
+                continue
+            if CANCEL_REF in refs:
+                self.handle_cancel_notice(message, seq=seq)
                 continue
             if self.state.pending_goal and (
                 GOAL_ANSWER_REF in refs
@@ -730,6 +774,75 @@ class AdminWorker:
                     ),
                     flush=True,
                 )
+
+    # ------------------------------------------------------ cancel notices
+
+    def handle_cancel_notice(self, message: dict[str, Any], *, seq: int) -> None:
+        """The owner cancelled a task: re-refine **that part** of the plan.
+
+        The scope stays narrow on purpose.  The cancelled task's own work order
+        is the requirement; re-refining the whole goal would dispatch work that
+        is already running a second time.  Everything else in the plan keeps
+        going, and the new refinement goes through the usual route (draft ->
+        circulation -> the owner approves -> dispatch).
+
+        If the work order cannot be read, nothing is invented: the administrator
+        says so in the group and waits for the human to say what the part was.
+        """
+        payload = _cancel_payload(message)
+        if payload is None:
+            print(
+                json.dumps({"cancel_notice_ignored": "no task id", "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        task_id = payload["task_id"]
+        try:
+            task = self.client.get(f"/tasks/{task_id}")
+        except httpx.HTTPStatusError:
+            print(
+                json.dumps(
+                    {"cancel_notice_ignored": "task not found", "task_id": task_id, "seq": seq},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+        spec = task.get("spec") or {}
+        requirement = str(spec.get("goal") or "").strip()
+        if not requirement:
+            # 没有工单原文就**不猜**范围：把一句话丢给模型让它自己补，那是编。
+            self._post_admin_message(
+                f"群主取消了一条活（{task_id}），但平台读不到它的工单原文，"
+                "所以我没有重新细化。请人再说一次那部分要做什么。"
+            )
+            print(
+                json.dumps({"cancel_notice_without_spec": task_id, "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        reason = payload.get("reason") or "（没写原因）"
+        title = payload.get("title") or str(task.get("title") or task_id)
+        self.handle_goal(
+            {
+                "goal_id": f"cancel-{task_id}",
+                "goal": (
+                    f"{requirement}\n\n"
+                    f"（这一条已被群主取消：{reason}。请就**它原本要做的这部分**重新细化一版；"
+                    "如果这部分已经不需要了，就不要产出任务。）"
+                ),
+                "project_name": None,
+                "members": [],
+                "max_tasks": 1,
+                "answers": [],
+                "admin": self.admin_harness_id,
+                "seq": seq,
+            }
+        )
+        print(
+            json.dumps({"cancel_refined": task_id, "title": title, "seq": seq}, ensure_ascii=False),
+            flush=True,
+        )
 
     # ------------------------------------------------------ re-point requests
 

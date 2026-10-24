@@ -296,6 +296,92 @@ def test_goal_for_another_admin_is_not_dispatched(tmp_path, monkeypatch):
     assert client.dispatches == []
 
 
+def test_a_cancel_notice_makes_the_administrator_refine_that_part(tmp_path, monkeypatch):
+    """人取消了一条活 → 管理员就**这一部分**重新细化。
+
+    范围要窄：被取消那条的工单原文就是要求，重新细化整个目标会把还在做的活
+    再派一遍。细化结果照旧走草案 → 传阅 → 人审，不直接派单。
+    """
+    admin = FakeAdmin(
+        tasks=[
+            {
+                "title": "写对照说明",
+                "goal": "写一份对照说明",
+                "exclusive_paths": ["docs/x.md"],
+                "acceptance": "docs/x.md exists",
+                "harness_id": "member-window",
+            }
+        ]
+    )
+    admin.assignable = ["member-window"]
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 11,
+                "sender_type": "human",
+                "body": "不做了：方向不对",
+                "task_id": "FD-9",
+                "refs": [
+                    "to-admin",
+                    "task-cancelled",
+                    "task-cancelled:FD-9",
+                    'task-cancelled-json:{"task_id":"FD-9","title":"写对照说明","reason":"方向不对"}',
+                ],
+            }
+        ]
+    )
+    client.task_detail = {
+        "task_id": "FD-9",
+        "status": "cancelled",
+        "title": "写对照说明",
+        "spec": {"goal": "写一份对照说明"},
+    }
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert len(admin.refine_calls) == 1
+    requirement = admin.refine_calls[0]["requirement"]
+    assert "写一份对照说明" in requirement, "要求就是被取消那条自己的工单原文"
+    assert "方向不对" in requirement, "取消的原因也给它"
+    assert admin.refine_calls[0]["max_tasks"] == 1, "只细化这一部分"
+    # 照旧走草案 → 传阅，不直接派单。
+    assert client.dispatches == []
+    assert len(client.plan_drafts) == 1
+    assert client.plan_drafts[0]["opened_by"] == "admin-window"
+
+
+def test_a_cancel_notice_without_a_work_order_is_not_guessed(tmp_path, monkeypatch):
+    """读不到工单原文就**不猜**范围：明说，让人再说一次要做什么。"""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 12,
+                "sender_type": "human",
+                "body": "不做了：方向不对",
+                "task_id": "FD-9",
+                "refs": [
+                    "task-cancelled",
+                    'task-cancelled-json:{"task_id":"FD-9","title":"写对照说明","reason":"方向不对"}',
+                ],
+            }
+        ]
+    )
+    client.task_detail = {"task_id": "FD-9", "status": "cancelled", "title": "写对照说明"}
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert admin.refine_calls == [], "没有工单原文就不细化"
+    assert client.plan_drafts == []
+    assert any("工单原文" in str(message.get("body", "")) for message in client.messages)
+
+
 def test_goal_handler_circulates_the_plan_instead_of_dispatching_it(tmp_path, monkeypatch):
     """After the refinement the plan is **circulated**, not dispatched.
 
