@@ -69,7 +69,7 @@ test_id：MVP-UI-010 DOC-TRACE-001
 | `tools/docstate` | 98 项检查，0 失败 |
 | `tools/discipline` | 44 项检查，0 失败（合并受控窗口内 rootworktree 一项会红：MERGE_HEAD 悬着而合并锁已释放；mergeguard 持锁续跑时该项自动放行，merge commit 落地后复测全绿） |
 | `ruff check` / `ruff format --check` | 全绿（218 个文件已格式化） |
-| `pytest`（全量） | 合并后 main 上全量跑：4 条红 —— 3 条 `test_gate_utf8` 是「合并未提交期间 discipline 正红」的连带现象（它断言 discipline 必须退出 0），门禁转绿后复测通过；1 条 `test_generic_adapter` 是 Pi 适配器合进来后通用适配器的基座表少 `pi`（已补 `pi` 并复测全绿） |
+| `pytest`（全量） | 合并后 main 上全量跑：4 条红 —— 3 条 `test_gate_utf8` 是「合并未提交期间 discipline 正红」的连带现象（它断言 discipline 必须退出 0），门禁转绿后复测通过；1 条 `test_generic_adapter` 是 Pi 适配器合进来后通用适配器的基座表少 `pi`（已补 `pi` 并复测全绿）。**两笔合并都落地后的最终树上全量复跑：`PYTEST_EXIT=0`** |
 | `office/` 构建 | `vite build` 通过：29 个模块，`main` 187.08 kB JS / 61.56 kB CSS，三个页面（`index.html` / `direct.html` / `outputs.html`）都在 |
 | `office/scripts/verify-*.mjs` | **30 条中 27 通过**；3 条失败均为**环境依赖**（要 5197 端口的 Godot dev server；本机 ollama 没有 `qwen3:4b`；平台在册凭据窗口数 7 ≠ 断言的 9） |
 | 真跑截图 | 大厅 / 办公室 / 群聊摘要 / 输出页 / **新增的私聊页**，均无 JS 报错；私聊页空状态是人话（「还没有私聊。发一条，只有你和管理员看得到。」） |
