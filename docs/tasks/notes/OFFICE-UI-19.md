@@ -12,7 +12,7 @@
 （平台照办前怎么核对）、`backend/app/adapter/model_choice.py`（选择的语义）；
 R10 §8（canonical 数据模型）、§37.6（表与必要字段）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`8de8993`）
 commit：`114528f`（收费要点头 + 记下点头时那一档 + 清单折叠 + 探针与名册 + codebuddy 的 step-5 进免费声明；R10 §38.15 R10-fix-20）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-034
