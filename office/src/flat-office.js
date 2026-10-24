@@ -1918,6 +1918,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function windowTaskCard(task) {
     const card = document.createElement('details');
     card.className = 'flat-wtask';
+    // 展开状态要活过 15 秒一次的重画：办公室靠 data-fold 记住哪些折叠是开着的。
+    const foldKey = `wtask:${String(task.task_id || '')}`;
+    card.dataset.fold = foldKey;
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
       <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
@@ -1927,9 +1930,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     body.className = 'flat-wtask-body';
     body.textContent = '正在读这条活的任务书…';
     card.append(body);
-    card.addEventListener('toggle', async () => {
-      if (!card.open || card.dataset.loaded) return;
+    const load = async () => {
+      if (card.dataset.loaded || card.dataset.loading) return;
+      card.dataset.loading = '1';
       const spec = await loadTaskSpec(task.task_id);
+      card.dataset.loading = '';
       if (!card.open) return;
       card.dataset.loaded = '1';
       const goal = String((spec && spec.goal) || '').trim();
@@ -1945,7 +1950,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${paths.length ? `<p class="flat-note">只允许改这些地方</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
         <p class="flat-note">这条活的经过${events.length ? `（${events.length} 步）` : ''}</p>
         ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">还没有它的记录。</p>'}`;
+    };
+    card.addEventListener('toggle', () => {
+      if (card.open) void load();
     });
+    // 重画之前它是展开的：重画之后仍然是展开的，而且照样把任务书读出来。
+    if (state.openFolds.has(foldKey)) {
+      card.open = true;
+      void load();
+    }
     return card;
   }
 
@@ -2111,7 +2124,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ${
         trace.length
           ? `<ol class="flat-events">${trace
-              .map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) }))
+              .map((event) =>
+                eventRow(event, {
+                  subject: taskTitleOf(event.aggregate_id),
+                  jumpTaskId: knownTaskId(event.aggregate_id),
+                }),
+              )
               .join('')}</ol>`
           : '<p class="flat-empty">它还没有留下动作记录。</p>'
       }`;
@@ -2536,7 +2554,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-    /**
+    /** 这条事件真的落在办公室已知的一条活上吗（方案级事件的聚合号不是活）。 */
+  function knownTaskId(taskId) {
+    const id = String(taskId || '');
+    if (!id) return '';
+    return (state.tasks || []).some((task) => String(task.task_id) === id) ? id : '';
+  }
+
+  /**
    * 活的名字（人起的）。
    *
    * 取自办公室已经有的任务表；取不到就退回编号 —— **不编**。
@@ -2551,6 +2576,20 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
 /**
+   * 事件的折叠键：同一条事件在重画之后还得是同一个键。
+   *
+   * 用聚合号 + 序号 + 事件名 + 时间拼：序号没有时（本地样例就没有），
+   * 事件名加时间也能把两条不同的动作分开。
+   */
+  function eventFoldKey(event) {
+    const id = String(event.aggregate_id || '');
+    const seq = event.seq == null ? '' : String(event.seq);
+    const name = String(event.event_name || '');
+    const at = String(event.created_at || '');
+    return `event:${id}:${seq}:${name}:${at}`;
+  }
+
+/**
    * 一条事件：标题行是骨架，**payload 才是这件事的细节**。
    * "改派给了谁"、"为什么失败"都在 payload 里，光看事件名等于没看见。
    */
@@ -2560,17 +2599,24 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const fields = payload ? payloadFields(payload) : [];
     // 动作 + 对象才是一句话：「批改了「收一条真实任务」」—— 只写「批改了」没人读得懂。
     const subject = options.subject ? `<span class="flat-event-subject">${escape(options.subject)}</span>` : '';
+    // 动作与活之间要**有路**：点这一行就能去看那条活的详情。
+    const jump = options.jumpTaskId
+      ? `<button type="button" class="flat-event-jump" data-open-task="${escape(options.jumpTaskId)}">看这条活</button>`
+      : '';
     // 事件列表是给人看"这条活经历了什么"的：时间、人话的动作、谁做的。
-    // 事件编号（seq）留�� title 里 —— 它是给查问题的人看的，不是给人读的。
+    // 事件编号（seq）留在 title 里 —— 它是给查问题的人看的，不是给人读的。
     const who = actorName(event);
+    // 同一条事件在重画之后还得是同一个键，否则用户展开的那一行会被合上。
+    const foldKey = eventFoldKey(event);
     return `<li class="flat-event">
-      <details>
+      <details data-fold="${escape(foldKey)}"${state.openFolds.has(foldKey) ? ' open' : ''}>
         <summary title="事件编号 ${escape(event.seq ?? '')} · ${escape(timeOf(event.created_at))}${event.event_name && eventName(event) !== event.event_name ? ` · 原文 ${escape(event.event_name)}` : ''}">
           <span class="flat-event-seq">${escape(timeShort(event.created_at))}</span>
           <b>${escape(eventName(event))}</b>
           ${subject}
           <em>${escape(who)}</em>
           ${hint ? `<span class="flat-event-hint">${escape(hint)}</span>` : ''}
+          ${jump}
         </summary>
         ${fields.length
           ? `<dl class="flat-event-payload">${fields
@@ -3915,6 +3961,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // data-act 过滤**之前**处理，否则点了没反应。
     const openTask = event.target.closest('button[data-open-task]');
     if (openTask) {
+      // 这个按钮在 <summary> 里：不阻止默认行为的话，点它会顺手把这一行展开。
+      event.preventDefault();
       state.view = { kind: 'tasks', id: null };
       void select(openTask.dataset.openTask);
       return;
