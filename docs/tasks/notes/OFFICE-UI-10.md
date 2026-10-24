@@ -12,6 +12,7 @@
 `docs/dev-convention.md` H-4 / H-7 / H-8
 当前状态：done（实现完成，待合入 main）
 commit：`441da4b`（实现）+ `3ae0275`（措辞改成书面口径）
+验证结果：`office/scripts/verify-office-firstrun.mjs` 通过；办公室冒烟 28/31（3 条为环境依赖）；`tools/docstate` 98/98、`tools/discipline` 44/44、`ruff` 全绿；全量 pytest `PYTEST_EXIT=0`（本轮未改 `backend/**`）；真跑 8849 平台 + 4174 预览：新建空项目 → 空办公室 → 点「配置目标」→ 开工向导真的打开。
 test_id：MVP-UI-025
 
 | 项 | 内容 |
