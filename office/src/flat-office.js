@@ -1061,8 +1061,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       body(pageTasks, { total: sorted.length, start, pages, size, all: state.tasks.length }),
       rail(),
     );
-    // 群聊在中间那一栏看的时候，底部那条就不重复了。
-    if (state.view.kind !== 'group') root.append(chat());
+    // 底下**不再**挂群聊条：群聊已经是左栏的一个会话，中间那栏铺开它。
+    // 同一份消息摆两处只是重复，左栏那一行还带着「最后一条」的摘要。
     restoreDrafts();
     restoreScroll();
     const sourceSelect = root.querySelector('#flatSourceSelect');

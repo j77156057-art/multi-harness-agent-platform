@@ -124,11 +124,38 @@ try {
       }
     }
 
-    // 2. 对话台的内容不越界
+    // 2. 对话台的内容不越界。
+    //    群聊现在是左栏里的一个会话，要切过去才看得到 —— 这一段在
+    //    切到群聊之后单独测（见下面的第二遍）。
     if (report.listBleed && report.listBleed.visible) {
       const b = report.listBleed;
       assert.ok(b.above <= 2, `${width}px: 对话台的内容往上溢出了 ${b.above}px`);
       assert.ok(b.below <= 2, `${width}px: 对话台的内容往下溢出了 ${b.below}px`);
+    }
+
+    // 2b. 切到群聊会话：对话台在中间那栏，内容同样不许越界。
+    const chatConv = page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first();
+    if (await chatConv.count()) {
+      await chatConv.click();
+      await page.waitForSelector('#aoWorkspace .flat-chat', { timeout: 20000 });
+      await page.waitForTimeout(800);
+      const bleed = await page.evaluate(() => {
+        const ws = document.querySelector('#aoWorkspace');
+        const chat = ws.querySelector('.flat-chat');
+        const list = ws.querySelector('.flat-chat-list');
+        if (!chat || !list) return null;
+        const c = chat.getBoundingClientRect();
+        const l = list.getBoundingClientRect();
+        return {
+          visible: l.width > 0 && l.height > 0,
+          above: Math.round(c.y - l.y),
+          below: Math.round(l.bottom - c.bottom),
+        };
+      });
+      if (bleed && bleed.visible) {
+        assert.ok(bleed.above <= 2, `${width}px: 群聊内容往上溢出了 ${bleed.above}px`);
+        assert.ok(bleed.below <= 2, `${width}px: 群聊内容往下溢出了 ${bleed.below}px`);
+      }
     }
 
     // 3. 详情里的文字不横向撑破盒子
