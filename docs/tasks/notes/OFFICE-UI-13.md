@@ -9,7 +9,8 @@
 依赖任务：OFFICE-UI-12（左边改成会话列表）
 真相源引用：`office/src/flat-office.js`（办公室界面）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（实现完成，待合入 main）
+commit：`bb742ef`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-028
 
@@ -56,5 +57,5 @@ test_id：MVP-UI-028
 | `office/scripts/verify-office-conversations.mjs` | ok（含新增三条断言：列表在、当前那条被标出、点另一条切过去） |
 | 真跑（8849 真平台 + 4174 预览） | 详情上方 12 条紧凑列表，当前那条高亮，「还有 6 条，用「← 返回任务表」看全部。」；点另一条 → 详情标题真的切过去 |
 | `office/` 构建 | ok（29 个模块，main 196.24 kB JS / 66.58 kB CSS） |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本轮**没碰 `backend/**`**，后端与 main 逐字节相同） |
