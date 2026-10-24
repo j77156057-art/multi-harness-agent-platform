@@ -9,7 +9,8 @@
 依赖任务：OFFICE-UI-12（左边改成会话列表）
 真相源引用：`backend/app/pool/service.py`（用量账与汇总）、`backend/app/pool/routes.py`（`/pool/status`）、
 R10 §19（群聊与定向消息）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`bc28aa3`）
+commit：`e5f9c2e`（后端记缓存 token 并按窗口给速率与命中率、界面写清四个数）；合入 main 的 merge commit：`bc28aa3`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-031
 
