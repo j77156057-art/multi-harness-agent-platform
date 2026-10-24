@@ -173,6 +173,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     // 第二批数据（窗口名单、群消息、额度池）到了没有：没到的时候左栏要说
     // 「正在读…」，不能让它看起来像"这个项目里没有窗口"。
     loaded: false,
+    // 当前筛选下的活（任务表算好的）：详情里的紧凑列表要用同一份，
+    // 免得详情里摆着一条被筛选掉的活。
+    filtered: [],
     pool: null,
     plan: null,
     status: null,
@@ -1044,6 +1047,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return true;
     });
 
+    state.filtered = filtered;
     const sorted = sortTasks(filtered);
     const size = Math.max(1, Number(state.pageSize) || 20);
     const pages = Math.max(1, Math.ceil(sorted.length / size));
@@ -1635,6 +1639,40 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return list;
   }
 
+  /**
+   * 详情上方的紧凑活列表：换看另一条活不用先回任务表。
+   *
+   * 用的是**任务表同一份筛选结果**（state.filtered）—— 详情里不该摆着
+   * 一条被筛选掉的活。超过 12 条只摆前 12 条，剩下的说一句。
+   */
+  function taskSwitcherHtml() {
+    const all = state.filtered || [];
+    const current = state.selected ? state.selected.task_id : '';
+    let list = all.slice(0, 12);
+    // 当前正在看的那条**必须在列表里**：它排在 12 条之外的话，既不会被标出来，
+    // 也点不回来。把它换到末位。
+    if (current && !list.some((task) => task.task_id === current)) {
+      const hit = all.find((task) => task.task_id === current);
+      if (hit) list = [...list.slice(0, 11), hit];
+    }
+    if (list.length < 2) return '';
+    const more = all.length - list.length;
+    return `<section class="flat-switcher">
+      <p class="flat-note">这个项目的活（点一条直接切过去）</p>
+      <div class="flat-switcher-row">${list
+        .map(
+          (task) => `<button type="button" class="flat-switch${
+            task.task_id === current ? ' is-on' : ''
+          }" data-open-task="${escape(task.task_id)}">
+            <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
+            <span>${escape(STATE_LABEL[task.status] || task.status)}</span>
+          </button>`,
+        )
+        .join('')}</div>
+      ${more > 0 ? `<p class="flat-note">还有 ${more} 条，用「← 返回任务表」看全部。</p>` : ''}
+    </section>`;
+  }
+
   function detail() {
     const panel = document.createElement('section');
     panel.className = 'flat-detail';
@@ -1663,6 +1701,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     panel.innerHTML = `
       <button type="button" class="flat-back" data-act="back-tasks">← 返回任务表</button>
+      ${taskSwitcherHtml()}
       <div class="flat-detail-head">
         <div>
           <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
@@ -3183,6 +3222,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       }
       return;
     }
+    // 「换看某条活」的按钮没有 data-act，只有 data-open-task —— 必须在
+    // data-act 过滤**之前**处理，否则点了没反应。
+    const openTask = event.target.closest('button[data-open-task]');
+    if (openTask) {
+      state.view = { kind: 'tasks', id: null };
+      void select(openTask.dataset.openTask);
+      return;
+    }
     const button = event.target.closest('button[data-act]');
     if (!button) return;
     // 一次新的动作开始：把上一条"没成"的提示收起来（这次要是再失败，会写新的）。
@@ -3206,12 +3253,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'open-assistant') {
       // 平台助手的完整面板是另一块（顶栏那个按钮），这里把它叫起来。
       document.getElementById('adminAgentBtn')?.click();
-      return;
-    }
-    if (button.dataset.openTask) {
-      // 从窗口状态页点进某条活：回到任务视图并选中它。
-      state.view = { kind: 'tasks', id: null };
-      void select(button.dataset.openTask);
       return;
     }
     if (button.dataset.act === 'start-project') {
