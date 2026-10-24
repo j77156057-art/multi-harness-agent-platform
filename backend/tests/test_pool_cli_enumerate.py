@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.pool import sources
 
 ROSTER = [
@@ -135,3 +137,69 @@ def test_a_broken_enumerate_spec_expands_nothing(tmp_path):
     names = [u.name for u in upstreams]
     assert names.count("toy:toy/f1") == 1, "声明的本体照在"
     assert not any("toy/f2" in name for name in names), "坏规则一个都不扩"
+
+
+def test_a_model_the_cli_lists_can_be_given_a_tier(tmp_path):
+    """人给名册里的模型定档：写进声明，argv 契约照抄那家现有的槽。"""
+    from app.pool.sources import declare_cli_model
+
+    config = tmp_path / "config.json"
+    slot = declare_cli_model(
+        "codebuddy",
+        "hy3-x",
+        "free",
+        config_path=config,
+        roster=["hy3", "hy3-x", "step-5-preview"],
+    )
+    assert slot["name"] == "codebuddy"
+    assert slot["model"] == "hy3-x"
+    assert slot["tier"] == "free"
+    # 同一家的调用约定照抄：模型不同，程序契约不该不同。
+    assert slot["binary"] == "codebuddy"
+    assert slot["args"], "argv 契约要跟着一起写进去"
+    written = json.loads(config.read_text(encoding="utf-8"))
+    declared = {entry["model"]: entry for entry in written["cli_slots"]}
+    assert declared["hy3-x"]["tier"] == "free"
+
+
+def test_a_model_the_cli_does_not_list_is_refused(tmp_path):
+    """平台不替 CLI 发明模型：它没列出来的，定档就 refused。"""
+    from app.pool.sources import PoolDeclarationError, declare_cli_model
+
+    with pytest.raises(PoolDeclarationError):
+        declare_cli_model(
+            "codebuddy",
+            "not-a-model",
+            "free",
+            config_path=tmp_path / "config.json",
+            roster=["hy3", "hy3-x"],
+        )
+
+
+def test_a_tier_the_platform_cannot_guess_is_refused(tmp_path):
+    """档位只有三个：平台不猜「这个到底花不花钱」。"""
+    from app.pool.sources import PoolDeclarationError, declare_cli_model
+
+    with pytest.raises(PoolDeclarationError):
+        declare_cli_model(
+            "codebuddy",
+            "hy3",
+            "maybe",
+            config_path=tmp_path / "config.json",
+            roster=["hy3"],
+        )
+
+
+def test_a_declaration_lands_in_the_data_directory(tmp_path, monkeypatch):
+    """写声明要写进**数据目录**。
+
+    读的时候有历史相对路径的兜底（老检出还能用），但**写**不能落在那儿 ——
+    平台是在 backend 目录下跑的，写进去就落进了仓库，而不是平台被指到的数据目录。
+    """
+    from app.pool import sources
+
+    monkeypatch.setattr(sources.settings, "data_dir", str(tmp_path), raising=False)
+    slot = sources.declare_cli_model("codebuddy", "hy3-x", "free", roster=["hy3-x"])
+    written = tmp_path / "pool" / "config.json"
+    assert written.exists(), "声明要落在数据目录里"
+    assert slot["model"] == "hy3-x"

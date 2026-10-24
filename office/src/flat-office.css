@@ -1901,6 +1901,32 @@
   background: #6a4a8a;
 }
 
+.flat-model-mark.is-unknown {
+  background: rgba(127, 127, 127, 0.65);
+}
+
+/* 按额度属主分组：每家一格，格子里才是那家的模型。 */
+.flat-model-owner {
+  margin: 6px 0;
+  padding-left: 8px;
+  border-left: 2px solid rgba(127, 127, 127, 0.25);
+}
+
+.flat-model-owner > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.flat-model-row.is-undeclared {
+  color: rgba(160, 160, 160, 0.95);
+}
+
+.flat-model-row.is-undeclared button {
+  margin-left: 8px;
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
 .flat-model-probe {
   margin-left: 8px;
   color: rgba(160, 160, 160, 0.95);

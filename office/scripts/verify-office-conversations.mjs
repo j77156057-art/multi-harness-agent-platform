@@ -167,6 +167,7 @@ const responses = {
       ],
     },
     inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
+    rosters: { codebuddy: ['hy3', 'step-5-preview'] },
   },
   '/plan': { plans: [], draft: null },
   '/pool/probe': {
@@ -353,7 +354,7 @@ try {
   assert.ok(metricText.includes('400'), '写了最近一小时多少 token');
   assert.ok(metricText.includes('20%'), '写了缓存命中率');
 
-  // 8. 窗口页的模型选择：自带 / 额度池里的哪个模型，写清是哪家的什么模型。
+  // 8. 窗口页的模型选择：自带 / 额度池里的哪个模型，按额度属主分组折叠。
   await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
   await page.waitForTimeout(1200);
   const modelBlock = page.locator('#aoWorkspace .flat-model');
@@ -365,27 +366,49 @@ try {
     false,
     '清单默认折着（二十几个模型铺开太长）',
   );
-  const modelSummary = await modelDetails.locator('summary').innerText();
+  const modelSummary = await modelDetails.locator('> summary').innerText();
   console.log('清单标题:', modelSummary);
-  assert.ok(modelSummary.includes('免费额度 2'), '标题写明每档几个（免费 2）');
-  assert.ok(modelSummary.includes('付费额度 1'), '标题写明每档几个（付费 1）');
+  assert.ok(modelSummary.includes('3 家'), '标题写明几家（3 家）');
+  assert.ok(modelSummary.includes('3 个可用'), '标题写明几个可用');
   assert.equal(
     await modelBlock.locator('button[data-act="probe-pool"]').count(),
     1,
     '有「重新探一遍」这个探针',
   );
-  // 展开才看得到每一条：写清「哪家的什么模型」+ 它属于哪一档。
-  await modelDetails.locator('summary').click();
+  // 展开：按额度属主分组，每组默认是收着的。
+  await modelDetails.locator('> summary').click();
   await page.waitForTimeout(600);
-  const modelText = await modelBlock.innerText();
-  console.log('模型选择:', modelText.replace(/\n+/g, ' | ').slice(0, 320));
-  assert.ok(modelText.includes('自带模型'), '有「自带模型」这一项');
-  assert.ok(modelText.includes('免费额度'), '额度池按档分开了（免费额度）');
-  assert.ok(modelText.includes('付费额度'), '额度池按档分开了（付费额度）');
-  assert.ok(modelText.includes('qoder 的 Qwen3.8-Flash'), '写清是哪家的什么模型（免费档）');
-  assert.ok(modelText.includes('codex 的 gpt-5.6'), '写清是哪家的什么模型（付费档）');
-  assert.ok(modelText.includes('免费'), '每一条都标了它属于哪一档');
-  assert.ok(modelText.includes('付费'), '收费的那一条也标出来了');
+  const owners = modelBlock.locator('details.flat-model-owner');
+  assert.equal(await owners.count(), 3, '按额度属主分成了 3 组');
+  assert.equal(
+    await owners.first().evaluate((el) => el.open),
+    false,
+    '每组默认是收着的（别弄太长）',
+  );
+  const ownerText = await owners.allInnerTexts();
+  console.log('分组:', ownerText.join(' | '));
+  assert.ok(ownerText.some((text) => text.includes('qoder')), 'qoder 自己一组');
+  assert.ok(ownerText.some((text) => text.includes('codex')), 'codex 自己一组');
+  // 展开 qoder 那组：里面是它自己的模型，每条带档位。
+  const qoderGroup = owners.filter({ hasText: 'qoder' }).first();
+  await qoderGroup.locator('> summary').click();
+  await page.waitForTimeout(400);
+  const qoderText = await qoderGroup.innerText();
+  assert.ok(qoderText.includes('Qwen3.8-Flash'), 'qoder 组里是它自己的模型');
+  assert.ok(qoderText.includes('免费'), '每条都标了它属于哪一档');
+  // 名册里没定档的也摆出来了（codebuddy 的 step-5-preview）。
+  const codebuddyGroup = owners.filter({ hasText: 'codebuddy' }).first();
+  await codebuddyGroup.locator('> summary').click();
+  await page.waitForTimeout(400);
+  const codebuddyText = await codebuddyGroup.innerText();
+  assert.ok(codebuddyText.includes('step-5-preview'), 'CLI 说它能用的也摆出来了');
+  assert.ok(codebuddyText.includes('没定档'), '没定档的说清楚是「没定档」');
+  assert.ok(
+    await codebuddyGroup.locator('button[data-act="declare-model"]').count() >= 2,
+    '没定档的旁边有「标成免费 / 标成收费」两个按钮',
+  );
+
+  // 选一个免费的池子模型再保存 → 平台收到的是那个模型。
   await modelBlock.locator('input[data-model-id="qoder/Qwen3.8-Flash"]').check();
   await modelBlock.locator('button[data-act="save-model-choice"]').click();
   await page.waitForTimeout(1500);
@@ -397,6 +420,9 @@ try {
   assert.equal(saved.body.paid_consent, false, '免费模型不用点头');
 
   // 9. 收费模型：保存前要问一句，点头之后才发。
+  const codexGroup = owners.filter({ hasText: 'codex' }).first();
+  await codexGroup.locator('> summary').click();
+  await page.waitForTimeout(400);
   await modelBlock.locator('input[data-model-id="gpt-5.6"]').check();
   await modelBlock.locator('button[data-act="save-model-choice"]').click();
   await page.waitForTimeout(900);
@@ -416,6 +442,17 @@ try {
     posted.some((item) => item.path === '/pool/probe'),
     '探针真的发到了平台',
   );
+
+  // 11. 当场定档：没定档的模型旁边有「标成免费 / 标成收费」。
+  const declare = modelBlock.locator('button[data-act="declare-model"]').first();
+  assert.ok((await declare.count()) === 1, '没定档的模型旁边有「标成…」的按钮');
+  await declare.click();
+  await page.waitForTimeout(1200);
+  const declared = posted.find((item) => item.path === '/pool/declaration');
+  assert.ok(declared, '定档真的发到了平台');
+  assert.ok(declared.body.cli, '说的是哪家的 CLI');
+  assert.ok(declared.body.model, '说的是哪个模型');
+  assert.ok(['free', 'metered'].includes(declared.body.tier), '说的是哪一档');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');

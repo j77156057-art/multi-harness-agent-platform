@@ -150,6 +150,7 @@
 | OFFICE-UI-17 | Mavis | OFFICE-UI-12 | done（窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率） | `agent/local/mavis/OFFICE-UI-17/a1` | `MVP-UI-031` |
 | OFFICE-UI-18 | Mavis | — | done（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
 | OFFICE-UI-19 | Mavis | OFFICE-UI-16 | done（模型选择的收口：**收费额度要点头**、清单折叠、**探针**（点刷新重探模型：免费变收费、新增免费额度都要知道）） | `agent/local/mavis/OFFICE-UI-19/a1` | `MVP-UI-034` |
+| OFFICE-UI-20 | Mavis | OFFICE-UI-19 | done（额度池清单**按 harness 折叠**；名册里没定档的模型**当场定档**：标成免费/收费） | `agent/local/mavis/OFFICE-UI-20/a1` | `MVP-UI-035` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -252,6 +253,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-17 → docs/claims/mavis--OFFICE-UI-17.md -->
 <!-- OFFICE-UI-18 → docs/claims/mavis--OFFICE-UI-18.md -->
 <!-- OFFICE-UI-19 → docs/claims/mavis--OFFICE-UI-19.md -->
+<!-- OFFICE-UI-20 → docs/claims/mavis--OFFICE-UI-20.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
@@ -304,6 +306,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-17 | [卡](docs/tasks/notes/OFFICE-UI-17.md) | | |
 | OFFICE-UI-18 | [卡](docs/tasks/notes/OFFICE-UI-18.md) | | |
 | OFFICE-UI-19 | [卡](docs/tasks/notes/OFFICE-UI-19.md) | | |
+| OFFICE-UI-20 | [卡](docs/tasks/notes/OFFICE-UI-20.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
