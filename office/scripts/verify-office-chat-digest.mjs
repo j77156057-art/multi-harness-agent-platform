@@ -130,6 +130,8 @@ try {
     .locator('.project-platform-item', { hasText: '示例项目' })
     .locator('.project-platform-open')
     .click();
+  // 群聊是左栏里的一个会话：先点开它，中间那栏才铺开群消息。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();
   await page.waitForSelector('#aoWorkspace .flat-chat-digest', { timeout: 20000 });
   await page.waitForTimeout(800);
 

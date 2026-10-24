@@ -51,7 +51,11 @@ try {
   await page.waitForSelector('#aoWorkspace .flat-head', { timeout: 20000 });
   assert.ok(await page.locator('#aoWorkspace .flat-body').count() > 0, 'the office has a body');
   assert.ok(await page.locator('#aoWorkspace .flat-rail').count() > 0, 'the office has the right rail');
-  assert.ok(await page.locator('#aoWorkspace .flat-chat').count() > 0, 'the office has the console');
+  // 群聊不再是底部那条了：它是左栏里的一个会话，中间那栏铺开。
+  assert.ok(
+    await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).count() > 0,
+    'the office has the group chat conversation',
+  );
 
   // 旧场景的东西不该再出现：场景导航、手机入口、3D 画布。
   for (const selector of ['#officeViewBtn', '#corridorViewBtn', '#phoneBtn', '#godotFrame', '.seat-picker', '.action-toolbar']) {
