@@ -117,6 +117,8 @@ const responses = {
 
 const browser = await chromium.launch({ headless: true });
 const calls = [];
+// 可以让某个端点失败（用来验"动作没成的时候**不要**去通知管理员"）。
+const failing = new Set();
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const errors = [];
@@ -126,6 +128,14 @@ try {
     const pathname = new URL(request.url()).pathname.replace('/api/formal', '');
     const raw = request.postData();
     calls.push({ path: pathname, method: request.method(), body: raw ? JSON.parse(raw) : null });
+    if (failing.has(pathname)) {
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'FD-1 is cancelled; not on any cancel edge' }),
+      });
+      return;
+    }
     const payload = responses[pathname] ?? {};
     await route.fulfill({
       status: 200,
@@ -210,6 +220,59 @@ try {
   assert.ok(release, '放行走了 /human/release');
   assert.equal(release.body.budget_override, true, '勾了"再给一次机会"就带上它');
   assert.equal(release.body.reason, '换个窗口再试');
+
+  // 取消：理由必填，**并且必须**给管理员发一条群消息 ——
+  // 管理员 worker 只认 project-goal / project-goal-answer / reassign-request，
+  // 不通知他，他就在一份已经不成立的计划上继续干活。
+  // （前面那条活是升级态，它的动作是"放行"；取消要切回等人回答的那条。）
+  await page.locator('.flat-task', { hasText: '等人回答的活' }).first().click();
+  await page.waitForTimeout(600);
+  await detail.locator('[data-act="decide-cancel"]').click();
+  await page.waitForSelector('#flatDecision[open]');
+  await page.locator('[data-decision-text]').fill('方向不对，先停');
+  await page.locator('[data-decision-confirm]').click();
+  await page.waitForTimeout(600);
+  const cancel = calls.find((call) => call.path === '/human/cancel');
+  assert.ok(cancel, '取消走了 /human/cancel');
+  assert.equal(cancel.body.task_id, TASK_ID);
+  assert.equal(cancel.body.reason, '方向不对，先停', '取消的理由带上了');
+  const notice = calls.find(
+    (call) => call.path === '/messages' && ((call.body && call.body.refs) || []).includes('task-cancelled'),
+  );
+  assert.ok(notice, '取消后给管理员发了一条群消息');
+  assert.ok(
+    (notice.body.refs || []).includes(`task-cancelled:${TASK_ID}`),
+    '消息里认得出是哪一条活',
+  );
+  assert.ok(
+    (notice.body.refs || []).some((ref) => String(ref).startsWith('task-cancelled-json:')),
+    '机器读的那份（任务号 + 原因）也在 refs 里',
+  );
+  assert.ok(
+    notice.body.body.includes('方向不对，先停'),
+    '正文说得出为什么不做',
+  );
+  assert.ok(
+    (notice.body.mentions || []).includes('admin-window'),
+    '消息 mention 了管理员，他那边才收得到',
+  );
+
+  // 取消**没成**的时候，不能去通知管理员 —— 那等于谎报"已经通知了"。
+  // （真跑抓到过：那条活早就是已取消状态，平台回了 409，但办公室照样发了消息。）
+  const noticesBefore = calls.filter(
+    (call) => call.path === '/messages' && ((call.body && call.body.refs) || []).includes('task-cancelled'),
+  ).length;
+  failing.add('/human/cancel');
+  await page.locator('.flat-detail-actions [data-act="decide-cancel"]').click();
+  await page.waitForSelector('#flatDecision[open]', { timeout: 10000 });
+  await page.locator('[data-decision-text]').fill('这次会失败');
+  await page.locator('[data-decision-confirm]').click();
+  await page.waitForTimeout(800);
+  const noticesAfter = calls.filter(
+    (call) => call.path === '/messages' && ((call.body && call.body.refs) || []).includes('task-cancelled'),
+  ).length;
+  assert.equal(noticesAfter, noticesBefore, '取消失败时没有通知管理员');
+  failing.delete('/human/cancel');
 
   // 方案卡片：批准旁边要有驳回。
   const rail = page.locator('.flat-rail');
