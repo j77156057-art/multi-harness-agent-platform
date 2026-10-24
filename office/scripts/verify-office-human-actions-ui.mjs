@@ -169,6 +169,20 @@ try {
   await card.locator('.project-card-open').click();
   await page.waitForSelector('#aoWorkspace .flat-head', { timeout: 20000 });
 
+  // 任务表现在住在中间那一栏，详情要**点开**一条活才出现（会话式的用法：
+  // 先看列表，再点进去）。所以这里先点一条等人回答的活。
+  await page.locator('#aoWorkspace .flat-task', { hasText: '等人回答的活' }).first().click();
+  await page.waitForTimeout(800);
+
+  // 从详情换看另一条活：先回任务表（详情视图里没有任务行）。
+  const backToTable = async () => {
+    const back = page.locator('#aoWorkspace .flat-back');
+    if (await back.count()) {
+      await back.click();
+      await page.waitForTimeout(600);
+    }
+  };
+
   // 详情里的「人自己的动作」。
   const detail = page.locator('.flat-detail-actions');
   await detail.locator('[data-act="decide-resume"]').waitFor({ state: 'visible' });
@@ -201,6 +215,9 @@ try {
   assert.equal(resume.body.answer, '按第二条做');
 
   // 预算用完的升级任务：放行时必须显式问"再给一次机会"。
+  // 详情视图把任务表换掉了（会话式：先看列表，再点进去）—— 换看另一条活
+  // 之前先「← 返回任务表」。
+  await backToTable();
   await page.locator('.flat-task', { hasText: '预算用完的升级任务' }).first().click();
   await page.waitForTimeout(800);
   const escalatedDetail = page.locator('.flat-detail-actions');
@@ -225,6 +242,7 @@ try {
   // 管理员 worker 只认 project-goal / project-goal-answer / reassign-request，
   // 不通知他，他就在一份已经不成立的计划上继续干活。
   // （前面那条活是升级态，它的动作是"放行"；取消要切回等人回答的那条。）
+  await backToTable();
   await page.locator('.flat-task', { hasText: '等人回答的活' }).first().click();
   await page.waitForTimeout(600);
   await detail.locator('[data-act="decide-cancel"]').click();

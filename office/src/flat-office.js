@@ -167,6 +167,12 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     detail: null,
     output: null,
     availability: [],
+    // 当前看的是哪个会话：tasks=项目任务、group=项目群聊、assistant=平台助手、
+    // window=某个窗口（id 是它的 harness_id）。
+    view: { kind: 'tasks', id: null },
+    // 第二批数据（窗口名单、群消息、额度池）到了没有：没到的时候左栏要说
+    // 「正在读…」，不能让它看起来像"这个项目里没有窗口"。
+    loaded: false,
     pool: null,
     plan: null,
     status: null,
@@ -302,6 +308,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
   const ADMIN_THREAD_REFS = ['to-admin', 'reassign-request', 'dispatch-request'];
   // 定向消息的签名（R10 §19）：只有发送方与收件方看得到。
   const DIRECT_REF = 'direct';
+// 还在跑的状态：这些不是「上一轮」，是「现在正在做」。
+const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
   /** 平台配置的管理员窗口（事实，不是猜的）。 */
   function adminIdentity() {
@@ -1048,8 +1056,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
       header(counts),
       body(pageTasks, { total: sorted.length, start, pages, size, all: state.tasks.length }),
       rail(),
-      chat(),
     );
+    // 群聊在中间那一栏看的时候，底部那条就不重复了。
+    if (state.view.kind !== 'group') root.append(chat());
     restoreDrafts();
     restoreScroll();
     const sourceSelect = root.querySelector('#flatSourceSelect');
@@ -1160,7 +1169,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
         ? `有 <b>${working}</b> 件正在做${counts.done ? `，${counts.done} 件已经完成` : ''}。没有要你处理的事。`
         : emptyProject
           ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
-          : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
+          : '这个项目里没有要你处理的事。点一条活看详情，或在左侧选一个窗口看它现在的状态。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
@@ -1224,10 +1233,249 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     return row;
   }
 
+  /**
+   * 左栏：会话列表（电脑版微信那一列）。
+   *
+   * 人在这个项目里打交道的是**几个对象**：项目本身、项目群聊、平台助手，还有每一个
+   * 窗口（管理员与成员）。列成一栏，点谁看谁 —— 先看到"我跟谁在来往"，再点进去看
+   * "它现在在做什么"。
+   *
+   * 每行的状态摘要都是**平台上的事实**算出来的（手上的活、在跑的活、上一次在干什么、
+   * 能不能接活），不猜。
+   */
+  function conversations() {
+    const list = document.createElement('section');
+    list.className = 'flat-convs';
+
+    const head = document.createElement('div');
+    head.className = 'flat-convs-head';
+    head.textContent = '会话';
+    list.append(head);
+
+    const addRow = (kind, id, name, status, onClick) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      const on = state.view.kind === kind && (state.view.id || null) === (id || null);
+      button.className = 'flat-conv' + (on ? ' is-on' : '');
+      button.innerHTML = `<b>${escape(name)}</b><span>${escape(status)}</span>`;
+      button.addEventListener('click', onClick || (() => {
+        state.view = { kind, id: id || null };
+        render();
+      }));
+      list.append(button);
+    };
+
+    const counts = countBy(state.tasks || []);
+    addRow('tasks', null, '项目任务', `${(state.tasks || []).length} 件事 · ${counts.waiting} 件在等人接`);
+
+    const groupMessages = (state.messages || []).filter(
+      (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
+    );
+    const last = groupMessages.slice(-1)[0];
+    addRow(
+      'group',
+      null,
+      '项目群聊',
+      last
+        ? oneLine(readableMessageBody(last) || last.body || '')
+        : state.loaded
+          ? '还没消息'
+          : '正在读…',
+    );
+
+    const adminId = adminIdentity();
+    const roster = state.availability || [];
+    // 窗口名单是第二批才到的（要探每个 CLI 的配置，慢）。这段时间说清楚在读，
+    // 别让左栏空着像"这个项目里没有窗口"。
+    if (!state.loaded && !roster.length) {
+      addRow('window', null, '窗口名单', '正在读…');
+    }
+    const assistant = roster.find((item) => isPlatformAssistantHarness(item));
+    if (assistant) {
+      addRow('assistant', assistant.harness_id, '平台助手', windowStatusText(assistant.harness_id));
+    }
+    if (adminId) {
+      addRow('window', adminId, `管理员 · ${harnessName(adminId)}`, windowStatusText(adminId));
+    }
+    for (const item of roster) {
+      if (item.harness_id === adminId) continue;
+      if (isPlatformAssistantHarness(item)) continue;
+      addRow('window', item.harness_id, harnessName(item.harness_id), windowStatusText(item.harness_id));
+    }
+    return list;
+  }
+
+  /** 一行摘要：只截断，不解释截断（解释留给展开正文的地方）。 */
+  function oneLine(text) {
+    const value = String(text || '').replace(/\s+/g, ' ').trim();
+    return value.length > 26 ? `${value.slice(0, 26)}…` : value;
+  }
+
+  /** 这个窗口现在怎么样（一行话）。全部是平台上的事实。 */
+  function windowStatusText(harnessId) {
+    const info = (state.availability || []).find((item) => item.harness_id === harnessId);
+    const mine = (state.tasks || []).filter(
+      (task) => holderIds(task).now === harnessId || task.owner === harnessId,
+    );
+    const running = mine.filter((task) => isRunning(task));
+    if (running.length) {
+      return `正在做：${clip(titleParts(running[0]).main || running[0].title || '', 18)}`;
+    }
+    if (info && info.last_attempt_status && info.last_task_id) {
+      const label = STATE_LABEL[info.last_attempt_status] || info.last_attempt_status;
+      // 还在跑的那一轮不是「上一轮」—— 它就是现在。
+      return RUNNING_STATUSES.has(String(info.last_attempt_status))
+        ? '正在做'
+        : `上一轮：${label}`;
+    }
+    if (mine.length) return `手上有 ${mine.length} 件活`;
+    if (info && info.status === 'offline') return '离线';
+    if (info && info.usable === false) return '暂时接不了活';
+    return '空闲';
+  }
+
+  /** 中间那一栏：按选中的会话给内容。 */
+  function conversationPane(filtered, pager) {
+    const pane = document.createElement('section');
+    pane.className = 'flat-main';
+    if (state.view.kind === 'group') {
+      pane.append(chat());
+      return pane;
+    }
+    if (state.view.kind === 'assistant' || state.view.kind === 'window') {
+      pane.append(windowPane(state.view.id));
+      return pane;
+    }
+    // 项目任务：选中一条活就看详情，没选就看任务表。
+    if (state.selected) {
+      pane.append(detail());
+      return pane;
+    }
+    pane.append(taskTable(filtered, pager));
+    return pane;
+  }
+
+  /**
+   * 一个窗口的状态页：现在在做什么、手上有几件活、进度、上一次干了什么。
+   *
+   * 数据都是现成的：availability（在线/模型/能不能接活/上一轮）、tasks（手上的活）、
+   * events（它的轨迹），以及正在跑的那条活的实时日志（与任务详情同一个端点）。
+   */
+  function windowPane(harnessId) {
+    const panel = document.createElement('section');
+    panel.className = 'flat-detail flat-window';
+    const info = (state.availability || []).find((item) => item.harness_id === harnessId) || null;
+    const name = harnessName(harnessId) || harnessId;
+    const mine = (state.tasks || []).filter(
+      (task) => holderIds(task).now === harnessId || task.owner === harnessId,
+    );
+    const running = mine.filter((task) => isRunning(task));
+    const done = mine.filter((task) => DONE_STATES.has(String(task.status)));
+    const failed = mine.filter((task) => FAILED_STATES.has(String(task.status)));
+    const isAssistant = info ? isPlatformAssistantHarness(info) : false;
+
+    const facts = [];
+    facts.push(['状态', info ? (info.status === 'online' ? '在线' : '离线') : '未知']);
+    if (info && info.model) facts.push(['用的模型', info.model]);
+    if (info && info.degraded) facts.push(['降级', '这个窗口当前处于降级状态']);
+    if (info && info.usable === false) {
+      const why = (info.reasons || []).map((r) => r.detail || r.code).filter(Boolean).join('；');
+      facts.push(['接不了活的原因', why || '平台没有登记凭据']);
+    }
+    facts.push(['本项目里的活', `${mine.length} 件（在做 ${running.length}、做完 ${done.length}、没做成 ${failed.length}）`]);
+    if (info && info.last_task_id) {
+      facts.push([
+        '最近一次尝试',
+        `${info.last_task_id}（${STATE_LABEL[info.last_attempt_status] || info.last_attempt_status || '未知'}）`,
+      ]);
+    }
+
+    panel.innerHTML = `
+      <div class="flat-detail-head">
+        <div>
+          <h2>${escape(name)}</h2>
+          <p class="flat-summary">${escape(windowStatusText(harnessId))}</p>
+        </div>
+        <div class="flat-detail-actions">
+          ${isAssistant ? '<button type="button" data-act="open-assistant">打开平台助手面板</button>' : ''}
+        </div>
+      </div>
+      <dl class="flat-facts">${facts.map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`).join('')}</dl>`;
+
+    // 现在正在做什么：读它正在跑的那条活的实时日志（与任务详情同一个端点）。
+    if (running.length) {
+      const task = running[0];
+      const box = document.createElement('section');
+      box.className = 'flat-spec flat-live';
+      box.innerHTML = `<h3>它现在正在做什么</h3>
+        <p class="flat-note">${escape(task.title || task.task_id)}</p>
+        <pre class="flat-output">正在读它写的日志…</pre>`;
+      panel.append(box);
+      api(`/tasks/${encodeURIComponent(task.task_id)}/output`).then((data) => {
+        const raw = data && data.output ? data.output : data;
+        const stdout = typeof raw === 'string' ? raw : String(raw?.stdout || raw?.text || '');
+        const pre = box.querySelector('.flat-output');
+        if (!pre) return;
+        if (!stdout) {
+          pre.textContent = '（它还没输出过东西）';
+          return;
+        }
+        const steps = recentSteps(stdout);
+        pre.textContent = steps.length
+          ? steps.map((step) => step.text).join('\n')
+          : readableText(headlineText(parseTranscript(stdout))) || stdout.slice(-1500);
+      }).catch(() => {
+        const pre = box.querySelector('.flat-output');
+        if (pre) pre.textContent = '（暂时读不到它的日志）';
+      });
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '它现在手上没有在跑的活。';
+      panel.append(empty);
+    }
+
+    // 手上的活：点进去看详情。
+    if (mine.length) {
+      const section = document.createElement('section');
+      section.className = 'flat-spec';
+      section.innerHTML = `<h3>它做过的活</h3>
+        <ul class="flat-list">${mine
+          .slice(-8)
+          .reverse()
+          .map((task) => `<li><button type="button" data-open-task="${escape(task.task_id)}">
+            <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
+            <span>${escape(STATE_LABEL[task.status] || task.status)} · ${escape(attemptWord(task))}</span>
+          </button></li>`)
+          .join('')}</ul>`;
+      panel.append(section);
+    }
+
+    // 它的轨迹：平台事件里 actor 是它的那几条。
+    const trace = (state.events || [])
+      .filter((event) => event.actor_id === harnessId)
+      .slice(-8)
+      .reverse();
+    const traceBox = document.createElement('section');
+    traceBox.className = 'flat-spec';
+    traceBox.innerHTML = `<h3>它的轨迹</h3>
+      ${trace.length
+        ? `<ol class="flat-events">${trace.map(eventRow).join('')}</ol>`
+        : '<p class="flat-empty">还没有它的事件。</p>'}`;
+    panel.append(traceBox);
+
+    return panel;
+  }
+
   function body(filtered, pager) {
     const wrap = document.createElement('div');
     wrap.className = 'flat-body';
+    wrap.append(conversations(), conversationPane(filtered, pager));
+    return wrap;
+  }
 
+  /** 任务表：筛选、按人归堆、分页。（现在住在中间那一栏） */
+  function taskTable(filtered, pager) {
     const list = document.createElement('section');
     list.className = 'flat-tasks';
     // 一条任务都没有时，「全部 / 等人接 / 正在做 / 按人 / 排序 / 每页」全是**没有对象的
@@ -1324,6 +1572,26 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
         ? '这个筛选下没有任务。'
         : '当前项目还没有任务。'
       list.append(empty);
+      if (!hasAnyTask) {
+        // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的
+        // 地方。原先这句话长在详情栏的空状态里，可详情栏只有选中一条活才出现 ——
+        // 空项目反而看不到它。放到任务表这一侧才对。
+        const hint = document.createElement('p');
+        hint.className = 'flat-empty';
+        hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
+        list.append(hint);
+        const start = document.createElement('button');
+        start.type = 'button';
+        start.className = 'flat-start';
+        start.dataset.act = 'start-project';
+        start.textContent = '配置目标';
+        list.append(start);
+        const note = document.createElement('p');
+        note.className = 'flat-note';
+        // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
+        note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
+        list.append(note);
+      }
     }
 
     // 列表：按「人」归堆（默认），或者平铺按时间排。
@@ -1364,8 +1632,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     // 没有东西可翻的时候，这一行只剩「第 0–0 条，共 0 条」和两个点不动的按钮。
     if (hasAnyTask) list.append(pagerBar);
 
-    wrap.append(list, detail());
-    return wrap;
+    return list;
   }
 
   function detail() {
@@ -1374,27 +1641,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     if (!state.selected) {
       const hint = document.createElement('p');
       hint.className = 'flat-empty';
-      if ((state.tasks || []).length) {
-        hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
-        panel.append(hint);
-        return panel;
-      }
-      // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的地方。
-      // 原来这里写「选一条任务看……」—— 可一条都没有，等于让人去找不存在的东西。
-      // 改成：说清这一栏将来会出现什么，再给一个能点的下一步。
-      hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
+      hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
       panel.append(hint);
-      const start = document.createElement('button');
-      start.type = 'button';
-      start.className = 'flat-start';
-      start.dataset.act = 'start-project';
-      start.textContent = '配置目标';
-      panel.append(start);
-      const note = document.createElement('p');
-      note.className = 'flat-note';
-      // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
-      note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
-      panel.append(note);
       return panel;
     }
     const task = state.selected;
@@ -1414,6 +1662,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     const paths = Array.isArray(spec.exclusive_paths) ? spec.exclusive_paths : [];
 
     panel.innerHTML = `
+      <button type="button" class="flat-back" data-act="back-tasks">← 返回任务表</button>
       <div class="flat-detail-head">
         <div>
           <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
@@ -2945,6 +3194,26 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
       render();
       return;
     }
+    if (button.dataset.act === 'back-tasks') {
+      // 从详情回到任务表（会话式的主从切换）。
+      state.selected = null;
+      state.detail = null;
+      state.output = null;
+      state.failureOutput = null;
+      render();
+      return;
+    }
+    if (button.dataset.act === 'open-assistant') {
+      // 平台助手的完整面板是另一块（顶栏那个按钮），这里把它叫起来。
+      document.getElementById('adminAgentBtn')?.click();
+      return;
+    }
+    if (button.dataset.openTask) {
+      // 从窗口状态页点进某条活：回到任务视图并选中它。
+      state.view = { kind: 'tasks', id: null };
+      void select(button.dataset.openTask);
+      return;
+    }
     if (button.dataset.act === 'start-project') {
       // 空项目里的那一步：把第一次用的人直接送到「开工配置」（写一句要做的事）。
       onStart?.();
@@ -3303,10 +3572,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
       state.tasks = scope ? all.filter(scope.matches) : all;
       // 这里**不**清 state.error：一次失败的提示要留到人下一次动手为止。
       // 每 15 秒把它抹掉，等于"点了没反应" —— 提示闪过就没了，人只记得没反应。
-      if (!state.selected && state.tasks.length) {
-        const first = state.tasks.find((task) => FAILED_STATES.has(task.status)) || state.tasks[0];
-        void select(first.task_id);
-      }
+      // 不自动选中第一条活：默认给人看**任务表**，点开哪条再看哪条
+      // （会话式的用法：先看列表，再点进去）。
       render();
       const [availability, pool, plan, messages] = await Promise.all([
         api('/availability').catch(() => ({ availability: [] })),
@@ -3316,6 +3583,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
         loadUserKeys(),
       ]);
       state.availability = availability.availability || [];
+      state.loaded = true;
       state.pool = pool;
       state.plan = plan;
       state.messages = messages.messages || [];

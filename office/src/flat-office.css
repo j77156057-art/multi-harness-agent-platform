@@ -1462,6 +1462,8 @@
 
 /* 空项目里那一步：把人送到「开工配置」。用主色，因为它是这一屏唯一的路。 */
 .flat-start {
+  /* 按钮在纵向排列的容器里会被拉满宽 —— 按内容收紧。 */
+  align-self: flex-start;
   margin-top: 12px;
   border: 1px solid #2f5d8c;
   border-radius: 5px;
@@ -1529,6 +1531,99 @@
   border-radius: 8px;
   height: 100%;
 }
+
+/* ------------------------------------------------------- 会话列表（微信那一列） */
+
+.flat-convs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  min-width: 0;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid var(--ao-line);
+  border-radius: 8px;
+  height: 100%;
+}
+
+.flat-convs-head {
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+  padding: 4px 8px 6px;
+}
+
+/* 一行一个会话：名字 + 一行状态摘要（平台上的事实算出来的）。 */
+.flat-conv {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flat-conv:hover { background: #f4f6f8; }
+.flat-conv.is-on { background: #eaf1f8; border-color: #cdd9e6; }
+.flat-conv b { font-size: 13px; font-weight: 600; color: var(--ao-ink); }
+
+.flat-conv span {
+  font-size: 11.5px;
+  color: var(--ao-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 中间那一栏：按选中的会话给内容。 */
+.flat-main { min-width: 0; overflow: auto; height: 100%; }
+.flat-main > .flat-tasks,
+.flat-main > .flat-detail,
+.flat-main > .flat-chat { height: 100%; }
+
+/* 群聊作为会话在中间那一栏：消息**直接铺开**（下面没有别的内容了，
+   收起它等于让人对着一个空框）。 */
+.flat-main > .flat-chat { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.flat-main > .flat-chat .flat-chat-list { display: flex; }
+.flat-main > .flat-chat .flat-chat-toggle { display: none; }
+
+/* 从详情回到任务表。 */
+.flat-back {
+  margin: 0 0 10px;
+  border: 1px solid var(--ao-line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ao-ink-soft);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.flat-back:hover { background: #f2f4f6; }
+
+/* 窗口状态页里「它做过的活」那几行。 */
+.flat-window .flat-list button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fff;
+  padding: 7px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flat-window .flat-list button:hover { background: #f4f6f8; }
+.flat-window .flat-list button b { font-size: 12.5px; font-weight: 600; color: var(--ao-ink); }
+.flat-window .flat-list button span { font-size: 11.5px; color: var(--ao-ink-faint); }
 
 @media (max-width: 1180px) {
   .flat-office {
