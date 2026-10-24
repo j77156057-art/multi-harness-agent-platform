@@ -134,6 +134,33 @@ check('the tool steps are said in plain words', () => {
   ]);
 });
 
+check('an absolute path is shortened and the command says where it ran', () => {
+  // 仓库主人：「输出页那行绝对路径压缩成「在 wt\\69d9 里跑了 git log」」。
+  const worktree = 'D:\\study\\tools\\agent\\new agent\\wt\\69d9';
+  const raw = [
+    JSON.stringify({
+      type: 'tool_use',
+      name: 'Bash',
+      input: { command: `cd ${worktree} && git log --oneline -5` },
+    }),
+    JSON.stringify({
+      type: 'item.completed',
+      item: { type: 'command_execution', command: `git -C ${worktree} log`, status: 'completed' },
+    }),
+    JSON.stringify({
+      type: 'tool_use',
+      name: 'Read',
+      input: { file_path: `${worktree}\\src\\main.py` },
+    }),
+  ].join('\n');
+  const parsed = parseTranscript(raw);
+  assert.equal(parsed.tools[0].label, '在 wt\\69d9 里跑了 git log --oneline -5');
+  assert.equal(parsed.tools[1].label, '在 wt\\69d9 里跑了 git log');
+  assert.match(parsed.tools[2].label, /wt\\69d9\\src\\main\.py/);
+  // 压短之后不该再出现整条绝对路径。
+  assert.ok(!parsed.tools.some((tool) => tool.label.includes('D:\\study')));
+});
+
 check('a JSON array in one line also works', () => {
   const raw = JSON.stringify([{ type: 'text', text: '数组里的一段话' }]);
   const parsed = parseTranscript(raw);

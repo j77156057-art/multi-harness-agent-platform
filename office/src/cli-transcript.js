@@ -58,6 +58,47 @@ const shortPath = (value) => {
 };
 
 /**
+ * 输出里的绝对路径压成短形式。
+ *
+ * `D:\study\tools\agent\new agent\wt\69d9\x.md` → `wt\69d9\x.md`：
+ * 整条绝对路径是给写代码的人看的 —— 它把卡片撑变形，而且没人靠它找文件。
+ * 认不出来的路径原样留着（不猜、不改内容）。
+ */
+export function shortenPath(value) {
+  const text = String(value ?? '');
+  // 路径段里可能有空格（`new agent`），所以前缀允许空格；尾巴到空白为止。
+  return text.replace(/[A-Za-z]:[\\/][^"'<>|\r\n]*?\\wt\\[^\s"'<>|]*/g, (match) => {
+    const parts = match.split(/[\\/]/);
+    const index = parts.findIndex((part) => part.toLowerCase() === 'wt');
+    return index < 0 ? match : parts.slice(index).join('\\');
+  });
+}
+
+/**
+ * 一条命令怎么说成人话。
+ *
+ * 命令里带了工作目录的（`cd D:\...\wt\69d9 && git log`），说成
+ * 「在 wt\69d9 里跑了 git log」—— 人要的是**在哪儿跑的什么**，不是那条路径。
+ */
+function commandLabel(verb, value) {
+  const text = String(value ?? '').trim();
+  const short = shortenPath(text);
+  const dir = /(?:^|[\s"'=])(wt\\[^\s"']+)/.exec(short);
+  // `cd <目录> && <命令>` 与 `git -C <目录> <命令>` 两种写法都要认。
+  const chain = /^(?:cd\s+)?(.+?)\s*&&\s*(.+)$/.exec(short);
+  const withC = /^(.*?)\s+-C\s+(\S+)\s+(.+)$/.exec(short);
+  if (dir && chain) {
+    return `在 ${dir[1]} 里跑了 ${clip(chain[2].trim(), 60)}`;
+  }
+  if (dir && withC) {
+    const command = `${withC[1].trim()} ${withC[3].trim()}`.trim();
+    return `在 ${dir[1]} 里跑了 ${clip(command, 60)}`;
+  }
+  // 没有工作目录就照旧说（`跑了命令：npm test`；codex 那条只给命令本身）。
+  return verb ? `${verb}：${clip(short, 60)}` : clip(short, 60);
+}
+
+/**
  * 把一次工具调用说成人话：「写了文件 commit-msg.txt」「跑了命令 npm test」。
  */
 function describeTool(tool, input) {
@@ -67,8 +108,13 @@ function describeTool(tool, input) {
   const key = PREFERRED_INPUT.find((candidate) => input[candidate] !== undefined && input[candidate] !== null);
   if (!key) return verb;
   const value = input[key];
-  if (key === 'command') return `${verb}：${clip(String(value).trim(), 60)}`;
-  if (key === 'path' || key === 'file_path' || key === 'filePath') return `${verb}：${shortPath(value)}`;
+  if (key === 'command') return commandLabel(verb, value);
+  if (key === 'path' || key === 'file_path' || key === 'filePath') {
+    const raw = String(value);
+    const short = shortenPath(raw);
+    // 工作目录里的路径留「wt\69d9\x.md」这样的短形式；别处的路径只留文件名。
+    return `${verb}：${short !== raw ? short : shortPath(raw)}`;
+  }
   return `${verb}：${clip(String(value), 48)}`;
 }
 
@@ -79,7 +125,7 @@ const clip = (value, limit) => {
 
 /** 一条消息文本（模型的"话"）。 */
 const pushText = (list, text, kind) => {
-  const value = String(text ?? '').trim();
+  const value = shortenPath(String(text ?? '')).trim();
   if (!value) return;
   list.push({ kind, text: clip(value, MAX_TEXT) });
 };
@@ -124,7 +170,8 @@ function collect(event, texts, tools) {
       return;
     }
     if (itemType === 'command_execution') {
-      pushTool(tools, item.command, item.status);
+      // 命令里的工作目录说成「在 wt\69d9 里跑了 git log」，别的照旧。
+      pushTool(tools, commandLabel('', item.command), item.status);
       return;
     }
     if (itemType === 'file_change') {

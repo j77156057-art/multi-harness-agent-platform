@@ -26,7 +26,7 @@ import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state
 // 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
 // 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
 import { humanize, summarize, translated } from './wording.js';
-import { headlineText, parseTranscript, readableText } from './cli-transcript.js';
+import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
 const escape = escapeHtml;
@@ -2562,7 +2562,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                .join('')}</ul>`
           : '<p class="flat-empty">它还没输出过东西。</p>'
       }
-      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(stdout.slice(-4000)) + '</pre></details>' : ''}
+      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(shortenPath(stdout.slice(-4000))) + '</pre></details>' : ''}
     </section>`;
   }
 
@@ -2576,7 +2576,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function recentSteps(stdout, limit = 8) {
     const lines = String(stdout || '')
       .split(/\r?\n/)
-      .map((line) => line.trim())
+      // 绝对路径压成短形式：人要的是「在哪儿做了什么」，不是那条路径。
+      .map((line) => shortenPath(line).trim())
       .filter(Boolean);
     return foldRepeats(lines, (line) => line).slice(-limit);
   }
