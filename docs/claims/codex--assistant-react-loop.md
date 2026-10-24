@@ -6,7 +6,7 @@
 | Harness | Codex |
 | 认领时间 | 2026-10-23 13:30 +08:00 |
 | 分支 | `agent/local/codex/OFFICE-UI-01/a1` |
-| 状态 | doing（P1 已交付；**提交 `aaa8da5`**；远端经 Git Data API 等价推送为 `5a3f8b28`，shas 对照见 P2 任务卡"远端同步备注"） |
+| 状态 | done（P1 已交付；commit `aaa8da5`；全量完成由后续 P2/P3 卡承接） |
 
 ## 做什么
 把平台助手（`office-assistant`，无席位、只读+说）从"一问一答模板"升级为

@@ -131,15 +131,15 @@
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
-| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | waiting（实现提交 `c4c16a1` 与定点验收已完成；该提交尚未合入 main，main 上 pool/adapter 已有后续结构变更，待仓库主人复核移植/合并方式） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
-| assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
-| assistant-react-loop-p2 | Codex | assistant-react-loop | doing（P2：池子直连免费档模型通道 + assistant worker 私聊轮询；admin/worker 只复用零修改，权限矩阵核实零行新增） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-react-loop | Codex | — | done（P1 ReAct 引擎、白名单工具、反思层与机械门；scripted/ruff/docstate/discipline 全绿，提交 `aaa8da5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-react-loop-p2 | Codex | assistant-react-loop | done（P2 池子免费档通道、assistant worker 私聊轮询、真实平台首跑与接线修复；全量 pytest 绿，提交 `1c65241`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
-| assistant-react-loop-p3 | Codex | assistant-react-loop | doing（P3 第一刀：审核助攻 review_pack 工具＋prompt 审核协议；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-react-loop-p3 | Codex | assistant-react-loop | done（P3 审核助攻 review_pack 工具＋prompt 审核协议；全量 pytest 绿；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | review-contract-gate | Codex | assistant-react-loop-p3 | waiting（提案：评审契约守门，落点 tasks/service.py 共享在途；待复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
-| assistant-diagnose-pack | Codex | assistant-react-loop-p3 | doing（证据束取样器：`task.diagnose` 一次取准失败证据束＋诊断姿势 prompt；守门因 tasks/service.py 共享在途，仍走提案） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-diagnose-pack | Codex | assistant-react-loop-p3 | done（`task.diagnose` 失败证据束、诊断姿势 prompt；scripted/全量 pytest/ruff/docstate/discipline 全绿，提交 `17914d5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。

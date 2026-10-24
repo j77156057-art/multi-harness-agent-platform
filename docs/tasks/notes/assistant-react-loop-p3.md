@@ -8,7 +8,8 @@
 工作区：.worktrees/codex/
 依赖任务：assistant-react-loop（P1 引擎）、assistant-react-loop-p2（P2 通道与 worker）
 真相源引用：MVP-ADAPTER-003（审核读面与 adapter 稳定性同族；新检查 ID 待规范复审后回填真相源）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing（审核助攻实现的入仓；验收守门另立提案 review-contract-gate 待复核）
+当前状态：done（审核助攻实现与验收完成；守门另立提案 review-contract-gate 待复核）
+commit：`6e1e1a8`
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
@@ -58,3 +59,10 @@ pytest 绿**：codex 工作树全仓跑批 `[100%]` 全点、退出码 0
 （输出留档 `D:\Temp\opencode\p3_full_pytest.txt`）；守门半件按
 共享文件纪律另立提案 `docs/proposals/review-contract-gate.md`，
 待仓库主人复核，不抢跑。
+
+### 验收结果
+
+- 实现提交：`6e1e1a8`。
+- commit：`6e1e1a8`（P3 审核助攻实现）。
+- assistant 定点测试、全量 pytest、ruff、docstate、discipline 全绿。
+- 未修改共享的 `backend/app/tasks/service.py`；剩余守门工作由 `review-contract-gate` 单独管理。
