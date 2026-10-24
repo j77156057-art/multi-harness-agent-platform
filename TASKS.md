@@ -124,7 +124,7 @@
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 | FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | done（Codex/OpenCode/Claude Code 均真实领取、提交并 verify 通过；Claude 由平台在 exclusive_paths 检查后代为提交，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
 | FORMAL-MULTI-HARNESS-02 | Codex | FORMAL-MULTI-HARNESS-01 | claimed（管理员 token 真实派发三 Harness、逐项审核闭环；待 Merge Gate） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-ADMIN-REVIEW-001` |
-| FORMAL-PI-ADAPTER-01 | Codex（协调）；新增成员 Pi CLI + 本机 Ollama | FORMAL-MULTI-HARNESS-01 | doing（CLI 已安装；本机模型认证与适配器验证中） | `agent/local/pi/FORMAL-PI-ADAPTER-01/a1` | `MVP-ADAPTER-002` `MVP-ADAPTER-003` |
+| FORMAL-PI-ADAPTER-01 | Codex（协调）；新增成员 Pi CLI + 本机 Ollama | FORMAL-MULTI-HARNESS-01 | doing（CLI 已安装；本机模型认证与适配器验证中；**适配器已移植到新 API**，Mavis 在 OFFICE-UI-01 的合并里一并带上） | `agent/local/pi/FORMAL-PI-ADAPTER-01/a1` | `MVP-ADAPTER-002` `MVP-ADAPTER-003` |
 | R10-fix-13 | OpenCode | auth-layer | doing（Stage A 规范登记 + Stage B 服务/状态机/路由/权限已完成并自测绿；Stage C 与 Claim 门禁强度待定） | `agent/local/opencode/R10-fix-13/a1` | `DOC-STATE-001` `DOC-MIRROR-001` |
 | codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
@@ -148,6 +148,7 @@
 | OFFICE-UI-15 | Mavis | OFFICE-UI-12 | done（窗口页的任务详细清单：写明具体做什么、**不截断**、收成卡片、点开即看） | `agent/local/mavis/OFFICE-UI-15/a1` | `MVP-UI-030` |
 | OFFICE-UI-16 | Mavis | OFFICE-UI-12 | →doing（窗口页的模型选择：**真能选** —— 自带模型 vs 额度池的哪个模型，写清是哪一档额度、哪家 harness 的什么模型；平台照办） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-032` |
 | OFFICE-UI-17 | Mavis | OFFICE-UI-12 | done（窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率） | `agent/local/mavis/OFFICE-UI-17/a1` | `MVP-UI-031` |
+| OFFICE-UI-18 | Mavis | — | →doing（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -248,6 +249,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-15 → docs/claims/mavis--OFFICE-UI-15.md -->
 <!-- OFFICE-UI-16 → docs/claims/mavis--OFFICE-UI-16.md -->
 <!-- OFFICE-UI-17 → docs/claims/mavis--OFFICE-UI-17.md -->
+<!-- OFFICE-UI-18 → docs/claims/mavis--OFFICE-UI-18.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
@@ -298,6 +300,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-15 | [卡](docs/tasks/notes/OFFICE-UI-15.md) | | |
 | OFFICE-UI-16 | [卡](docs/tasks/notes/OFFICE-UI-16.md) | | |
 | OFFICE-UI-17 | [卡](docs/tasks/notes/OFFICE-UI-17.md) | | |
+| OFFICE-UI-18 | [卡](docs/tasks/notes/OFFICE-UI-18.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
