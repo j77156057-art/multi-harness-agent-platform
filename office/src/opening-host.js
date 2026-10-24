@@ -70,7 +70,7 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   const patchSummaryNote = () => {
     if (activeCatalog.mode !== 'formal') return;
     for (const note of slot.querySelectorAll('.oop-sum-note')) {
-      const text = '确认后只提交一条项目目标；管理员 Agent 会细化并分派，成员 worker 再自己领取执行。';
+      const text = '确认后只提交一条项目目标；管理员窗口会细化并分派，成员窗口再自行领取执行。';
       if (note.textContent !== text) note.textContent = text;
     }
   };
@@ -81,7 +81,7 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   const patchAdminLabel = () => {
     for (const label of slot.querySelectorAll('label.oop-label')) {
       if (!label.textContent.includes('唯一管理员实例')) continue;
-      label.textContent = '管理员实例（只能选一个；其他实例在下面选为成员）';
+      label.textContent = '管理员窗口（必选，只能选一个；其余窗口在下方选为成员）';
     }
   };
   const adminLabelObserver = new MutationObserver(patchAdminLabel);
@@ -97,6 +97,67 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   };
   const homeLabelObserver = new MutationObserver(patchHomeLabel);
   homeLabelObserver.observe(slot, {childList: true, subtree: true});
+  // 锁定组件的措辞是给机器看的（实例 / 打工人 / Harness / instance_id / 宿主 /
+  // 唯一管理员 / (harness)），而这条向导是**第一次用的人**走的第一条路。
+  // 这里统一改渲染出来的文字：只改显示，不改组件的校验与行为（锁定文件本身不动）。
+  //
+  // 顺序有意义：具体句式排在通用词之前，否则「普通打工人」会先被拆成
+  // 「普通成员窗口」这种半截话。
+  const JARGON_FIXES = [
+    [/未选择唯一管理员/g, '请先选择管理员窗口'],
+    [/至少选择 1 名普通打工人/g, '请至少选择 1 个成员窗口'],
+    [/请至少勾选 1 个普通打工人/g, '请至少勾选 1 个成员窗口'],
+    [/同一实例不得兼任管理员与打工人/g, '同一个窗口不能既是管理员又是成员'],
+    [/实例已不在当前目录/g, '窗口已不在当前名单'],
+    [/实例不可用/g, '窗口不可用'],
+    [/打工人数量/g, '成员窗口数量'],
+    [/普通打工人/g, '参与成员'],
+    [/打工人/g, '成员窗口'],
+    [/管理员实例/g, '管理员窗口'],
+    [/成员实例/g, '成员窗口'],
+    [/唯一管理员/g, '管理员窗口'],
+    [/容量\(宿主\)/g, '可用'],
+    [/宿主容量/g, '可用数量'],
+    [/已注册窗口/g, '已登记窗口'],
+    [/同 Harness 的不同 instance_id 可同时加入/g, '同一程序的不同窗口可同时加入'],
+    [/管理员 Agent/g, '管理员窗口'],
+    [/成员 worker/g, '成员窗口'],
+    [/已创建开工聊聊/g, '已创建开工群聊'],
+    [/重播演出/g, '再看一遍'],
+    [/（请宿主确认）/g, ''],
+    [/请宿主确认/g, ''],
+    [/（harness）/g, ''],
+  ];
+  const patchJargon = () => {
+    for (const node of slot.querySelectorAll('*')) {
+      for (const child of node.childNodes) {
+        if (child.nodeType !== 3) continue;
+        const text = child.nodeValue || '';
+        if (!text) continue;
+        let next = text;
+        for (const [pattern, to] of JARGON_FIXES) next = next.replace(pattern, to);
+        // 「可用 7」「已选 7」后面补个单位，读起来才像句话。
+        next = next.replace(/可用 (\d+)(?! 个)/g, '可用 $1 个');
+        next = next.replace(/已选 (\d+)(?! 个)/g, '已选 $1 个');
+        // 摘要里管理员那一行带着实例 id（[codex-window-admin]）：界面上给人看的是名字。
+        next = next.replace(/^([^\[\n]+)\[[^\]\n]+\]/, '$1');
+        if (next !== text) child.nodeValue = next;
+      }
+    }
+  };
+  const jargonObserver = new MutationObserver(patchJargon);
+  jargonObserver.observe(slot, {childList: true, subtree: true});
+  // 正式平台下这一屏是组件的**彩排**（演示对话），不是真实回复 —— 说清楚，
+  // 否则第一次用的人会把演示里那句「在的，马上开工」当成成员真的回话了。
+  const patchPerformLabel = () => {
+    if (activeCatalog.mode !== 'formal') return;
+    for (const note of slot.querySelectorAll('.oop-perform-demo')) {
+      const text = '正式平台 · 任务回执已收到，目标已发到项目群聊；下方为界面演示，不是真实回复。';
+      if (note.textContent !== text) note.textContent = text;
+    }
+  };
+  const performLabelObserver = new MutationObserver(patchPerformLabel);
+  performLabelObserver.observe(slot, {childList: true, subtree: true});
   // The project phone phase hides the office shell. Keep the configuration
   // dialog outside that hidden subtree so the role/member selector remains
   // reachable after clicking "新建任务".
