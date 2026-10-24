@@ -11,7 +11,7 @@
 （消息与签名）、`backend/app/cli/main.py`（成员窗口发消息的口子）、
 `office/src/flat-office.js`（群聊）；R10 §19（群聊与消息）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`ec98f5d`）
 commit：`78a9aa5`（成员能标「要改目标」；管理员听见并把话带给群主；群主的回答接得住；办公室群里标出来；R10 §38.16 R10-fix-22 + §19 一条）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-036
