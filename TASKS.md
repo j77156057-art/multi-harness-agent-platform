@@ -138,7 +138,7 @@
 | OFFICE-UI-06 | Mavis | OFFICE-UI-05 | done（讲故事的「今天」：头顶一段人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-021` |
 | OFFICE-UI-07 | Mavis | OFFICE-UI-04 | done（工单里夹着的机器 JSON 拆开、现场说人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-022` |
 | OFFICE-UI-08 | Mavis | OFFICE-UI-04 | done（群聊摘要：最近群里在说什么；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-023` |
-| OFFICE-UI-09 | Mavis | OFFICE-UI-04 | →doing（取消一条活要通知管理员，管理员就剩下的范围重新细化） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-024` |
+| OFFICE-UI-09 | Mavis | OFFICE-UI-04 | done（取消一条活要通知管理员，管理员就剩下的范围重新细化；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-024` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
