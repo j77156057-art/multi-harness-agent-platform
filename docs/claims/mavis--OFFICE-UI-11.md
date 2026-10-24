@@ -6,7 +6,7 @@
 | Harness | Mavis |
 | 认领时间 | 2026-10-24 13:40 +08:00 |
 | 分支 | `agent/local/mavis/OFFICE-UI-11/a1` |
-| 状态 | doing |
+| 状态 | done（实现完成，待合入 main） |
 
 目标：**开工向导的措辞也按书面口径统一** —— 第一次用的人走的第一条路上，不该出现
 实例 / 打工人 / Harness / instance_id / 宿主 / 唯一管理员这类机器词。
