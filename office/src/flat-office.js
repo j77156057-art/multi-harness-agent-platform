@@ -46,6 +46,32 @@ const STATUS_RANK = {
   merging: 4, approved: 4, merged: 4, cancelled: 4,
 };
 
+// 事件 payload 里**只给机器看**的字段：哈希、commit、内部编号。
+// 真数据里 `approve` 事件的 payload 就是它们（findings_hash / reviewed_commit /
+// review_id）—— 摆出来像玄学，人读不出发生了什么。机器字段藏进 title 里
+// （鼠标悬停可见），给人看的字段才摆出来。
+const MACHINE_ONLY_FIELDS = new Set([
+  'findings_hash',
+  'reviewed_commit',
+  'revert_commit',
+  'reverted_commit',
+  'commit',
+  'branch',
+  'receipt_id',
+  'decision_id',
+  'review_id',
+  'claim_request_id',
+  'registration_version',
+  'fencing_epoch',
+  'workspace_id',
+  'boot_id',
+  'fingerprint',
+  'attempt_id',
+  'event_id',
+  'plan_id',
+  'snapshot_id',
+]);
+
 /** payload 里的字段名（认识的给中文，不认识的照实写英文键）。 */
 const FIELD_LABEL = {
   attempt_id: '第几次尝试',
@@ -1918,7 +1944,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${acceptance.length ? `<p class="flat-note">做到什么程度算完成</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
         ${paths.length ? `<p class="flat-note">只允许改这些地方</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
         <p class="flat-note">这条活的经过${events.length ? `（${events.length} 步）` : ''}</p>
-        ${events.length ? `<ol class="flat-events">${events.map(eventRow).join('')}</ol>` : '<p class="flat-empty">还没有它的记录。</p>'}`;
+        ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">还没有它的记录。</p>'}`;
     });
     return card;
   }
@@ -2080,10 +2106,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       .reverse();
     const traceBox = document.createElement('section');
     traceBox.className = 'flat-spec';
-    traceBox.innerHTML = `<h3>它的轨迹</h3>
-      ${trace.length
-        ? `<ol class="flat-events">${trace.map(eventRow).join('')}</ol>`
-        : '<p class="flat-empty">还没有它的事件。</p>'}`;
+    traceBox.innerHTML = `<h3>它做过的动作</h3>
+      <p class="flat-note">平台记下来的这个窗口的动作：它领过什么活、批改了什么、什么时候出的问题。新的在上面。</p>
+      ${
+        trace.length
+          ? `<ol class="flat-events">${trace
+              .map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) }))
+              .join('')}</ol>`
+          : '<p class="flat-empty">它还没有留下动作记录。</p>'
+      }`;
     panel.append(traceBox);
 
     return panel;
@@ -2505,14 +2536,30 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-  /**
+    /**
+   * 活的名字（人起的）。
+   *
+   * 取自办公室已经有的任务表；取不到就退回编号 —— **不编**。
+   */
+  function taskTitleOf(taskId) {
+    const id = String(taskId || '');
+    if (!id) return '';
+    const task = (state.tasks || []).find((item) => String(item.task_id) === id);
+    if (!task) return id;
+    const title = String(listTitle(task) || '').trim();
+    return title && title !== id ? title : id;
+  }
+
+/**
    * 一条事件：标题行是骨架，**payload 才是这件事的细节**。
    * "改派给了谁"、"为什么失败"都在 payload 里，光看事件名等于没看见。
    */
-  function eventRow(event) {
+  function eventRow(event, options = {}) {
     const payload = event.payload && typeof event.payload === 'object' ? event.payload : null;
     const hint = eventHint(event);
     const fields = payload ? payloadFields(payload) : [];
+    // 动作 + 对象才是一句话：「批改了「收一条真实任务」」—— 只写「批改了」没人读得懂。
+    const subject = options.subject ? `<span class="flat-event-subject">${escape(options.subject)}</span>` : '';
     // 事件列表是给人看"这条活经历了什么"的：时间、人话的动作、谁做的。
     // 事件编号（seq）留�� title 里 —— 它是给查问题的人看的，不是给人读的。
     const who = actorName(event);
@@ -2521,6 +2568,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <summary title="事件编号 ${escape(event.seq ?? '')} · ${escape(timeOf(event.created_at))}${event.event_name && eventName(event) !== event.event_name ? ` · 原文 ${escape(event.event_name)}` : ''}">
           <span class="flat-event-seq">${escape(timeShort(event.created_at))}</span>
           <b>${escape(eventName(event))}</b>
+          ${subject}
           <em>${escape(who)}</em>
           ${hint ? `<span class="flat-event-hint">${escape(hint)}</span>` : ''}
         </summary>
@@ -2528,7 +2576,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           ? `<dl class="flat-event-payload">${fields
               .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
               .join('')}</dl>`
-          : '<p class="flat-empty">这个事件没有附带信息。</p>'}
+          : '<p class="flat-empty">这个事件没有要人看的细节。</p>'}
       </details>
     </li>`;
   }
@@ -2560,6 +2608,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function payloadFields(payload) {
     const rows = [];
     for (const [key, value] of Object.entries(payload)) {
+      // 机器字段不摆（哈希、commit、内部编号）—— 它们对人没有意义。
+      if (MACHINE_ONLY_FIELDS.has(key)) continue;
       rows.push([FIELD_LABEL[key] || key, clip(formatValue(value), 600)]);
     }
     return rows;

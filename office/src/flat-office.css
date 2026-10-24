@@ -770,6 +770,12 @@
 .flat-event-seq { color: var(--ao-ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flat-event summary b { font-weight: 600; color: var(--ao-ink); }
 .flat-event summary em { color: var(--ao-ink-soft); font-style: normal; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flat-event-subject {
+  color: rgba(160, 160, 160, 0.95);
+  font-size: 12px;
+  margin: 0 2px;
+}
+
 .flat-event-hint { color: var(--ao-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .flat-event-payload {
