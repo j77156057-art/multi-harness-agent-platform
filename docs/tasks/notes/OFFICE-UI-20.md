@@ -11,7 +11,8 @@
 `backend/app/pool/routes.py`（`/pool/status`、`/pool/probe`）、
 `backend/app/pool/inventory.py`（档位的中文说法）、`office/src/flat-office.js`（窗口页的
 模型选择）；R10 §38（R10-fix 流程）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`9d1ca13`（清单按额度属主分组折叠 + 名册里没定档的能当场定档；R10 §38.16 R10-fix-21）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-035
 
@@ -54,10 +55,10 @@ test_id：MVP-UI-035
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_pool_cli_enumerate.py` | 待回填 |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_pool_cli_enumerate.py` | ok（12 条：定档只认名册里的模型 / 沿用同一家的调用约定 / 档位不认（只有 free·reserve·metered）/ 写声明落在**数据目录**而不是历史相对路径） |
+| `office/scripts/verify-office-conversations.mjs` | ok（清单按额度属主分组、每组默认收起、qoder 的模型在自己那组、名册里没定档的列出来并能定档） |
+| 真跑（8849 真平台 + 4174 预览） | 清单标题「9 家 · 28 个可用 · 50 个还没定档」；分组：codex（8）/ claude-provider（1）/ opencode（2）/ minimax（1）/ opencode-cli（9 · 34 个没定档）/ codebuddy（3 · 16 个没定档）/ qoder（2）/ mmx（1）/ 你自己的 key（1）；点「标成收费」→ 那组从「6 个可用」变成「7 个可用」，新模型标「付费」；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 209.17 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
