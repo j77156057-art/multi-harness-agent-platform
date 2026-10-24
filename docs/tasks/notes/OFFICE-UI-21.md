@@ -11,7 +11,8 @@
 （消息与签名）、`backend/app/cli/main.py`（成员窗口发消息的口子）、
 `office/src/flat-office.js`（群聊）；R10 §19（群聊与消息）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`78a9aa5`（成员能标「要改目标」；管理员听见并把话带给群主；群主的回答接得住；办公室群里标出来；R10 §38.16 R10-fix-22 + §19 一条）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-036
 
@@ -55,11 +56,11 @@ test_id：MVP-UI-036
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_admin_worker.py` | 待回填 |
-| `backend/tests/test_cli_flow.py` | 待回填 |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_admin_worker.py` | ok（3 条新：成员提「要改目标」→ 管理员把原话带给群主、群主的回答接得住（重新细化）、成员的闲聊不被当成群主的回答） |
+| `backend/tests/test_cli_flow.py` | ok（`say --ref goal-change` 带出签名、作者是 harness） |
+| `office/scripts/verify-office-conversations.mjs` | ok（群聊里那条「要改目标」的消息被标出来，成员的原话在） |
+| 真跑（8849 真平台 + 4174 预览） | 成员窗口在真平台发了一条带 `goal-change` 的消息（seq 1066，平台收下）；办公室里那条消息标着「要改目标」，作者是「Codex · 管理员」，原话在；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 209.30 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |

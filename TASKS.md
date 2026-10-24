@@ -151,7 +151,7 @@
 | OFFICE-UI-18 | Mavis | — | done（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
 | OFFICE-UI-19 | Mavis | OFFICE-UI-16 | done（模型选择的收口：**收费额度要点头**、清单折叠、**探针**（点刷新重探模型：免费变收费、新增免费额度都要知道）） | `agent/local/mavis/OFFICE-UI-19/a1` | `MVP-UI-034` |
 | OFFICE-UI-20 | Mavis | OFFICE-UI-19 | done（额度池清单**按 harness 折叠**；名册里没定档的模型**当场定档**：标成免费/收费） | `agent/local/mavis/OFFICE-UI-20/a1` | `MVP-UI-035` |
-| OFFICE-UI-21 | Mavis | OFFICE-UI-12 | →doing（**成员 harness 也能发信息**；成员要改目标时**管理员要听见**并把话带给群主） | `agent/local/mavis/OFFICE-UI-21/a1` | `MVP-UI-036` |
+| OFFICE-UI-21 | Mavis | OFFICE-UI-12 | done（**成员 harness 也能发信息**；成员要改目标时**管理员要听见**并把话带给群主） | `agent/local/mavis/OFFICE-UI-21/a1` | `MVP-UI-036` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
