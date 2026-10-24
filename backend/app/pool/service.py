@@ -92,6 +92,8 @@ class Usage:
     duration_ms: int
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: 缓存命中的 token（读缓存）。
+    cached_tokens: int = 0
     #: False when the CLI did not report its usage at all -- then the zeros
     #: are the absence of a number, not a measurement.
     usage_reported: bool = True
@@ -148,6 +150,27 @@ def _usage_blobs(event: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _cached_tokens(usage: dict[str, Any]) -> int:
+    """缓存**命中**的 token 数：各家协议把它放在不同的地方。
+
+    * OpenAI chat: ``usage.prompt_tokens_details.cached_tokens``
+    * OpenAI Responses: ``usage.input_tokens_details.cached_tokens``
+    * Anthropic: ``usage.cache_read_input_tokens``
+
+    只认**读**缓存（命中）。写缓存（``cache_creation_input_tokens``）不算命中。
+    """
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+    if isinstance(details, dict):
+        value = details.get("cached_tokens")
+        if isinstance(value, int | float):
+            return int(value)
+    for key in ("cache_read_input_tokens", "cached_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int | float):
+            return int(value)
+    return 0
+
+
 class _UsageSniffer:
     """Watch an SSE stream for the usage the upstream reports.
 
@@ -160,6 +183,9 @@ class _UsageSniffer:
     def __init__(self) -> None:
         self.prompt = 0
         self.completion = 0
+        #: 缓存命中的 token（读缓存）。没有就是 0 —— 那是「provider 没报」，
+        #: 不是「一次都没命中」，两者的区别在汇总时说。
+        self.cached = 0
 
     def feed(self, line: str) -> None:
         text = line.strip()
@@ -182,6 +208,7 @@ class _UsageSniffer:
                 self.completion,
                 int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
             )
+            self.cached = max(self.cached, _cached_tokens(usage))
 
     def watched(self, lines: Iterator[str]) -> Iterator[str]:
         for line in lines:
@@ -670,6 +697,7 @@ class PoolService:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
                 completion_tokens=sniffer.completion,
+                cached_tokens=sniffer.cached,
                 consumer=consumer,
                 note="streamed",
             )
@@ -727,6 +755,7 @@ class PoolService:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
                 completion_tokens=sniffer.completion,
+                cached_tokens=sniffer.cached,
                 consumer=consumer,
                 note="streamed (responses)",
             )
@@ -768,6 +797,7 @@ class PoolService:
                 duration_ms=duration,
                 prompt_tokens=int((usage or {}).get("prompt_tokens") or 0),
                 completion_tokens=int((usage or {}).get("completion_tokens") or 0),
+                cached_tokens=_cached_tokens(usage or {}),
                 # The CLI did not report its usage: say so, instead of
                 # recording a zero that reads as "this call was free".
                 usage_reported=usage is not None,
@@ -827,6 +857,7 @@ class PoolService:
                             "duration_ms": usage.duration_ms,
                             "prompt_tokens": usage.prompt_tokens,
                             "completion_tokens": usage.completion_tokens,
+                            "cached_tokens": usage.cached_tokens,
                             "usage_reported": usage.usage_reported,
                             "credits": usage.credits,
                             "session_id": usage.session_id,
@@ -886,8 +917,11 @@ class PoolService:
                 "requests": 0,
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
+                "cached_tokens": 0,
                 "upstreams": {},
                 "consumers": {},
+                #: 每个窗口（consumer）在这个小时里烧了多少 token。
+                "consumer_tokens": {},
             }
         outside = 0
         if self.usage_path is not None and self.usage_path.exists():
@@ -913,10 +947,18 @@ class PoolService:
                 bucket["requests"] += 1
                 bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
                 bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 upstream = str(record.get("upstream") or "?")
                 bucket["upstreams"][upstream] = bucket["upstreams"].get(upstream, 0) + 1
                 consumer = str(record.get("consumer") or "?")
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
+                spent = bucket["consumer_tokens"].setdefault(
+                    consumer,
+                    {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0},
+                )
+                spent["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+                spent["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
         return {
             "bucket": "hour",
             "hours": hours,
@@ -997,6 +1039,7 @@ class PoolService:
                         "requests": 0,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
+                        "cached_tokens": 0,
                         "tokens_unknown": 0,
                         "credits": 0.0,
                         "models": {},
@@ -1025,18 +1068,47 @@ class PoolService:
                 else:
                     bucket["prompt_tokens"] += prompt_tokens
                     bucket["completion_tokens"] += completion_tokens
+                    bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 bucket["models"][model] = bucket["models"].get(model, 0) + 1
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
                 spent = consumers.setdefault(
-                    consumer, {"requests": 0, "upstreams": {}, "models": {}}
+                    consumer,
+                    {
+                        "requests": 0,
+                        "upstreams": {},
+                        "models": {},
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "duration_ms": 0,
+                    },
                 )
                 spent["requests"] += 1
                 spent["upstreams"][str(record.get("upstream") or "?")] = (
                     spent["upstreams"].get(str(record.get("upstream") or "?"), 0) + 1
                 )
                 spent["models"][model] = spent["models"].get(model, 0) + 1
+                if not (corrected is not None or record.get("usage_reported") is False):
+                    spent["prompt_tokens"] += prompt_tokens
+                    spent["completion_tokens"] += completion_tokens
+                    spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
+                duration = record.get("duration_ms")
+                if isinstance(duration, int | float) and duration > 0:
+                    spent["duration_ms"] += int(duration)
         except OSError:
             pass
+        # 每秒生成多少 token：生成 token ÷ 生成耗时。数不到就**不给数**
+        # （给 0 会被读成「一次都没生成」）。
+        for spent in consumers.values():
+            seconds = spent["duration_ms"] / 1000
+            spent["generation_rate"] = (
+                round(spent["completion_tokens"] / seconds, 1) if seconds > 0 else None
+            )
+            spent["cache_hit_rate"] = (
+                round(spent["cached_tokens"] / spent["prompt_tokens"], 4)
+                if spent["prompt_tokens"] > 0
+                else None
+            )
         return {
             "upstreams": summary,
             "consumers": consumers,
