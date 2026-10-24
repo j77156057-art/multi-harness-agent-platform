@@ -1462,6 +1462,8 @@
 
 /* 空项目里那一步：把人送到「开工配置」。用主色，因为它是这一屏唯一的路。 */
 .flat-start {
+  /* 按钮在纵向排列的容器里会被拉满宽 —— 按内容收紧。 */
+  align-self: flex-start;
   margin-top: 12px;
   border: 1px solid #2f5d8c;
   border-radius: 5px;
