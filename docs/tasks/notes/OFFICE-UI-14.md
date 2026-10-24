@@ -9,7 +9,8 @@
 依赖任务：OFFICE-UI-12（左边改成会话列表）
 真相源引用：`office/src/flat-office.js`（办公室界面）、`office/src/flat-office.css`（三栏布局）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（实现完成，待合入 main）
+commit：`32b3618`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-029
 
@@ -52,5 +53,5 @@ test_id：MVP-UI-029
 | `office/scripts/verify-office-conversations.mjs` | ok |
 | 真跑（8849 真平台 + 4174 预览） | 底部群聊条 0 个；正文区 837px；点左栏「项目群聊」→ 中间铺开 186 条群消息，输入框在位 |
 | `office/` 构建 | ok（29 个模块，main 196.21 kB JS） |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本轮**没碰 `backend/**`**，后端与 main 逐字节相同） |
