@@ -555,6 +555,19 @@ export function createFormalGateway(config={}){
         const availability=await call('/adapter/availability');
         json(res,200,availability);return true;
       }
+      if(req.method==='POST'&&route==='/model-selection'){
+        // 人给某个窗口指定「用自带模型 / 用额度池的哪个模型」。平台照办：
+        // 下一轮这个窗口干活时就按它安排。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/adapter/model-selection',{
+          harness_id:String(body.harness_id||''),
+          model_mode:String(body.model_mode||'cli'),
+          model_id:body.model_id==null?'':String(body.model_id),
+        });
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/plan'){
         // 方案定稿：给人看的那一份（草稿 + 传阅记录），以及由人点「批准并派单」。
         const plan=await call('/groups/'+encodeURIComponent(config.group)+'/plans');

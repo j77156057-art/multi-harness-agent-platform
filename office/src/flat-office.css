@@ -1855,3 +1855,45 @@
 }
 
 .flat-userkeys-form [data-userkey-error] { margin: 0; color: #b03a3a; }
+/* 窗口页的「它用哪个模型」：一行一个选项，写清楚是哪家的什么模型。 */
+.flat-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  /* 池子里有二十几个模型：清单再长也不能把整页挤走（自己滚）。 */
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.flat-model-group {
+  margin: 10px 0 2px;
+  font-weight: 600;
+}
+
+.flat-model-group .flat-model-hint {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.flat-model-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
+
+.flat-model-row:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+
+.flat-model-hint {
+  color: rgba(160, 160, 160, 0.9);
+  font-size: 12px;
+}
+
+.flat-model-actions {
+  margin: 10px 0 0;
+}

@@ -129,7 +129,11 @@ const responses = {
   },
   '/pool': {
     upstreams: [],
-    models: [],
+    models: [
+      { id: 'qoder/Qwen3.8-Flash', owned_by: 'qoder:Qwen3.8-Flash', upstream: 'qoder:Qwen3.8-Flash', protocol: 'cli', tier: 'free' },
+      { id: 'codebuddy/hy3', owned_by: 'codebuddy:hy3', upstream: 'codebuddy:hy3', protocol: 'cli', tier: 'free' },
+      { id: 'gpt-5.6', owned_by: 'codex:geekspace', upstream: 'codex:geekspace', protocol: 'openai_responses', tier: 'metered' },
+    ],
     usage: {
       upstreams: {},
       consumers: {
@@ -165,6 +169,9 @@ const responses = {
     inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
   },
   '/plan': { plans: [], draft: null },
+  '/model-selection': {
+    selection: { harness_id: MEMBER, model_mode: 'pool', model_id: 'qoder/Qwen3.8-Flash', updated_at: '2026-10-24T11:00:00Z' },
+  },
 };
 
 const browser = await chromium.launch({ headless: true });
@@ -173,8 +180,15 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  const posted = [];
   await context.route('**/api/formal/**', async route => {
     const pathname = new URL(route.request().url()).pathname.replace('/api/formal', '');
+    if (route.request().method() === 'POST') {
+      const raw = route.request().postData() || '';
+      let body = null;
+      try { body = raw ? JSON.parse(raw) : null; } catch { body = null; }
+      posted.push({ path: pathname, body });
+    }
     const payload = responses[pathname] ?? {};
     await route.fulfill({
       status: 200,
@@ -326,6 +340,27 @@ try {
   assert.ok(metricText.includes('1400'), '写了消耗总 token');
   assert.ok(metricText.includes('400'), '写了最近一小时多少 token');
   assert.ok(metricText.includes('20%'), '写了缓存命中率');
+
+  // 8. 窗口页的模型选择：自带 / 额度池里的哪个模型，写清是哪家的什么模型。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
+  await page.waitForTimeout(1200);
+  const modelBlock = page.locator('#aoWorkspace .flat-model');
+  assert.equal(await modelBlock.count(), 1, '窗口页有「它用哪个模型」这一块');
+  const modelText = await modelBlock.innerText();
+  console.log('模型选择:', modelText.replace(/\n+/g, ' | ').slice(0, 320));
+  assert.ok(modelText.includes('自带模型'), '有「自带模型」这一项');
+  assert.ok(modelText.includes('免费额度'), '额度池按档分开了（免费额度）');
+  assert.ok(modelText.includes('付费额度'), '额度池按档分开了（付费额度）');
+  assert.ok(modelText.includes('qoder 的 Qwen3.8-Flash'), '写清是哪家的什么模型（免费档）');
+  assert.ok(modelText.includes('codex 的 gpt-5.6'), '写清是哪家的什么模型（付费档）');
+  await modelBlock.locator('input[data-model-id="qoder/Qwen3.8-Flash"]').check();
+  await modelBlock.locator('button[data-act="save-model-choice"]').click();
+  await page.waitForTimeout(1500);
+  const saved = posted.find((item) => item.path === '/model-selection');
+  assert.ok(saved, '保存动作真的发到了平台');
+  assert.equal(saved.body.harness_id, MEMBER, '保存的是这个窗口');
+  assert.equal(saved.body.model_mode, 'pool', '保存的是「走额度池」');
+  assert.equal(saved.body.model_id, 'qoder/Qwen3.8-Flash', '保存的是被选中的那个模型');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');

@@ -63,6 +63,7 @@ def plan_attempt(
     attempt_no: int = 0,
     data_dir: Path | None = None,
     pool: Any = None,
+    selection: Any = None,
 ) -> dict[str, Any]:
     """Decide where this attempt's model calls go.
 
@@ -70,8 +71,27 @@ def plan_attempt(
     (the platform serves the attempt from the pool).  The answer always says
     *why*, because a silent switch of provider is exactly the kind of thing
     that has to be explainable afterwards.
+
+    ``selection`` is what the **human** chose for this window (see
+    ``app.adapter.model_choice``): when it names a model in the pool, this
+    attempt runs on that model right away -- not only after the window's own
+    provider died.  The pool stays the emergency path for everyone else.
     """
     evidence = failure_evidence(task_id, data_dir=data_dir)
+    chosen = _chosen_model_id(selection)
+    if chosen and evidence and str(evidence.get("model") or "") == chosen:
+        # The chosen model is the one that just died: do not run it twice.
+        # Fall through to the automatic path, which skips the failed model
+        # anyway.
+        chosen = ""
+    if chosen:
+        return _plan_for_chosen_model(
+            task_id,
+            harness_id=harness_id,
+            attempt_no=attempt_no,
+            model_id=chosen,
+            pool=pool,
+        )
     if not evidence:
         return {
             "mode": "direct",
@@ -177,6 +197,90 @@ def plan_attempt(
         "model": model,
         "upstream": upstream,
         "upstream_protocol": protocol,
+        "base_path": POOL_BASE_PATH,
+        "anthropic_path": POOL_ANTHROPIC_PATH,
+        "task_id": task_id,
+        "harness_id": harness_id,
+        "attempt_no": attempt_no,
+    }
+
+
+def _chosen_model_id(selection: Any) -> str:
+    """The pool model the human chose for this window (empty when they did not)."""
+    if selection is None:
+        return ""
+    mode = str(getattr(selection, "model_mode", "") or "")
+    model = str(getattr(selection, "model_id", "") or "")
+    if mode != "pool" or not model:
+        return ""
+    return model
+
+
+def _plan_for_chosen_model(
+    task_id: str,
+    *,
+    harness_id: str,
+    attempt_no: int,
+    model_id: str,
+    pool: Any,
+) -> dict[str, Any]:
+    """Run this attempt on the model the human chose.
+
+    Three things this must never do: swap the model silently, spend the user's
+    own money without a yes, or treat "could not ask the pool" as "the pool is
+    empty".
+    """
+    entries: list[dict[str, Any]] = []
+    if pool is not None:
+        try:
+            entries = pool.models()
+        except Exception:
+            entries = []
+    entry = next((item for item in entries if str(item.get("id")) == model_id), None)
+    if entry is None:
+        # The model is not in the pool right now (the quota went away, the
+        # config changed).  Do **not** swap in a similar one: then nobody
+        # could tell which model the work actually ran on.
+        return {
+            "mode": "direct",
+            "reason": (
+                f"the model {model_id} is not in the pool right now; "
+                "the window retries on its own provider"
+            ),
+            "task_id": task_id,
+            "harness_id": harness_id,
+        }
+    upstream = str(entry.get("upstream") or "")
+    if str(entry.get("tier") or "") == "user" and not _user_key_approved(upstream):
+        # The user's own key: the platform never spends it on its own.  Ask
+        # once; this attempt stays on the window's own provider.
+        asked = _ask_for_user_key(
+            entries,
+            task_id=task_id,
+            harness_id=harness_id,
+            reason=(
+                "the operator chose the user's own key for this window; "
+                "the platform asked the user about spending it"
+            ),
+        )
+        return {
+            "mode": "direct",
+            "reason": (
+                "the chosen model is the user's own key and they have not said yes"
+                + ("; the platform is waiting for the user's answer" if asked else "")
+                + "; the window retries on its own provider"
+            ),
+            "task_id": task_id,
+            "harness_id": harness_id,
+        }
+    return {
+        "mode": "pool",
+        "reason": (
+            "the operator chose this model for this window" + (f" ({upstream})" if upstream else "")
+        ),
+        "model": model_id,
+        "upstream": upstream,
+        "upstream_protocol": str(entry.get("protocol") or ""),
         "base_path": POOL_BASE_PATH,
         "anthropic_path": POOL_ANTHROPIC_PATH,
         "task_id": task_id,

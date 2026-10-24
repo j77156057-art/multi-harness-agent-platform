@@ -83,7 +83,7 @@ def _account_one(tmp_path) -> PoolService:
 
 def test_the_cached_tokens_are_accounted(tmp_path):
     """provider 报的缓存命中要进账 —— 否则命中率永远是「没数到」。"""
-    service = _account_one(tmp_path)
+    _account_one(tmp_path)
     rows = [
         json.loads(line)
         for line in (tmp_path / "usage.jsonl").read_text(encoding="utf-8").splitlines()
@@ -106,7 +106,7 @@ def test_the_window_gets_its_tokens_and_the_rate(tmp_path):
         USAGE["input_tokens_details"]["cached_tokens"] / USAGE["input_tokens"], 4
     )
     # 每秒生成 = 生成 token ÷ 生成耗时（本地服务很快，数值大；只断言它是正数）
-    assert isinstance(spent["generation_rate"], (int, float))
+    assert isinstance(spent["generation_rate"], int | float)
     assert spent["generation_rate"] > 0
 
 

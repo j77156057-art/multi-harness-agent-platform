@@ -20,4 +20,12 @@ test_id：MVP-ADAPTER-002、MVP-ADAPTER-003
 当前状态：doing
 已知问题：Gemini CLI 已安装但缺认证（退出错误码 41）；Pi 默认 agent dir 没有 Ollama 配置，
   需使用每次 worker attempt 独立的临时 models.json 指向 loopback Ollama，不修改用户配置。
+
+适配器移植登记（Mavis，2026-10-24）：合并 OFFICE-UI-01 时发现 **Pi 适配器还停在旧 API**
+  （`ADAPTER_TYPES[harness_id]` 那一套：构造器不收 `harness_id`，登记名写死在适配器里）。
+  已按 CodexAdapter 的样子移植到新 API：构造器收下 `harness_id` 与 `display_name`，
+  登记名用 `replace(REGISTRATION, ...)` 换掉。改动在 merge commit `2c02969` 里
+  （那笔合并同时修了 Pi 基座的一处语义缺口）。
+  这条登记只说明**适配器已经跟上新 API**；本卡的其余部分仍由 Codex 推进，
+  本机模型认证与真实 attempt 验证照旧按原计划走。
 ~~~
