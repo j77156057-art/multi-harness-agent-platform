@@ -62,9 +62,9 @@ test_id：MVP-UI-031
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_pool_token_metrics.py`（新增） | ok（4 条） |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_pool_token_metrics.py`（新增） | ok（4 条：缓存 token 进账 / 按窗口给 token 与速率 / 小时桶带每个窗口的 token / 没数到时不给 0） |
+| `office/scripts/verify-office-conversations.mjs` | ok（窗口页写清四个数） |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
