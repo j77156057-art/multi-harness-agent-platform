@@ -10,7 +10,8 @@
 真相源引用：R10 §19（群聊与定向消息）、§22（群主只说目标，管理员细化并分派）；
 `backend/app/adapter/service.py` 侧的 availability（谁现在能用、用哪个模型、上一次在干什么）；
 `office/src/flat-office.js`（办公室界面）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（实现完成，待合入 main）
+commit：`e9a5abe`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-027
 
@@ -81,8 +82,8 @@ test_id：MVP-UI-027
 | `office/scripts/verify-office-conversations.mjs`（新增） | ok |
 | 真跑（8849 真平台 + 4174 预览） | 见下 |
 | `office/` 构建 | ok（29 个模块，main 195.34 kB JS） |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本轮**没碰 `backend/**`**） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0`（本轮**没碰 `backend/**`**，后端与 main 逐字节相同） |
 
 真跑那一趟（8849 真平台 + 4174 预览，用前端按钮点）：
 
