@@ -10,7 +10,7 @@
 真相源引用：`office/src/cli-transcript.js`（CLI 转录的解析与人话）、
 `office/src/outputs.js`（输出页）、`office/src/flat-office.js`（办公室的输出块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`1f92831`）
 commit：`6036b5d`（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-033
