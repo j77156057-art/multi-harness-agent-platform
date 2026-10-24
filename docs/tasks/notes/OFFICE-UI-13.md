@@ -9,8 +9,8 @@
 依赖任务：OFFICE-UI-12（左边改成会话列表）
 真相源引用：`office/src/flat-office.js`（办公室界面）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done（实现完成，待合入 main）
-commit：`bb742ef`
+当前状态：done（已合入 main：`1d98d01`）
+commit：`bb742ef`（实现）；合入 main 的 merge commit：`1d98d01`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-028
 
