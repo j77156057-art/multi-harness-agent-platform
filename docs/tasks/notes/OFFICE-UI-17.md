@@ -9,7 +9,8 @@
 依赖任务：OFFICE-UI-12（左边改成会话列表）
 真相源引用：`backend/app/pool/service.py`（用量账与汇总）、`backend/app/pool/routes.py`（`/pool/status`）、
 R10 §19（群聊与定向消息）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done（已合入 main：`bc28aa3`）
+commit：`e5f9c2e`（后端记缓存 token 并按窗口给速率与命中率、界面写清四个数）；合入 main 的 merge commit：`bc28aa3`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-031
 
@@ -61,9 +62,9 @@ test_id：MVP-UI-031
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_pool_token_metrics.py`（新增） | ok（4 条） |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_pool_token_metrics.py`（新增） | ok（4 条：缓存 token 进账 / 按窗口给 token 与速率 / 小时桶带每个窗口的 token / 没数到时不给 0） |
+| `office/scripts/verify-office-conversations.mjs` | ok（窗口页写清四个数） |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
