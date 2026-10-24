@@ -108,7 +108,8 @@ const responses = {
   },
   '/events': {
     events: [
-      { aggregate_id: TASK, event_name: 'claim', actor_id: MEMBER, payload: {}, created_at: '2026-10-24T10:05:00Z' },
+      // payload 里混着机器字段（哈希）：界面上不该摆出来；「原因」是人看的，要摆。
+      { aggregate_id: TASK, event_name: 'claim', actor_id: MEMBER, payload: { findings_hash: 'sha256:deadbeef', reason: '它没交出东西' }, created_at: '2026-10-24T10:05:00Z' },
       { aggregate_id: TASK, event_name: 'start', actor_id: MEMBER, payload: {}, created_at: '2026-10-24T10:06:00Z' },
     ],
     next_seq: 0,
@@ -282,6 +283,20 @@ try {
     await page.locator('#aoWorkspace .flat-window .flat-events').count() > 0,
     '有它的轨迹',
   );
+  // 轨迹读得懂：说了这是什么、每行带活的名字、机器字段不摆。
+  const windowPaneText = await page.locator('#aoWorkspace .flat-window').innerText();
+  assert.ok(windowPaneText.includes('它做过的动作'), '轨迹块说清了这叫什么');
+  assert.ok(windowPaneText.includes('平台记下来的'), '轨迹块说明了这是什么');
+  assert.ok(
+    windowPaneText.includes('开工链路 · 收一条真实任务'),
+    '每一行带这条活的名字（动作 + 对象才是一句话）',
+  );
+  const windowPaneDom = await page
+    .locator('#aoWorkspace .flat-window')
+    .evaluate((el) => el.textContent || '');
+  assert.ok(!windowPaneDom.includes('sha256:deadbeef'), '机器字段（哈希）不摆出来');
+  assert.ok(windowPaneDom.includes('它没交出东西'), '给人看的字段（原因）摆出来');
+
 
   // 3. 点群聊 → 中间那栏是群消息（展开的，不是空框）
   await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();

@@ -4,7 +4,7 @@
 |---|---|
 | task_id | `OFFICE-UI-23` |
 | Harness | Mavis |
-| 认领时间： | 2026-10-25 01:40 +08:00 |
+| 认领时间 | 2026-10-25 01:40 +08:00 |
 | 分支 | `agent/local/mavis/OFFICE-UI-23/a1` |
 | 状态 | doing |
 
