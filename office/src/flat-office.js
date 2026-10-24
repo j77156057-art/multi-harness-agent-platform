@@ -178,6 +178,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     filtered: [],
     // 读过的任务书（spec）：窗口页的活清单点开才去读，读过一次记一分钟。
     windowSpecs: {},
+    // **还没保存的模型挑选**（按窗口）：办公室每 15 秒重画一次，只存在 DOM 里的
+    // 选择会被重画抹掉 —— 人挑好模型，过一会儿就没了。
+    modelPicks: {},
     pool: null,
     plan: null,
     status: null,
@@ -1393,7 +1396,204 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return pane;
   }
 
+    // 档位的中文说法（界面上到处都要用，别处写一遍就散了一地）。
+  const TIER_WORDS = {
+    free: '免费',
+    metered: '付费',
+    reserve: '兜底',
+    user: '你自己的 key',
+  };
+
+  const tierWord = (tier) => TIER_WORDS[String(tier || '')] || String(tier || '未知');
+
+  // 上次探到的清单放在浏览器里：刷新页面、关掉再开，都还记得上一次是什么样。
+  const POOL_SNAPSHOT_KEY = 'agent-office.pool-models.v1';
+
+  function poolSnapshot() {
+    try {
+      const raw = window.localStorage.getItem(POOL_SNAPSHOT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function savePoolSnapshot(pool) {
+    try {
+      window.localStorage.setItem(
+        POOL_SNAPSHOT_KEY,
+        JSON.stringify({
+          at: Date.now(),
+          models: ((pool && pool.models) || []).map((item) => ({
+            id: String(item.id),
+            tier: String(item.tier || ''),
+            label: poolModelLabel(item).label,
+          })),
+          rosters: (pool && pool.rosters) || {},
+        }),
+      );
+    } catch {
+      // 存不下就算了：探针照样能报，只是没法跟「上次」比。
+    }
+  }
+
   /**
+   * 这次的清单与上次的比：**多了什么**、**谁换了档**、**CLI 还能用但没人定档的**。
+   *
+   * 档位会变 —— 某个免费额度改成收费，只改一行配置。所以「免费」不是永久的，
+   * 得有个探针能重新读一遍，再把变化说出来。
+   */
+  function comparePool(pool) {
+    const list = (pool && pool.models) || [];
+    const snapshot = poolSnapshot();
+    const before = (snapshot && snapshot.models) || [];
+    const added = list
+      .filter((item) => !before.some((old) => old.id === String(item.id)))
+      .map((item) => ({
+        id: String(item.id),
+        label: poolModelLabel(item).label,
+        tier: String(item.tier || ''),
+      }));
+    const retyped = list
+      .map((item) => {
+        const old = before.find((entry) => entry.id === String(item.id));
+        if (!old || old.tier === String(item.tier || '')) return null;
+        return {
+          id: String(item.id),
+          label: poolModelLabel(item).label,
+          before: tierWord(old.tier),
+          after: tierWord(item.tier),
+        };
+      })
+      .filter(Boolean);
+    // CLI 自己的名册里有、池子里没有的：CLI 还能跑它，但**没人说它免费还是收费**
+    // —— 平台不猜，所以不给用；但人要看得见它存在。
+    const undeclared = [];
+    const rosters = (pool && pool.rosters) || {};
+    for (const [cli, names] of Object.entries(rosters)) {
+      for (const name of names || []) {
+        const id = `${cli}/${String(name).split('/').pop()}`;
+        if (!list.some((item) => String(item.id) === id)) {
+          undeclared.push({ cli, name: String(name), id });
+        }
+      }
+    }
+    // 名册本身也变了（CLI 新增了模型）：上一次探到时没有它。
+    const previousRosters = (snapshot && snapshot.rosters) || {};
+    const newRosterEntries = [];
+    for (const [cli, names] of Object.entries(rosters)) {
+      const known = previousRosters[cli] || [];
+      for (const name of names || []) {
+        if (!known.includes(name)) newRosterEntries.push({ cli, name: String(name) });
+      }
+    }
+    return {
+      added,
+      retyped,
+      undeclared,
+      newRosterEntries,
+      first: before.length === 0,
+      total: list.length,
+      at: Date.now(),
+    };
+  }
+
+  /** 探针的结果怎么说给人听：多了什么、谁换了档、正用着的那个变了没有。 */
+  function poolProbeNote(harnessId) {
+    const probe = state.poolProbe;
+    if (!probe) return '';
+    // 长名单压短：八十个模型名摆出来没有人看得下去 —— 说清有几个、举几个例子。
+    const cap = (names, limit = 5) =>
+      names.length > limit ? `${names.slice(0, limit).join('、')}…还有 ${names.length - limit} 个` : names.join('、');
+    const bits = [];
+    if (probe.first) {
+      bits.push(`第一次探到 ${probe.total} 个模型`);
+    } else if (!probe.added.length && !probe.retyped.length) {
+      bits.push('跟上次探到的一样');
+    } else {
+      if (probe.added.length) {
+        bits.push(`多了 ${probe.added.length} 个：${cap(probe.added.map((item) => item.label))}`);
+      }
+      if (probe.retyped.length) {
+        bits.push(
+          `有 ${probe.retyped.length} 个换了档：${cap(
+            probe.retyped.map((item) => `${item.label}（${item.before} → ${item.after}）`),
+          )}`,
+        );
+      }
+    }
+    if (probe.newRosterEntries && probe.newRosterEntries.length && !probe.first) {
+      bits.push(
+        `各家 CLI 多了：${cap(probe.newRosterEntries.map((item) => `${item.cli} 的 ${item.name}`))}`,
+      );
+    }
+    if (probe.undeclared && probe.undeclared.length) {
+      bits.push(
+        `还有 ${probe.undeclared.length} 个模型 CLI 说它能用、平台没给档位（免费还是收费没人声明）：${cap(
+          probe.undeclared.map((item) => `${item.cli} 的 ${item.name}`),
+        )}`,
+      );
+    }
+    const info = (state.availability || []).find((item) => item.harness_id === harnessId);
+    const chosen = info && info.model_id ? String(info.model_id) : '';
+    const changed = probe.retyped.find((item) => item.id === chosen);
+    if (changed) {
+      bits.push(
+        `这个窗口正用着「${changed.label}」，它${
+          changed.after === '付费' ? '现在按量计费了' : '换了档'
+        } —— 平台不会再花它，你要重新点头`,
+      );
+    }
+    return bits.join('；');
+  }
+
+  /**
+   * 重新探一遍池子：平台清掉发现缓存重读一遍，回来再与上次的清单比。
+   *
+   * 探一次要问二十几个上游，所以**只有人点了才探**；平时 15 秒的自动刷新
+   * 读的是缓存。
+   */
+  async function probePool() {
+    const fresh = await api('/pool/probe', {}).catch(() => null);
+    if (!fresh) {
+      state.error = '重新探一遍没成功：平台没回话。';
+      render();
+      return;
+    }
+    state.pool = fresh;
+    state.poolProbe = comparePool(fresh);
+    savePoolSnapshot(fresh);
+    state.error = null;
+    render();
+  }
+
+  /** 收费模型要人点头：问一次，答了才算。 */
+  const paidModelDialog = buildPanelDialog('flatPaidModel', '确认要用收费模型');
+
+  function askPaidConsent(label) {
+    return new Promise((resolve) => {
+      paidModelDialog.querySelector('h2').textContent = '这个模型按量计费';
+      paidModelDialog.querySelector('.flat-note').textContent =
+        `「${label}」每调用一次都花钱。用它得你点头 —— 不用就还是这个窗口自己的模型。`;
+      const list = paidModelDialog.querySelector('.flat-dialog-list');
+      list.innerHTML = `<p class="flat-brief-action">
+          <button type="button" data-paid="yes">用它（我知道要花钱）</button>
+          <button type="button" data-paid="no">不用</button>
+        </p>`;
+      const onClick = (event) => {
+        const yes = event.target.closest('[data-paid="yes"]');
+        const no = event.target.closest('[data-paid="no"]');
+        if (!yes && !no) return;
+        paidModelDialog.removeEventListener('click', onClick);
+        paidModelDialog.close();
+        resolve(Boolean(yes));
+      };
+      paidModelDialog.addEventListener('click', onClick);
+      paidModelDialog.showModal();
+    });
+  }
+
+/**
    * 额度池里一个模型怎么念给人听。
    *
    * 池子里的模型 id 是给机器看的（`opencode-cli/opencode/beam-free`），人要的是
@@ -1414,10 +1614,30 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
   // 额度池的档位，按人看的顺序：先不花钱的，再花钱的，最后是兜底与自己掏钱的。
   const POOL_TIER_GROUPS = [
-    { tier: 'free', title: '免费额度', hint: '不额外花钱：用的是各家 CLI 自带的免费额度。' },
-    { tier: 'metered', title: '付费额度', hint: '按量计费：每调用一次都花钱。' },
-    { tier: 'reserve', title: '兜底额度', hint: '订阅里的额度：平台不会自己花它，你点名才用。' },
-    { tier: 'user', title: '你自己的 key', hint: '你自己的 API key：平台不会自己花，要你先点头。' },
+    {
+      tier: 'free',
+      title: '免费额度',
+      mark: '免费',
+      hint: '不额外花钱：用的是各家 CLI 自带的免费额度。',
+    },
+    {
+      tier: 'metered',
+      title: '付费额度',
+      mark: '付费',
+      hint: '按量计费：每调用一次都花钱 —— 选它要你点头。',
+    },
+    {
+      tier: 'reserve',
+      title: '兜底额度',
+      mark: '兜底',
+      hint: '订阅里的额度：平台不会自己花它，你点名才用。',
+    },
+    {
+      tier: 'user',
+      title: '你自己的 key',
+      mark: '你的 key',
+      hint: '你自己的 API key：平台不会自己花，要你先点头。',
+    },
   ];
 
   /**
@@ -1429,31 +1649,36 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    */
   function modelChoiceBlock(harnessId) {
     const info = (state.availability || []).find((item) => item.harness_id === harnessId) || null;
-    const mode = info ? String(info.model_mode || 'cli') : 'cli';
-    const modelId = info ? String(info.model_id || '') : '';
+    // 人刚刚挑的（还没保存）优先；没有就显示平台上登记着的那个。
+    const pick = state.modelPicks[harnessId] || null;
+    const mode = pick ? pick.mode : info ? String(info.model_mode || 'cli') : 'cli';
+    const modelId = pick ? pick.modelId : info ? String(info.model_id || '') : '';
     const models = (state.pool && state.pool.models) || [];
     const section = document.createElement('section');
     section.className = 'flat-spec flat-model';
-    const rows = [];
-    rows.push(
-      `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="cli" ${mode === 'pool' ? '' : 'checked'}>
+    section.dataset.harness = harnessId;
+    const cliRow = `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="cli" ${
+      mode === 'pool' ? '' : 'checked'
+    }>
         <span>自带模型</span><span class="flat-model-hint">这个窗口自己的配置${
           info && info.model ? `（${escape(info.model)}）` : ''
-        }</span></label>`,
-    );
+        }</span></label>`;
+    const poolRows = [];
+    const counts = [];
     for (const group of POOL_TIER_GROUPS) {
       const items = models.filter((item) => String(item.tier || '') === group.tier);
       if (!items.length) continue;
-      rows.push(
+      counts.push(`${group.title} ${items.length}`);
+      poolRows.push(
         `<p class="flat-model-group">${escape(group.title)}（${items.length} 个）<span class="flat-model-hint">${escape(group.hint)}</span></p>`,
       );
       for (const item of items) {
         const label = poolModelLabel(item);
-        rows.push(
+        poolRows.push(
           `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
             modelId === String(item.id) ? 'checked' : ''
           }>
-            <span>${escape(label.label)}</span></label>`,
+            <span>${escape(label.label)}</span><em class="flat-model-mark is-${escape(group.tier)}">${escape(group.mark)}</em></label>`,
         );
       }
     }
@@ -1462,10 +1687,22 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       mode === 'pool'
         ? `额度池：${picked ? poolModelLabel(picked).label : modelId || '（选中的模型已不在池子里）'}`
         : `自带模型${info && info.model ? `（${info.model}）` : ''}`;
+    const probe = poolProbeNote(harnessId);
     section.innerHTML = `<h3>它用哪个模型</h3>
       <p class="flat-note">当前：${escape(current)}</p>
-      <div class="flat-model-list">${rows.join('')}</div>
-      <p class="flat-model-actions"><button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button></p>`;
+      ${cliRow}
+      <details class="flat-model-list" data-fold="model-list"${
+        state.openFolds.has('model-list') ? ' open' : ''
+      }>
+        <summary>额度池里的模型（${models.length} 个${counts.length ? `：${escape(counts.join(' · '))}` : ''}）</summary>
+        <p class="flat-model-hint">每一档是额度**自己声明**的 —— 免费额度也可能改成收费。点「重新探一遍」重读一次，改了就告诉你。</p>
+        ${poolRows.join('')}
+      </details>
+      <p class="flat-model-actions">
+        <button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button>
+        <button type="button" data-act="probe-pool">重新探一遍</button>
+        ${probe ? `<span class="flat-model-probe">${escape(probe)}</span>` : ''}
+      </p>`;
     return section;
   }
 
@@ -1481,17 +1718,29 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const picked = pane ? pane.querySelector('input[name="flatModelMode"]:checked') : null;
     const mode = picked && picked.value === 'pool' ? 'pool' : 'cli';
     const modelId = mode === 'pool' ? String((picked && picked.dataset.modelId) || '') : '';
+    const entry = ((state.pool && state.pool.models) || []).find(
+      (item) => String(item.id) === modelId,
+    );
+    const tier = entry ? String(entry.tier || '') : '';
+    // 按量计费的先问一句：人没点头就不发（服务端还会再拒一次，两道闸门）。
+    if (tier === 'metered') {
+      const yes = await askPaidConsent(poolModelLabel(entry).label);
+      if (!yes) return;
+    }
     button.disabled = true;
     try {
       await api('/model-selection', {
         harness_id: harnessId,
         model_mode: mode,
         model_id: modelId,
+        paid_consent: tier === 'metered',
       });
       const availability = await api('/availability').catch(() => null);
       if (availability && Array.isArray(availability.availability)) {
         state.availability = availability.availability;
       }
+      // 存上了：接下来显示的是平台登记里的那个，不再是「刚刚挑的」。
+      delete state.modelPicks[harnessId];
       state.error = null;
       render();
     } catch (error) {
@@ -3430,6 +3679,19 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }, true);
 
   root.addEventListener('change', (event) => {
+    // 模型清单里的挑选：记进 state（重画之后还在）。
+    const modelRadio = event.target.closest('input[name="flatModelMode"]');
+    if (modelRadio) {
+      const block = modelRadio.closest('.flat-model');
+      const harnessId = block ? String(block.dataset.harness || '') : '';
+      if (harnessId) {
+        state.modelPicks[harnessId] = {
+          mode: modelRadio.value === 'pool' ? 'pool' : 'cli',
+          modelId: String(modelRadio.dataset.modelId || ''),
+        };
+      }
+      return;
+    }
     const source = event.target.closest('#flatSourceSelect');
     if (source) {
       state.source = source.value === 'demo' ? 'demo' : 'platform';
@@ -3479,6 +3741,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'save-model-choice') {
       void saveModelChoice(button);
+      return;
+    }
+    if (button.dataset.act === 'probe-pool') {
+      void probePool();
       return;
     }
     if (button.dataset.act === 'dismiss-error') {
@@ -3825,7 +4091,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (recent.length) await humanize(recent, 'text');
   }
 
-  async function refresh() {
+  async function refresh(options) {
+    // 人点了刷新 → 顺手**重探一遍**池子（新增的免费额度、变成收费的额度都要知道）。
+    // 平时 15 秒的自动刷新不探：探一次要问二十几个上游。
+    const wantProbe = Boolean(options && options.probe);
+    let probed = null;
+    if (wantProbe) {
+      probed = await api('/pool/probe', {}).catch(() => null);
+    }
     try {
       const scope = projectScope() || (projectOf && projectOf());
       state.scope = scope;
@@ -3862,7 +4135,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
       const [availability, pool, plan, messages] = await Promise.all([
         api('/availability').catch(() => ({ availability: [] })),
-        api('/pool').catch(() => null),
+        probed ? Promise.resolve(probed) : api('/pool').catch(() => null),
         api('/plan').catch(() => null),
         api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
         loadUserKeys(),
@@ -3870,6 +4143,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       state.availability = availability.availability || [];
       state.loaded = true;
       state.pool = pool;
+      if (probed) {
+        // 探过了：把与上次的差别记下来（多了什么、谁换了档、谁还没定档）。
+        state.poolProbe = comparePool(probed);
+        savePoolSnapshot(probed);
+      }
       state.plan = plan;
       state.messages = messages.messages || [];
       state.events = events.events || [];

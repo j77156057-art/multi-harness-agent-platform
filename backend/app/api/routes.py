@@ -632,9 +632,11 @@ def availability(
                 "model": model["model"],
                 "model_alias": model.get("model_alias"),
                 "model_source": model["source"],
-                # 人给这个窗口指定的模型来源（自带 / 额度池里的哪个模型）。
+                # 人给这个窗口指定的模型来源（自带 / 额度池里的哪个模型），
+                # 以及**人点头时那一档**（档位会变：免费额度改成收费之后，平台不再花它）。
                 "model_mode": str(row.get("model_mode") or "cli"),
                 "model_id": str(row["model_id"]) if row.get("model_id") else None,
+                "model_tier": str(row["model_tier"]) if row.get("model_tier") else None,
                 "degraded": degraded,
                 "last_probe_at": probe["created_at"] if probe else None,
                 "warnings": [
@@ -660,18 +662,19 @@ def availability(
     return {"availability": entries}
 
 
-def _pool_model_ids() -> set[str]:
-    """额度池现在有哪些模型（id 集合）。
+def _pool_models() -> list[dict[str, Any]]:
+    """额度池现在有哪些模型（每条带它属于哪一档）。
 
-    池子是活的：额度会下线、配置会改。**读不到**就返回空集 —— 空集表示「查不到」，
-    不是「一个模型都没有」，所以调用方不要拿它当「池子空了」来拒绝人。
+    池子是活的：额度会下线、配置会改，**档位也会变**（某个 free 改成 metered）。
+    **读不到**就返回空清单 —— 空清单表示「查不到」，不是「一个模型都没有」，
+    所以调用方不要拿它当「池子空了」来拒绝人。
     """
     from app.pool.service import PoolService  # local import: keeps the module cycle out
 
     try:
-        return {str(entry.get("id")) for entry in PoolService().models()}
+        return list(PoolService().models())
     except Exception:
-        return set()
+        return []
 
 
 @adapter.post("/model-selection")
@@ -688,13 +691,25 @@ def set_model_selection(
     存之前先核对池子里有没有这个模型：存下一个池子里没有的模型，只会让界面显示
     「已保存」而下一轮悄悄回落 —— 那比当场拒绝更坏。
     """
+    tier = ""
     if body.model_mode == "pool":
-        available = _pool_model_ids()
+        models = _pool_models()
+        available = {str(entry.get("id")) for entry in models}
         if available and body.model_id not in available:
             raise ApiError(
                 "request.invalid",
                 400,
                 f"the pool has no model named {body.model_id} right now",
+            )
+        entry = next((item for item in models if str(item.get("id")) == body.model_id), None)
+        tier = str((entry or {}).get("tier") or "")
+        if tier == model_choice.PAID_TIER and not body.paid_consent:
+            # 按量计费：每调用一次都花钱。人没点头就不许花 —— 这一条写在服务端，
+            # 界面点不点得到都不算数。
+            raise ApiError(
+                "model.paid_consent_required",
+                409,
+                "这个模型按量计费（每调用一次都花钱），要你明确点头才用它",
             )
     try:
         choice = model_choice.save_choice(
@@ -702,6 +717,7 @@ def set_model_selection(
             harness_id=body.harness_id,
             model_mode=body.model_mode,
             model_id=body.model_id,
+            model_tier=tier,
         )
     except model_choice.ModelChoiceError as error:
         raise ApiError("request.invalid", 400, str(error)) from error

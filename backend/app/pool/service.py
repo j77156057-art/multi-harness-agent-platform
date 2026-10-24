@@ -872,6 +872,19 @@ class PoolService:
             # Accounting must never break a request.
             pass
 
+    def rosters(self) -> dict[str, list[str]]:
+        """What every CLI says it can run (the catalogue, not a tier).
+
+        Read-only: a listing costs no quota.  The office uses it to say "the
+        CLI can do this too, but nobody said what it costs".
+        """
+        from app.pool.sources import discover_cli_rosters
+
+        try:
+            return discover_cli_rosters()
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            return {}
+
     def inventory(self) -> dict[str, Any]:
         """What is **left** in each tier, not just what was spent.
 

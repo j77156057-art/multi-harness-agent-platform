@@ -59,6 +59,23 @@ class _Pool:
         return list(self._entries)
 
 
+#: 一个**按量计费**的模型：选它要人明确点头。
+PAID_MODEL = {
+    "id": "codex/gpt-5.6",
+    "upstream": "codex:geekspace",
+    "protocol": "openai_responses",
+    "tier": "metered",
+}
+
+
+def _free_pool_models() -> list[dict[str, Any]]:
+    return [FREE_MODEL, OTHER_FREE_MODEL]
+
+
+def _paid_pool_models() -> list[dict[str, Any]]:
+    return [FREE_MODEL, OTHER_FREE_MODEL, PAID_MODEL]
+
+
 def _register(database, harness_id: str) -> None:
     HarnessRegistry(database).register(
         HarnessRegistration(
@@ -100,9 +117,7 @@ def _availability(client, harness_id: str, token: str | None = None) -> dict[str
 
 def test_the_choice_is_stored_and_read_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """人指定池子里的模型 → 平台记下来 → 办公室读得到；改回自带也要能改回去。"""
-    monkeypatch.setattr(
-        "app.api.routes._pool_model_ids", lambda: {FREE_MODEL["id"], OTHER_FREE_MODEL["id"]}
-    )
+    monkeypatch.setattr("app.api.routes._pool_models", _free_pool_models)
     client, database = make_client(tmp_path)
     _register(database, "h-A")
 
@@ -139,7 +154,7 @@ def test_an_unknown_window_cannot_be_given_a_model(tmp_path: Path):
 
 def test_a_model_the_pool_does_not_have_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """存下一个池子里没有的模型，只会让界面说「已保存」而下一轮悄悄回落。"""
-    monkeypatch.setattr("app.api.routes._pool_model_ids", lambda: {FREE_MODEL["id"]})
+    monkeypatch.setattr("app.api.routes._pool_models", lambda: [FREE_MODEL])
     client, database = make_client(tmp_path)
     _register(database, "h-A")
     refused = _post(
@@ -273,3 +288,108 @@ def test_the_plan_route_asks_the_database_for_the_choice(
     plan = response.json()
     assert plan["mode"] == "pool"
     assert plan["model"] == FREE_MODEL["id"]
+
+
+# ------------------------------------------------- OFFICE-UI-19：收费要点头、探针
+
+
+def test_a_paid_model_needs_a_yes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """按量计费的模型：人没点头，平台就不给存（更不花）。"""
+    monkeypatch.setattr("app.api.routes._pool_models", _paid_pool_models)
+    client, database = make_client(tmp_path)
+    _register(database, "h-A")
+
+    refused = _post(
+        client,
+        database,
+        {"harness_id": "h-A", "model_mode": "pool", "model_id": PAID_MODEL["id"]},
+    )
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["error"]["code"] == "model.paid_consent_required"
+    assert _availability(client, "h-A")["model_mode"] == "cli", "没点头就没存上"
+
+    agreed = _post(
+        client,
+        database,
+        {
+            "harness_id": "h-A",
+            "model_mode": "pool",
+            "model_id": PAID_MODEL["id"],
+            "paid_consent": True,
+        },
+    )
+    assert agreed.status_code == 200, agreed.text
+    # 点头时那一档要记下来：它以后会变，平台要拿它跟现在这一档比。
+    assert agreed.json()["selection"]["model_tier"] == "metered"
+
+
+def test_a_free_quota_that_turned_paid_is_not_spent():
+    """人点头时它是免费、现在它收费了 —— 平台不再花它。"""
+    plan = plan_attempt(
+        "T-1",
+        harness_id="h-A",
+        pool=_Pool([PAID_MODEL]),
+        selection=ModelChoice("h-A", "pool", PAID_MODEL["id"], model_tier="free"),
+    )
+    assert plan["mode"] == "direct"
+    assert "paid quota now" in str(plan["reason"])
+
+
+def test_a_paid_quota_the_user_agreed_to_is_spent():
+    """人已经点头过的付费额度：照办。"""
+    plan = plan_attempt(
+        "T-1",
+        harness_id="h-A",
+        pool=_Pool([PAID_MODEL]),
+        selection=ModelChoice("h-A", "pool", PAID_MODEL["id"], model_tier="metered"),
+    )
+    assert plan["mode"] == "pool"
+    assert plan["model"] == PAID_MODEL["id"]
+
+
+class _Service:
+    """A pool service that answers with a fixed list (and counts the calls)."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def upstreams(self, refresh: bool = False) -> list[dict[str, Any]]:
+        self.calls.append("upstreams")
+        return []
+
+    def models(self, refresh: bool = False) -> list[dict[str, Any]]:
+        self.calls.append("models")
+        return [dict(FREE_MODEL)]
+
+    def usage_summary(self) -> dict[str, Any]:
+        return {}
+
+    def usage_timeline(self) -> dict[str, Any]:
+        return {"bucket": "hour", "hours": 24, "buckets": []}
+
+    def inventory(self) -> dict[str, Any]:
+        return {"tiers": []}
+
+    def rosters(self) -> dict[str, list[str]]:
+        return {"codebuddy": ["hy3", "step-5-preview"]}
+
+
+def test_the_probe_reads_the_pool_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """人点的「重新探一遍」：发现缓存被清掉，重读一遍，名册也回来。"""
+    from app.pool import service as pool_service
+
+    client, database = make_client(tmp_path)
+    _register(database, "h-A")
+    service = _Service()
+    monkeypatch.setattr("app.pool.routes._service", lambda: service)
+    # 缓存里先放一点东西：探针要把它清掉。
+    pool_service._DISCOVERY[("probe-test",)] = (0.0, [])
+    token = TokenService(database).issue(subject_type="harness", subject_id="h-A")
+
+    response = client.post("/api/v1/pool/probe", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["id"] for item in body["models"]] == [FREE_MODEL["id"]]
+    # 名册：CLI 自己说它能跑什么（哪些没人定档，办公室要报出来）。
+    assert body["rosters"]["codebuddy"] == ["hy3", "step-5-preview"]
+    assert ("probe-test",) not in pool_service._DISCOVERY, "探针要清掉发现缓存"

@@ -31,6 +31,12 @@ MODEL_MODE_CLI = "cli"
 MODEL_MODE_POOL = "pool"
 #: 平台只认这两个取值。
 MODEL_MODES = (MODEL_MODE_CLI, MODEL_MODE_POOL)
+#: 按量计费的那一档：每调用一次都花钱。选它要人**明确点头**（别的一律不花）。
+PAID_TIER = "metered"
+#: 兜底（订阅里的额度）：平台不自己花，人点名才算。
+RESERVE_TIER = "reserve"
+#: 人自己的 key：平台不自己花，要人点头（另有一套问询机制）。
+USER_TIER = "user"
 
 
 class ModelChoiceError(ValueError):
@@ -44,6 +50,9 @@ class ModelChoice:
     harness_id: str
     model_mode: str = MODEL_MODE_CLI
     model_id: str = ""
+    #: **人点头时那一档**（free / reserve / metered / user）。档位会变：某个免费额度
+    #: 改成收费之后，平台拿它和现在这一档比，对不上就不花（见 app/pool/routing.py）。
+    model_tier: str = ""
     updated_at: str | None = None
 
     @property
@@ -56,6 +65,7 @@ class ModelChoice:
             "harness_id": self.harness_id,
             "model_mode": self.model_mode,
             "model_id": self.model_id or None,
+            "model_tier": self.model_tier or None,
             "updated_at": self.updated_at,
         }
 
@@ -63,8 +73,8 @@ class ModelChoice:
 def read_choice(database: Database, harness_id: str) -> ModelChoice | None:
     """这个窗口当前的选择；窗口没在册就是 ``None``。"""
     rows = database.read(
-        "SELECT harness_id, model_mode, model_id, model_updated_at FROM harnesses"
-        " WHERE harness_id = ?",
+        "SELECT harness_id, model_mode, model_id, model_tier, model_updated_at"
+        " FROM harnesses WHERE harness_id = ?",
         (harness_id,),
     )
     if not rows:
@@ -78,6 +88,7 @@ def save_choice(
     harness_id: str,
     model_mode: str,
     model_id: str | None = None,
+    model_tier: str = "",
 ) -> ModelChoice:
     """记下人给这个窗口的选择。
 
@@ -93,6 +104,9 @@ def save_choice(
     if mode == MODEL_MODE_CLI:
         # 自带模型时池子的那个 id 没有意义，清掉（不留一个半截的选择）。
         chosen = ""
+        tier = ""
+    else:
+        tier = str(model_tier or "").strip().lower()
     now = datetime.now(UTC).isoformat()
     with database.transaction() as conn:
         row = conn.execute(
@@ -101,11 +115,17 @@ def save_choice(
         if row is None:
             raise ModelChoiceError(f"harness {harness_id} is not registered")
         conn.execute(
-            "UPDATE harnesses SET model_mode = ?, model_id = ?, model_updated_at = ?"
-            " WHERE harness_id = ?",
-            (mode, chosen or None, now, harness_id),
+            "UPDATE harnesses SET model_mode = ?, model_id = ?, model_tier = ?,"
+            " model_updated_at = ? WHERE harness_id = ?",
+            (mode, chosen or None, tier or None, now, harness_id),
         )
-    return ModelChoice(harness_id=harness_id, model_mode=mode, model_id=chosen, updated_at=now)
+    return ModelChoice(
+        harness_id=harness_id,
+        model_mode=mode,
+        model_id=chosen,
+        model_tier=tier,
+        updated_at=now,
+    )
 
 
 def _choice_from_row(row: Any) -> ModelChoice:
@@ -119,5 +139,6 @@ def _choice_from_row(row: Any) -> ModelChoice:
         harness_id=str(row["harness_id"]),
         model_mode=mode,
         model_id=str(row["model_id"] or ""),
+        model_tier=str(row["model_tier"] or ""),
         updated_at=str(updated) if updated else None,
     )

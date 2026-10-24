@@ -91,6 +91,7 @@ def plan_attempt(
             attempt_no=attempt_no,
             model_id=chosen,
             pool=pool,
+            consented_tier=str(getattr(selection, "model_tier", "") or ""),
         )
     if not evidence:
         return {
@@ -223,6 +224,7 @@ def _plan_for_chosen_model(
     attempt_no: int,
     model_id: str,
     pool: Any,
+    consented_tier: str = "",
 ) -> dict[str, Any]:
     """Run this attempt on the model the human chose.
 
@@ -251,7 +253,22 @@ def _plan_for_chosen_model(
             "harness_id": harness_id,
         }
     upstream = str(entry.get("upstream") or "")
-    if str(entry.get("tier") or "") == "user" and not _user_key_approved(upstream):
+    current_tier = str(entry.get("tier") or "")
+    if current_tier == "metered" and consented_tier != "metered":
+        # The human said yes to a **free** quota; the quota is a paid one now.
+        # Spending it without asking again would be spending the user's money
+        # on the strength of an old yes.
+        return {
+            "mode": "direct",
+            "reason": (
+                f"the chosen model {model_id} is a paid quota now "
+                "(it was not one when it was chosen); the platform will not spend "
+                "it until the user says yes again"
+            ),
+            "task_id": task_id,
+            "harness_id": harness_id,
+        }
+    if current_tier == "user" and not _user_key_approved(upstream):
         # The user's own key: the platform never spends it on its own.  Ask
         # once; this attempt stays on the window's own provider.
         asked = _ask_for_user_key(

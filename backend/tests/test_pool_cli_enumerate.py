@@ -100,9 +100,12 @@ def test_the_roster_listing_is_cached_on_a_ttl(tmp_path, monkeypatch):
 def test_a_slot_without_an_enumerate_rule_is_left_alone(tmp_path):
     upstreams = _discover(tmp_path)
     codebuddy = sorted(u.name for u in upstreams if u.name.startswith("codebuddy:"))
+    # codebuddy 的 step-5 是**声明过**的免费额度（仓库主人说的），所以它在；
+    # 别的没声明的模型仍然不进池子——不扩大也不缩小。
     assert codebuddy == [
         "codebuddy:hy3",
         "codebuddy:minimax-m3.1-flash",
+        "codebuddy:step-5-preview",
     ], "没声明的就按声明来——不扩大也不缩小"
 
 

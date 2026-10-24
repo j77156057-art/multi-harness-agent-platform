@@ -1,0 +1,11 @@
+-- R10 §39 窗口的模型选择：记下**人点头时那一档**（R10-fix-20 登记，见规范 §38.15）。
+--
+-- 「免费」只是一个声明：额度槽自己声明 tier（free / reserve / metered / user），
+-- 而声明会变 —— 把某个 free 改成 metered 只需要改一行配置。
+--
+-- 人当初点头时它是免费、现在它收费了，平台不该照旧去花它。所以把「点头时那一档」
+-- 记在选择旁边：照办前核一次，对不上就不花（见 app/pool/routing.py）。
+--
+-- 不新增事件名、状态、状态迁移边 → 事件 `schema_version` 不动（§37.7 只对新增事件
+-- 提升）。表的 schema 版本由本迁移的编号（018）承载。
+ALTER TABLE harnesses ADD COLUMN model_tier TEXT;

@@ -31,6 +31,7 @@ from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.routing import plan_attempt
 from app.pool.service import PoolError, PoolService, invalidate_discovery
+from app.pool.sources import invalidate_rosters
 
 router = APIRouter(tags=["pool"])
 
@@ -95,10 +96,8 @@ def pool_models(principal: _guard("harness:pool")) -> dict[str, Any]:
     return {"object": "list", "data": _service().models()}
 
 
-@router.get("/pool/status")
-def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
+def _pool_status(service: PoolService) -> dict[str, Any]:
     """The pool's state: the sources, the models, and who spent what."""
-    service = _service()
     return {
         "upstreams": [
             {
@@ -119,7 +118,30 @@ def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
         # What is **left** in each tier -- where a balance can be asked for,
         # and an honest "there is no balance" where it cannot.
         "inventory": service.inventory(),
+        # What each CLI says it can run: the catalogue, **not** a tier.  The
+        # office compares it with the models above, so "a new model nobody
+        # declared" is visible instead of silently missing.
+        "rosters": service.rosters(),
     }
+
+
+@router.get("/pool/status")
+def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
+    """The pool's state: the sources, the models, and who spent what."""
+    return _pool_status(_service())
+
+
+@router.post("/pool/probe")
+def pool_probe(principal: _guard("harness:pool")) -> dict[str, Any]:
+    """Read the pool again, from scratch.
+
+    The discovery is cached (30 seconds) and nothing used to clear it, so a
+    quota that was added -- or a free quota that turned into a paid one --
+    could stay invisible.  The human asks for this: "probe it again".
+    """
+    invalidate_discovery()
+    invalidate_rosters()
+    return _pool_status(_service())
 
 
 @router.post("/pool/v1/chat/completions")

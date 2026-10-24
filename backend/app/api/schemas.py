@@ -44,6 +44,8 @@ class ModelSelectionRequest(BaseModel):
     harness_id: str = Field(min_length=1)
     model_mode: Literal["cli", "pool"] = "cli"
     model_id: str | None = None
+    #: 人是否明确同意花**按量计费**的钱。没点头时平台拒绝（409），并说清为什么。
+    paid_consent: bool = False
 
 
 class HarnessRegistrationRequest(BaseModel):
