@@ -817,3 +817,100 @@ def test_a_private_question_the_model_cannot_answer_says_so_privately(tmp_path, 
     assert sent["mentions"] == ["office-operator"]
     assert "没有答上来" in sent["body"]
     assert "boom" in sent["body"]
+
+
+def test_a_member_asking_for_a_goal_change_is_heard(tmp_path, monkeypatch):
+    """成员窗口说「这个目标要改」：管理员要听见，并把原话带给群主。
+
+    目标是群主的（§19）：管理员听见之后**转达**，自己不改目标。
+    """
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 11,
+                "sender_type": "harness",
+                "sender_id": "member-window",
+                "body": "这个目标做不到：要改成只做那半边",
+                "task_id": "FD-1",
+                "refs": ["goal-change"],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.last_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+    }
+    # 首轮只锚定不处理（历史不重放）—— 这次要处理的是「之后」的消息。
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    said = " ".join(str(item.get("body") or "") for item in client.messages)
+    assert said, "管理员要在群里说话（把成员的话带给群主）"
+    assert "member-window" in said, "要说清是谁说的"
+    assert "要改成只做那半边" in said, "要原话转达"
+    # 群主的回答要接得住：目标摆成待答。
+    assert worker.state.pending_goal, "群主的回答要有地方接"
+    assert worker.state.pending_goal["goal"] == "把两边都做完"
+
+
+def test_the_owners_answer_to_a_member_goal_change_is_used(tmp_path, monkeypatch):
+    """群主回答之后，管理员照新的说法重新细化（方案随之修订）。"""
+    admin = FakeAdmin()
+    client = FakeClient()
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.last_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+    }
+    worker.state.pending_goal = {
+        **worker.state.last_goal,
+        "questions": ["成员窗口 member-window 说目标要改"],
+        "seq": 11,
+    }
+    worker.state.last_message_seq = 11
+    worker.state.initialized = True
+    client.inbox = [
+        {"created_seq": 12, "sender_type": "human", "body": "那就只做那半边"},
+    ]
+
+    worker.poll_messages()
+
+    assert admin.refine_calls, "群主回答后要重新细化"
+    assert admin.refine_calls[0]["answers"] == ["那就只做那半边"]
+
+
+def test_a_member_message_is_not_treated_as_an_answer(tmp_path, monkeypatch):
+    """成员的话不能被当成群主对目标的回答（那会把别人的话写进群主的回执）。"""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 13,
+                "sender_type": "harness",
+                "sender_id": "member-window",
+                "body": "随便说句话",
+                "refs": [],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.pending_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+        "seq": 11,
+    }
+    worker.state.last_message_seq = 11
+
+    worker.poll_messages()
+
+    assert not admin.refine_calls, "成员的闲聊不能被当成群主的回答"

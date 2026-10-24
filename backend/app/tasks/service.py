@@ -85,6 +85,10 @@ def _canonical(value: object) -> str:
 # 定向消息的签名（R10 §19）：带这个 ref 的消息只给发送方与收件方看。
 DIRECT_REF = "direct"
 
+# 「这条要改目标」的签名（R10 §19）：成员窗口提出目标要改时带上它。
+# 目标归群主，成员只能**提**；管理员听见之后把话带给群主（R10-fix-22）。
+GOAL_CHANGE_REF = "goal-change"
+
 
 def _normalise_refs(refs: list[str] | None) -> list[str]:
     """Validate the message refs array (openapi post_message / Message schema).

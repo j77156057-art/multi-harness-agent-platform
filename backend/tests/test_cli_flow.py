@@ -348,3 +348,30 @@ def test_say_can_post_a_direct_message(tmp_path):
     )
     assert "direct" in posted["refs"], "定向标记写在 refs 里"
     assert posted["mentions"] == ["human-1"], "收件人就是 mentions 里的那个"
+
+
+def test_say_can_mark_a_goal_change(tmp_path):
+    """成员窗口能标出「这条是要改目标」（R10 §19 的 goal-change 签名）。"""
+    client, _database = make_client(tmp_path)
+    _ok(client, "project-create", "P-1", "--name", "demo")
+    _ok(client, "group-create", "G-1", "--project", "P-1", "--name", "group")
+
+    _ok(
+        client,
+        "say",
+        "--group",
+        "G-1",
+        "--author",
+        "member-window",
+        "--kind",
+        "harness",
+        "--body",
+        "这个目标要改",
+        "--ref",
+        "goal-change",
+    )
+
+    log = _ok(client, "log", "--group", "G-1")
+    message = log["messages"][-1]
+    assert "goal-change" in (message.get("refs") or [])
+    assert message["sender_type"] == "harness"

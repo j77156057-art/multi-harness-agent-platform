@@ -117,6 +117,8 @@ const responses = {
   '/messages': {
     messages: [
       { created_seq: 1, created_at: '2026-10-24T10:10:00Z', sender_type: 'human', sender_id: 'office-operator', body: '群里的话', refs: [], mentions: [] },
+      // 成员窗口提「要改目标」：群里要一眼看见（等群主拍板）。
+      { created_seq: 2, created_at: '2026-10-24T10:20:00Z', sender_type: 'harness', sender_id: 'codex-window', body: '这个目标做不到：要改成只做那半边', refs: ['goal-change'], mentions: [] },
     ],
   },
   '/availability': {
@@ -453,6 +455,20 @@ try {
   assert.ok(declared.body.cli, '说的是哪家的 CLI');
   assert.ok(declared.body.model, '说的是哪个模型');
   assert.ok(['free', 'metered'].includes(declared.body.tier), '说的是哪一档');
+
+  // 12. 成员提「要改目标」的消息：群里一眼要看见（等群主拍板的事）。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();
+  await page.waitForTimeout(1200);
+  const goalChat = page.locator('#aoWorkspace .flat-msg.is-goal-change');
+  assert.equal(await goalChat.count(), 1, '群里那条「要改目标」的消息被标出来了');
+  assert.ok(
+    (await goalChat.innerText()).includes('要改目标'),
+    '标记写的是「要改目标」',
+  );
+  assert.ok(
+    (await goalChat.innerText()).includes('这个目标做不到'),
+    '成员的原话在',
+  );
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');
