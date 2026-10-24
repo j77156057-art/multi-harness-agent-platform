@@ -128,10 +128,10 @@ try {
   await page.waitForSelector('dialog[open]', { timeout: 10000 });
   const legend = await page.locator('dialog[open] legend').innerText();
   assert.ok(!legend.includes('Harness'), '成员栏不说 Harness');
-  assert.ok(legend.includes('干活的人'), '成员栏说的是人话');
+  assert.ok(legend.includes('执行成员'), '成员栏说的是人话');
   const scope = await page.locator('.project-create-scope').innerText();
   assert.ok(!/\bp\s*\/\s*g\b/.test(scope), '范围说明不摆项目号/群号');
-  assert.ok(scope.includes('能接活'), '范围说明说的是"谁还能接活"');
+  assert.ok(scope.includes('可执行'), '范围说明说的是"谁还能接活"');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 
@@ -161,7 +161,7 @@ try {
   await page.waitForTimeout(800);
 
   const guide = await page.locator('#aoWorkspace .flat-guide').first().innerText();
-  assert.ok(guide.includes('还没有任务'), '顶部说清现在是什么');
+  assert.ok(guide.includes('尚无任务'), '顶部说清现在是什么');
   assert.ok(guide.includes('开工配置'), '顶部说清下一步点哪里');
   assert.equal(await page.locator('#aoWorkspace .flat-filters').count(), 0, '没有活可筛时不摆筛选条');
   assert.equal(await page.locator('#aoWorkspace .flat-pager').count(), 0, '没有东西可翻时不摆分页条');
@@ -170,7 +170,7 @@ try {
 
   const start = page.locator('#aoWorkspace .flat-start');
   assert.equal(await start.count(), 1, '中间那栏给一个能点的下一步');
-  assert.ok((await start.innerText()).includes('写'), '那个按钮说清自己要干什么');
+  assert.ok((await start.innerText()).includes('配置'), '那个按钮说清自己要干什么');
   await start.click();
   await page.waitForTimeout(1200);
   assert.equal(await page.locator('#openingDialog[open]').count(), 1, '点了真的把人送到开工向导');
@@ -182,7 +182,7 @@ try {
   await chat.waitForTimeout(800);
   const waiting = await chat.locator('.direct-waiting').count();
   assert.equal(waiting, 1, '自己那条还没人回，页面说在等');
-  assert.ok((await chat.locator('.direct-waiting').innerText()).includes('等管理员回话'), '那句话说的是等谁');
+  assert.ok((await chat.locator('.direct-waiting').innerText()).includes('等待管理员回复'), '那句话说的是等谁');
 
   directThread = [
     ...directThread,
