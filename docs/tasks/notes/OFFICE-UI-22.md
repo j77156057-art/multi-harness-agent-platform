@@ -12,7 +12,8 @@
 `backend/app/admin/worker.py`（管理员的消息处理）、`backend/app/tasks/service.py`
 （消息签名）；R10 §19（群聊与消息）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`5ac3533`（状态栏的在线/离线、中途把新窗口加进项目、加完通知管理员；R10 §38.17 R10-fix-23 + §19 一条）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-037
 
@@ -57,10 +58,10 @@ test_id：MVP-UI-037
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_admin_worker.py` | 待回填 |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_admin_worker.py` | ok（新增 1 条：管理员收到「中途加入」的消息 → 知道、在群里说一声、把等人领的活改派给新窗口、只处理一次） |
+| `office/scripts/verify-office-conversations.mjs` | ok（状态栏给出在线数、窗口页有「加入这个项目」、加入后确实通知了管理员） |
+| 真跑（8849 真平台 + 4174 预览） | 状态栏「已连接平台 · 窗口 12 在线」；左栏列出 12 个窗口；窗口页有「加入这个项目」，点了之后界面显示「已通知管理员」，平台群里收到那条带 `add-member` 的消息；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 210.67 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
