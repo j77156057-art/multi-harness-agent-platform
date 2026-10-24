@@ -11,7 +11,7 @@
 `backend/app/pool/routes.py`（`/pool/status`、`/pool/probe`）、
 `backend/app/pool/inventory.py`（档位的中文说法）、`office/src/flat-office.js`（窗口页的
 模型选择）；R10 §38（R10-fix 流程）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`565b38a`）
 commit：`9d1ca13`（清单按额度属主分组折叠 + 名册里没定档的能当场定档；R10 §38.16 R10-fix-21）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-035
