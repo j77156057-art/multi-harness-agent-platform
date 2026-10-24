@@ -607,13 +607,28 @@ export function createFormalGateway(config={}){
       if(req.method==='GET'&&route==='/pool'){
         // 平台自己的额度池：池子里有哪些额度、谁的额度被谁花了。
         // 池子的接口只认 harness 主体，所以这里用管理员 harness 的凭据读。
-        const pool=await call('/pool/status',undefined,config.adminTokenFile);
+        // 冷启动那一次要问三个 CLI 的名册（各 spawn 一次），10 秒不够 —— 超时了
+        // 办公室会以为「池子是空的」。
+        const pool=await call('/pool/status',undefined,config.adminTokenFile,undefined,30000);
         json(res,200,pool);return true;
+      }
+      if(req.method==='POST'&&route==='/pool/declaration'){
+        // 人给「CLI 自己说它能用」的模型定档：免费还是收费由人说了算。平台写进
+        // 声明（沿用同一家的调用约定）后重探一遍，立刻就能选。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/pool/declaration',{
+          cli:String(body.cli||''),
+          model:String(body.model||''),
+          tier:String(body.tier||''),
+        },undefined,'POST',30000);
+        json(res,200,result);return true;
       }
       if(req.method==='POST'&&route==='/pool/probe'){
         // 人点的「重新探一遍」：平台清掉发现缓存，重读一遍各家 CLI 的额度，
         // 回一份新的清单（新增的免费额度、变成收费的额度都要看得见）。
-        const pool=await call('/pool/probe',undefined,config.adminTokenFile,'POST');
+        const pool=await call('/pool/probe',undefined,config.adminTokenFile,'POST',30000);
         json(res,200,pool);return true;
       }
       if(req.method==='GET'&&route==='/messages'){

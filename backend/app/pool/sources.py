@@ -479,6 +479,18 @@ def _port_of(base_url: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def pool_config_write_path() -> Path:
+    """Where a **new** declaration is written: the data directory.
+
+    The read path (:func:`pool_config_path`) falls back to a historical
+    CWD-relative location so an old checkout keeps working.  A write must not
+    land there: the platform runs with the backend directory as its CWD, so the
+    declaration would end up inside the checkout instead of the data directory
+    the platform was pointed at.
+    """
+    return Path(settings.data_dir) / "pool" / "config.json"
+
+
 def _slot_key(slot: dict[str, Any]) -> tuple[str, str]:
     """A slot's identity: the CLI name and the model it spends."""
     return (str(slot.get("name") or "cli-slot"), str(slot.get("model") or "").strip())
@@ -653,6 +665,91 @@ def invalidate_rosters() -> None:
     is about.
     """
     _ENUM_ROSTER.clear()
+
+
+class PoolDeclarationError(ValueError):
+    """A model cannot be given a tier (unknown CLI, unknown model, bad tier)."""
+
+
+#: The fields a new slot **inherits** from the CLI's other slots: how to run
+#: that CLI.  A model is a different thing, not a different program.
+_SLOT_CONTRACT_FIELDS = (
+    "binary",
+    "args",
+    "prompt_via_stdin",
+    "file_arg",
+    "message_flag",
+    "timeout_seconds",
+    "store",
+    "catalogue",
+    "requires",
+)
+
+
+def declare_cli_model(
+    cli: str,
+    model: str,
+    tier: str,
+    *,
+    config_path: Path | None = None,
+    roster: list[str] | None = None,
+) -> dict[str, Any]:
+    """Give a model the CLI says it can run a tier (free / metered / reserve).
+
+    Three rules:
+
+    * **Only what the CLI itself lists** may be declared -- the platform does
+      not invent models.  (``roster`` is that list; ``None`` means "no
+      listing available", and the check is skipped rather than guessed.)
+    * **The tier is the human's call**: free or paid is a fact about the
+      account, not something the platform can sniff out.
+    * **The argv contract is inherited**: the new slot runs the CLI the same
+      way the CLI's other slots do -- a different contract would not run.
+    """
+    name = str(cli or "").strip()
+    model_name = str(model or "").strip()
+    tier_name = str(tier or "").strip().lower()
+    if not name or not model_name:
+        raise PoolDeclarationError("which CLI and which model must be named")
+    if tier_name not in CLI_TIERS:
+        raise PoolDeclarationError(
+            "the tier must be free, reserve or metered -- the platform will not "
+            "guess whether spending this quota costs money"
+        )
+    path = config_path or pool_config_write_path()
+    declared: list[dict[str, Any]] = []
+    document = _read_json(path) if path.exists() else {}
+    if isinstance(document, dict):
+        slots = document.get("cli_slots")
+        if isinstance(slots, list):
+            declared = [slot for slot in slots if isinstance(slot, dict)]
+    siblings = [slot for slot in _merge_slots(declared) if str(slot.get("name") or "") == name]
+    if not siblings:
+        raise PoolDeclarationError(f"the pool has no slot for {name}")
+    if roster is not None:
+        known = {str(entry).split("/")[-1] for entry in roster}
+        if model_name not in known:
+            raise PoolDeclarationError(
+                f"{name} does not list {model_name} itself -- the pool does not "
+                "offer models the CLI cannot run"
+            )
+    contract = {key: siblings[0][key] for key in _SLOT_CONTRACT_FIELDS if key in siblings[0]}
+    slot: dict[str, Any] = {"name": name, "model": model_name, "tier": tier_name}
+    slot.update(contract)
+    kept = [
+        entry
+        for entry in declared
+        if not (
+            str(entry.get("name") or "") == name
+            and str(entry.get("model") or "").strip() == model_name
+        )
+    ]
+    kept.append(slot)
+    payload = dict(document) if isinstance(document, dict) else {}
+    payload["cli_slots"] = kept
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return slot
 
 
 def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:

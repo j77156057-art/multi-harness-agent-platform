@@ -182,6 +182,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
     // 选择会被重画抹掉 —— 人挑好模型，过一会儿就没了。
     modelPicks: {},
     pool: null,
+    // 池子状态是什么时候读到的：定时刷新早发起、晚落地，**旧**的不能盖掉新的
+    // （否则刚定档的清单会被下一轮刷新抹掉）。
+    poolAt: 0,
     plan: null,
     status: null,
     scope: null,
@@ -1561,10 +1564,39 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return;
     }
     state.pool = fresh;
+    state.poolAt = Date.now();
     state.poolProbe = comparePool(fresh);
     savePoolSnapshot(fresh);
     state.error = null;
     render();
+  }
+
+  /**
+   * 给「CLI 自己说它能用、但没人定档」的模型定档。
+   *
+   * 免费还是收费是**人的事实**（账户里的事），平台猜不出来；所以这里只做一件事：
+   * 把人的判断写进池子的声明（沿用同一家的调用约定），然后重探一遍。
+   */
+  async function declareModel(button) {
+    const cli = String(button.dataset.cli || '');
+    const model = String(button.dataset.model || '');
+    const tier = String(button.dataset.tier || '');
+    button.disabled = true;
+    try {
+      const result = await api('/pool/declaration', { cli, model, tier });
+      if (result && result.pool) {
+        state.pool = result.pool;
+        state.poolAt = Date.now();
+        state.poolProbe = comparePool(result.pool);
+        savePoolSnapshot(result.pool);
+      }
+      state.error = null;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `没能定档：${String((error && error.message) || error)}`;
+      render();
+    }
   }
 
   /** 收费模型要人点头：问一次，答了才算。 */
@@ -1654,6 +1686,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const mode = pick ? pick.mode : info ? String(info.model_mode || 'cli') : 'cli';
     const modelId = pick ? pick.modelId : info ? String(info.model_id || '') : '';
     const models = (state.pool && state.pool.models) || [];
+    const rosters = (state.pool && state.pool.rosters) || {};
     const section = document.createElement('section');
     section.className = 'flat-spec flat-model';
     section.dataset.harness = harnessId;
@@ -1663,25 +1696,67 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <span>自带模型</span><span class="flat-model-hint">这个窗口自己的配置${
           info && info.model ? `（${escape(info.model)}）` : ''
         }</span></label>`;
-    const poolRows = [];
-    const counts = [];
-    for (const group of POOL_TIER_GROUPS) {
-      const items = models.filter((item) => String(item.tier || '') === group.tier);
-      if (!items.length) continue;
-      counts.push(`${group.title} ${items.length}`);
-      poolRows.push(
-        `<p class="flat-model-group">${escape(group.title)}（${items.length} 个）<span class="flat-model-hint">${escape(group.hint)}</span></p>`,
-      );
-      for (const item of items) {
-        const label = poolModelLabel(item);
-        poolRows.push(
-          `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
-            modelId === String(item.id) ? 'checked' : ''
-          }>
-            <span>${escape(label.label)}</span><em class="flat-model-mark is-${escape(group.tier)}">${escape(group.mark)}</em></label>`,
-        );
+    // 按**额度属主**分组：谁家的额度、谁家的模型 —— 摊平成一长串谁都看不清。
+    const groups = new Map();
+    const groupOf = (key) => {
+      if (!groups.has(key)) groups.set(key, { key, models: [], undeclared: [] });
+      return groups.get(key);
+    };
+    for (const item of models) {
+      const owner = String(item.upstream || item.owned_by || '');
+      const key = owner.split(':')[0] || owner;
+      groupOf(key).models.push(item);
+    }
+    for (const [cli, names] of Object.entries(rosters)) {
+      const group = groupOf(cli);
+      for (const name of names || []) {
+        const id = `${cli}/${String(name).split('/').pop()}`;
+        if (models.some((item) => String(item.id) === id)) continue;
+        group.undeclared.push({ id, name: String(name) });
       }
     }
+    const groupHtml = [...groups.values()]
+      .map((group) => {
+        const rows = [];
+        for (const item of group.models) {
+          const label = poolModelLabel(item);
+          const tier = String(item.tier || '');
+          const mark = POOL_TIER_GROUPS.find((entry) => entry.tier === tier);
+          rows.push(
+            `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
+              modelId === String(item.id) ? 'checked' : ''
+            }>
+              <span>${escape(label.label)}</span><em class="flat-model-mark is-${escape(tier)}">${escape(
+                mark ? mark.mark : '未知',
+              )}</em></label>`,
+          );
+        }
+        for (const entry of group.undeclared) {
+          // CLI 自己说它能用，但**没人说它免费还是收费** —— 平台不猜，所以不能选；
+          // 但人可以一句话定档（免费还是收费由人说了算）。
+          rows.push(
+            `<p class="flat-model-row is-undeclared"><span>${escape(entry.name)}</span>
+              <em class="flat-model-mark is-unknown">没定档</em>
+              <button type="button" data-act="declare-model" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="free">标成免费</button>
+              <button type="button" data-act="declare-model" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="metered">标成收费</button>
+            </p>`,
+          );
+        }
+        const label = group.key === 'user' ? '你自己的 key' : group.key;
+        const summary = `${label}（${group.models.length} 个可用${
+          group.undeclared.length ? ` · ${group.undeclared.length} 个它还能用但没定档` : ''
+        }）`;
+        return `<details class="flat-model-owner" data-fold="model-${escape(group.key)}"${
+          state.openFolds.has(`model-${group.key}`) ? ' open' : ''
+        }>
+          <summary>${escape(summary)}</summary>
+          ${rows.join('')}
+        </details>`;
+      })
+      .join('');
+    const undeclaredTotal = [...groups.values()].reduce((sum, group) => sum + group.undeclared.length, 0);
+    // 池子还没读到的时候别报「0 家」—— 那不是「池子是空的」，是「还在读」。
+    const poolPending = !state.pool;
     const picked = models.find((item) => String(item.id) === modelId);
     const current =
       mode === 'pool'
@@ -1694,9 +1769,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <details class="flat-model-list" data-fold="model-list"${
         state.openFolds.has('model-list') ? ' open' : ''
       }>
-        <summary>额度池里的模型（${models.length} 个${counts.length ? `：${escape(counts.join(' · '))}` : ''}）</summary>
-        <p class="flat-model-hint">每一档是额度**自己声明**的 —— 免费额度也可能改成收费。点「重新探一遍」重读一次，改了就告诉你。</p>
-        ${poolRows.join('')}
+        <summary>${
+          poolPending
+            ? '额度池里的模型（还在读…）'
+            : `额度池里的模型（${groups.size} 家 · ${models.length} 个可用${
+                undeclaredTotal ? ` · ${undeclaredTotal} 个还没定档` : ''
+              }）`
+        }</summary>
+        <p class="flat-model-hint">按额度属主分组：谁家的额度、谁家的模型。每一档是额度**自己声明**的 —— 免费额度也可能改成收费；点「重新探一遍」重读一次，改了就告诉你。</p>
+        ${groupHtml}
       </details>
       <p class="flat-model-actions">
         <button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button>
@@ -3747,6 +3828,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       void probePool();
       return;
     }
+    if (button.dataset.act === 'declare-model') {
+      void declareModel(button);
+      return;
+    }
     if (button.dataset.act === 'dismiss-error') {
       render();
       return;
@@ -4133,6 +4218,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 不自动选中第一条活：默认给人看**任务表**，点开哪条再看哪条
       // （会话式的用法：先看列表，再点进去）。
       render();
+      const poolReadAt = Date.now();
       const [availability, pool, plan, messages] = await Promise.all([
         api('/availability').catch(() => ({ availability: [] })),
         probed ? Promise.resolve(probed) : api('/pool').catch(() => null),
@@ -4142,7 +4228,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ]);
       state.availability = availability.availability || [];
       state.loaded = true;
-      state.pool = pool;
+      // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
+      // 写进去的更新鲜），就别用这份旧的盖上去。
+      if (poolReadAt >= state.poolAt) {
+        state.pool = pool;
+        state.poolAt = poolReadAt;
+      }
       if (probed) {
         // 探过了：把与上次的差别记下来（多了什么、谁换了档、谁还没定档）。
         state.poolProbe = comparePool(probed);

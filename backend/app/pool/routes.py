@@ -31,7 +31,7 @@ from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.routing import plan_attempt
 from app.pool.service import PoolError, PoolService, invalidate_discovery
-from app.pool.sources import invalidate_rosters
+from app.pool.sources import PoolDeclarationError, declare_cli_model, invalidate_rosters
 
 router = APIRouter(tags=["pool"])
 
@@ -129,6 +129,36 @@ def _pool_status(service: PoolService) -> dict[str, Any]:
 def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
     """The pool's state: the sources, the models, and who spent what."""
     return _pool_status(_service())
+
+
+@router.post("/pool/declaration")
+def pool_declaration(
+    body: dict[str, Any],
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """Give a model the CLI says it can run a tier.
+
+    The **human** decides: free or paid is a fact about the account, not
+    something the platform can sniff out.  The declaration reuses that CLI's
+    argv contract, and the pool is read again right away -- the model is
+    usable from then on (a paid one still needs a yes before it is spent).
+    """
+    cli = str(body.get("cli") or "").strip()
+    model = str(body.get("model") or "").strip()
+    tier = str(body.get("tier") or "").strip().lower()
+    service = _service()
+    try:
+        slot = declare_cli_model(
+            cli,
+            model,
+            tier,
+            roster=(service.rosters() or {}).get(cli),
+        )
+    except PoolDeclarationError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    invalidate_discovery()
+    invalidate_rosters()
+    return {"declaration": slot, "pool": _pool_status(_service())}
 
 
 @router.post("/pool/probe")
