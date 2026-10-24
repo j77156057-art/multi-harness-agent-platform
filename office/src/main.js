@@ -198,7 +198,7 @@ openingHost = mountOpeningHost({
 
 const projectWorkspace = mountProjectWorkspace({
   root: $('#aoLobby'),
-  members: memberCandidates.map((h) => ({ id: h.harness_id, name: h.name, role: 'Harness 成员', status: 'online' })),
+  members: memberCandidates.map((h) => ({ id: h.harness_id, name: h.name, role: '成员窗口', status: 'online' })),
   onOpenProject(project) {
     activeProject = project;
     openingHost?.setProjectContext(project.name);
@@ -224,7 +224,12 @@ const projectWorkspace = mountProjectWorkspace({
       ),
     ]);
     if (!office) {
-      office = mountFlatOffice({ root: $('#aoWorkspace'), project: () => activeProject });
+      office = mountFlatOffice({
+        root: $('#aoWorkspace'),
+        project: () => activeProject,
+        // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
+        onStart: () => openingHost.open(),
+      });
     } else {
       void office.refresh();
     }

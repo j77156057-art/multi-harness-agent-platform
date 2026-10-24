@@ -67,6 +67,9 @@
 
 .direct-empty { font-size: 12px; color: #8a94a0; }
 
+/* 已发出、还在等回话：让主人知道消息到了，不是在等它自己消失。 */
+.direct-waiting { padding: 0 20px 6px; font-size: 12px; color: #6b7684; }
+
 .direct-form {
   display: flex;
   gap: 8px;

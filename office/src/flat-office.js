@@ -160,7 +160,7 @@ function countBy(tasks) {
   return counts;
 }
 
-export function mountFlatOffice({ root, project: projectOf }) {
+export function mountFlatOffice({ root, project: projectOf, onStart }) {
   const state = {
     tasks: [],
     selected: null,
@@ -376,7 +376,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       </header>
       <div class="flat-dialog-list" id="flatAdminChatList"></div>
       <form class="flat-dialog-form" id="flatAdminChatForm">
-        <input type="text" id="flatAdminChatInput" placeholder="对管理员说一句话…" aria-label="给管理员的消息" />
+        <input type="text" id="flatAdminChatInput" placeholder="向管理员发送消息…" aria-label="给管理员的消息" />
         <button type="submit">发送</button>
       </form>`;
     document.body.append(dialog);
@@ -424,12 +424,12 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (!list) return;
     const adminId = adminIdentity();
     if (!adminId) {
-      list.innerHTML = '<p class="flat-empty">平台还没有配置管理员窗口，管理员 Agent 还没上线。</p>';
+      list.innerHTML = '<p class="flat-empty">平台尚未配置管理员窗口。</p>';
       return;
     }
     const { items: thread, started } = adminThread();
     if (!thread.length) {
-      list.innerHTML = '<p class="flat-empty">还没有和管理员说过话。发一条，它会出现在项目群里并 @ 到管理员。</p>';
+      list.innerHTML = '<p class="flat-empty">尚未与管理员沟通。发送的消息将出现在项目群聊中，并通知管理员。</p>';
       return;
     }
     const shown = thread.slice(-40);
@@ -789,7 +789,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
   function briefBody(brief) {
     const rows = briefTasks();
     if (!rows.length) {
-      return '<p class="flat-empty">还没有任务。管理员 Agent 细化之后，这里会给出任务书。</p>';
+      return '<p class="flat-empty">暂无任务。管理员细化之后，这里会给出任务书。</p>';
     }
     const done = rows.filter((r) => ['merged', 'approved', 'done'].includes(r.task.status)).length;
     const running = rows.filter((r) => ['claimed', 'in_progress', 'verifying', 'awaiting_review'].includes(r.task.status)).length;
@@ -1117,7 +1117,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       }, { at: 0, task: null });
       sentences.push(latest.task
         ? `今天这个项目还没有动静 —— 最新的一条是 ${timeAgo(latest.task.updated_at)}更新的。`
-        : '今天这个项目还没有动静 —— 这个项目还没有任务。');
+        : '今天这个项目尚无进展。');
     }
     if (working.length) {
       sentences.push(`现在 ${windows.size || working.length} 个窗口在干活。`);
@@ -1151,11 +1151,16 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ['claimed', 'in_progress', 'verifying'].includes(String(task.status)),
     ).length;
     // 主角是"现在该干什么"，不是"一共有多少条"。所以先说人话，再给数字。
+    // 一个任务都没有的项目：顶部这句话就是**唯一的路标** —— 说清现在是什么，
+    // 再说清第一步点哪里。空项目下还说「左边是所有正在做的事」是骗人的：那里一条都没有。
+    const emptyProject = !(state.tasks || []).length;
     const guide = waitingOnMe
       ? `有 <b>${waitingOnMe}</b> 件事在等你处理${working ? `，另有 ${working} 件正在做` : ''}。点开就能看。`
       : working
         ? `有 <b>${working}</b> 件正在做${counts.done ? `，${counts.done} 件已经完成` : ''}。没有要你处理的事。`
-        : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
+        : emptyProject
+          ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
+          : '这个项目里没有要你处理的事。左边是所有正在做的事，点一条看详情。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
@@ -1225,6 +1230,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
 
     const list = document.createElement('section');
     list.className = 'flat-tasks';
+    // 一条任务都没有时，「全部 / 等人接 / 正在做 / 按人 / 排序 / 每页」全是**没有对象的
+    // 开关**：第一次用的人一进来先面对八个按钮，却不知道该按哪个。没有活可筛就收起来。
+    const hasAnyTask = (state.tasks || []).length > 0;
     const bar = document.createElement('div');
     bar.className = 'flat-taskbar';
     const filters = document.createElement('div');
@@ -1307,14 +1315,14 @@ export function mountFlatOffice({ root, project: projectOf }) {
     tools.append(viewWrap, sortWrap);
     bar.append(tools);
 
-    list.append(bar);
+    if (hasAnyTask) list.append(bar);
 
     if (!filtered.length) {
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
-      empty.textContent = state.tasks.length
+      empty.textContent = hasAnyTask
         ? '这个筛选下没有任务。'
-        : '本项目还没有任务。去顶栏的「开工配置」写一句你要做的事，管理员会把它拆成任务分派下去。'
+        : '当前项目还没有任务。'
       list.append(empty);
     }
 
@@ -1353,7 +1361,8 @@ export function mountFlatOffice({ root, project: projectOf }) {
         <span>${state.page} / ${pager.pages}</span>
         <button type="button" data-act="page-next" ${state.page >= pager.pages ? 'disabled' : ''}>下一页</button>
       </span>`;
-    list.append(pagerBar);
+    // 没有东西可翻的时候，这一行只剩「第 0–0 条，共 0 条」和两个点不动的按钮。
+    if (hasAnyTask) list.append(pagerBar);
 
     wrap.append(list, detail());
     return wrap;
@@ -1365,8 +1374,27 @@ export function mountFlatOffice({ root, project: projectOf }) {
     if (!state.selected) {
       const hint = document.createElement('p');
       hint.className = 'flat-empty';
-      hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
+      if ((state.tasks || []).length) {
+        hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
+        panel.append(hint);
+        return panel;
+      }
+      // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的地方。
+      // 原来这里写「选一条任务看……」—— 可一条都没有，等于让人去找不存在的东西。
+      // 改成：说清这一栏将来会出现什么，再给一个能点的下一步。
+      hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
       panel.append(hint);
+      const start = document.createElement('button');
+      start.type = 'button';
+      start.className = 'flat-start';
+      start.dataset.act = 'start-project';
+      start.textContent = '配置目标';
+      panel.append(start);
+      const note = document.createElement('p');
+      note.className = 'flat-note';
+      // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
+      note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
+      panel.append(note);
       return panel;
     }
     const task = state.selected;
@@ -2124,7 +2152,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
       modelsByUpstream.get(key).push(model);
     }
     if (!upstreams.length) {
-      return '<section class="flat-card"><h3>额度池</h3><p class="flat-empty">池子现在是空的。</p></section>';
+      return '<section class="flat-card"><h3>额度池</h3><p class="flat-empty">暂无额度来源记录。</p></section>';
     }
     const items = upstreams.map((source) => {
       const name = source.name || '?';
@@ -2495,20 +2523,20 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ${askCard()}
       ${waitingCard()}
       <section class="flat-card flat-card-brief">
-        <h3>${cardIcon('brief')}要做的事</h3>
+        <h3>${cardIcon('brief')}待办事项</h3>
         ${brief.planId
           ? `<p><b>${escape(brief.title)}</b></p>
              <p class="flat-note">${(state.tasks || []).length} 件事${unclaimed.length ? `（${unclaimed.length} 件还没人接）` : ''}</p>
              <button type="button" data-act="open-brief">看全部要做的事</button>`
           : `<p class="flat-note">${(state.tasks || []).length} 件事</p>
-             <p class="flat-empty">还没有方案正文。</p>`}
+             <p class="flat-empty">暂无方案正文。</p>`}
       </section>
       <section class="flat-card flat-card-members">
-        <h3>${cardIcon('people')}成员</h3>
+        <h3>${cardIcon('people')}成员求助</h3>
         ${helps.length
           ? `<p class="flat-note">${helps.length} 条求助待处理</p>
              <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span></li>`).join('')}</ul>`
-          : '<p class="flat-empty">没有待处理的求助。</p>'}
+          : '<p class="flat-empty">暂无待处理求助。</p>'}
         <button type="button" data-act="open-members">看成员表现</button>
       </section>
       <section class="flat-card flat-card-admin">
@@ -2516,9 +2544,9 @@ export function mountFlatOffice({ root, project: projectOf }) {
         ${admin
           ? `<p><b>${escape(admin)}</b></p>
              <p class="flat-note">${!started
-               ? '你还没找过管理员。发一条，他会看到。'
+               ? '尚未与管理员沟通。发送一条消息，管理员即可收到。'
                : thread.length
-                 ? `这轮对话 ${thread.length} 条。`
+                 ? `本轮对话 ${thread.length} 条。`
                  : '还没说过话。发一条，管理员就看到了。'}</p>
              <button type="button" data-act="open-admin-chat">打开对话</button>
              <button type="button" data-act="open-direct-window">开私聊窗口</button>`
@@ -2527,15 +2555,15 @@ export function mountFlatOffice({ root, project: projectOf }) {
       ${poolCard()}
       <section class="flat-card flat-card-fold">
         <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
-          <summary>现在能干活的人 · ${usable.length} 个</summary>
+          <summary>可执行成员 · ${usable.length} 个</summary>
           <ul class="flat-list">${usable
             .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
-            .join('') || '<li class="flat-empty">现在没有能干活的人。</li>'}</ul>
+            .join('') || '<li class="flat-empty">暂无可执行成员窗口：请在顶部「开工配置」中指定管理员与成员。</li>'}</ul>
         </details>
-        <button type="button" data-act="open-outputs" title="另开一个窗口，看每个窗口做完活之后都说了什么">看他们说了什么</button>
+        <button type="button" data-act="open-outputs" title="另开一个窗口，查看各成员的执行输出">查看成员输出</button>
       </section>
       <section class="flat-card">
-        <h3>${cardIcon('stamp')}等我批准的方案</h3>
+        <h3>${cardIcon('stamp')}待批准的方案</h3>
         ${plan
           ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
              <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
@@ -2544,7 +2572,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
              )}</p>
              <button type="button" data-act="approve-plan">批准，开始做</button>
              <button type="button" data-act="reject-plan" title="驳回这份方案：退回给管理员，改一版再来找你">驳回方案</button>`
-          : '<p class="flat-empty">没有等你批准的方案。</p>'}
+          : '<p class="flat-empty">暂无待批准的方案。</p>'}
       </section>`;
     return wrap;
   }
@@ -2708,7 +2736,7 @@ export function mountFlatOffice({ root, project: projectOf }) {
     form.className = 'flat-chat-form';
     const input = document.createElement('input');
     input.type = 'text';
-    input.placeholder = '在项目群里说一句话（写 @管理员 会真的向他提醒）';
+    input.placeholder = '在项目群聊中发言（@ 管理员将直接通知管理员）';
     input.setAttribute('aria-label', '群聊消息');
     input.dataset.draft = 'chat';
     const send = document.createElement('button');
@@ -2904,6 +2932,11 @@ export function mountFlatOffice({ root, project: projectOf }) {
     }
     if (button.dataset.act === 'dismiss-error') {
       render();
+      return;
+    }
+    if (button.dataset.act === 'start-project') {
+      // 空项目里的那一步：把第一次用的人直接送到「开工配置」（写一句要做的事）。
+      onStart?.();
       return;
     }
     if (button.dataset.act === 'page-prev') {

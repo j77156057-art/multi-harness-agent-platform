@@ -63,12 +63,15 @@ function render() {
   const id = adminId();
   const name = adminName();
   const thread = directMessages();
+  // 最后一条是我自己发的、还没人回 → 说一句「在等」。管理员回话要过一次模型（慢），
+  // 不说的话，主人只看到自己那条消息挂着，会以为消息丢了。
+  const waitingForReply = Boolean(thread.length) && thread[thread.length - 1].sender_type === 'human';
   root.innerHTML = `
     <div class="direct-shell">
       <header class="direct-head">
         <h1>${name ? `与 ${escape(name)} 的私聊` : '私聊'}</h1>
         <p>${id ? `收件人：<b>${escape(id)}</b>` : '平台还没有配置管理员窗口。'}</p>
-        <p class="direct-note">这是<b>定向消息</b>：只有你和管理员看得到，群里其他成员读不到（平台按消息的收件人过滤）。管理员要回你，得用同样的定向消息发回来。</p>
+        <p class="direct-note">这是<b>定向消息</b>：仅您与管理员可见，其他成员无法读取（平台按收件人过滤）。管理员的回复同样以定向消息发送。</p>
       </header>
       <div class="direct-list" id="directList">
         ${
@@ -84,12 +87,13 @@ function render() {
                   </article>`;
                 })
                 .join('')
-            : '<p class="direct-empty">还没有私聊。发一条，只有你和管理员看得到。</p>'
+            : '<p class="direct-empty">暂无对话记录。发送的消息仅您与管理员可见。</p>'
         }
       </div>
+      ${waitingForReply ? '<p class="direct-waiting">消息已送达，正在等待管理员回复。管理员可能正在处理其他任务，回复需经过一次模型调用，存在一定延迟。</p>' : ''}
       ${state.error ? `<p class="direct-error">${escape(state.error)}</p>` : ''}
       <form class="direct-form" id="directForm">
-        <input type="text" id="directInput" placeholder="对管理员说一句话（只有你们俩看得到）" aria-label="私聊消息" />
+        <input type="text" id="directInput" placeholder="向管理员发送消息（仅双方可见）" aria-label="私聊消息" />
         <button type="submit" ${id ? '' : 'disabled'}>发送</button>
       </form>
     </div>`;
