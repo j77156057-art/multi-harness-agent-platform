@@ -10,8 +10,8 @@
 真相源引用：R10 §19（群聊与定向消息）、§22（群主只说目标，管理员细化并分派）；
 `backend/app/adapter/service.py` 侧的 availability（谁现在能用、用哪个模型、上一次在干什么）；
 `office/src/flat-office.js`（办公室界面）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done（实现完成，待合入 main）
-commit：`e9a5abe`
+当前状态：done（已合入 main：`08b1425`）
+commit：`e9a5abe`（实现）+ `c7a653d`（空项目按钮与既有冒烟）+ `370f0ef`（按钮收紧）；合入 main 的 merge commit：`08b1425`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-027
 
