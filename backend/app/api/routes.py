@@ -15,7 +15,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.adapter import cli_output
+from app.adapter import cli_output, model_choice
 from app.adapter.dispatch import dispatch, eligible_tasks
 from app.adapter.models import configured_model
 from app.adapter.protocol import HarnessRegistration
@@ -632,6 +632,9 @@ def availability(
                 "model": model["model"],
                 "model_alias": model.get("model_alias"),
                 "model_source": model["source"],
+                # 人给这个窗口指定的模型来源（自带 / 额度池里的哪个模型）。
+                "model_mode": str(row.get("model_mode") or "cli"),
+                "model_id": str(row["model_id"]) if row.get("model_id") else None,
                 "degraded": degraded,
                 "last_probe_at": probe["created_at"] if probe else None,
                 "warnings": [
@@ -655,6 +658,54 @@ def availability(
             }
         )
     return {"availability": entries}
+
+
+def _pool_model_ids() -> set[str]:
+    """额度池现在有哪些模型（id 集合）。
+
+    池子是活的：额度会下线、配置会改。**读不到**就返回空集 —— 空集表示「查不到」，
+    不是「一个模型都没有」，所以调用方不要拿它当「池子空了」来拒绝人。
+    """
+    from app.pool.service import PoolService  # local import: keeps the module cycle out
+
+    try:
+        return {str(entry.get("id")) for entry in PoolService().models()}
+    except Exception:
+        return set()
+
+
+@adapter.post("/model-selection")
+def set_model_selection(
+    body: schemas.ModelSelectionRequest,
+    database: DatabaseDep,
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """人给某个窗口指定用哪个模型；下一轮这个窗口干活时，平台照办。
+
+    权限复用 ``harness:register``（人可用）：这是**人**对部署的决定，harness 令牌
+    改它一律 403（harness 改自己的模型 = 自己给自己批额度）。
+
+    存之前先核对池子里有没有这个模型：存下一个池子里没有的模型，只会让界面显示
+    「已保存」而下一轮悄悄回落 —— 那比当场拒绝更坏。
+    """
+    if body.model_mode == "pool":
+        available = _pool_model_ids()
+        if available and body.model_id not in available:
+            raise ApiError(
+                "request.invalid",
+                400,
+                f"the pool has no model named {body.model_id} right now",
+            )
+    try:
+        choice = model_choice.save_choice(
+            database,
+            harness_id=body.harness_id,
+            model_mode=body.model_mode,
+            model_id=body.model_id,
+        )
+    except model_choice.ModelChoiceError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    return {"selection": choice.as_dict()}
 
 
 @adapter.get("/list_ready_tasks")

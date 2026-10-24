@@ -25,7 +25,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.auth_deps import Principal, require_for
+from app.adapter import model_choice
+from app.api.auth_deps import DatabaseDep, Principal, require_for
 from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.routing import plan_attempt
@@ -175,6 +176,7 @@ def pool_responses(
 @router.get("/pool/plan")
 def pool_plan(
     principal: _guard("harness:pool"),
+    database: DatabaseDep,
     task_id: str,
     harness_id: str,
     attempt_no: int = 0,
@@ -182,13 +184,15 @@ def pool_plan(
     """Where should this attempt's model calls go?
 
     The worker asks before it runs; the platform answers, because the platform
-    is the one that knows what failed and which quota is alive.
+    is the one that knows what failed and which quota is alive -- and what the
+    human chose for this window.
     """
     return plan_attempt(
         task_id,
         harness_id=harness_id,
         attempt_no=attempt_no,
         pool=_service(),
+        selection=model_choice.read_choice(database, harness_id),
     )
 
 

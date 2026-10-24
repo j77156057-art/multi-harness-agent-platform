@@ -26,7 +26,7 @@ import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state
 // 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
 // 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
 import { humanize, summarize, translated } from './wording.js';
-import { headlineText, parseTranscript, readableText } from './cli-transcript.js';
+import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 
 const escape = escapeHtml;
@@ -288,7 +288,13 @@ export function mountFlatOffice({ root, project: projectOf, onStart }) {
         : {}),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+    if (!response.ok) {
+      const detail = data && typeof data.error === 'object' ? data.error : null;
+      const text = detail
+        ? [detail.code, detail.message].filter(Boolean).join('：')
+        : String(data.error || `请求失败（${response.status}）`);
+      throw new Error(text);
+    }
     return data;
   };
 
@@ -1388,6 +1394,114 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
+   * 额度池里一个模型怎么念给人听。
+   *
+   * 池子里的模型 id 是给机器看的（`opencode-cli/opencode/beam-free`），人要的是
+   * 「**哪家的什么模型**」—— 所以从额度名（`upstream`，形如 `qoder:Qwen3.8-Flash`）
+   * 里切出那家 harness，剩下的就是它内部模型的名字。
+   */
+  function poolModelLabel(entry) {
+    const id = String((entry && entry.id) || '');
+    const owner = String((entry && (entry.upstream || entry.owned_by)) || '');
+    const head = owner.split(':')[0] || owner;
+    const prefixed = head && id.toLowerCase().startsWith(`${head.toLowerCase()}/`);
+    const model = prefixed ? id.slice(head.length + 1) : id;
+    if (String((entry && entry.tier) || '') === 'user') {
+      return { harness: '你自己的 key', model, label: `你自己的 key 的 ${model}` };
+    }
+    return { harness: head, model, label: head ? `${head} 的 ${model}` : model };
+  }
+
+  // 额度池的档位，按人看的顺序：先不花钱的，再花钱的，最后是兜底与自己掏钱的。
+  const POOL_TIER_GROUPS = [
+    { tier: 'free', title: '免费额度', hint: '不额外花钱：用的是各家 CLI 自带的免费额度。' },
+    { tier: 'metered', title: '付费额度', hint: '按量计费：每调用一次都花钱。' },
+    { tier: 'reserve', title: '兜底额度', hint: '订阅里的额度：平台不会自己花它，你点名才用。' },
+    { tier: 'user', title: '你自己的 key', hint: '你自己的 API key：平台不会自己花，要你先点头。' },
+  ];
+
+  /**
+   * 这个窗口用哪个模型 —— **能选，选了平台照办**。
+   *
+   * 两个来源：**自带**（这个窗口自己的 CLI 配置里那个）与**额度池**（池子里的某个
+   * 模型，写清楚是哪家的什么模型、属于哪一档额度）。选完存进平台的登记，下一轮
+   * 这个窗口干活时平台就按它安排 —— 不是列出来给人看而已。
+   */
+  function modelChoiceBlock(harnessId) {
+    const info = (state.availability || []).find((item) => item.harness_id === harnessId) || null;
+    const mode = info ? String(info.model_mode || 'cli') : 'cli';
+    const modelId = info ? String(info.model_id || '') : '';
+    const models = (state.pool && state.pool.models) || [];
+    const section = document.createElement('section');
+    section.className = 'flat-spec flat-model';
+    const rows = [];
+    rows.push(
+      `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="cli" ${mode === 'pool' ? '' : 'checked'}>
+        <span>自带模型</span><span class="flat-model-hint">这个窗口自己的配置${
+          info && info.model ? `（${escape(info.model)}）` : ''
+        }</span></label>`,
+    );
+    for (const group of POOL_TIER_GROUPS) {
+      const items = models.filter((item) => String(item.tier || '') === group.tier);
+      if (!items.length) continue;
+      rows.push(
+        `<p class="flat-model-group">${escape(group.title)}（${items.length} 个）<span class="flat-model-hint">${escape(group.hint)}</span></p>`,
+      );
+      for (const item of items) {
+        const label = poolModelLabel(item);
+        rows.push(
+          `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
+            modelId === String(item.id) ? 'checked' : ''
+          }>
+            <span>${escape(label.label)}</span></label>`,
+        );
+      }
+    }
+    const picked = models.find((item) => String(item.id) === modelId);
+    const current =
+      mode === 'pool'
+        ? `额度池：${picked ? poolModelLabel(picked).label : modelId || '（选中的模型已不在池子里）'}`
+        : `自带模型${info && info.model ? `（${info.model}）` : ''}`;
+    section.innerHTML = `<h3>它用哪个模型</h3>
+      <p class="flat-note">当前：${escape(current)}</p>
+      <div class="flat-model-list">${rows.join('')}</div>
+      <p class="flat-model-actions"><button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button></p>`;
+    return section;
+  }
+
+  /**
+   * 把「这个窗口用哪个模型」存到平台，然后读回来重画。
+   *
+   * 保存失败要说清楚是哪一步没成 —— 人以为已经换了模型，下一轮却在用旧的，
+   * 那比报错更糟。
+   */
+  async function saveModelChoice(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const pane = button.closest('.flat-model');
+    const picked = pane ? pane.querySelector('input[name="flatModelMode"]:checked') : null;
+    const mode = picked && picked.value === 'pool' ? 'pool' : 'cli';
+    const modelId = mode === 'pool' ? String((picked && picked.dataset.modelId) || '') : '';
+    button.disabled = true;
+    try {
+      await api('/model-selection', {
+        harness_id: harnessId,
+        model_mode: mode,
+        model_id: modelId,
+      });
+      const availability = await api('/availability').catch(() => null);
+      if (availability && Array.isArray(availability.availability)) {
+        state.availability = availability.availability;
+      }
+      state.error = null;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `模型选择没有保存：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
+/**
    * 一个窗口的状态页：现在在做什么、手上有几件活、进度、上一次干了什么。
    *
    * 数据都是现成的：availability（在线/模型/能不能接活/上一轮）、tasks（手上的活）、
@@ -1576,6 +1690,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-note">这些是平台用量账里的数：每秒生成 = 生成 token ÷ 生成耗时；命中率 = 缓存读到的 token ÷ 输入 token。数不到就写「没数到」，不写 0。</p>`;
       panel.append(box);
     }
+
+    // 它用哪个模型：自带，还是额度池里的某个模型。选了就照办。
+    panel.append(modelChoiceBlock(harnessId));
 
     // 它的轨迹：平台事件里 actor 是它的那几条。
     const trace = (state.events || [])
@@ -2445,7 +2562,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                .join('')}</ul>`
           : '<p class="flat-empty">它还没输出过东西。</p>'
       }
-      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(stdout.slice(-4000)) + '</pre></details>' : ''}
+      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(shortenPath(stdout.slice(-4000))) + '</pre></details>' : ''}
     </section>`;
   }
 
@@ -2459,7 +2576,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function recentSteps(stdout, limit = 8) {
     const lines = String(stdout || '')
       .split(/\r?\n/)
-      .map((line) => line.trim())
+      // 绝对路径压成短形式：人要的是「在哪儿做了什么」，不是那条路径。
+      .map((line) => shortenPath(line).trim())
       .filter(Boolean);
     return foldRepeats(lines, (line) => line).slice(-limit);
   }
@@ -3358,6 +3476,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (state.error) {
       state.error = null;
       render();
+    }
+    if (button.dataset.act === 'save-model-choice') {
+      void saveModelChoice(button);
+      return;
     }
     if (button.dataset.act === 'dismiss-error') {
       render();

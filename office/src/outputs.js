@@ -10,7 +10,7 @@
 import './outputs.css';
 import { DONE_STATES, FAILED_STATES, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
-import { headlineText, parseTranscript, readableText } from './cli-transcript.js';
+import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
@@ -143,17 +143,17 @@ function words(task, attempt) {
     return `
       <div class="outputs-said">
         <div class="outputs-said-head">它最后说了</div>
-        <pre class="outputs-words">${escape(head.text || '（这段里没有可读的文字）')}</pre>
+        <pre class="outputs-words">${escape(shortenPath(head.text) || '（这段里没有可读的文字）')}</pre>
         ${
           head.rest
-            ? `<details class="outputs-more-block"><summary>它还写了 ${head.rest} 行</summary><pre class="outputs-words">${escape(head.restText)}</pre></details>`
+            ? `<details class="outputs-more-block"><summary>它还写了 ${head.rest} 行</summary><pre class="outputs-words">${escape(shortenPath(head.restText))}</pre></details>`
             : ''
         }
         ${steps.length ? `<div class="outputs-said-head">它做了什么（最近 ${steps.length} 步）</div><ul class="flat-list outputs-tools">${steps.map((tool) => `<li><span>${escape(tool.label)}</span></li>`).join('')}</ul>` : ''}
-        ${others.length ? `<details class="outputs-more-block"><summary>它之前还说了 ${others.length} 段</summary>${others.map((item) => `<pre class="outputs-words">${escape(readableText(item.text))}</pre>`).join('')}</details>` : ''}
-        ${raw.trim() ? `<details class="outputs-more-block"><summary>看原始记录（机器日志）</summary><pre class="outputs-raw">${escape(raw)}</pre></details>` : ''}
+        ${others.length ? `<details class="outputs-more-block"><summary>它之前还说了 ${others.length} 段</summary>${others.map((item) => `<pre class="outputs-words">${escape(shortenPath(readableText(item.text)))}</pre>`).join('')}</details>` : ''}
+        ${raw.trim() ? `<details class="outputs-more-block"><summary>看原始记录（机器日志）</summary><pre class="outputs-raw">${escape(shortenPath(raw))}</pre></details>` : ''}
       </div>
-      ${stderr.trim() ? `<div class="outputs-said-head">它报的错</div><pre class="outputs-err">${escape(readableText(stderr))}</pre>` : ''}`;
+      ${stderr.trim() ? `<div class="outputs-said-head">它报的错</div><pre class="outputs-err">${escape(shortenPath(readableText(stderr)))}</pre>` : ''}`;
   }
 
   const plain = stdout || String(attempt.stdout_tail || '');
@@ -169,9 +169,9 @@ function words(task, attempt) {
     clipped = true;
   }
   return `
-    <pre class="outputs-words ${clipped ? 'is-clipped' : ''}">${escape(shown || '（它什么也没输出）')}</pre>
+    <pre class="outputs-words ${clipped ? 'is-clipped' : ''}">${escape(shortenPath(shown) || '（它什么也没输出）')}</pre>
     ${long ? `<button type="button" class="outputs-more" data-more="${escape(key)}">${expanded ? '收起' : `展开全部 ${lines.length} 行`}</button>` : ''}
-    ${stderr.trim() ? `<pre class="outputs-err">${escape(stderr)}</pre>` : ''}`;
+    ${stderr.trim() ? `<pre class="outputs-err">${escape(shortenPath(stderr))}</pre>` : ''}`;
 }
 
 /**
