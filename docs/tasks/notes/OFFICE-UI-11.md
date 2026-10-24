@@ -11,8 +11,8 @@
 `office/contributions/office-opening-phone/office-opening-phone.js`（锁定组件，只读）、
 R10 §22（群主只说目标，管理员细化并分派）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done（实现完成，待合入 main）
-commit：`bb69e1a`（向导措辞）+ `34e871f`（右栏成员说明）
+当前状态：done（已合入 main：`08e08de`）
+commit：`bb69e1a`（向导措辞）+ `34e871f`（右栏成员说明）；合入 main 的 merge commit：`08e08de`
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-026
 
