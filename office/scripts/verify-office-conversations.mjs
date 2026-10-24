@@ -169,6 +169,18 @@ const responses = {
     inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
   },
   '/plan': { plans: [], draft: null },
+  '/pool/probe': {
+    upstreams: [],
+    models: [
+      { id: 'qoder/Qwen3.8-Flash', owned_by: 'qoder:Qwen3.8-Flash', upstream: 'qoder:Qwen3.8-Flash', protocol: 'cli', tier: 'free' },
+      { id: 'codebuddy/hy3', owned_by: 'codebuddy:hy3', upstream: 'codebuddy:hy3', protocol: 'cli', tier: 'free' },
+      { id: 'gpt-5.6', owned_by: 'codex:geekspace', upstream: 'codex:geekspace', protocol: 'openai_responses', tier: 'metered' },
+    ],
+    usage: { upstreams: {}, consumers: {}, requests: 0, tokens_unknown: 0 },
+    timeline: { bucket: 'hour', hours: 24, buckets: [] },
+    inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
+    rosters: { codebuddy: ['hy3', 'step-5-preview'] },
+  },
   '/model-selection': {
     selection: { harness_id: MEMBER, model_mode: 'pool', model_id: 'qoder/Qwen3.8-Flash', updated_at: '2026-10-24T11:00:00Z' },
   },
@@ -346,6 +358,25 @@ try {
   await page.waitForTimeout(1200);
   const modelBlock = page.locator('#aoWorkspace .flat-model');
   assert.equal(await modelBlock.count(), 1, '窗口页有「它用哪个模型」这一块');
+  const modelDetails = modelBlock.locator('details.flat-model-list');
+  assert.equal(await modelDetails.count(), 1, '池子里的模型是一个可折叠的清单');
+  assert.equal(
+    await modelDetails.evaluate((el) => el.open),
+    false,
+    '清单默认折着（二十几个模型铺开太长）',
+  );
+  const modelSummary = await modelDetails.locator('summary').innerText();
+  console.log('清单标题:', modelSummary);
+  assert.ok(modelSummary.includes('免费额度 2'), '标题写明每档几个（免费 2）');
+  assert.ok(modelSummary.includes('付费额度 1'), '标题写明每档几个（付费 1）');
+  assert.equal(
+    await modelBlock.locator('button[data-act="probe-pool"]').count(),
+    1,
+    '有「重新探一遍」这个探针',
+  );
+  // 展开才看得到每一条：写清「哪家的什么模型」+ 它属于哪一档。
+  await modelDetails.locator('summary').click();
+  await page.waitForTimeout(600);
   const modelText = await modelBlock.innerText();
   console.log('模型选择:', modelText.replace(/\n+/g, ' | ').slice(0, 320));
   assert.ok(modelText.includes('自带模型'), '有「自带模型」这一项');
@@ -353,6 +384,8 @@ try {
   assert.ok(modelText.includes('付费额度'), '额度池按档分开了（付费额度）');
   assert.ok(modelText.includes('qoder 的 Qwen3.8-Flash'), '写清是哪家的什么模型（免费档）');
   assert.ok(modelText.includes('codex 的 gpt-5.6'), '写清是哪家的什么模型（付费档）');
+  assert.ok(modelText.includes('免费'), '每一条都标了它属于哪一档');
+  assert.ok(modelText.includes('付费'), '收费的那一条也标出来了');
   await modelBlock.locator('input[data-model-id="qoder/Qwen3.8-Flash"]').check();
   await modelBlock.locator('button[data-act="save-model-choice"]').click();
   await page.waitForTimeout(1500);
@@ -361,6 +394,28 @@ try {
   assert.equal(saved.body.harness_id, MEMBER, '保存的是这个窗口');
   assert.equal(saved.body.model_mode, 'pool', '保存的是「走额度池」');
   assert.equal(saved.body.model_id, 'qoder/Qwen3.8-Flash', '保存的是被选中的那个模型');
+  assert.equal(saved.body.paid_consent, false, '免费模型不用点头');
+
+  // 9. 收费模型：保存前要问一句，点头之后才发。
+  await modelBlock.locator('input[data-model-id="gpt-5.6"]').check();
+  await modelBlock.locator('button[data-act="save-model-choice"]').click();
+  await page.waitForTimeout(900);
+  const paidDialog = page.locator('#flatPaidModel');
+  assert.equal(await paidDialog.count(), 1, '收费模型保存前要弹确认');
+  assert.ok((await paidDialog.innerText()).includes('按量计费'), '确认框说清要花钱');
+  await paidDialog.locator('button[data-paid="yes"]').click();
+  await page.waitForTimeout(1500);
+  const paid = posted.find((item) => item.path === '/model-selection' && item.body.paid_consent);
+  assert.ok(paid, '点头之后才带 paid_consent 发出去');
+  assert.equal(paid.body.model_id, 'gpt-5.6', '点的是哪个模型就是哪个');
+
+  // 10. 探针：点了就重新探一遍，平台清缓存重读。
+  await modelBlock.locator('button[data-act="probe-pool"]').click();
+  await page.waitForTimeout(1500);
+  assert.ok(
+    posted.some((item) => item.path === '/pool/probe'),
+    '探针真的发到了平台',
+  );
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');

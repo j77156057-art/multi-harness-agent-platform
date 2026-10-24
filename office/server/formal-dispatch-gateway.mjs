@@ -610,6 +610,12 @@ export function createFormalGateway(config={}){
         const pool=await call('/pool/status',undefined,config.adminTokenFile);
         json(res,200,pool);return true;
       }
+      if(req.method==='POST'&&route==='/pool/probe'){
+        // 人点的「重新探一遍」：平台清掉发现缓存，重读一遍各家 CLI 的额度，
+        // 回一份新的清单（新增的免费额度、变成收费的额度都要看得见）。
+        const pool=await call('/pool/probe',undefined,config.adminTokenFile,'POST');
+        json(res,200,pool);return true;
+      }
       if(req.method==='GET'&&route==='/messages'){
         const sinceRaw=url.searchParams.get('since_seq')||'0';
         const limitRaw=url.searchParams.get('limit')||'100';

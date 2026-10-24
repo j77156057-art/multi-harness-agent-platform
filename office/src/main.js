@@ -66,6 +66,7 @@ app.innerHTML = `
     <div class="ao-topbar-actions">
       <span class="ao-conn" id="aoConn"><i></i><span>正在连接平台…</span></span>
       <button class="ao-btn" id="aoStartBtn" type="button" hidden>开工配置</button>
+      <button class="ao-btn" id="aoRefreshBtn" type="button" title="重新读平台的数据，并重新探一遍额度池">刷新</button>
       <span id="aoTopActions" class="ao-topbar-actions"></span>
       <button class="ao-btn" id="aoLobbyBtn" type="button">项目列表</button>
       <span class="ao-user" title="你就是群主：项目里的事都由你拍板">群主</span>
@@ -77,6 +78,12 @@ app.innerHTML = `
   </main>
   <div id="aoOpening"></div>
 `;
+
+// 顶栏的「刷新」：重读平台的数据，**并**重新探一遍额度池 ——
+// 新增的免费额度、变成收费的额度，都要人知道。
+$('#aoRefreshBtn')?.addEventListener('click', () => {
+  void office?.refresh?.({ probe: true });
+});
 
 const connection = $('#aoConn');
 if (status?.connected) {

@@ -1857,14 +1857,54 @@
 .flat-userkeys-form [data-userkey-error] { margin: 0; color: #b03a3a; }
 /* 窗口页的「它用哪个模型」：一行一个选项，写清楚是哪家的什么模型。 */
 .flat-model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: block;
   margin: 8px 0;
-  /* 池子里有二十几个模型：清单再长也不能把整页挤走（自己滚）。 */
-  max-height: 360px;
-  overflow-y: auto;
-  padding-right: 4px;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+
+/* 清单是折着的：二十几个模型铺开会把整页挤走，要看才展开。 */
+.flat-model-list > summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: revert;
+}
+
+.flat-model-list[open] > summary {
+  margin-bottom: 6px;
+}
+
+.flat-model-mark {
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-style: normal;
+  color: #fff;
+  background: rgba(127, 127, 127, 0.55);
+}
+
+.flat-model-mark.is-free {
+  background: #2f7d4f;
+}
+
+.flat-model-mark.is-metered {
+  background: #a4552a;
+}
+
+.flat-model-mark.is-reserve {
+  background: #4a5f8a;
+}
+
+.flat-model-mark.is-user {
+  background: #6a4a8a;
+}
+
+.flat-model-probe {
+  margin-left: 8px;
+  color: rgba(160, 160, 160, 0.95);
+  font-size: 12px;
 }
 
 .flat-model-group {

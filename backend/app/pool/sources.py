@@ -94,6 +94,10 @@ DEFAULT_CLI_SLOTS = (
         # with the same argv contract; the roster is re-listed on a TTL, so
         # the pool adjusts when opencode adds or retires a free model.
         "enumerate": {"args": ["models"], "pattern": r"^opencode/.+-free$"},
+        # 名册：这个 CLI **自己说**它能跑哪些模型（一次列举，不花额度）。
+        # 名册不是档位 —— 它只说「有这些」，不说「这些免费不免费」。所以平台
+        # 仍然只提供**声明过**的那几个，多出来的那些要告诉人（见 pool 的 rosters）。
+        "roster": {"args": ["models"], "pattern": r"^(opencode/\S+)$", "group": 1},
     },
     {
         "name": "codebuddy",
@@ -110,6 +114,12 @@ DEFAULT_CLI_SLOTS = (
             "{workdir}",
         ],
         "prompt_via_stdin": True,
+        # 名册：codebuddy 把可用模型写在 `--model` 的说明里，一次列举不花额度。
+        "roster": {
+            "args": ["--help"],
+            "pattern": r"Currently supported: \(([^)]*)\)",
+            "group": 1,
+        },
     },
     {
         "name": "codebuddy",
@@ -132,6 +142,8 @@ DEFAULT_CLI_SLOTS = (
         "model": "Qwen3.8-Flash",
         "tier": "free",
         "binary": "qoderclicn",
+        # 名册：qoder 的 CLI 自己会列（`--list-models`，不花额度）。
+        "roster": {"args": ["--list-models"], "pattern": r"^(?!MODEL$)(\S+)$", "group": 1},
         "args": [
             "-p",
             "--output-format",
@@ -165,6 +177,25 @@ DEFAULT_CLI_SLOTS = (
         # The slot only exists once the user has signed the CLI in: offering a
         # quota that cannot be spent would be a lie.
         "requires": {"file": ".mmx/config.json", "key": "api_key"},
+    },
+    {
+        # 仓库主人：codebuddy 的 step-5 也是免费的（`--model` 说明里它排在
+        # hy3-x 之后）。免费与否是**人的事实**，不是平台能猜出来的 ——
+        # 所以它进声明（声明就是人的决定）。
+        "name": "codebuddy",
+        "model": "step-5-preview",
+        "tier": "free",
+        "binary": "codebuddy",
+        "args": [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--permission-mode",
+            "bypassPermissions",
+            "--add-dir",
+            "{workdir}",
+        ],
+        "prompt_via_stdin": True,
     },
     {
         "name": "qoder",
@@ -513,6 +544,115 @@ def _enumerate_roster(
     except re.error:
         return []
     return [line for line in _ENUM_ROSTER.get(key, (now, []))[1] if pattern.fullmatch(line)]
+
+
+def _listing_lines(
+    slot: dict[str, Any], source: CliModelSource, runner: ListingRunner | None
+) -> list[str]:
+    """The CLI's own listing (cached, TTL).  A listing costs no quota."""
+    spec = slot.get("roster")
+    if not isinstance(spec, dict):
+        return []
+    args = [str(arg) for arg in (spec.get("args") or ())]
+    if not args:
+        return []
+    binary = source.resolve_binary()
+    key = (binary, " ".join(args))
+    now = time.monotonic()
+    cached = _ENUM_ROSTER.get(key)
+    if cached is None or now - cached[0] > ENUM_TTL_SECONDS:
+        try:
+            roster = (runner or _run_listing)(binary, args)
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            roster = []
+        _ENUM_ROSTER[key] = (now, roster)
+    return list(_ENUM_ROSTER.get(key, (now, []))[1])
+
+
+def cli_roster(
+    slot: dict[str, Any], source: CliModelSource, runner: ListingRunner | None
+) -> list[str]:
+    """What the CLI itself says it can run.
+
+    The roster is **not a tier**: it says what exists, not what is free.  The
+    pool still serves only the models the operator declared; the ones the CLI
+    knows but nobody declared are reported, so the human can see "the CLI can
+    do this, and nobody said whether it costs anything".
+    """
+    spec = slot.get("roster")
+    if not isinstance(spec, dict):
+        return []
+    lines = _listing_lines(slot, source, runner)
+    pattern_text = str(spec.get("pattern") or "")
+    try:
+        pattern = re.compile(pattern_text) if pattern_text else None
+    except re.error:
+        return []
+    group = int(spec.get("group") or 0)
+    names: list[str] = []
+    for line in lines:
+        if pattern is None:
+            names.append(line.strip())
+            continue
+        match = pattern.search(line)
+        if not match:
+            continue
+        value = match.group(group) if group <= (match.lastindex or 0) else match.group(0)
+        for part in str(value).split(","):
+            name = part.strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def discover_cli_rosters(
+    config_path: Path | None = None,
+    home: Path | None = None,
+    *,
+    listing_runner: ListingRunner | None = None,
+) -> dict[str, list[str]]:
+    """What every CLI says it can run, keyed by the CLI's name.
+
+    Read-only and quota-free: a listing is a question, not a model call.
+    """
+    path = config_path or pool_config_path()
+    declared: list[dict[str, Any]] = []
+    document = _read_json(path) if path.exists() else {}
+    if isinstance(document, dict):
+        slots = document.get("cli_slots")
+        if isinstance(slots, list):
+            declared = [slot for slot in slots if isinstance(slot, dict)]
+    rosters: dict[str, list[str]] = {}
+    for slot in _merge_slots(declared):
+        spec = slot.get("roster")
+        if not isinstance(spec, dict):
+            continue
+        name = str(slot.get("name") or "cli-slot")
+        source = CliModelSource(
+            name=name,
+            model=str(slot.get("model") or ""),
+            binary=str(slot.get("binary") or ""),
+            args=tuple(str(part) for part in (slot.get("args") or ())),
+        )
+        names = cli_roster(slot, source, listing_runner)
+        if not names:
+            continue
+        merged = list(rosters.get(name) or [])
+        for entry in names:
+            if entry not in merged:
+                merged.append(entry)
+        rosters[name] = merged
+    return rosters
+
+
+def invalidate_rosters() -> None:
+    """Forget the cached CLI listings.
+
+    The probe asks for them again: a listing costs no quota, only a process
+    spawn, and a stale roster is exactly what "did we miss a new free model?"
+    is about.
+    """
+    _ENUM_ROSTER.clear()
 
 
 def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
