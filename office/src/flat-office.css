@@ -1592,6 +1592,49 @@
 .flat-main > .flat-chat .flat-chat-list { display: flex; }
 .flat-main > .flat-chat .flat-chat-toggle { display: none; }
 
+/* 详情上方的紧凑活列表：换看另一条活不用先回任务表。 */
+.flat-switcher {
+  margin: 0 0 12px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.flat-switcher .flat-note { margin: 0 0 6px; }
+
+.flat-switcher-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flat-switch {
+  display: grid;
+  gap: 1px;
+  max-width: 260px;
+  text-align: left;
+  padding: 5px 9px;
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 5px;
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flat-switch:hover { background: #f2f6fa; }
+.flat-switch.is-on { border-color: var(--ao-accent); background: #eaf1f8; }
+.flat-switch b {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ao-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flat-switch span { font-size: 11px; color: var(--ao-ink-faint); }
+
 /* 从详情回到任务表。 */
 .flat-back {
   margin: 0 0 10px;

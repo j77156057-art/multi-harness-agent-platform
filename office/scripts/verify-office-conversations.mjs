@@ -68,6 +68,15 @@ const task = {
   updated_at: '2026-10-24T10:30:00Z',
 };
 
+const second = {
+  ...task,
+  task_id: 'FD-fedcba9876543210',
+  title: '开工链路 · 第二件事',
+  status: 'awaiting_human',
+  owner: ADMIN,
+  updated_at: '2026-10-24T11:00:00Z',
+};
+
 const responses = {
   '/status': {
     configured: true,
@@ -85,7 +94,7 @@ const responses = {
     ],
     base_adapters: [],
   },
-  '/tasks': { tasks: [task] },
+  '/tasks': { tasks: [task, second] },
   '/events': {
     events: [
       { aggregate_id: TASK, event_name: 'claim', actor_id: MEMBER, payload: {}, created_at: '2026-10-24T10:05:00Z' },
@@ -136,7 +145,7 @@ try {
     phase: 'scene',
     source: 'platform',
     members: [],
-    taskIds: [TASK],
+    taskIds: [TASK, 'FD-fedcba9876543210'],
   };
   await page.evaluate(
     ([key, activeKey, value]) => {
@@ -225,6 +234,23 @@ try {
     await page.locator('#aoWorkspace .flat-main .flat-task').count() > 0,
     '返回之后又是任务表',
   );
+
+  // 5. 详情上方留一条紧凑的活列表：换看另一条活不用先回任务表。
+  await page.locator('#aoWorkspace .flat-main .flat-task').first().click();
+  await page.waitForTimeout(1500);
+  const switches = page.locator('#aoWorkspace .flat-switch');
+  assert.equal(await switches.count(), 2, '详情上方有本项目的活列表');
+  assert.equal(
+    await page.locator('#aoWorkspace .flat-switch.is-on').count(),
+    1,
+    '当前那条被标出来',
+  );
+  const before = await page.locator('#aoWorkspace .flat-detail-head h2').innerText();
+  await page.locator('#aoWorkspace .flat-switch', { hasText: '第二件事' }).first().click();
+  await page.waitForTimeout(1500);
+  const after = await page.locator('#aoWorkspace .flat-detail-head h2').innerText();
+  console.log('切换前:', before, '→ 切换后:', after);
+  assert.ok(after.includes('第二件事'), '点另一条活，详情直接切过去');
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-conversations: ok');
