@@ -12,7 +12,8 @@
 （平台照办前怎么核对）、`backend/app/adapter/model_choice.py`（选择的语义）；
 R10 §8（canonical 数据模型）、§37.6（表与必要字段）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`114528f`（收费要点头 + 记下点头时那一档 + 清单折叠 + 探针与名册 + codebuddy 的 step-5 进免费声明；R10 §38.15 R10-fix-20）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-034
 
@@ -68,10 +69,11 @@ test_id：MVP-UI-034
 
 | 门禁 | 结果 |
 |---|---|
-| `backend/tests/test_harness_model_selection.py` | 待回填 |
-| `office/scripts/verify-office-conversations.mjs` | 待回填 |
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| `backend/tests/test_harness_model_selection.py` | ok（15 条：含收费要点头 409 / 免费变收费就不再花 / 点头过的照办 / 探针清缓存重探、名册回来） |
+| `backend/tests/test_pool_cli_enumerate.py` | ok（codebuddy 的 step-5 进声明） |
+| `office/scripts/verify-office-conversations.mjs` | ok（清单默认折着、标题写明每档几个、每条标档位、收费模型要确认才发、探针真的发到平台） |
+| 真跑（8849 真平台 + 4174 预览） | 清单默认折着，标题「28 个：免费额度 14 · 付费额度 11 · 兜底额度 2 · 你的 key 1」；每条带档位标记（免费/付费/兜底/你的 key）；**codebuddy 的 step-5-preview 与 qoder 的两条都在免费档**；探针重探后报「还有 50 个模型 CLI 说它能用、平台没给档位」；选 `codex 的 gpt-5.6-sol` 弹确认「每调用一次都花钱」，点头后平台存下、界面显示「当前：额度池：codex 的 gpt-5.6-sol」，再改回自带；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（29 个模块，main 207.33 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿 |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
