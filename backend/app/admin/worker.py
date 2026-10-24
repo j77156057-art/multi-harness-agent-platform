@@ -37,6 +37,7 @@ import httpx
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
 from app.db.connection import Database
+from app.tasks.service import DIRECT_REF
 
 GOAL_REF = "project-goal"
 GOAL_ANSWER_REF = "project-goal-answer"
@@ -350,6 +351,12 @@ class AdminWorker:
             if CANCEL_REF in refs:
                 self.handle_cancel_notice(message, seq=seq)
                 continue
+            if DIRECT_REF in refs:
+                # A private question. It is answered privately and is NOT fed to
+                # the pending goal: the group receipt is public, so replaying the
+                # owner's private words there would break the channel.
+                self.handle_direct_message(message, seq=seq)
+                continue
             if self.state.pending_goal and (
                 GOAL_ANSWER_REF in refs
                 or (_sender_type(message) == "human" and str(message.get("body") or "").strip())
@@ -366,6 +373,43 @@ class AdminWorker:
                     self.handle_goal(pending)
         self.state.save(self.state_path)
         return bool(messages)
+
+    def handle_direct_message(self, message: dict[str, Any], *, seq: int) -> None:
+        """Answer a private question from the owner, in the same private channel.
+
+        A direct message is a *conversation*, not a dispatch request: the answer
+        goes through the administrator's own model channel and leaves as one more
+        direct message (R10 §19). It is deliberately NOT fed to the pending goal
+        -- the goal's receipt is posted to the whole group, which would drag the
+        owner's private words into public view.
+        """
+        if seq in self.state.handled_request_seqs:
+            return
+        sender = str(message.get("sender_id") or "").strip()
+        body = str(message.get("body") or "").strip()
+        if not sender or not body or sender == self.admin_harness_id:
+            return
+        # Marked before the model call: a question is answered once, and the
+        # answer is expensive. Messages replay on every poll, so the mark is the
+        # only thing that keeps one question from becoming two answers.
+        self.state.handled_request_seqs.append(seq)
+        self.state.handled_request_seqs = self.state.handled_request_seqs[-200:]
+        self.state.save(self.state_path)
+        if self.dry_run:
+            return
+        try:
+            self.admin.answer(question=body, group_id=self.group_id, asker=sender)
+        except Exception as exc:  # noqa: BLE001 - the owner must hear about the failure
+            # Never silence the owner. A failure is reported as a failure,
+            # privately and in plain words -- a canned "收到" would claim work
+            # that did not happen. The type is kept so a 500 or a secret-scan
+            # block is not misreported as "the model was busy".
+            self._post_direct_message(
+                sender,
+                "这一条没有答上来。\n"
+                f"原因：{type(exc).__name__}: {exc}\n"
+                "（不是你的问题；可以稍后重发，或者让管理员人工回答。）",
+            )
 
     def handle_goal(self, payload: dict[str, Any] | None, *, force: bool = False) -> None:
         if not payload:
@@ -1195,6 +1239,22 @@ class AdminWorker:
         )
 
     # ------------------------------------------------------------------ misc
+
+    def _post_direct_message(self, recipient: str, body: str) -> None:
+        """Post one private message; a reporting failure must not crash the loop."""
+        if self.dry_run:
+            return
+        with contextlib.suppress(httpx.HTTPStatusError):
+            self.client.post(
+                f"/groups/{self.group_id}/messages",
+                {
+                    "author_kind": "harness",
+                    "author_id": self.admin_harness_id,
+                    "body": body,
+                    "mentions": [recipient],
+                    "direct": True,
+                },
+            )
 
     def _post_admin_message(self, body: str) -> None:
         if self.dry_run:

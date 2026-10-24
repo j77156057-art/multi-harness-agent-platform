@@ -25,6 +25,7 @@ class FakeAdmin:
         self.refine_calls = []
         self.revise_calls = []
         self.review_calls = []
+        self.answer_calls = []
         self.assignable = ["member-window"]
         self.credentials = {"member-window": True, "admin-window": True}
         self.dispatched: set[str] = set()
@@ -49,6 +50,12 @@ class FakeAdmin:
             "project_name": kwargs.get("project_name"),
             "tasks": self.tasks,
         }
+
+    def answer(self, **kwargs):
+        self.answer_calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return {"answer": "答", "asker": kwargs.get("asker")}
 
     def revise_with_reviews(self, *, plan_id, goal, tasks, reviews):
         self.revise_calls.append(
@@ -713,3 +720,100 @@ def test_state_cursor_round_trips(tmp_path):
     assert loaded.last_message_seq == 42
     assert loaded.processed_goal_seqs == [7]
     assert loaded.reviewed_attempts == ["FD-1:FD-1.a1"]
+
+
+def test_a_direct_question_is_answered_privately_and_only_once(tmp_path, monkeypatch):
+    """A private question is a conversation, not a dispatch.
+
+    It must not reach ``refine``: the refinement receipt is posted to the whole
+    group, so replaying the owner's private words there would break the channel
+    the office opened.
+    """
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 4,
+                "sender_type": "human",
+                "sender_id": "office-operator",
+                "body": "FD-1 为什么被放弃？",
+                "refs": ["direct"],
+            }
+        ]
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert admin.answer_calls == [
+        {"question": "FD-1 为什么被放弃？", "group_id": "G-1", "asker": "office-operator"}
+    ]
+    assert admin.refine_calls == []
+
+    # Messages replay on every poll; one question must not become two answers.
+    worker.poll_messages()
+    assert len(admin.answer_calls) == 1
+
+
+def test_a_private_question_is_never_replayed_into_the_public_goal(tmp_path, monkeypatch):
+    """The pending goal answers in the group; a private question answers privately."""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 11,
+                "sender_type": "human",
+                "sender_id": "office-operator",
+                "body": "这句是私聊，不是群里的回答",
+                "refs": ["direct"],
+            }
+        ]
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 10
+    worker.state.pending_goal = {
+        "goal_id": "g-1",
+        "goal": "补一条说明",
+        "project_name": "DEMO",
+        "members": ["member-1"],
+        "max_tasks": 1,
+        "answers": [],
+        "seq": 10,
+        "admin": "admin-window",
+    }
+
+    worker.poll_messages()
+
+    assert admin.refine_calls == []
+    assert admin.answer_calls[0]["question"] == "这句是私聊，不是群里的回答"
+
+
+def test_a_private_question_the_model_cannot_answer_says_so_privately(tmp_path, monkeypatch):
+    """A model failure is reported as a failure, not as a silent non-answer."""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 5,
+                "sender_type": "human",
+                "sender_id": "office-operator",
+                "body": "在吗",
+                "refs": ["direct"],
+            }
+        ]
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert len(client.messages) == 1
+    sent = client.messages[0]
+    assert sent["direct"] is True
+    assert sent["mentions"] == ["office-operator"]
+    assert "没有答上来" in sent["body"]
+    assert "boom" in sent["body"]

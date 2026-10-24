@@ -130,7 +130,7 @@
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
 | R10-fix-17 | Codex | FORMAL-MULTI-HARNESS-01 | doing（接替关系进平台字段；实现与 R10 正文（§9、§38.12）已就位，**规范复审由仓库主人 2026-10-22 拍板**） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
-| OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
+| OFFICE-UI-01 | Codex | 无 | done（办公室的数据版界面收进本仓 office/；已合入 main） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
 | OFFICE-UI-02 | Mavis | OFFICE-UI-01 | done（界面收拾：状态词/按钮/版式/活气；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
 | OFFICE-UI-03 | Mavis | OFFICE-UI-02 | done（用户自己的 API key：平台保管、不点头不花；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
@@ -140,6 +140,16 @@
 | OFFICE-UI-07 | Mavis | OFFICE-UI-04 | done（工单里夹着的机器 JSON 拆开、现场说人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-022` |
 | OFFICE-UI-08 | Mavis | OFFICE-UI-04 | done（群聊摘要：最近群里在说什么；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-023` |
 | OFFICE-UI-09 | Mavis | OFFICE-UI-04 | →doing（取消一条活要通知管理员，管理员就剩下的范围重新细化） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-024` |
+| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
+| assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-react-loop-p2 | Codex | assistant-react-loop | doing（P2：池子直连免费档模型通道 + assistant worker 私聊轮询；admin/worker 只复用零修改，权限矩阵核实零行新增） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
+| assistant-react-loop-p3 | Codex | assistant-react-loop | doing（P3 第一刀：审核助攻 review_pack 工具＋prompt 审核协议；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| review-contract-gate | Codex | assistant-react-loop-p3 | waiting（提案：评审契约守门，落点 tasks/service.py 共享在途；待复核，未开工） | `agent/local/codex/OFFICE-UI-01/a1` | 待复审后定 |
+| cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| assistant-diagnose-pack | Codex | assistant-react-loop-p3 | doing（证据束取样器：`task.diagnose` 一次取准失败证据束＋诊断姿势 prompt；守门因 tasks/service.py 共享在途，仍走提案） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -222,6 +232,15 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-07 → docs/claims/mavis--OFFICE-UI-07.md -->
 <!-- OFFICE-UI-08 → docs/claims/mavis--OFFICE-UI-08.md -->
 <!-- OFFICE-UI-09 → docs/claims/mavis--OFFICE-UI-09.md -->
+<!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
+<!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
+<!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
+<!-- assistant-react-loop-p2 → docs/claims/codex--assistant-react-loop-p2.md -->
+<!-- pool-free-set-watch → docs/claims/codex--pool-free-set-watch.md -->
+<!-- assistant-react-loop-p3 → docs/claims/codex--assistant-react-loop-p3.md -->
+<!-- review-contract-gate → 提案未开工，无认领文件（docs/proposals/review-contract-gate.md） -->
+<!-- cli-roster-enumerate → docs/claims/codex--cli-roster-enumerate.md -->
+<!-- assistant-diagnose-pack → docs/claims/codex--assistant-diagnose-pack.md -->
 
 
 
@@ -255,6 +274,15 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-07 | [卡](docs/tasks/notes/OFFICE-UI-07.md) | | |
 | OFFICE-UI-08 | [卡](docs/tasks/notes/OFFICE-UI-08.md) | | |
 | OFFICE-UI-09 | [卡](docs/tasks/notes/OFFICE-UI-09.md) | | |
+| pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
+| diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
+| assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
+| assistant-react-loop-p2 | [卡](docs/tasks/notes/assistant-react-loop-p2.md) | | |
+| pool-free-set-watch | [卡](docs/tasks/notes/pool-free-set-watch.md) | | |
+| assistant-react-loop-p3 | [卡](docs/tasks/notes/assistant-react-loop-p3.md) | | |
+| review-contract-gate | [提案](docs/proposals/review-contract-gate.md) | | |
+| cli-roster-enumerate | [卡](docs/tasks/notes/cli-roster-enumerate.md) | | |
+| assistant-diagnose-pack | [卡](docs/tasks/notes/assistant-diagnose-pack.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |

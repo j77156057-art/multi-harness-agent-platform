@@ -23,6 +23,7 @@ from app.adapter.harnesses.cli import (
 )
 from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
+from app.adapter.harnesses.generic import GenericCliAdapter, load_declarations
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.pi import PiAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
@@ -45,9 +46,19 @@ ADAPTER_TYPES = {
 }
 
 _INSTANCE_RE = re.compile(
-    r"^(?P<base>codex|claude-code|opencode|qoder|codebuddy)"
+    r"^(?P<base>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)"
     r"-(?P<kind>member|window)-(?P<slot>[A-Za-z0-9][A-Za-z0-9_-]{0,31})$"
 )
+
+
+def known_bases() -> set[str]:
+    """Every base a formal worker can run: the built-ins plus declarations.
+
+    The declarations are read here, not cached at import, so an operator can
+    add a CLI without restarting anything that has not started yet.  A broken
+    declaration raises: a half-read registry would look like a missing harness.
+    """
+    return set(ADAPTER_TYPES) | set(load_declarations())
 
 
 def _unquote_git_path(path: str) -> str:
@@ -84,18 +95,39 @@ def _unquote_git_path(path: str) -> str:
 def base_harness_id(harness_id: str) -> str:
     """Resolve a registered window identity to its explicit CLI adapter.
 
-    Only the two documented instance forms are accepted.  This keeps a typo
+    Only the two documented instance forms are accepted, and the base has to
+    be either built in or declared in ``adapters/cli.json``.  This keeps a typo
     or an unregistered provider from silently selecting a different CLI.
     """
-    if harness_id in ADAPTER_TYPES:
+    declared = load_declarations()
+    if harness_id in ADAPTER_TYPES or harness_id in declared:
         return harness_id
     match = _INSTANCE_RE.fullmatch(harness_id)
-    if match and match.group("base") in ADAPTER_TYPES:
-        return match.group("base")
+    if match:
+        base = match.group("base")
+        if base in ADAPTER_TYPES or base in declared:
+            return base
     raise ValueError(
         "unsupported formal Harness instance: "
         f"{harness_id}; use a registered base ID or <base>-member-<slot>"
     )
+
+
+def build_adapter(base_id: str, client, *, harness_id: str):
+    """Build the adapter for a base, built in or declared.
+
+    The built-ins are classes written against a measured CLI; a declared base
+    is the same ``CliHarness`` contract read from operator-owned facts.  The
+    caller keeps the *registered* ``harness_id`` so the receipt names the
+    identity that ran, while ``registration.adapter`` names the executable.
+    """
+    adapter_type = ADAPTER_TYPES.get(base_id)
+    if adapter_type is not None:
+        return adapter_type(client, harness_id=harness_id)
+    declaration = load_declarations().get(base_id)
+    if declaration is None:
+        raise ValueError(f"unknown base harness: {base_id!r}")
+    return GenericCliAdapter(client, harness_id=harness_id, declaration=declaration)
 
 
 def adapter_for_harness(client, harness_id: str):
@@ -106,9 +138,7 @@ def adapter_for_harness(client, harness_id: str):
     running the Codex command, which would make the platform receipt lie about
     the executable that produced it.
     """
-    base_id = base_harness_id(harness_id)
-    adapter_type = ADAPTER_TYPES[base_id]
-    return adapter_type(client, harness_id=harness_id)
+    return build_adapter(base_harness_id(harness_id), client, harness_id=harness_id)
 
 
 class ScopedRunner(SubprocessRunner):

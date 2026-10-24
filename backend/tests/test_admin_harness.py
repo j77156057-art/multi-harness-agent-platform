@@ -881,3 +881,69 @@ def test_review_refuses_an_unknown_verdict(tmp_path):
         service.review(
             task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
         )
+
+
+# --------------------------------------------------- 定向消息（私聊，R10-fix-18）
+
+
+def test_a_direct_question_is_answered_in_the_same_private_channel(tmp_path):
+    """The answer rides the same private channel as the question.
+
+    It is one more ``task_messages`` row carrying the ``direct`` signature -- no
+    new event, no new state -- and the group's other members cannot read it.
+    """
+    from app.tasks.service import SchedulerService
+
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope({"answer": "T-1 被放弃，账本里的原因是测试超时。"}))
+    service = _refine_service(chain, runner)
+
+    result = service.answer(
+        question="T-1 为什么被放弃？", group_id=DEFAULT_GROUP, asker="office-operator"
+    )
+
+    assert result["answer"] == "T-1 被放弃，账本里的原因是测试超时。"
+    messages = SchedulerService(chain.database).list_messages(
+        DEFAULT_GROUP, viewer="office-operator"
+    )
+    direct = [m for m in messages if "direct" in (m.get("refs") or [])]
+    assert len(direct) == 1
+    assert direct[0]["sender_type"] == "harness"
+    assert direct[0]["sender_id"] == ADMIN_WINDOW
+    assert direct[0]["body"] == result["answer"]
+    # 定向消息不落进群聊：同群的其他人看不到这一条。
+    outsider = SchedulerService(chain.database).list_messages(DEFAULT_GROUP, viewer="someone-else")
+    assert [m for m in outsider if "direct" in (m.get("refs") or [])] == []
+
+
+def test_the_private_answer_reads_the_ledger_and_is_told_not_to_invent(tmp_path):
+    """Without the ledger, "为什么失败" can only be answered by guessing."""
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope({"answer": "不知道。"}))
+    service = _refine_service(chain, runner)
+
+    service.answer(question="T-1 为什么被放弃？", group_id=DEFAULT_GROUP, asker="office-operator")
+
+    prompt = " ".join(str(part) for part in runner.calls[0]["argv"]) + str(
+        runner.calls[0]["stdin"] or ""
+    )
+    assert "T-1" in prompt
+    assert "Never invent" in prompt
+    assert "为什么被放弃" in prompt
+
+
+def test_a_private_answer_without_text_fails_closed(tmp_path):
+    """An empty answer is not posted: silence is honest, a blank message is not."""
+    from app.tasks.service import SchedulerService
+
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope({"answer": "   "}))
+    service = _refine_service(chain, runner)
+
+    with pytest.raises(AdminHarnessError, match="no answer text"):
+        service.answer(question="在吗", group_id=DEFAULT_GROUP, asker="office-operator")
+
+    assert (
+        SchedulerService(chain.database).list_messages(DEFAULT_GROUP, viewer="office-operator")
+        == []
+    )

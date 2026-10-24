@@ -214,8 +214,26 @@ class CanonicalRepo:
         commit = proc.stdout.strip()
         return commit or None
 
+    def is_initialized(self) -> bool:
+        """Whether the bare repository actually exists on disk.
+
+        The same predicate :meth:`ensure` uses to decide it must create the
+        repository; a misconfigured ``AP_CANONICAL_REPO`` reads as "not there".
+        """
+        return (self.path / "HEAD").exists()
+
     def has_object(self, commit: str) -> bool:
-        proc = run_git("cat-file", "-e", f"{commit}^{{commit}}", cwd=self.path, check=False)
+        """Whether the commit object can actually be consulted.
+
+        A git that cannot run against its own directory (a misconfigured
+        canonical path makes ``subprocess`` fail before git starts) answers
+        False, not an exception: "cannot see it" is exactly "not reachable"
+        as far as every caller can act on it.
+        """
+        try:
+            proc = run_git("cat-file", "-e", f"{commit}^{{commit}}", cwd=self.path, check=False)
+        except OSError:
+            return False
         return proc.returncode == 0
 
     def read_file(self, ref: str, path: str) -> str | None:

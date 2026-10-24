@@ -6,7 +6,7 @@
 | Harness | Codex |
 | 认领时间 | 2026-10-22 16:20 +08:00 |
 | 分支 | `agent/local/codex/OFFICE-UI-01/a1` |
-| 状态 | in_progress |
+| 状态 | done（办公室的数据版界面已收进本仓 `office/`，已合入 main） |
 
 ## 做什么
 

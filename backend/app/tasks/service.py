@@ -1861,6 +1861,11 @@ class SchedulerService:
         if branch:
             result["branch"] = str(branch[0]["branch"])
         canonical = repo if repo is not None else CanonicalRepo.from_settings()
+        if not canonical.is_initialized():
+            # 一个打不开的正式仓库不是"提交不在库里"——那句话自称知道提交的去向。
+            # 这里连问都没问成，老实说"仓库没就位"，读者按"没有改动"对待，不 500。
+            result["reason"] = "canonical repository is not initialized"
+            return result
         if not canonical.has_object(str(base)) or not canonical.has_object(str(head)):
             result["reason"] = "commits are not in the canonical repository"
             return result

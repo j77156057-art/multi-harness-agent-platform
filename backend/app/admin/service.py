@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from app.adapter.formal_worker import ADAPTER_TYPES, base_harness_id
+from app.adapter.formal_worker import base_harness_id, build_adapter, known_bases
 from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
@@ -31,9 +31,10 @@ from app.tasks.service import SchedulerService
 
 #: 执行者身份只接受"注册过的 base harness id"或"<base>-member|window-<slot>"，
 #: 与 ``app.adapter.formal_worker.base_harness_id`` 同一口径：不让模型发明一个新身份。
-_BASE_HARNESSES = ("codex", "claude-code", "opencode", "qoder", "codebuddy")
+#: base 是否注册由 ``known_bases()`` 现读（内置 + ``adapters/cli.json`` 声明），
+#: 所以这里只认形状，不抄一份名单。
 _INSTANCE_RE = re.compile(
-    r"^(?:codex|claude-code|opencode|qoder|codebuddy)-(?:member|window)"
+    r"^(?P<base>[a-z][a-z0-9]*(?:-[a-z0-9]+)*)-(?:member|window)"
     r"-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$"
 )
 
@@ -81,7 +82,14 @@ def _valid_exclusive_path(raw: str) -> bool:
 
 
 def _known_harness_id(value: str) -> bool:
-    return value in _BASE_HARNESSES or bool(_INSTANCE_RE.fullmatch(value))
+    if not isinstance(value, str):
+        return False
+    value = value.strip()
+    bases = known_bases()
+    if value in bases:
+        return True
+    match = _INSTANCE_RE.fullmatch(value)
+    return bool(match and match.group("base") in bases)
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
@@ -417,6 +425,58 @@ class AdminService:
         result["receipt"] = self._post_receipt(result, group_id=group_id)
         return result
 
+    def answer(
+        self,
+        *,
+        question: str,
+        group_id: str,
+        asker: str,
+    ) -> dict[str, Any]:
+        """Answer one private question, and send the answer back privately.
+
+        The owner's question arrives as a *direct* message (R10 §19): a message
+        row whose ``refs`` carry the ``direct`` signature. The answer leaves the
+        same way -- same table, same ordering authority, same visibility rule
+        (sender and recipients only). That is why this adds no event name, no
+        state and no schema column.
+
+        The model is given the group's task ledger and nothing else, and is told
+        to say it does not know when the ledger does not answer: a private
+        channel is still a place where a guess would be read as a fact.
+        """
+        text = question.strip() if isinstance(question, str) else ""
+        if not text:
+            raise AdminHarnessError("question must not be empty")
+        recipient = asker.strip() if isinstance(asker, str) else ""
+        if not recipient:
+            raise AdminHarnessError("a direct answer needs a recipient")
+        if recipient == self.harness_id:
+            # A window answering itself would produce a private echo the owner
+            # never sees and that still claims to be an answer.
+            raise AdminHarnessError("refusing to answer the administrator's own message")
+        prompt = self._answer_prompt(text, group_id=group_id, asker=recipient)
+        payload, model = self._invoke_model(prompt)
+        answer = str(payload.get("answer") or "").strip()
+        if not answer:
+            raise AdminHarnessError("the administrator model returned no answer text")
+        message = SchedulerService(self.database).post_message(
+            group_id=group_id,
+            author_kind="harness",
+            author_id=self.harness_id,
+            body=answer,
+            mentions=[recipient],
+            direct=True,
+        )
+        return {
+            "harness_id": self.harness_id,
+            "group_id": group_id,
+            "asker": recipient,
+            "question": text,
+            "answer": answer,
+            "model": model,
+            "message": message,
+        }
+
     # --------------------------------------------------------------- internals
 
     def invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -445,21 +505,21 @@ class AdminService:
             ) from exc
         pinned = getattr(settings, "admin_model_channel", "auto")
         if pinned and pinned != "auto":
-            if base not in ADAPTER_TYPES:
+            if base not in known_bases():
                 raise AdminHarnessError(
                     f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
                 )
             # 身份必须能解析（上面那句），但通道可以被显式钉到另一条 CLI：这是
             # "管理员窗口的 CLI 不在本机"时的部署选择，不是猜。
             base = pinned
-        adapter_type = ADAPTER_TYPES.get(base)
-        if adapter_type is None:
+        try:
+            # No client: the refine call needs the argv contract and the output
+            # parser, not the HTTP surface.
+            adapter = build_adapter(base, None, harness_id=self.harness_id)
+        except ValueError as exc:
             raise AdminHarnessError(
-                f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}"
-            )
-        # No client: the refine call needs the argv contract and the output
-        # parser, not the HTTP surface.
-        adapter = adapter_type(None, harness_id=self.harness_id)
+                f"administrator {self.harness_id!r} resolves to an unknown base harness {base!r}: {exc}"
+            ) from exc
         return adapter, base
 
     def _invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -677,6 +737,72 @@ class AdminService:
                 "---",
                 "Produce the task list now, incorporating those answers verbatim.",
             ]
+        return "\n".join(lines)
+
+    def _answer_prompt(self, question: str, *, group_id: str, asker: str) -> str:
+        """One question, one JSON answer, no dispatch and no promises.
+
+        The question is private, but the facts behind it are public inside the
+        group, so the ledger is handed over verbatim instead of a summary: a
+        summary is where an invented reason would hide.
+        """
+        lines = [
+            "You are the ADMINISTRATOR harness of a multi-harness coordination platform.",
+            "The group owner is asking you a question in a PRIVATE channel. Only the",
+            "owner and you can read the answer -- but it is still a claim about real",
+            "work, so it must be true.",
+            "",
+            f"Group: {group_id}",
+            f"Recipient of this answer: {asker}",
+            "",
+            "The platform's task ledger for this group (your only ground truth; you",
+            "cannot see the members' screens, their private notes or their reasoning):",
+            "---",
+            self._task_ledger(group_id),
+            "---",
+            "",
+            "Group owner's question (verbatim):",
+            "---",
+            question,
+            "---",
+            "",
+            "Hard rules:",
+            '1. Answer with ONE JSON object and nothing else: {"answer":"..."}',
+            "2. Answer only from the ledger above. If it does not contain what the",
+            "   owner asks for (for example why a member abandoned a task, or how",
+            "   many tokens were spent), say plainly that you do not know and name",
+            "   what is missing. Never invent a reason, a person, a number or a time.",
+            "3. Do not promise work you are not doing in this same turn: you are",
+            "   answering a question, not dispatching, reviewing or re-pointing.",
+            "4. Write in the language the owner used. Keep it short: a few sentences.",
+        ]
+        return "\n".join(lines)
+
+    def _task_ledger(self, group_id: str) -> str:
+        """What the platform actually knows about this group's work.
+
+        Handing the ledger to the model is the difference between "answering
+        from the record" and "inventing a reason". A broken read fails closed
+        instead of degrading into an empty ledger the model would fill in.
+        """
+        try:
+            tasks = SchedulerService(self.database).list_tasks(group_id)
+        except Exception as exc:  # noqa: BLE001 - a failed read must not become a guess
+            raise AdminHarnessError(f"cannot read the task ledger: {exc}") from exc
+        if not tasks:
+            return "（这个群里还没有任务。）"
+        lines: list[str] = []
+        for task in tasks:
+            failure = task.get("last_failure")
+            reason = str(failure.get("reason") or "").strip() if isinstance(failure, dict) else ""
+            line = (
+                f"- {task.get('task_id')}｜{task.get('title') or '（无标题）'}"
+                f"｜状态 {task.get('status')}"
+                f"｜执行者 {task.get('owner') or '（无人）'}"
+            )
+            if reason:
+                line += f"｜最近一次失败：{reason}"
+            lines.append(line)
         return "\n".join(lines)
 
     def _parse_payload(

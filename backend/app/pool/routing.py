@@ -25,6 +25,27 @@ POOL_BASE_PATH = "/api/v1/pool/v1"
 POOL_ANTHROPIC_PATH = "/api/v1/pool"
 
 
+def _base_of(harness_id: str) -> str:
+    """The base harness a window belongs to (``qoder-member-1`` → ``qoder``)."""
+    return str(harness_id).split("-member-")[0].split("-window-")[0]
+
+
+def _owned_by_harness(upstream: str, harness_id: str) -> bool:
+    """Whether an upstream is the failing window's own quota.
+
+    Upstreams are named after the harness that owns them (``codex:geekspace``,
+    ``qoder:Qwen3.8-Flash``, ``opencode-cli:...``).  A harness that follows
+    that convention is protected without a code change; the explicit map in
+    :func:`_blocked_upstreams` covers the names that do not.
+    """
+    base = _base_of(harness_id)
+    if not base:
+        return False
+    name = str(upstream or "")
+    head = name.split(":", 1)[0]
+    return head == base or head.startswith(base + "-") or name.startswith(base + "/")
+
+
 def failure_evidence(task_id: str, *, data_dir: Path | None = None) -> dict[str, Any] | None:
     """The last failure the worker recorded for a task, if any."""
     root = (data_dir or Path(settings.data_dir)) / "formal-runs"
@@ -101,7 +122,8 @@ def plan_attempt(
             for entry in entries:
                 if str(entry.get("id")) == str(evidence.get("model")):
                     continue
-                if str(entry.get("upstream")) in blocked:
+                upstream_name = str(entry.get("upstream") or "")
+                if upstream_name in blocked or _owned_by_harness(upstream_name, harness_id):
                     continue
                 if str(entry.get("tier") or "metered") != tier:
                     continue
@@ -212,7 +234,7 @@ def _blocked_upstreams(harness_id: str) -> set[str]:
     Routing a dead provider's task back to the same provider would be a
     loop: the second attempt would fail the same way.
     """
-    base = str(harness_id).split("-member-")[0].split("-window-")[0]
+    base = _base_of(harness_id)
     if base == "claude-code":
         return {"claude-provider"}
     if base == "codex":

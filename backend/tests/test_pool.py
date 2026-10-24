@@ -326,6 +326,30 @@ def test_a_task_is_never_routed_back_to_the_provider_that_failed_it(tmp_path):
     assert plan["upstream"] != "opencode-cli"
 
 
+def test_a_new_harness_is_not_routed_back_to_its_own_quota(tmp_path):
+    """The self-loop guard follows the owner convention, not a fixed list.
+
+    A harness the pool has never seen before must still not be sent back to
+    the quota that just failed it; otherwise adding a harness would
+    re-introduce the loop the pool exists to break.
+    """
+    _write_failure(tmp_path, "T-1", harness_id="pi-member-1")
+    pool = _FakePool(
+        [
+            {"id": "pi-free", "upstream": "pi:free", "protocol": "cli", "tier": "free"},
+            {
+                "id": "Qwen3.8-Flash",
+                "upstream": "qoder:Qwen3.8-Flash",
+                "protocol": "cli",
+                "tier": "free",
+            },
+        ]
+    )
+    plan = plan_attempt("T-1", harness_id="pi-member-1", data_dir=tmp_path, pool=pool)
+    assert plan["mode"] == "pool"
+    assert plan["upstream"] == "qoder:Qwen3.8-Flash"
+
+
 def test_a_task_without_a_failure_stays_on_its_own_provider(tmp_path):
     plan = plan_attempt("T-2", harness_id="opencode", data_dir=tmp_path, pool=_FakePool([]))
     assert plan["mode"] == "direct"
@@ -371,6 +395,117 @@ def test_the_cli_slot_is_declared_not_sniffed(tmp_path):
     }
     assert "mmx:MiniMax-M3.1-Flash-Preview" in with_mmx
     assert with_mmx["mmx:MiniMax-M3.1-Flash-Preview"].models == ("mmx/MiniMax-M3.1-Flash-Preview",)
+
+
+def test_every_builtin_slot_declares_its_tier():
+    """A missing tier used to mean "free" -- which can spend money silently."""
+    from app.pool.sources import CLI_TIERS, DEFAULT_CLI_SLOTS
+
+    for slot in DEFAULT_CLI_SLOTS:
+        assert slot.get("tier") in CLI_TIERS, slot
+
+
+def test_a_declared_slot_extends_the_builtin_slots(tmp_path):
+    """Adding a harness must not drop every other free slot."""
+    config = tmp_path / "pool.json"
+    config.write_text(
+        json.dumps(
+            {
+                "cli_slots": [
+                    {
+                        "name": "newcli",
+                        "model": "free-1",
+                        "binary": "newcli",
+                        "args": ["-p"],
+                        "tier": "free",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    upstreams = {
+        upstream.name: upstream
+        for upstream in discover_upstreams(tmp_path / "home", config_path=config)
+    }
+    assert upstreams["newcli:free-1"].models == ("newcli/free-1",)
+    assert upstreams["newcli:free-1"].tier == "free"
+    assert "codebuddy:hy3" in upstreams
+    assert "opencode-cli:opencode/minimax-m3.1-flash-free" in upstreams
+
+
+def test_a_declared_slot_without_a_tier_is_not_offered(tmp_path):
+    config = tmp_path / "pool.json"
+    config.write_text(
+        json.dumps(
+            {"cli_slots": [{"name": "paid", "model": "gold", "binary": "paid", "args": ["-p"]}]}
+        ),
+        encoding="utf-8",
+    )
+    upstreams = {
+        upstream.name: upstream
+        for upstream in discover_upstreams(tmp_path / "home", config_path=config)
+    }
+    rejected = upstreams["paid:gold"]
+    assert rejected.models == ()
+    assert "tier" in rejected.note
+    # The rejection is visible, and the built-ins still work.
+    assert "qoder:DeepSeek-Flash" in upstreams
+
+
+def test_a_store_the_pool_cannot_read_is_not_offered(tmp_path):
+    config = tmp_path / "pool.json"
+    config.write_text(
+        json.dumps(
+            {
+                "cli_slots": [
+                    {
+                        "name": "newcli",
+                        "model": "free-1",
+                        "tier": "free",
+                        "store": "mystery",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    upstreams = {
+        upstream.name: upstream
+        for upstream in discover_upstreams(tmp_path / "home", config_path=config)
+    }
+    rejected = upstreams["newcli:free-1"]
+    assert rejected.models == ()
+    assert "store" in rejected.note
+
+
+def test_a_declaration_can_switch_a_builtin_slot_off(tmp_path):
+    config = tmp_path / "pool.json"
+    config.write_text(
+        json.dumps({"cli_slots": [{"name": "codebuddy", "enabled": False}]}),
+        encoding="utf-8",
+    )
+    upstreams = {
+        upstream.name: upstream
+        for upstream in discover_upstreams(tmp_path / "home", config_path=config)
+    }
+    assert not any(name.startswith("codebuddy:") for name in upstreams)
+    assert "qoder:DeepSeek-Flash" in upstreams
+
+
+def test_the_declared_slots_are_read_from_the_data_directory(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.pool.sources import pool_config_path
+
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    (tmp_path / "pool").mkdir()
+    (tmp_path / "pool" / "config.json").write_text(
+        json.dumps({"cli_slots": [{"name": "newcli", "model": "free-1", "tier": "free"}]}),
+        encoding="utf-8",
+    )
+    assert pool_config_path() == tmp_path / "pool" / "config.json"
+    upstreams = {upstream.name: upstream for upstream in discover_upstreams(tmp_path / "home")}
+    assert "newcli:free-1" in upstreams
 
 
 def test_the_minimax_quota_is_read_from_the_mmx_clis_own_credentials(tmp_path):
