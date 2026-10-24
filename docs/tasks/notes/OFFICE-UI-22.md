@@ -12,7 +12,7 @@
 `backend/app/admin/worker.py`（管理员的消息处理）、`backend/app/tasks/service.py`
 （消息签名）；R10 §19（群聊与消息）、§38（R10-fix 流程）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`948236a`）
 commit：`5ac3533`（状态栏的在线/离线、中途把新窗口加进项目、加完通知管理员；R10 §38.17 R10-fix-23 + §19 一条）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-037
