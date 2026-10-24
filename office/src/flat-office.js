@@ -1572,6 +1572,26 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ? '这个筛选下没有任务。'
         : '当前项目还没有任务。'
       list.append(empty);
+      if (!hasAnyTask) {
+        // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的
+        // 地方。原先这句话长在详情栏的空状态里，可详情栏只有选中一条活才出现 ——
+        // 空项目反而看不到它。放到任务表这一侧才对。
+        const hint = document.createElement('p');
+        hint.className = 'flat-empty';
+        hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
+        list.append(hint);
+        const start = document.createElement('button');
+        start.type = 'button';
+        start.className = 'flat-start';
+        start.dataset.act = 'start-project';
+        start.textContent = '配置目标';
+        list.append(start);
+        const note = document.createElement('p');
+        note.className = 'flat-note';
+        // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
+        note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
+        list.append(note);
+      }
     }
 
     // 列表：按「人」归堆（默认），或者平铺按时间排。
@@ -1621,27 +1641,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!state.selected) {
       const hint = document.createElement('p');
       hint.className = 'flat-empty';
-      if ((state.tasks || []).length) {
-        hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
-        panel.append(hint);
-        return panel;
-      }
-      // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的地方。
-      // 原来这里写「选一条任务看……」—— 可一条都没有，等于让人去找不存在的东西。
-      // 改成：说清这一栏将来会出现什么，再给一个能点的下一步。
-      hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
+      hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
       panel.append(hint);
-      const start = document.createElement('button');
-      start.type = 'button';
-      start.className = 'flat-start';
-      start.dataset.act = 'start-project';
-      start.textContent = '配置目标';
-      panel.append(start);
-      const note = document.createElement('p');
-      note.className = 'flat-note';
-      // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
-      note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
-      panel.append(note);
       return panel;
     }
     const task = state.selected;
