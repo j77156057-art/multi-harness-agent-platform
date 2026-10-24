@@ -12,7 +12,7 @@
 `backend/app/adapter/models.py`（窗口自带的模型是 CLI 自己配置里的事实）、
 `backend/app/adapter/registry.py`（窗口登记）；R10 §8（canonical 数据模型）、
 §37.6（表与必要字段）、§38（R10-fix 流程）；`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`1f92831`）
 commit：`491a9b4`（窗口页的模型选择：迁移 017 + 平台照办 + 界面选择器 + R10 §38.14 R10-fix-19）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-032
