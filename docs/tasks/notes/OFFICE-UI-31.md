@@ -11,7 +11,8 @@
 `backend/app/api/routes.py`（新读面）、`backend/app/assistant/tools.py`（工具表）、
 `backend/app/assistant/prompts.py`（姿势与红线）、`backend/app/security/scan.py`（凭据识别）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`fb819ba`（助手的深取证档）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-046
 
@@ -51,8 +52,9 @@ test_id：MVP-UI-046
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_forensics.py` 新增 6 项（脱敏 + 计数、有界 + 整个日志的大小、读面的出处与遮挡、未知任务是 404、助手工具是只读）；连同 `test_assistant_loop.py` 与 `test_assistant_bases.py` 全过 |
+| 真跑（8849 真平台 + 4174 预览） | **读面**：`GET /api/v1/tasks/FD-554d39dd92e7ec10/forensics` 对 4.98MB 的真实日志给出读到的 882 行、整个日志 4,987,478 字节、stderr 另有 103 字节、出处指向 `formal-runs/FD-554d39dd92e7ec10.FD-554d39dd92e7ec10.a1.log`、轮次 `a1`、harness `claude-code`。**脱敏**：把两行凭据（`OPENAI_API_KEY=` 前缀式、`token =` 空格式）混进真实日志，两行都被遮挡、原文不在输出里、其余日志行原样保留；整段 882 行扫描 0.078s。**助手真的用上了这个工具**：助手循环（真实池子模型 + 真实工具表 + 真实读面 + 真实日志）的 trace 里，`task.forensics` 被实际调用 **8 次**，每次都取回同一份真实材料（attempt `a1` / harness `claude-code` / 4,987,478 字节 / 来源日志路径） |
+| 办公室全部冒烟 | 30/33（3 条是与本卡无关的环境依赖：verify-anchors、verify-harness-connections、verify-project-workspace，与 OFFICE-UI-28/29/30 同） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44；`ruff check` + `ruff format --check` 全绿 |
+| `pytest`（全量） | EXIT=0 |
+| 已知限制（如实记下，不掩饰） | 池子里的**免费模型**在「先取证再作答」这件事上不稳定：实测有的模型根本不调工具直接答「未记上」，有的调完工具后上游 502/超时拿不到最终答案。工具、读面、提示词三样都已就位并被真跑验证过；模型肯不肯用、用得稳不稳，取决于当下池子里挂的是哪个模型 —— 那是**模型与上游**的现状，本卡不替它兜底。 |

@@ -161,7 +161,7 @@
 | OFFICE-UI-28 | Mavis | pool-generic-adapter | done（**办公室本地接声明表**：加新 harness 不用改代码；不新增端点、不新增权限行） | `agent/local/mavis/OFFICE-UI-28/a1` | `MVP-UI-043` |
 | OFFICE-UI-29 | Mavis | OFFICE-UI-28 | done（**「接一个新 harness」的操作手册**写进仓：`docs/harness-onboarding.md`） | `agent/local/mavis/OFFICE-UI-29/a1` | `MVP-UI-044` |
 | OFFICE-UI-30 | Mavis | OFFICE-UI-29 | done（**助手的适配体检 + 声明草案**：新读面 `GET /harnesses/bases` 给缺口清单，助手只读工具 `harness.bases`；只出草案，装不装由人） | `agent/local/mavis/OFFICE-UI-30/a1` | `MVP-UI-045` |
-| OFFICE-UI-31 | Mavis | OFFICE-UI-30 | →doing（**助手的深取证档**：更深的输出 + 出处 + 脱敏） | `agent/local/mavis/OFFICE-UI-31/a1` | `MVP-UI-046` |
+| OFFICE-UI-31 | Mavis | OFFICE-UI-30 | done（**助手的深取证档**：新读面 `GET /tasks/{task_id}/forensics` 给更深的输出/stderr/出处/脱敏，助手只读工具 `task.forensics`） | `agent/local/mavis/OFFICE-UI-31/a1` | `MVP-UI-046` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
