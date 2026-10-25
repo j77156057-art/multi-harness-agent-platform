@@ -9,7 +9,7 @@
 依赖任务：assistant-react-loop-p2（通道已按"目录驱动"实现，本卡是平台侧抽样哨）
 真相源引用：MVP-ADAPTER-003（模型目录/池子面同族）；新检查 ID（如
 `CORE-POOLWATCH-001`）待规范复审后回填，不在本卡自造
-当前状态：doing（实现＋scripted 测试已就位；运行入口备好未部署）
+当前状态：doing（实现＋scripted 测试已就位并在 main 上，运行入口备好并真跑过；**只剩部署时机待仓库主人定** —— 2026-10-26 由 Mavis 核实并真跑，见「验证结果」）
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
@@ -59,3 +59,29 @@ test_id：MVP-ADAPTER-003
 
 实现与测试已就位（本轮提交）。部署：运维侧需要哪个进程跑
 `--loop`（或 cron 打 `--once`）待仓库主人定；未部署前哨不上工。
+
+### 验证结果
+
+（2026-10-26 由 Mavis 补记，OFFICE-UI-39）
+
+| 门禁 | 结果 |
+|---|---|
+| 逐条核实 | ✅ 模块与入口在 main 上（`9d73000`）；7 条 scripted 测试在 main 上且**全绿**（`tests/test_pool_free_set_watch.py`：首跑建基线不喊人 / 同名单静默且账本不重写 / 删添各投一条 / 同名单重查不重投 / 回滚快照重演已投变迁不重投 / 坏快照算基线丢失不误报 / 点名刷新可透传） |
+| **真跑**（8849 真实池子） | ① 首跑 `python -m app.pool.free_set_watch --once` → `first_snapshot: true`、`changed: false`、`alerts_enqueued: 0`（**建基线，不喊人**），快照落盘 `data/pool/free-set.json`，当前 free 名单 14 个模型（codebuddy×3、opencode-cli×8、qoder×2…），指纹 `a9b68f20…`；② 第二遍 → `first_snapshot: false`、`changed: false`、`alerts_enqueued: 0`、指纹不变（**同名单静默，账本不重写**） |
+| 入口 | `python -m app.pool.free_set_watch [--once｜--loop] [--interval N]`，`--once` 是默认；`--help` 可读 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| `pytest`（全量） | EXIT=0（实现代码逐字节未变） |
+| 边界 | **没有改它的实现**；也没有擅自部署 —— 哨会发告警（outbound），挂不挂是运维决定 |
+
+### 部署（待仓库主人定）
+
+三个选项，代价各不相同：
+
+| 选项 | 怎么跑 | 代价 / 影响 |
+|---|---|---|
+| **A 常驻** | 一个独立进程 `python -m app.pool.free_set_watch --loop --interval N` | 目录一变就告警（延迟 ≤ N）。**注意不能挂进 `run_all_sweeps`** —— sweeper 家族有「sweeps 永不做 outbound（连告警排队都不做）」的不变量，哨是独立入口才合平台规矩 |
+| **B 定时** | 计划任务/cron 定期打 `python -m app.pool.free_set_watch --once` | 告警延迟 = 计划周期；不占常驻进程 |
+| **C 暂不部署** | 不跑 | 哨不上工：**免费档变了没人被喊**，人得自己看池子清单（办公室「额度池」那块能看到当前档位，但不会主动提醒） |
+
+无论选哪个，投递都沿 **alerts 现有面**（`python -m app.alerts` 投，收件人沿现有 webhook）——
+本卡没有新增任何表结构、事件或路由。
