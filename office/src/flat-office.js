@@ -1516,10 +1516,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const trace = document.createElement('details');
     trace.className = 'flat-spec flat-assistant-trace';
     const runs = state.assistantRuns || [];
-    const latest = runs[0];
+    // 优先给**最近一次完整跑完**的那轮：中途停掉的那次信息不全（没跑完、
+    // 模型没记上），看完它不如看完上一次。
+    const latest = runs.find((run) => run.status === 'done') || runs[0];
     const summary = document.createElement('summary');
     summary.textContent = latest
-      ? `它这一轮做了什么（${(latest.steps || []).length} 步 · ${latest.model || '模型未记上'}）`
+      ? `它最近一次做完的一轮（${(latest.steps || []).length} 步 · ${latest.model || '模型未记上'}）`
       : '它这一轮做了什么';
     trace.append(summary);
     if (!latest) {

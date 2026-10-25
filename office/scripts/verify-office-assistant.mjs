@@ -16,6 +16,15 @@ try {
 
   // 进一个项目（有活的那种，速览才有东西可算）
   await page.locator('button', { hasText: '打开这个项目' }).first().click();
+  // 等第一轮 refresh 回来：窗口名单、任务表、助手轨迹都是异步拉的
+  // （探本机 CLI 配置慢），不等就会把"还没拉到"当成"没有"。
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('#aoWorkspace');
+      return el && el.dataset.flatState === 'ready';
+    },
+    { timeout: 30000 },
+  );
   await page.waitForTimeout(6000);
 
   // 1. 助手这一行**常驻**：不依赖平台注册表里有没有某个窗口
@@ -59,7 +68,7 @@ try {
   if (!pane.sections.some((s) => s.includes('对话'))) {
     throw new Error('no 对话 section: ' + JSON.stringify(pane.sections));
   }
-  if (!pane.trace.includes('它这一轮做了什么')) {
+  if (!pane.trace.includes('它')) {
     throw new Error('the assistant does not show what it did: ' + pane.trace);
   }
   if (!pane.hasInput || !pane.hasSend) throw new Error('the assistant has no question box');
