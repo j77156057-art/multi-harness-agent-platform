@@ -43,3 +43,9 @@
 2. 既有回归不破：`test_task_diff.py`、`test_publish.py` 全绿（与
    `has_object` 共用的 publish 路径回归）；
 3. `ruff`（check + format）全绿；`tools/docstate`、`tools/discipline` 绿。
+
+## 2026-10-26：逐条核实并收尾（OFFICE-UI-38，Mavis）
+
+实现已在 main 上（原写的「待合并门禁」已过时）。逐条核实 + 真跑（真的把
+`AP_CANONICAL_REPO` 指到不存在的目录）记录见
+`docs/tasks/notes/diff-uninitialized-repo.md` 的「验证结果」。
