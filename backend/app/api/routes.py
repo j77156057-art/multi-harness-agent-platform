@@ -2184,6 +2184,110 @@ def harness_bases() -> dict[str, Any]:
     }
 
 
+#: How much of a transcript the forensics face hands out.  Deeper than the
+#: office's live tail (32KB / 200 lines) and still bounded -- a 5 MB transcript
+#: does not belong in a model context.
+FORENSICS_MAX_BYTES = 256 * 1024
+FORENSICS_MAX_LINES = 2000
+FORENSICS_HARD_MAX_BYTES = 1024 * 1024
+FORENSICS_HARD_MAX_LINES = 20000
+
+
+@read.get("/tasks/{task_id}/forensics")
+def task_forensics(
+    task_id: str,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    attempt_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """The deeper evidence an assistant needs to say *where* it got stuck.
+
+    More of the CLI's own output than the live tail, the stderr side as well,
+    and the **provenance** of every byte: which task, which attempt, which log
+    file, how many bytes, how many lines, when it was last written.
+
+    Lines that carry a credential-looking value are masked **here**, so the
+    raw value never reaches the reader; the count of masked lines travels with
+    the text.
+    """
+    task = service.get_task(task_id)
+    if attempt_id:
+        attempt_id = str(attempt_id)
+        current = attempt_id == str(task.get("current_attempt_id") or "")
+        known = database.read(
+            "SELECT attempt_id FROM task_attempts WHERE attempt_id = ? AND task_id = ?",
+            (attempt_id, task_id),
+        )
+        if not known:
+            return {"forensics": None}
+    else:
+        attempt_id = task.get("current_attempt_id")
+        current = attempt_id is not None
+        if not attempt_id:
+            rows = database.read(
+                "SELECT attempt_id FROM task_attempts WHERE task_id = ?"
+                " ORDER BY attempt_no DESC LIMIT 1",
+                (task_id,),
+            )
+            if not rows:
+                return {"forensics": None}
+            attempt_id = str(rows[0]["attempt_id"])
+    stdout_path, stderr_path = cli_output.log_paths(settings.data_dir, task_id, str(attempt_id))
+    stdout = cli_output.read_tail(
+        stdout_path, max_bytes=FORENSICS_MAX_BYTES, max_lines=FORENSICS_MAX_LINES
+    )
+    stderr = cli_output.read_tail(
+        stderr_path, max_bytes=FORENSICS_MAX_BYTES, max_lines=FORENSICS_MAX_LINES
+    )
+    stdout_text, stdout_masked = cli_output.redact(stdout["text"])
+    stderr_text, stderr_masked = cli_output.redact(stderr["text"])
+    attempt = database.read(
+        "SELECT status, owner, head_commit, attempt_no FROM task_attempts WHERE attempt_id = ?",
+        (str(attempt_id),),
+    )
+    attempt_row = dict(attempt[0]) if attempt else {}
+    return {
+        "forensics": {
+            "task_id": task_id,
+            "attempt_id": str(attempt_id),
+            "attempt_no": attempt_row.get("attempt_no"),
+            "current": current,
+            "attempt_status": attempt_row.get("status"),
+            "harness_id": attempt_row.get("owner") or task.get("owner"),
+            "stdout": {
+                "text": stdout_text,
+                "bytes": stdout["bytes"],
+                "read_lines": stdout["lines"],
+                "returned_lines": len(stdout_text.splitlines()),
+                "redacted_lines": stdout_masked,
+            },
+            "stderr": {
+                "text": stderr_text,
+                "bytes": stderr["bytes"],
+                "read_lines": stderr["lines"],
+                "returned_lines": len(stderr_text.splitlines()),
+                "redacted_lines": stderr_masked,
+            },
+            "source": {
+                "stdout_log": str(stdout_path.relative_to(settings.data_dir))
+                if stdout_path.is_relative_to(settings.data_dir)
+                else stdout_path.name,
+                "stderr_log": str(stderr_path.relative_to(settings.data_dir))
+                if stderr_path.is_relative_to(settings.data_dir)
+                else stderr_path.name,
+                "stdout_updated_at": stdout["updated_at"],
+                "stderr_updated_at": stderr["updated_at"],
+            },
+            "bounds": {
+                "max_bytes": FORENSICS_MAX_BYTES,
+                "max_lines": FORENSICS_MAX_LINES,
+                "hard_max_bytes": FORENSICS_HARD_MAX_BYTES,
+                "hard_max_lines": FORENSICS_HARD_MAX_LINES,
+            },
+        }
+    }
+
+
 @read.get("/tasks/{task_id}/events")
 def task_events(
     task_id: str,
