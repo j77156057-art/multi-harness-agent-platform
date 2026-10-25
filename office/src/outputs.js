@@ -8,7 +8,7 @@
 // 数据来自平台的 `/tasks/{id}/output`（每一次 attempt 的 CLI 输出尾巴）。
 // 页面本身只读，不发任何写。
 import './outputs.css';
-import { DONE_STATES, FAILED_STATES, stateLabel } from './state-labels.js';
+import { DONE_STATES, FAILED_STATES, outcomeLabel, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 
@@ -29,7 +29,7 @@ const state = { status: null, outputs: [], scope: null, group: null, filter: 'al
 
 /** 窗口的登记名（平台的 `codex-window` → 「Codex 窗口」）。 */
 function harnessName(id) {
-  if (!id) return '不知道是谁';
+  if (!id) return '执行方未知';
   const roster = (state.status && state.status.harnesses) || [];
   const hit = roster.find((item) => item.harness_id === id);
   return (hit && hit.name) || id;
@@ -142,7 +142,7 @@ function words(task, attempt) {
     const head = clipLines(headline, 6);
     return `
       <div class="outputs-said">
-        <div class="outputs-said-head">它最后说了</div>
+        <div class="outputs-said-head">最后一次输出</div>
         <pre class="outputs-words">${escape(shortenPath(head.text) || '（这段里没有可读的文字）')}</pre>
         ${
           head.rest
@@ -169,7 +169,7 @@ function words(task, attempt) {
     clipped = true;
   }
   return `
-    <pre class="outputs-words ${clipped ? 'is-clipped' : ''}">${escape(shortenPath(shown) || '（它什么也没输出）')}</pre>
+    <pre class="outputs-words ${clipped ? 'is-clipped' : ''}">${escape(shortenPath(shown) || '（无输出）')}</pre>
     ${long ? `<button type="button" class="outputs-more" data-more="${escape(key)}">${expanded ? '收起' : `展开全部 ${lines.length} 行`}</button>` : ''}
     ${stderr.trim() ? `<pre class="outputs-err">${escape(shortenPath(stderr))}</pre>` : ''}`;
 }
@@ -196,15 +196,15 @@ function render() {
   root.innerHTML = `
     <div class="outputs-shell">
       <header class="outputs-head">
-        <h1>各个窗口都说了什么</h1>
+        <h1>各窗口输出记录</h1>
         <p>${escape(scopeName())} · ${total} 次尝试留下了话</p>
-        <p class="outputs-note">干活的人每做一次活，都会留下一段<b>它自己的话</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开；一条活做过几次，这里就摊几次，新的那次在前。</p>
+        <p class="outputs-note">执行成员每完成一次任务，都会留下一段<b>其自身输出</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开；一条活做过几次，这里就摊几次，新的那次在前。</p>
         <div class="outputs-tools">
           <label for="outputsFilter">看</label>
           <select id="outputsFilter">
             <option value="all"${state.filter === 'all' ? ' selected' : ''}>全部</option>
-            <option value="done"${state.filter === 'done' ? ' selected' : ''}>做完了的</option>
-            <option value="failed"${state.filter === 'failed' ? ' selected' : ''}>没做成的</option>
+            <option value="done"${state.filter === 'done' ? ' selected' : ''}>已完成的</option>
+            <option value="failed"${state.filter === 'failed' ? ' selected' : ''}>未完成的</option>
           </select>
           <button type="button" id="outputsRefresh">刷新</button>
           <span class="outputs-count">显示 ${shown} 次</span>
@@ -237,7 +237,7 @@ function render() {
                               // 这一轮的结果来自**事件**，不是那个停在 verifying 的
                               // attempt 状态：交上去了 / 放弃了（带原因）/ 放开了。
                               const outcome = attempt.outcome
-                                ? `<span class="outputs-tag ${attempt.outcome === '交上去了' ? 'is-done' : 'is-stuck'}">这一轮：${escape(attempt.outcome)}</span>`
+                                ? `<span class="outputs-tag ${attempt.outcome === '交上去了' ? 'is-done' : 'is-stuck'}">这一轮：${escape(outcomeLabel(attempt.outcome))}</span>`
                                 : '';
                               const reason = attempt.reason
                                 ? `<p class="outputs-reason">它当时说：${escape(attempt.reason)}</p>`
@@ -262,8 +262,8 @@ function render() {
                 state.error
                   ? ''
                   : total
-                    ? '这些活都还没做完 —— 切到「全部」能看到它们现在说了什么。'
-                    : '还没有窗口留下过话。等有活跑起来，这里就会摊开它们说了什么。'
+                    ? '这些任务尚未完成 —— 切换至「全部」可查看其当前输出。'
+                    : '尚无窗口留下输出。任务开始执行后，其输出将在此展示。'
               }</p>`
         }
         ${state.error ? `<p class="outputs-error">读不到：${escape(state.error)}</p>` : ''}

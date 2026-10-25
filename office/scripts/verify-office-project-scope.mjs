@@ -80,7 +80,7 @@ try {
   const empty = await page.locator('#aoWorkspace .flat-task').count();
   assert.equal(empty, 0, 'an unrelated project shows no tasks');
   const emptyNote = await page.locator('#aoWorkspace .flat-empty').first().textContent();
-  assert.ok(emptyNote && emptyNote.includes('还没有任务'), 'the empty state says so');
+  assert.ok(emptyNote && emptyNote.includes('暂无任务'), 'the empty state says so');
 
   assert.deepEqual(errors, [], 'the page raised no errors');
   console.log('verify-office-project-scope: ok');

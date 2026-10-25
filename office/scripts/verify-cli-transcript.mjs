@@ -38,7 +38,7 @@ check("Claude Code: the assistant's text blocks are picked out", () => {
   assert.equal(headlineText(parsed), '改完了，测试通过。');
   assert.equal(parsed.tools.length, 1);
   // Claude Code 的 tool_use 把 input 放在顶层。
-  assert.equal(parsed.tools[0].label, '读了文件：login.vue');
+  assert.equal(parsed.tools[0].label, '读取文件：login.vue');
 });
 
 check('Claude Code: the final result line is the conclusion', () => {
@@ -87,7 +87,7 @@ check('OpenCode: text and tool events are picked out', () => {
   assert.equal(parsed.texts.length, 1);
   assert.equal(parsed.texts[0].text, '我改了 fuzzy.ts。');
   assert.equal(parsed.tools.length, 1);
-  assert.equal(parsed.tools[0].label, '跑了命令：npm test');
+  assert.equal(parsed.tools[0].label, '执行命令：npm test');
 });
 
 check('OpenCode: the text may also be at the top level', () => {
@@ -113,7 +113,7 @@ check('OpenCode: the tool details live in part, not at the top level', () => {
   });
   const parsed = parseTranscript(raw);
   assert.equal(parsed.tools.length, 1);
-  assert.equal(parsed.tools[0].label, '读了文件：login.vue');
+  assert.equal(parsed.tools[0].label, '读取文件：login.vue');
   assert.equal(parsed.tools[0].status, 'completed');
 });
 
@@ -126,16 +126,16 @@ check('the tool steps are said in plain words', () => {
   ].join('\n');
   const parsed = parseTranscript(raw);
   assert.deepEqual(parsed.tools.map((t) => t.label), [
-    '跑了命令：npm test',
-    '写了文件：commit-msg.txt',
-    '搜了代码：TODO',
+    '执行命令：npm test',
+    '写入文件：commit-msg.txt',
+    '搜索代码：TODO',
     // 认不出的工具只报名字：挑一个字段来解释它是猜，而猜错比不解释更糟。
     'some_unknown_tool',
   ]);
 });
 
 check('an absolute path is shortened and the command says where it ran', () => {
-  // 仓库主人：「输出页那行绝对路径压缩成「在 wt\\69d9 里跑了 git log」」。
+  // 仓库主人：「输出页那行绝对路径压缩成「在 wt\\69d9 中执行了 git log」」。
   const worktree = 'D:\\study\\tools\\agent\\new agent\\wt\\69d9';
   const raw = [
     JSON.stringify({
@@ -154,8 +154,8 @@ check('an absolute path is shortened and the command says where it ran', () => {
     }),
   ].join('\n');
   const parsed = parseTranscript(raw);
-  assert.equal(parsed.tools[0].label, '在 wt\\69d9 里跑了 git log --oneline -5');
-  assert.equal(parsed.tools[1].label, '在 wt\\69d9 里跑了 git log');
+  assert.equal(parsed.tools[0].label, '在 wt\\69d9 中执行了 git log --oneline -5');
+  assert.equal(parsed.tools[1].label, '在 wt\\69d9 中执行了 git log');
   assert.match(parsed.tools[2].label, /wt\\69d9\\src\\main\.py/);
   // 压短之后不该再出现整条绝对路径。
   assert.ok(!parsed.tools.some((tool) => tool.label.includes('D:\\study')));

@@ -148,10 +148,10 @@ try {
 
   const today = (await page.locator('.flat-today').innerText()).trim();
   assert.match(today, /今天/, '顶上有一段说今天的话');
-  assert.match(today, /新接了 1 件事/, '今天新来的一件算进去了');
-  assert.match(today, /做完了 1 件/, '今天做完的一件算进去了（昨天做完的不算）');
-  assert.match(today, /没做成 1 件/, '今天没做成的一件算进去了');
-  assert.match(today, /1 个窗口在干活/, '现在有几个窗口在干，说得清');
+  assert.match(today, /新接手 1 条任务/, '今天新来的一件算进去了');
+  assert.match(today, /完成 1 条/, '今天做完的一件算进去了（昨天做完的不算）');
+  assert.match(today, /未完成 1 条/, '今天没做成的一件算进去了');
+  assert.match(today, /1 个窗口正在执行任务/, '现在有几个窗口在干，说得清');
   assert.match(today, /额度池今天用了 3 次/, '额度单独一句，用的是今天的时间线');
   await page.close();
 
@@ -160,8 +160,8 @@ try {
   const quietPage = await openOffice();
   await quietPage.waitForTimeout(1200);
   const quiet = (await quietPage.locator('.flat-today').innerText()).trim();
-  assert.match(quiet, /今天这个项目还没有动静/, '今天没动静时说出来');
-  assert.match(quiet, /最新的一条是 .*前更新/, '还要说清多久没动静了');
+  assert.match(quiet, /本项目今天暂无进展/, '今天没动静时说出来');
+  assert.match(quiet, /最新一条更新于 .*前/, '还要说清多久没动静了');
   await quietPage.close();
 
   assert.deepEqual(errors, [], '页面没有报错');

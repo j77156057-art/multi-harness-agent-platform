@@ -79,7 +79,7 @@ const FIELD_LABEL = {
   attempt_budget_override: '多给了一次机会',
   branch: '分支',
   budget_override_by: '谁多给了一次机会',
-  claim_request_id: '接活请求',
+  claim_request_id: '领取请求',
   commit: 'commit',
   completion: '成员自述',
   decided_by: '谁决定的',
@@ -197,7 +197,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // window=某个窗口（id 是它的 harness_id）。
     view: { kind: 'tasks', id: null },
     // 第二批数据（窗口名单、群消息、额度池）到了没有：没到的时候左栏要说
-    // 「正在读…」，不能让它看起来像"这个项目里没有窗口"。
+    // 「正在读取…」，不能让它看起来像"这个项目里没有窗口"。
     loaded: false,
     // 当前筛选下的活（任务表算好的）：详情里的紧凑列表要用同一份，
     // 免得详情里摆着一条被筛选掉的活。
@@ -653,7 +653,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    *
    * 真数据实测踩到的坑：合入之后平台把 owner 清空了，于是"已完成"的活在列表里
    * 写着"没人做（之前是 OpenCode）"—— 一件做完的事说成没人做，读者会以为它
-   * 还在等人。所以先看这条活**处在什么状态**，再说人。
+   * 还在等人。所以先看这条任务**处在什么状态**，再说人。
    */
   /**
    * 标题拆成**主句**与**副句**。
@@ -675,15 +675,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function whoWord(task, holds) {
     const status = String(task.status || '');
     if (DONE_STATES.has(status)) {
-      return holds.before ? `做完了（之前是 ${holds.before} 做的）` : '做完了';
+      return holds.before ? `已完成（此前由 ${holds.before} 执行）` : '已完成';
     }
     if (['abandoned', 'stale', 'cancelled'].includes(status)) {
-      return holds.before ? `没做成（之前是 ${holds.before} 做的）` : '没做成';
+      return holds.before ? `未完成（此前由 ${holds.before} 执行）` : '未完成';
     }
-    if (holds.now) return `${holds.now} 在做`;
-    if (holds.before) return `现在没人做（之前是 ${holds.before}）`;
-    if (Number(task.attempt_no || 0) > 0) return `现在没人做（试过 ${task.attempt_no} 次）`;
-    return '还没人接';
+    if (holds.now) return `${holds.now} 执行中`;
+    if (holds.before) return `当前无人执行（此前由 ${holds.before} 执行）`;
+    if (Number(task.attempt_no || 0) > 0) return `当前无人执行（已尝试 ${task.attempt_no} 次）`;
+    return '尚无人领取';
   }
 
   /** 谁在拿着这条活（拿不了就说谁接过）。 */
@@ -703,8 +703,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const used = Number(task.attempt_no || 0);
     const max = Number(task.max_attempts || 0);
     // 「第 0 次尝试」是句废话 —— 一次都没试过就别数了。
-    if (!used) return '还没开始试';
-    if (!max) return `已经试了 ${used} 次`;
+    if (!used) return '尚未开始尝试';
+    if (!max) return `已尝试 ${used} 次`;
     return `第 ${used} 次尝试（最多 ${max} 次）`;
   }
 
@@ -731,11 +731,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /**
    * 按「谁」把活归堆。
    *
-   * 现在谁在做就归谁；做完了、没做成的归**最后做的那个人** —— 一条活做完没人
-   * 接手，它还是那个人的活。没人碰过的归「还没人接」。
+   * 现在谁在做就归谁；已完成、未完成的归**最后做的那个人** —— 一条活做完没人
+   * 接手，它还是那个人的活。没人碰过的归「尚无人领取」。
    *
-   * 每堆带三个数：手上（在做的）、做完了、没做成。**忙闲是从"手上"推出来的**，
-   * 不是猜的：手上有人在做的活就是在忙，没有就是闲着。
+   * 每堆带三个数：手上（在做的）、已完成、未完成。**忙闲是从"手上"推出来的**，
+   * 不是猜的：手上有人在做的活就是忙碌，没有就是空闲。
    */
   function groupByPerson(tasks) {
     const groups = new Map();
@@ -746,7 +746,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (!group) {
         group = {
           key,
-          name: key ? harnessName(key) : '还没人接',
+          name: key ? harnessName(key) : '尚无人领取',
           tasks: [],
           active: 0,
           done: 0,
@@ -775,30 +775,30 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
   /** 这一堆是忙是闲（依据：手上有几条在做的活）。 */
   function groupMood(group) {
-    if (group.active > 0) return { text: '在忙', kind: 'is-busy' };
-    if (!group.key) return { text: '等人接', kind: 'is-waiting' };
-    return { text: '闲着', kind: 'is-idle' };
+    if (group.active > 0) return { text: '忙碌', kind: 'is-busy' };
+    if (!group.key) return { text: '待领取', kind: 'is-waiting' };
+    return { text: '空闲', kind: 'is-idle' };
   }
 
-  /** 这一堆的数：手上几条、做完了几条、没做成几条。 */
+  /** 这一堆的数：手上几条、已完成几条、未完成几条。 */
   function groupFacts(group) {
     const bits = [];
-    if (group.active) bits.push(`手上 ${group.active} 条`);
-    if (group.waiting) bits.push(`等着 ${group.waiting} 条`);
-    if (group.done) bits.push(`做完了 ${group.done} 条`);
-    if (group.failed) bits.push(`没做成 ${group.failed} 条`);
+    if (group.active) bits.push(`进行中 ${group.active} 条`);
+    if (group.waiting) bits.push(`待领取 ${group.waiting} 条`);
+    if (group.done) bits.push(`已完成 ${group.done} 条`);
+    if (group.failed) bits.push(`未完成 ${group.failed} 条`);
     return bits.join(' · ');
   }
 
   /** 审核结论的说人话（事件名 -> 人话）。 */
   const REVIEW_VERDICT = {
     approve: '通过',
-    request_changes: '打回返修',
-    reopen_for_changes: '打回重做',
-    verify_passed: '机器校验通过',
+    request_changes: '退回返修',
+    reopen_for_changes: '退回重做',
+    verify_passed: '自动校验通过',
     merge_success: '已合入',
-    merge_conflict: '合入冲突',
-    merge_conflict_needs_owner: '合入冲突（需要人决）',
+    merge_conflict: '合并冲突',
+    merge_conflict_needs_owner: '合并冲突（需人工决定）',
   };
 
   /**
@@ -838,11 +838,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     });
   }
 
-  /** 任务书的内容：先是活账（谁在做、做得怎么样），后面是方案原文。 */
+  /** 任务书的内容：先是任务清单（谁在做、执行情况），后面是方案原文。 */
   function briefBody(brief) {
     const rows = briefTasks();
     if (!rows.length) {
-      return '<p class="flat-empty">暂无任务。管理员细化之后，这里会给出任务书。</p>';
+      return '<p class="flat-empty">暂无任务。管理员细化后，这里将显示任务详情。</p>';
     }
     const done = rows.filter((r) => ['merged', 'approved', 'done'].includes(r.task.status)).length;
     const running = rows.filter((r) => ['claimed', 'in_progress', 'verifying', 'awaiting_review'].includes(r.task.status)).length;
@@ -851,17 +851,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         const task = row.task;
         const holds = whoHolds(task);
         const owner = holds.now
-          ? `${holds.now}（在做）`
+          ? `${holds.now}（执行中）`
           : holds.before
-            ? `现在没人做（之前是 ${holds.before}）`
+            ? `当前无人执行（此前由 ${holds.before} 执行）`
             : Number(task.attempt_no || 0) > 0
-              ? `现在没人做（接过 ${task.attempt_no} 次，接手的人不在近期这段记录里）`
-              : '还没人接过';
+              ? `当前无人执行（已交接 ${task.attempt_no} 次，接收方不在近期记录中）`
+              : '尚无人领取';
         const history = row.claims.map((c) => c.actor_id).filter((v, i, a) => a.indexOf(v) === i);
         const who = (id) => (id ? harnessName(id) : '');
         const verdict = row.lastReview
           ? `${REVIEW_VERDICT[row.lastReview.event_name] || row.lastReview.event_name}（${who(row.lastReview.actor_id) || '平台'}）`
-          : '还没有审核结论';
+          : '尚无审核结论';
         const submitter = row.submits.length
           ? row.submits.map((s) => s.actor_id).filter((v, i, a) => a.indexOf(v) === i).map(who).join('、')
           : null;
@@ -872,9 +872,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             <span class="flat-mono" title="任务编号 ${escape(task.task_id)}">${escape(translated(task.task_id) || task.task_id)}</span>
           </header>
           <dl>
-            <dt>谁接的</dt>
-            <dd>${escape(owner)}${history.length ? `· 接过：${escape(history.map(who).join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
-            <dt>做得怎么样</dt>
+            <dt>执行方</dt>
+            <dd>${escape(owner)}${history.length ? `· 接手：${escape(history.map(who).join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
+            <dt>执行情况</dt>
             <dd>交了 ${row.submits.length} 次${submitter ? `（${escape(submitter)}）` : ''}；${escape(verdict)}${row.median !== null ? `；接手到交付 ${row.median}s` : ''}</dd>
             ${task.last_failure && task.last_failure.reason ? `<dt>没完成的原因</dt><dd>${escape(reasonText(task.last_failure.reason))}</dd>` : ''}
           </dl>
@@ -886,11 +886,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       : '';
     const unclaimed = unclaimedTasks();
     const dispatchNote = unclaimed.length
-      ? `<p class="flat-brief-action">还有 <b>${unclaimed.length}</b> 条没人接的（待领取）。
+      ? `<p class="flat-brief-action">另有 <b>${unclaimed.length}</b> 条任务尚未领取。
          <button type="button" data-act="ask-admin-dispatch">让管理员派出去</button>
          <span class="flat-note">这是一条 @管理员 的群消息；派给谁由管理员自己决定，办公室不代点。</span></p>`
-      : '<p class="flat-brief-action flat-note">没有待领取的活：要么已经都在人手上，要么已经收尾了。</p>';
-    return `${dispatchNote}<p class="flat-note">共 ${rows.length} 条任务：进行中 ${running} · 已完成 ${done}。下面每一条都写着：现在谁拿着、接过几次、交了几次、审核结论。</p>
+      : '<p class="flat-brief-action flat-note">暂无待领取的任务：或已全部领取，或已收尾。</p>';
+    return `${dispatchNote}<p class="flat-note">共 ${rows.length} 条任务：进行中 ${running} · 已完成 ${done}。每条均标明当前执行者、接手次数、提交次数与审核结论。</p>
       <p class="flat-note">当前持有者与尝试次数是平台自己的字段，一定准；接过的人与交付次数取自**近期这一段事件**，这个群的事件已经超过一页，更早的接手记录不在窗口里。</p>
       <p class="flat-brief-summary" data-brief-summary${state.briefSummary ? '' : ' hidden'}>${escape(state.briefSummary || '')}</p>${cards}${original}`;
   }
@@ -905,7 +905,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   async function askAdminToDispatch(taskIds) {
     const adminId = adminIdentity();
     if (!adminId) {
-      state.error = '平台还没配置管理员窗口，没法把请求送给管理员。';
+      state.error = '平台尚未配置管理员窗口，请求无法送达。';
       render();
       return;
     }
@@ -915,8 +915,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return `- ${id}${task && task.title ? `（${task.title}）` : ''}`;
     });
     const body = ids.length
-      ? `这些活还没人接，请派出去：\n${lines.join('\n')}`
-      : '这个项目里没有待领取的任务。';
+      ? `以下任务尚无人领取，请分派：\n${lines.join('\n')}`
+      : '本项目暂无待领取的任务。';
     try {
       await api('/messages', { body, mentions: [adminId], refs: ['to-admin', 'dispatch-request'] });
       await refresh();
@@ -926,7 +926,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-  /** 这个项目里还没人接的活。 */
+  /** 这个项目里尚无人领取的活。 */
   function unclaimedTasks() {
     return (state.tasks || []).filter((task) => !task.owner && task.status === 'ready');
   }
@@ -970,7 +970,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   const decisionDialog = document.createElement('dialog');
   decisionDialog.className = 'flat-dialog is-compact';
   decisionDialog.id = 'flatDecision';
-  decisionDialog.setAttribute('aria-label', '处置这条活');
+  decisionDialog.setAttribute('aria-label', '任务处置');
   decisionDialog.innerHTML = `
     <header class="flat-dialog-head">
       <div><h2></h2><p class="flat-note"></p></div>
@@ -981,7 +981,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <textarea data-decision-text rows="3"></textarea>
       </label>
       <label class="flat-check" data-decision-override-wrap hidden>
-        <input type="checkbox" data-decision-override /> 顺便再给一次机会
+        <input type="checkbox" data-decision-override /> 顺便追加一次尝试
         <span class="flat-note">这条活的尝试次数已经用完了。不勾这个，平台不放行它。</span>
       </label>
       <div class="flat-dialog-actions">
@@ -1134,7 +1134,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 每句都是平台上的事实算出来的：
    *   · 今天新来的 —— 任务 created_at 落在今天；
    *   · 今天做完的 —— 状态是已完成、updated_at 落在今天；
-   *   · 今天没做成的 —— 状态是没做成、updated_at 落在今天；
+   *   · 今天未完成的 —— 状态是未完成、updated_at 落在今天；
    *   · 现在在干的 —— 状态是 claimed/in_progress/verifying；
    *   · 额度 —— 平台给的 24 小时用量时间线。额度是**全平台**的，不是这个项目的；
    *     时间线盖不满今天的时候就说"最近一天"，不假装它是"今天"。
@@ -1157,9 +1157,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const windows = new Set(working.map((task) => task.owner).filter(Boolean));
 
     const bits = [];
-    if (fresh.length) bits.push(`新接了 ${fresh.length} 件事`);
-    if (done.length) bits.push(`做完了 ${done.length} 件`);
-    if (failed.length) bits.push(`没做成 ${failed.length} 件`);
+    if (fresh.length) bits.push(`新接手 ${fresh.length} 条任务`);
+    if (done.length) bits.push(`完成 ${done.length} 条`);
+    if (failed.length) bits.push(`未完成 ${failed.length} 条`);
 
     const sentences = [];
     if (bits.length) {
@@ -1171,11 +1171,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         return at > best.at ? { at, task } : best;
       }, { at: 0, task: null });
       sentences.push(latest.task
-        ? `今天这个项目还没有动静 —— 最新的一条是 ${timeAgo(latest.task.updated_at)}更新的。`
-        : '今天这个项目尚无进展。');
+        ? `本项目今天暂无进展 —— 最新一条更新于 ${timeAgo(latest.task.updated_at)}。`
+        : '本项目今天暂无进展。');
     }
     if (working.length) {
-      sentences.push(`现在 ${windows.size || working.length} 个窗口在干活。`);
+      sentences.push(`${windows.size || working.length} 个窗口正在执行任务。`);
     }
     // 额度是全平台的用量，单独一句，别混进"这个项目"的账里。
     const timeline = state.pool && state.pool.timeline;
@@ -1210,12 +1210,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 再说清第一步点哪里。空项目下还说「左边是所有正在做的事」是骗人的：那里一条都没有。
     const emptyProject = !(state.tasks || []).length;
     const guide = waitingOnMe
-      ? `有 <b>${waitingOnMe}</b> 件事在等你处理${working ? `，另有 ${working} 件正在做` : ''}。点开就能看。`
+      ? `有 <b>${waitingOnMe}</b> 条任务需要你处理${working ? `，另有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
       : working
-        ? `有 <b>${working}</b> 件正在做${counts.done ? `，${counts.done} 件已经完成` : ''}。没有要你处理的事。`
+        ? `有 <b>${working}</b> 条任务正在执行${counts.done ? `，其中 ${counts.done} 条已完成` : ''}。暂无需要你处理的任务。`
         : emptyProject
           ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
-          : '这个项目里没有要你处理的事。点一条活看详情，或在左侧选一个窗口看它现在的状态。';
+          : '本项目暂无需要你处理的任务。可选择一条任务查看详情，或在左侧选择窗口查看其当前状态。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
@@ -1224,10 +1224,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-today">${escape(todayStory())}</p>
       </div>
       <ul class="flat-counts">
-        <li class="${counts.waiting ? 'has-value' : ''}"><span>等人接</span><b>${counts.waiting}</b></li>
-        <li class="${counts.active ? 'has-value' : ''}"><span>正在做</span><b>${counts.active}</b></li>
-        <li class="is-review ${counts.review ? 'has-value' : ''}"><span>等人处理</span><b>${counts.review}</b></li>
-        <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>没做成</span><b>${counts.failed}</b></li>
+        <li class="${counts.waiting ? 'has-value' : ''}"><span>待领取</span><b>${counts.waiting}</b></li>
+        <li class="${counts.active ? 'has-value' : ''}"><span>执行中</span><b>${counts.active}</b></li>
+        <li class="is-review ${counts.review ? 'has-value' : ''}"><span>待处理</span><b>${counts.review}</b></li>
+        <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>未完成</span><b>${counts.failed}</b></li>
         <li class="${counts.done ? 'has-value' : ''}"><span>完成了</span><b>${counts.done}</b></li>
       </ul>
       <div class="flat-source">
@@ -1252,7 +1252,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 列表里的一条活。
    *
    * `hideWho` 用于按人归堆的视图：块头已经写了是谁，这里就不用每行再写一遍。
-   * 「还没人接」那一堆例外 —— 那里没有名字，行里得说清"现在没人做"。
+   * 「尚无人领取」那一堆例外 —— 那里没有名字，行里得说清「当前无人执行」。
    */
   function taskRow(task, { hideWho = false } = {}) {
     const row = document.createElement('button');
@@ -1270,8 +1270,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
       <span class="flat-task-title">${escape(parts.main)}</span>
       ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
-      <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="它正在做"></i>' : ''}${whoPart}${whoPart ? ' · ' : ''}${escape(attemptWord(task))}${escape(reason)}</span>
-      <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看它最后说了什么 ↓</span>` : ''}</span>`;
+      <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="正在执行"></i>' : ''}${whoPart}${whoPart ? ' · ' : ''}${escape(attemptWord(task))}${escape(reason)}</span>
+      <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看最后一次输出 ↓</span>` : ''}</span>`;
     row.addEventListener('click', (event) => {
       if (event.target.closest('[data-jump="log"]')) return;
       void select(task.task_id);
@@ -1312,7 +1312,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     };
 
     const counts = countBy(state.tasks || []);
-    addRow('tasks', null, '项目任务', `${(state.tasks || []).length} 件事 · ${counts.waiting} 件在等人接`);
+    addRow('tasks', null, '项目任务', `${(state.tasks || []).length} 条任务 · ${counts.waiting} 条待领取`);
 
     const groupMessages = (state.messages || []).filter(
       (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
@@ -1325,8 +1325,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       last
         ? oneLine(readableMessageBody(last) || last.body || '')
         : state.loaded
-          ? '还没消息'
-          : '正在读…',
+          ? '暂无消息'
+          : '正在读取…',
     );
 
     const adminId = adminIdentity();
@@ -1334,7 +1334,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 窗口名单是第二批才到的（要探每个 CLI 的配置，慢）。这段时间说清楚在读，
     // 别让左栏空着像"这个项目里没有窗口"。
     if (!state.loaded && !roster.length) {
-      addRow('window', null, '窗口名单', '正在读…');
+      addRow('window', null, '窗口名单', '正在读取…');
     }
     const assistant = roster.find((item) => isPlatformAssistantHarness(item));
     if (assistant) {
@@ -1391,18 +1391,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     });
     const running = mine.filter((task) => isRunning(task));
     if (running.length) {
-      return `正在做：${clip(titleParts(running[0]).main || running[0].title || '', 18)}`;
+      return `执行中：${clip(titleParts(running[0]).main || running[0].title || '', 18)}`;
     }
     if (info && info.last_attempt_status && info.last_task_id) {
       const label = STATE_LABEL[info.last_attempt_status] || info.last_attempt_status;
       // 还在跑的那一轮不是「上一轮」—— 它就是现在。
       return RUNNING_STATUSES.has(String(info.last_attempt_status))
-        ? '正在做'
+        ? '执行中'
         : `上一轮：${label}`;
     }
-    if (mine.length) return `手上有 ${mine.length} 件活`;
+    if (mine.length) return `手上有 ${mine.length} 条任务`;
     if (info && info.status === 'offline') return '离线';
-    if (info && info.usable === false) return '暂时接不了活';
+    if (info && info.usable === false) return '暂时无法领取任务';
     return '空闲';
   }
 
@@ -1432,7 +1432,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     free: '免费',
     metered: '付费',
     reserve: '兜底',
-    user: '你自己的 key',
+    user: '自有 Key',
   };
 
   const tierWord = (tier) => TIER_WORDS[String(tier || '')] || String(tier || '未知');
@@ -1538,16 +1538,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       names.length > limit ? `${names.slice(0, limit).join('、')}…还有 ${names.length - limit} 个` : names.join('、');
     const bits = [];
     if (probe.first) {
-      bits.push(`第一次探到 ${probe.total} 个模型`);
+      bits.push(`首次探测到 ${probe.total} 个模型`);
     } else if (!probe.added.length && !probe.retyped.length) {
-      bits.push('跟上次探到的一样');
+      bits.push('与上次探测结果一致');
     } else {
       if (probe.added.length) {
-        bits.push(`多了 ${probe.added.length} 个：${cap(probe.added.map((item) => item.label))}`);
+        bits.push(`新增 ${probe.added.length} 个：${cap(probe.added.map((item) => item.label))}`);
       }
       if (probe.retyped.length) {
         bits.push(
-          `有 ${probe.retyped.length} 个换了档：${cap(
+          `${probe.retyped.length} 个档位变更：${cap(
             probe.retyped.map((item) => `${item.label}（${item.before} → ${item.after}）`),
           )}`,
         );
@@ -1555,12 +1555,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (probe.newRosterEntries && probe.newRosterEntries.length && !probe.first) {
       bits.push(
-        `各家 CLI 多了：${cap(probe.newRosterEntries.map((item) => `${item.cli} 的 ${item.name}`))}`,
+        `各家 CLI 新增：${cap(probe.newRosterEntries.map((item) => `${item.cli} 的 ${item.name}`))}`,
       );
     }
     if (probe.undeclared && probe.undeclared.length) {
       bits.push(
-        `还有 ${probe.undeclared.length} 个模型 CLI 说它能用、平台没给档位（免费还是收费没人声明）：${cap(
+        `另有 ${probe.undeclared.length} 个模型 CLI 声明可用但平台未标注档位（免费或收费尚无人声明）：${cap(
           probe.undeclared.map((item) => `${item.cli} 的 ${item.name}`),
         )}`,
       );
@@ -1570,9 +1570,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const changed = probe.retyped.find((item) => item.id === chosen);
     if (changed) {
       bits.push(
-        `这个窗口正用着「${changed.label}」，它${
-          changed.after === '付费' ? '现在按量计费了' : '换了档'
-        } —— 平台不会再花它，你要重新点头`,
+        `该窗口正在使用「${changed.label}」${
+          changed.after === '付费' ? '现按量计费' : '档位已变更'
+        } —— 平台将停止使用，需重新确认授权。`,
       );
     }
     return bits.join('；');
@@ -1587,7 +1587,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   async function probePool() {
     const fresh = await api('/pool/probe', {}).catch(() => null);
     if (!fresh) {
-      state.error = '重新探一遍没成功：平台没回话。';
+      state.error = '重新探测失败：平台未返回结果。';
       render();
       return;
     }
@@ -1622,7 +1622,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
     } catch (error) {
       button.disabled = false;
-      state.error = `没能定档：${String((error && error.message) || error)}`;
+      state.error = `档位设置失败：${String((error && error.message) || error)}`;
       render();
     }
   }
@@ -1651,22 +1651,22 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       state.error = null;
       render();
     } catch (error) {
-      state.error = `没能加入：${String((error && error.message) || error)}`;
+      state.error = `加入失败：${String((error && error.message) || error)}`;
       render();
     }
   }
 
   /** 收费模型要人点头：问一次，答了才算。 */
-  const paidModelDialog = buildPanelDialog('flatPaidModel', '确认要用收费模型');
+  const paidModelDialog = buildPanelDialog('flatPaidModel', '确认使用收费模型');
 
   function askPaidConsent(label) {
     return new Promise((resolve) => {
-      paidModelDialog.querySelector('h2').textContent = '这个模型按量计费';
+      paidModelDialog.querySelector('h2').textContent = '该模型按量计费';
       paidModelDialog.querySelector('.flat-note').textContent =
-        `「${label}」每调用一次都花钱。用它得你点头 —— 不用就还是这个窗口自己的模型。`;
+        `「${label}」按调用次数计费。使用需你确认 —— 否则继续使用该窗口自带的模型。`;
       const list = paidModelDialog.querySelector('.flat-dialog-list');
       list.innerHTML = `<p class="flat-brief-action">
-          <button type="button" data-paid="yes">用它（我知道要花钱）</button>
+          <button type="button" data-paid="yes">确认使用（知晓计费）</button>
           <button type="button" data-paid="no">不用</button>
         </p>`;
       const onClick = (event) => {
@@ -1696,7 +1696,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const prefixed = head && id.toLowerCase().startsWith(`${head.toLowerCase()}/`);
     const model = prefixed ? id.slice(head.length + 1) : id;
     if (String((entry && entry.tier) || '') === 'user') {
-      return { harness: '你自己的 key', model, label: `你自己的 key 的 ${model}` };
+      return { harness: '自有 Key', model, label: `自有 Key 的 ${model}` };
     }
     return { harness: head, model, label: head ? `${head} 的 ${model}` : model };
   }
@@ -1707,25 +1707,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       tier: 'free',
       title: '免费额度',
       mark: '免费',
-      hint: '不额外花钱：用的是各家 CLI 自带的免费额度。',
+      hint: '不产生额外费用：使用各家 CLI 自带的免费额度。',
     },
     {
       tier: 'metered',
       title: '付费额度',
       mark: '付费',
-      hint: '按量计费：每调用一次都花钱 —— 选它要你点头。',
+      hint: '按量计费：按调用次数计费 —— 需你确认后方可使用。',
     },
     {
       tier: 'reserve',
       title: '兜底额度',
       mark: '兜底',
-      hint: '订阅里的额度：平台不会自己花它，你点名才用。',
+      hint: '订阅额度：平台不会自行使用，需你点名后才会启用。',
     },
     {
       tier: 'user',
-      title: '你自己的 key',
+      title: '自有 Key',
       mark: '你的 key',
-      hint: '你自己的 API key：平台不会自己花，要你先点头。',
+      hint: '自有 API Key：平台不会自行使用，需你先确认授权。',
     },
   ];
 
@@ -1750,7 +1750,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const cliRow = `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="cli" ${
       mode === 'pool' ? '' : 'checked'
     }>
-        <span>自带模型</span><span class="flat-model-hint">这个窗口自己的配置${
+        <span>窗口自带模型</span><span class="flat-model-hint">这个窗口自己的配置${
           info && info.model ? `（${escape(info.model)}）` : ''
         }</span></label>`;
     // 按**额度属主**分组：谁家的额度、谁家的模型 —— 摊平成一长串谁都看不清。
@@ -1799,7 +1799,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             </p>`,
           );
         }
-        const label = group.key === 'user' ? '你自己的 key' : group.key;
+        const label = group.key === 'user' ? '自有 Key' : group.key;
         const summary = `${label}（${group.models.length} 个可用${
           group.undeclared.length ? ` · ${group.undeclared.length} 个它还能用但没定档` : ''
         }）`;
@@ -1817,23 +1817,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const picked = models.find((item) => String(item.id) === modelId);
     const current =
       mode === 'pool'
-        ? `额度池：${picked ? poolModelLabel(picked).label : modelId || '（选中的模型已不在池子里）'}`
-        : `自带模型${info && info.model ? `（${info.model}）` : ''}`;
+        ? `额度池：${picked ? poolModelLabel(picked).label : modelId || '（所选模型已不在额度池中）'}`
+        : `窗口自带模型${info && info.model ? `（${info.model}）` : ''}`;
     const probe = poolProbeNote(harnessId);
-    section.innerHTML = `<h3>它用哪个模型</h3>
-      <p class="flat-note">当前：${escape(current)}</p>
+    section.innerHTML = `<h3>该窗口使用的模型</h3>
+      <p class="flat-note">当前使用：${escape(current)}</p>
       ${cliRow}
       <details class="flat-model-list" data-fold="model-list"${
         state.openFolds.has('model-list') ? ' open' : ''
       }>
         <summary>${
           poolPending
-            ? '额度池里的模型（还在读…）'
+            ? '额度池中的模型（正在读取…）'
             : `额度池里的模型（${groups.size} 家 · ${models.length} 个可用${
                 undeclaredTotal ? ` · ${undeclaredTotal} 个还没定档` : ''
               }）`
         }</summary>
-        <p class="flat-model-hint">按额度属主分组：谁家的额度、谁家的模型。每一档是额度**自己声明**的 —— 免费额度也可能改成收费；点「重新探一遍」重读一次，改了就告诉你。</p>
+        <p class="flat-model-hint">按额度归属分组：各家的额度与模型。每档档位由额度方自行声明 —— 免费额度也可能改为收费；点「重新探一遍」重新读取，有变化会提示。</p>
         ${groupHtml}
       </details>
       <p class="flat-model-actions">
@@ -1883,7 +1883,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
     } catch (error) {
       button.disabled = false;
-      state.error = `模型选择没有保存：${String((error && error.message) || error)}`;
+      state.error = `模型选择未能保存：${String((error && error.message) || error)}`;
       render();
     }
   }
@@ -1913,7 +1913,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /**
    * 窗口页里的一条活：收起时是「状态 + 标题 + 做到第几次 + 现在什么状态」，
    * 点开就是**这条活完整的目标原文**（不截断）+ 验收标准 + 只允许改的路径 +
-   * 这条活的经过。
+   * 动作记录。
    */
   function windowTaskCard(task) {
     const card = document.createElement('details');
@@ -1928,7 +1928,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     card.append(summary);
     const body = document.createElement('div');
     body.className = 'flat-wtask-body';
-    body.textContent = '正在读这条活的任务书…';
+    body.textContent = '正在读取任务详情…';
     card.append(body);
     const load = async () => {
       if (card.dataset.loaded || card.dataset.loading) return;
@@ -1944,12 +1944,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const paths = spec && Array.isArray(spec.exclusive_paths) ? spec.exclusive_paths : [];
       const events = (state.events || []).filter((event) => event.aggregate_id === task.task_id);
       body.innerHTML = `
-        <p class="flat-note">这条活要做什么</p>
-        <p class="flat-wtask-goal">${goal ? escape(goal) : '（平台没有给这条活写目标）'}</p>
-        ${acceptance.length ? `<p class="flat-note">做到什么程度算完成</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
-        ${paths.length ? `<p class="flat-note">只允许改这些地方</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
-        <p class="flat-note">这条活的经过${events.length ? `（${events.length} 步）` : ''}</p>
-        ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">还没有它的记录。</p>'}`;
+        <p class="flat-note">任务目标</p>
+        <p class="flat-wtask-goal">${goal ? escape(goal) : '（平台未提供该任务的目标）'}</p>
+        ${acceptance.length ? `<p class="flat-note">验收标准</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
+        ${paths.length ? `<p class="flat-note">允许修改的路径</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
+        <p class="flat-note">动作记录${events.length ? `（${events.length} 步）` : ''}</p>
+        ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">暂无该任务的记录。</p>'}`;
     };
     card.addEventListener('toggle', () => {
       if (card.open) void load();
@@ -1990,13 +1990,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const isAdminWindow = harnessId === adminIdentity();
     const joinable =
       Boolean(info) && !isMember && !isAdminWindow && info.status === 'online';
-    if (info && info.model) facts.push(['用的模型', info.model]);
-    if (info && info.degraded) facts.push(['降级', '这个窗口当前处于降级状态']);
+    if (info && info.model) facts.push(['使用的模型', info.model]);
+    if (info && info.degraded) facts.push(['降级', '该窗口当前处于降级状态']);
     if (info && info.usable === false) {
       const why = (info.reasons || []).map((r) => r.detail || r.code).filter(Boolean).join('；');
-      facts.push(['接不了活的原因', why || '平台没有登记凭据']);
+      facts.push(['无法领取任务的原因', why || '平台未登记凭据']);
     }
-    facts.push(['本项目里的活', `${mine.length} 件（在做 ${running.length}、做完 ${done.length}、没做成 ${failed.length}）`]);
+    facts.push(['本项目里的任务', `${mine.length} 条（执行中 ${running.length}、已完成 ${done.length}、未完成 ${failed.length}）`]);
     if (info && info.last_task_id) {
       facts.push([
         '最近一次尝试',
@@ -2029,7 +2029,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const task = running[0];
       const box = document.createElement('section');
       box.className = 'flat-spec flat-live';
-      box.innerHTML = `<h3>它现在正在做什么</h3>
+      box.innerHTML = `<h3>当前正在执行</h3>
         <p class="flat-note">${escape(task.title || task.task_id)}</p>
         <pre class="flat-output">正在读它写的日志…</pre>`;
       panel.append(box);
@@ -2039,7 +2039,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         const pre = box.querySelector('.flat-output');
         if (!pre) return;
         if (!stdout) {
-          pre.textContent = '（它还没输出过东西）';
+          pre.textContent = '（尚无输出）';
           return;
         }
         const steps = recentSteps(stdout);
@@ -2048,12 +2048,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           : readableText(headlineText(parseTranscript(stdout))) || stdout.slice(-1500);
       }).catch(() => {
         const pre = box.querySelector('.flat-output');
-        if (pre) pre.textContent = '（暂时读不到它的日志）';
+        if (pre) pre.textContent = '（暂时无法读取其日志）';
       });
     } else {
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
-      empty.textContent = '它现在手上没有在跑的活。';
+      empty.textContent = '该窗口当前没有进行中的任务。';
       panel.append(empty);
     }
 
@@ -2065,7 +2065,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const list = document.createElement('div');
       list.className = 'flat-wtasks';
       for (const task of [...mine].reverse()) list.append(windowTaskCard(task));
-      section.innerHTML = '<h3>它做过的活（点开看这条活要做什么）</h3>';
+      section.innerHTML = '<h3>它做过的任务（展开可查看任务详情）</h3>';
       section.append(list);
       panel.append(section);
     }
@@ -2079,7 +2079,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         [
           '每秒生成 token',
           entry.generation_rate == null
-            ? '（没数到）'
+            ? '（无数据）'
             : `${entry.generation_rate} token/秒`,
         ],
         [
@@ -2095,21 +2095,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         [
           '缓存命中率',
           entry.cache_hit_rate == null
-            ? '（没数到）'
+            ? '（无数据）'
             : `${Math.round(Number(entry.cache_hit_rate) * 100)}%`,
         ],
       ];
       const box = document.createElement('section');
       box.className = 'flat-spec';
-      box.innerHTML = `<h3>它的用量</h3>
+      box.innerHTML = `<h3>用量</h3>
         <dl class="flat-facts">${rows
           .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
           .join('')}</dl>
-        <p class="flat-note">这些是平台用量账里的数：每秒生成 = 生成 token ÷ 生成耗时；命中率 = 缓存读到的 token ÷ 输入 token。数不到就写「没数到」，不写 0。</p>`;
+        <p class="flat-note">数据来自平台用量账：每秒生成 = 生成 token ÷ 生成耗时；命中率 = 缓存命中 token ÷ 输入 token。无数据时标注「无数据」，不填 0。</p>`;
       panel.append(box);
     }
 
-    // 它用哪个模型：自带，还是额度池里的某个模型。选了就照办。
+    // 该窗口使用的模型：自带，还是额度池里的某个模型。选了就照办。
     panel.append(modelChoiceBlock(harnessId));
 
     // 它的轨迹：平台事件里 actor 是它的那几条。
@@ -2120,7 +2120,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const traceBox = document.createElement('section');
     traceBox.className = 'flat-spec';
     traceBox.innerHTML = `<h3>它做过的动作</h3>
-      <p class="flat-note">平台记下来的这个窗口的动作：它领过什么活、批改了什么、什么时候出的问题。新的在上面。</p>
+      <p class="flat-note">平台记录的本窗口动作：领取过哪些任务、做过哪些修改、何时出现问题。最新在前。</p>
       ${
         trace.length
           ? `<ol class="flat-events">${trace
@@ -2131,7 +2131,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                 }),
               )
               .join('')}</ol>`
-          : '<p class="flat-empty">它还没有留下动作记录。</p>'
+          : '<p class="flat-empty">暂无动作记录。</p>'
       }`;
     panel.append(traceBox);
 
@@ -2149,7 +2149,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function taskTable(filtered, pager) {
     const list = document.createElement('section');
     list.className = 'flat-tasks';
-    // 一条任务都没有时，「全部 / 等人接 / 正在做 / 按人 / 排序 / 每页」全是**没有对象的
+    // 一条任务都没有时，「全部 / 待领取 / 执行中 / 按人 / 排序 / 每页」全是**没有对象的
     // 开关**：第一次用的人一进来先面对八个按钮，却不知道该按哪个。没有活可筛就收起来。
     const hasAnyTask = (state.tasks || []).length > 0;
     const bar = document.createElement('div');
@@ -2158,10 +2158,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     filters.className = 'flat-filters';
     for (const [key, label] of [
       ['all', '全部'],
-      ['waiting', '等人接'],
-      ['active', '正在做'],
-      ['review', '等人处理'],
-      ['failed', '没做成'],
+      ['waiting', '待领取'],
+      ['active', '执行中'],
+      ['review', '待处理'],
+      ['failed', '未完成'],
     ]) {
       const button = document.createElement('button');
       button.type = 'button';
@@ -2240,8 +2240,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
       empty.textContent = hasAnyTask
-        ? '这个筛选下没有任务。'
-        : '当前项目还没有任务。'
+        ? '当前筛选条件下没有任务。'
+        : '当前项目暂无任务。'
       list.append(empty);
       if (!hasAnyTask) {
         // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的
@@ -2325,7 +2325,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (list.length < 2) return '';
     const more = all.length - list.length;
     return `<section class="flat-switcher">
-      <p class="flat-note">这个项目的活（点一条直接切过去）</p>
+      <p class="flat-note">本项目的任务（点选即可切换）</p>
       <div class="flat-switcher-row">${list
         .map(
           (task) => `<button type="button" class="flat-switch${
@@ -2346,7 +2346,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!state.selected) {
       const hint = document.createElement('p');
       hint.className = 'flat-empty';
-      hint.textContent = '选一条任务看它的规格、事件轨迹和 CLI 原话。';
+      hint.textContent = '选择一条任务以查看其规格、动作记录与 CLI 原话。';
       panel.append(hint);
       return panel;
     }
@@ -2380,13 +2380,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <div class="flat-detail-actions">${humanActions(task)}</div>
       </div>
       ${lineageBlock(task)}
-      ${spec.goal ? `<section class="flat-spec"><h3>这件事要做什么</h3><p>${escape(spec.goal)}</p></section>` : ''}
+      ${spec.goal ? `<section class="flat-spec"><h3>任务目标</h3><p>${escape(spec.goal)}</p></section>` : ''}
       ${handoffBlock(spec)}
-      ${acceptance ? `<section class="flat-spec"><h3>做到什么程度算完成</h3><p>${escape(acceptance)}</p></section>` : ''}
-      ${paths.length ? `<section class="flat-spec"><h3>只允许改这些地方</h3><ul>${paths.map((p) => `<li><code>${escape(p)}</code></li>`).join('')}</ul></section>` : ''}
+      ${acceptance ? `<section class="flat-spec"><h3>验收标准</h3><p>${escape(acceptance)}</p></section>` : ''}
+      ${paths.length ? `<section class="flat-spec"><h3>允许修改的路径</h3><ul>${paths.map((p) => `<li><code>${escape(p)}</code></li>`).join('')}</ul></section>` : ''}
       ${files.length ? `<section class="flat-spec"><h3>这次改了什么</h3><ul>${files.map((f) => `<li><code>${escape(typeof f === 'string' ? f : f.path || JSON.stringify(f))}</code></li>`).join('')}</ul></section>` : ''}
-      <section class="flat-spec"><h3>这条活的经过</h3>
-        <p class="flat-note">${events.length ? `一共 ${events.length} 步，新的在最上面。点开每一步看细节。` : '还没有记录。'}</p>
+      <section class="flat-spec"><h3>动作记录</h3>
+        <p class="flat-note">${events.length ? `一共 ${events.length} 步，新的在最上面。点开每一步看细节。` : '暂无记录。'}</p>
         <ol class="flat-events">${events
           .slice(-(state.allEvents ? events.length : 14))
           .reverse()
@@ -2402,7 +2402,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <summary>技术信息（任务编号等）</summary>
         <p>任务编号 ${escape(task.task_id)}</p>
       </details>
-      <p class="flat-detail-foot">以上就是这条活的全部记录。想看整体，去右栏的「要做的事」和「看成员表现」。</p>`;
+      <p class="flat-detail-foot">以上就是该任务的全部记录。想看整体，去右栏的「待办事项」和「查看成员执行情况」。</p>`;
     return panel;
   }
 
@@ -2484,11 +2484,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!text) return '';
     const fromPlatform = translated(text);
     if (fromPlatform) return fromPlatform;
+    const worker = /^formal worker error:\s*(\w+)/i.exec(text);
+    if (worker) return `平台内部出错了（${worker[1]}）`;
     const exit = /^harness CLI exited (\d+)$/.exec(text);
-    if (exit) return `窗口的命令退出了（退出码 ${exit[1]}）`;
-    if (/^harness timeout:/.test(text)) return '窗口跑超时了，没在时间内做完';
-    if (/quota|rate.?limit|insufficient/i.test(text)) return '额度用完了';
-    if (/^(provider|upstream)/i.test(text)) return '模型那边出了问题';
+    if (exit) return `窗口命令已退出（退出码 ${exit[1]}）`;
+    if (/^harness timeout:/.test(text)) return '窗口执行超时，未在时限内完成';
+    if (/quota|rate.?limit|insufficient/i.test(text)) return '额度已用尽';
+    if (/^(provider|upstream)/i.test(text)) return '模型服务异常';
     return text;
   }
 
@@ -2510,47 +2512,47 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const failure = reasonText(task.last_failure?.reason);
     switch (String(task.status)) {
       case 'awaiting_human':
-        return '这条活在等你回答。回答之后，它会回到干活的人手里。';
+        return '该任务正在等待你的回答。回答后将交回执行成员继续处理。';
       case 'escalated':
-        return '这条活卡住了，平台把它交给了你：放回去重做，或者干脆取消。';
+        return '该任务已阻塞，平台已转交由你处理：可重新分派，或直接取消。';
       case 'ready':
-        return '这条活还没人接。可以让管理员安排个人。';
+        return '该任务尚无人领取。可请管理员分派。';
       case 'queued':
-        return '这条活在排队，等资源空出来。';
+        return '该任务正在排队，等待可用资源。';
       case 'claimed':
-        return '已经有人接了，正在准备开工。';
+        return '已有人领取，正在准备执行。';
       case 'in_progress':
-        return `${who.now || '有人'}正在做这条活。`;
+        return `${who.now || '有人'}正在执行该任务。`;
       case 'verifying':
-        return '做完了，机器正在检查结果。';
+        return '已完成提交，正在自动校验结果。';
       case 'awaiting_review':
-        return '做完了，正在等人审。';
+        return '已完成提交，正在等待审核。';
       case 'changes_requested':
-        return '审的人觉得要返工，正在打回去。';
+        return '审核方要求返工，正在退回。';
       case 'approved':
-        return '审过了，正在合进主分支。';
+        return '审核通过，正在合入主分支。';
       case 'merging':
-        return '正在合进主分支。';
+        return '正在合入主分支。';
       case 'merged':
-        return '已经合进主分支，这件事做完了。';
+        return '已合入主分支，任务完成。';
       case 'abandoned':
-        return failure ? `这件事被放弃了：${failure}` : '这件事被放弃了。';
+        return failure ? `任务已放弃：${failure}` : '任务已放弃。';
       case 'stale':
-        return '干活的那个窗口失联了，这条活卡在这里。';
+        return '执行窗口失联，任务已阻塞。';
       case 'cancelled':
-        return '这件事被取消了，不会再有人做。';
+        return '任务已取消，不会再继续执行。';
       case 'plan_drift':
-        return '需求变了，这条活需要重新确认一下。';
+        return '需求已变更，该任务需重新确认。';
       case 'impl_drift':
-        return '做的东西和需求对不上了，需要人看一眼。';
+        return '执行结果与需求不符，需人工确认。';
       case 'blocked':
-        return '这条活遇到问题过不去了。';
+        return '该任务因异常无法继续。';
       case 'needs_help':
-        return '干活的人正在求助，等人搭把手。';
+        return '执行成员正在求助，等待协助。';
       case 'reclaiming':
-        return '正在重新找人做这条活。';
+        return '正在重新分派该任务。';
       default:
-        return '这条活还在进行中。';
+        return '该任务仍在进行中。';
     }
   }
 
@@ -2601,7 +2603,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const subject = options.subject ? `<span class="flat-event-subject">${escape(options.subject)}</span>` : '';
     // 动作与活之间要**有路**：点这一行就能去看那条活的详情。
     const jump = options.jumpTaskId
-      ? `<button type="button" class="flat-event-jump" data-open-task="${escape(options.jumpTaskId)}">看这条活</button>`
+      ? `<button type="button" class="flat-event-jump" data-open-task="${escape(options.jumpTaskId)}">查看任务详情</button>`
       : '';
     // 事件列表是给人看"这条活经历了什么"的：时间、人话的动作、谁做的。
     // 事件编号（seq）留在 title 里 —— 它是给查问题的人看的，不是给人读的。
@@ -2622,7 +2624,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           ? `<dl class="flat-event-payload">${fields
               .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
               .join('')}</dl>`
-          : '<p class="flat-empty">这个事件没有要人看的细节。</p>'}
+          : '<p class="flat-empty">该事件没有可展示的细节。</p>'}
       </details>
     </li>`;
   }
@@ -2722,7 +2724,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 以前这些散在事件流里，要一条条读。
    */
   /**
-   * 「上一次没做完，窗口贴回来的现场」。
+   * 「上一次未完成，窗口回传的现场信息」。
    *
    * 上一轮失败时，平台把现场报告（错误、CLI 自己的话、动过哪些文件）**追加到工单
    * 后面** —— 那是给**干活的人**看的：接手的人要靠它接着做。人看它没用：真数据里
@@ -2737,21 +2739,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!report || typeof report !== 'object') return '';
     const bits = [];
     const who = report.failed_harness ? harnessName(report.failed_harness) : '';
-    if (who) bits.push(`上一次是 ${who} 干的`);
+    if (who) bits.push(`上一次由 ${who} 执行`);
     // 网关已经翻过一遍（平台的规则表）；翻不出来就用本地兜底。
     const error = report.error_human || reasonText(report.error || '');
     if (error) bits.push(error);
     const touched = Array.isArray(report.files_touched) ? report.files_touched : [];
-    bits.push(touched.length ? `动了 ${touched.length} 个文件` : '没有产出文件');
+    bits.push(touched.length ? `改动 ${touched.length} 个文件` : '未产出文件');
     // 它自己最后说的话：CLI 的原话是一段机器日志（JSON 行），用办公室现成的
     // 解析器挑出那句**人话**（"API Error: 503 No available accounts"），
     // 原话收在后面 —— 跟输出页用的是同一个解析器。
     const said = String(report.cli_stdout_tail || report.cli_stderr_tail || '').trim();
     const saidHuman = said ? readableText(headlineText(parseTranscript(said))) : '';
     return `<section class="flat-spec flat-handoff">
-      <h3>上一次没做完，窗口贴回来的现场</h3>
+      <h3>上一次未完成，窗口回传的现场信息</h3>
       <p>${escape(bits.join('，'))}。</p>
-      ${saidHuman ? `<p class="flat-handoff-said">它自己最后说的是：${escape(saidHuman)}</p>` : ''}
+      ${saidHuman ? `<p class="flat-handoff-said">其最后输出为：${escape(saidHuman)}</p>` : ''}
       ${said ? `<details class="flat-tech"><summary>看它自己的原话</summary><pre>${escape(said.slice(-1200))}</pre></details>` : ''}
       ${spec.handoff_raw ? `<details class="flat-tech"><summary>看原始现场（机器记的）</summary><pre>${escape(spec.handoff_raw)}</pre></details>` : ''}
     </section>`;
@@ -2782,22 +2784,22 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       : '';
 
     const attemptHtml = attempts.length
-      ? `<h4>这条活的每一次尝试</h4>
+      ? `<h4>该任务的每一次尝试</h4>
         <ol class="flat-attempts">${attempts
           .map((row) => `<li>
             <span class="flat-attempt-no" title="${escape(row.id || '')}">${row.no != null ? `第 ${row.no} 次` : '第 ? 次'}</span>
-            <span class="flat-attempt-owner">${escape(row.owner || '不知道是谁领的')}</span>
-            <span class="flat-attempt-outcome">${escape(row.outcome || '（没记录）')}</span>
+            <span class="flat-attempt-owner">${escape(row.owner || '领取方未知')}</span>
+            <span class="flat-attempt-outcome">${escape(row.outcome || '（无记录）')}</span>
             <span class="flat-attempt-at">${escape(timeOf(row.at))}</span>
-            ${row.revisedFrom ? `<span class="flat-attempt-from">从上一轮改过来</span>` : ''}
+            ${row.revisedFrom ? `<span class="flat-attempt-from">由上一轮转入</span>` : ''}
           </li>`)
           .join('')}</ol>`
       : '';
 
-    // 什么也没有就别画一个空框（"这条活的来路"里只留一个标题，看着像坏了）。
+    // 什么也没有就别画一个空框（"任务来源与交接"里只留一个标题，看着像坏了）。
     if (!chainHtml && !attemptHtml) return '';
     return `<section class="flat-spec flat-lineage">
-      <h3>这条活的来路</h3>
+      <h3>任务来源与交接</h3>
       ${chainHtml}
       ${attemptHtml}
     </section>`;
@@ -2837,13 +2839,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       } else if (name === 'start') {
         row.outcome = '开工了';
       } else if (name === 'submit_result') {
-        row.outcome = '交了东西';
+        row.outcome = '已提交';
       } else if (name === 'verify_passed') {
         row.outcome = '校验通过';
       } else if (name === 'abandon') {
-        row.outcome = `没交出来：${reasonText(event.payload?.reason) || '（没写理由）'}`;
+        row.outcome = `未提交：${reasonText(event.payload?.reason) || '（没写理由）'}`;
       } else if (name === 'release' || name === 'human.release') {
-        row.outcome = `交回队列：${event.payload?.reason || '（没写理由）'}`;
+        row.outcome = `退回队列：${event.payload?.reason || '（没写理由）'}`;
       }
     }
     // 被要求返修的那一轮：平台把返修记在评审上，链接在下一轮的 revised_from。
@@ -2852,9 +2854,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const previous = rows.get(row.revisedFrom);
       if (!previous) continue;
       previous.outcome =
-        previous.outcome === '交了东西'
-          ? '交了，但被要求返修'
-          : `${previous.outcome || '跑了'}，随后被要求返修`;
+        previous.outcome === '已提交'
+          ? '已提交，但被要求返修'
+          : `${previous.outcome || '已执行'}，随后被要求返修`;
     }
     return [...rows.values()].sort((a, b) => (a.no ?? 99) - (b.no ?? 99));
   }
@@ -2946,13 +2948,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       source?.updated_at ? `时间 ${timeOf(source.updated_at)}` : '',
     ].filter(Boolean).join(' · ');
     return `<section class="flat-spec flat-fail-log" id="flatFailLog">
-      <h3>它最后说了什么</h3>
+      <h3>最后一次输出</h3>
       ${task.last_failure?.reason ? `<p class="flat-note">平台记下的原因：${escape(task.last_failure.reason)}</p>` : ''}
       ${task.last_failure?.at ? `<p class="flat-note">失败于 ${escape(timeOf(task.last_failure.at))}</p>` : ''}
       ${facts ? `<p class="flat-note">${escape(facts)}</p>` : ''}
       ${stderr ? `<h4>报错内容</h4><pre class="flat-output">${escape(stderr.slice(-4000))}</pre>` : ''}
       ${stdout ? `<h4>输出内容</h4><pre class="flat-output">${escape(stdout.slice(-4000))}</pre>` : ''}
-      ${!stderr && !stdout ? '<p class="flat-empty">这一轮它什么也没留下（进程被杀，或者它没说话）。</p>' : ''}
+      ${!stderr && !stdout ? '<p class="flat-empty">本轮没有留下任何输出（进程被终止，或未产生输出）。</p>' : ''}
     </section>`;
   }
 
@@ -2962,11 +2964,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ? state.output.output || state.output
       : state.output;
     const text = typeof raw === 'string' ? raw : String(raw?.stdout || raw?.text || '');
-    return text.slice(-4000) || '（它还没输出过东西）';
+    return text.slice(-4000) || '（尚无输出）';
   }
 
   /**
-   * 「它自己输出的内容」：机器日志先给人话（结论 + 做了什么），原文收在后面。
+   * 「成员输出」：机器日志先给人话（结论 + 做了什么），原文收在后面。
    * 和「各个窗口都说了什么」那个页面用的是同一个解析器（`cli-transcript.js`）。
    */
   /**
@@ -2990,7 +2992,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ? state.output.output || state.output
       : null;
     const at = raw && raw.updated_at ? String(raw.updated_at) : '';
-    if (!at) return '还没开始说话';
+    if (!at) return '尚无输出';
     const ago = timeAgo(at);
     return ago === '刚刚' ? '刚刚还在动' : `${ago}还有动静`;
   }
@@ -3002,9 +3004,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const stdout = typeof raw === 'string' ? raw : String(raw?.stdout || '');
     const transcript = parseTranscript(stdout);
     const running = isRunning(state.selected);
-    const title = running ? '它现在正在做什么' : '它自己输出的内容';
+    const title = running ? '当前正在执行' : '成员输出';
     const stamp = running
-      ? `<p class="flat-live-stamp"><i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自己更新</p>`
+      ? `<p class="flat-live-stamp"><i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自动刷新</p>`
       : '';
     if (transcript.isJson && transcript.texts.length) {
       const tools = foldRepeats(transcript.tools.slice(-6).reverse(), (tool) => tool.label);
@@ -3013,7 +3015,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-note">它最后说了</p>
         <pre class="flat-output">${escape(readableText(headlineText(transcript)) || '（这段里没有可读的文字）')}</pre>
         ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.text)}${tool.count > 1 ? ` <em>×${tool.count}</em>` : ''}</span></li>`).join('')}</ul>` : ''}
-        <details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
+        <details class="outputs-more-block"><summary>查看原始记录</summary><pre class="outputs-raw">${escape(stdout.slice(-4000))}</pre></details>
       </section>`;
     }
     // 不是结构化日志（就是一段纯文本）：**别把整段倒出来**。
@@ -3035,9 +3037,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                    }</span></li>`,
                )
                .join('')}</ul>`
-          : '<p class="flat-empty">它还没输出过东西。</p>'
+          : '<p class="flat-empty">尚无输出。</p>'
       }
-      ${stdout ? '<details class="outputs-more-block"><summary>看原始记录</summary><pre class="outputs-raw">' + escape(shortenPath(stdout.slice(-4000))) + '</pre></details>' : ''}
+      ${stdout ? '<details class="outputs-more-block"><summary>查看原始记录</summary><pre class="outputs-raw">' + escape(shortenPath(stdout.slice(-4000))) + '</pre></details>' : ''}
     </section>`;
   }
 
@@ -3091,19 +3093,19 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function humanActions(task) {
     const spent = Number(task.attempt_no || 0) >= Number(task.max_attempts || 0);
     const buttons = [];
-    // 还没人接的：请管理员派出去。派给谁是管理员的决定，
+    // 尚无人领取的：请管理员派出去。派给谁是管理员的决定，
     // 办公室只负责把这个请求送到管理员面前（群里的 @mention）。
     if (!task.owner && task.status === 'ready') {
       buttons.push(
-        `<button type="button" data-act="ask-dispatch" title="这是一条 @管理员 的群消息；派给谁由管理员决定">交给管理员安排</button>`,
+        `<button type="button" data-act="ask-dispatch" title="这是一条 @管理员 的群消息；派给谁由管理员决定">交给管理员分派</button>`,
       );
     }
     if (spent) {
       buttons.push(
-        `<button type="button" data-act="override">再给一次机会</button>`,
+        `<button type="button" data-act="override">追加一次尝试</button>`,
       );
     }
-    buttons.push(`<button type="button" data-act="reassign">请管理员换个人做</button>`);
+    buttons.push(`<button type="button" data-act="reassign">请管理员改派</button>`);
     // 处置动词：回答提问、放行、重开、取消。
     //
     // 这些是**人自己的动作**（R10 §18），旧的人操作面里有过（已随 Vue 控制台
@@ -3111,7 +3113,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 是个死状态 —— 人只能发条群消息，平台不会把它当成决策。
     // 状态集合见 `human-actions.js`，与后端守卫一一对应；后端仍是唯一裁判。
     //
-    // 按钮上写的是**人话**：平台那边叫"放行回队列"，人只知道"放回去重新找人做"。
+    // 按钮上写的是**人话**：平台那边叫"放行回队列"，人只知道"重新分派"。
     for (const action of humanDecisionActions(task)) {
       const label = ACTION_LABEL[action] || action;
       const hint = ACTION_HINT[action] || '';
@@ -3134,7 +3136,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!text.startsWith('user:')) return text;
     const keyId = text.slice('user:'.length);
     const key = (state.userKeys || []).find((item) => item.id === keyId);
-    return key ? `你的 key「${key.label || '未命名'}」` : '你自己的 key';
+    return key ? `你的 Key「${key.label || '未命名'}」` : '自有 Key';
   }
 
   /**
@@ -3168,8 +3170,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return `<details class="flat-pool-item">
         <summary>
           <b>${escape(poolSourceName(name))}</b>
-          <span>${own.length ? `${own.length} 个模型` : '还没探到模型'}</span>
-          <em>${used ? `已用 ${usedCount} 次` : '还没人用过'}</em>
+          <span>${own.length ? `${own.length} 个模型` : '尚未探测到模型'}</span>
+          <em>${used ? `已用 ${usedCount} 次` : '尚无人使用'}</em>
         </summary>
         <dl class="flat-facts">
           <dt>上游地址</dt><dd><code>${escape(source.base_url || '—')}</code></dd>
@@ -3181,7 +3183,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
              <ul class="flat-pool-models">${own
                .map((model) => `<li><code>${escape(model.id)}</code><span class="flat-tier flat-tier-${escape(model.tier || 'free')}">${escape(TIER_LABEL[model.tier] || model.tier || '')}</span></li>`)
                .join('')}</ul>`
-          : '<p class="flat-empty">这个额度源还没探测到模型。</p>'}
+          : '<p class="flat-empty">该额度来源尚未探测到模型。</p>'}
         ${used
           ? `<h4>已用额度</h4>
              <p class="flat-note">${usedCount} 次请求 · 输入 ${Number(used.prompt_tokens || 0)} / 输出 ${Number(used.completion_tokens || 0)} 个字（token）</p>
@@ -3205,7 +3207,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${items.join('')}
         ${consumerItems.length
           ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
-          : '<p class="flat-note">还没有人从池子里借过额度。</p>'}
+          : '<p class="flat-note">尚无人从额度池借用额度。</p>'}
         ${userKeysBlock()}
       </details>
     </section>`;
@@ -3254,12 +3256,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const pending = state.userKeyPending || null;
     if (!pending) return '';
     return `<section class="flat-card flat-card-ask">
-      <h3>平台在问你一件事</h3>
+      <h3>平台需要你确认</h3>
       <div class="flat-userkey-ask">
-        <p><b>免费额度用完了。</b>要不要用它自己加的 key 继续做？</p>
+        <p><b>免费额度已用尽。</b>要不要用它自己添加的 Key 继续执行？</p>
         <p class="flat-note">用的是你的 key「${escape(pending.label || '未命名')}」${
           pending.model ? `（模型 ${escape(pending.model)}）` : ''
-        }。你点了头它才会花；不点头它不会自己动。</p>
+        }。经你确认后才会使用；未确认前不会启用。</p>
         <div class="flat-dialog-actions">
           <button type="button" data-act="deny-user-key" data-key="${escape(pending.key_id)}">先不用</button>
           <button type="button" data-act="approve-user-key" data-key="${escape(pending.key_id)}" data-mode="once">同意用一次</button>
@@ -3270,7 +3272,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
-   * 用户自己的 API key。
+   * 用户自有 API Key。
    *
    * 这一块是**人自己的钱**：加进来之后平台替它保管，但平台**不会自己花** ——
    * 免费额度用完时，平台会**来问**你，点了头才用。
@@ -3324,10 +3326,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             </li>`,
           )
           .join('')
-      : '<p class="flat-empty">还没加过自己的 key。</p>';
+      : '<p class="flat-empty">尚未添加自有 Key。</p>';
     return `<section class="flat-userkeys">
-      <h3>自己的 API key</h3>
-      <p class="flat-note">平台替你保管，但<b>不会自己花</b> —— 免费额度用完时它会来问你，点了头才用。</p>
+      <h3>自有 API Key</h3>
+      <p class="flat-note">平台代为保管，但<b>不会自行使用</b> —— 免费额度用尽时会征求你的确认。</p>
       <ul class="flat-list flat-userkeys-list">${rows}</ul>
       <details class="flat-userkeys-add" data-fold="userkey-add"${
         state.openFolds.has('userkey-add') ? ' open' : ''
@@ -3375,7 +3377,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const value = Number(pick(bucket) || 0);
       if (!best || value > best.value) best = { value, at: bucket.at };
     }
-    if (!best || !best.value) return '这段时间没有用量';
+    if (!best || !best.value) return '该时段无用量';
     return `高峰 ${timeMinute(best.at)}（${best.value} 次）`;
   }
 
@@ -3407,7 +3409,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         detail = `<p class="flat-note">${escape(parts.join(' · '))}${resets.length ? `；${escape(resets.join('，'))}` : ''}</p>
           <p class="flat-note">来源 ${escape(balance.source || '')} · ${escape(timeMinute(balance.checked_at))} 查的</p>`;
       } else if (balance && balance.known === false) {
-        detail = `<p class="flat-note">问不到余额：${escape(balance.reason || '')}</p>`;
+        detail = `<p class="flat-note">无法查询余额：${escape(balance.reason || '')}</p>`;
       }
       // 计量档的**钱**：每条 provider 自己的余额（provider 自己报的数字）。
       const balances = Array.isArray(tier.balances) ? tier.balances : [];
@@ -3426,13 +3428,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                 return `${item.upstream} ${amounts}`;
               })
               .join('；')
-          : '这一档的 provider 都没有可查的余额接口'}</p>`;
+          : '该档位的 Provider 均无可查询余额的接口'}</p>`;
         // 账号层面的用量：provider 自己报的（平台只是它的一个调用方）。
         const daily = known
           .flatMap((item) => (item.daily || []).map((row) => ({ ...row, unit: item.unit })))
           .slice(-3);
         if (daily.length) {
-          detail += `<p class="flat-note">账号最近几天（provider 自己报的）：${escape(
+          detail += `<p class="flat-note">账号近几日用量（由 Provider 自报）：${escape(
             daily
               .map(
                 (row) =>
@@ -3499,7 +3501,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const pick = (bucket) => (bucket.upstreams || {})[name] || 0;
     const total = timeline.buckets.reduce((sum, bucket) => sum + Number(pick(bucket) || 0), 0);
     if (!total) return '';
-    return `<h4>什么时候用掉的</h4>
+    return `<h4>用量分布</h4>
       ${sparkline(timeline.buckets, pick)}
       <p class="flat-note">${escape(peakNote(timeline.buckets, pick))}；这段时间共 ${total} 次。</p>`;
   }
@@ -3536,9 +3538,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <h3>${cardIcon('brief')}待办事项</h3>
         ${brief.planId
           ? `<p><b>${escape(brief.title)}</b></p>
-             <p class="flat-note">${(state.tasks || []).length} 件事${unclaimed.length ? `（${unclaimed.length} 件还没人接）` : ''}</p>
-             <button type="button" data-act="open-brief">看全部要做的事</button>`
-          : `<p class="flat-note">${(state.tasks || []).length} 件事</p>
+             <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条尚未领取）` : ''}</p>
+             <button type="button" data-act="open-brief">查看全部待办</button>`
+          : `<p class="flat-note">${(state.tasks || []).length} 条任务</p>
              <p class="flat-empty">暂无方案正文。</p>`}
       </section>
       <section class="flat-card flat-card-members">
@@ -3547,7 +3549,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           ? `<p class="flat-note">${helps.length} 条求助待处理</p>
              <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span></li>`).join('')}</ul>`
           : '<p class="flat-empty">暂无待处理求助。</p>'}
-        <button type="button" data-act="open-members">看成员表现</button>
+        <button type="button" data-act="open-members">查看成员执行情况</button>
       </section>
       <section class="flat-card flat-card-admin">
         <h3>${cardIcon('chat')}与管理员对话</h3>
@@ -3557,7 +3559,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                ? '尚未与管理员沟通。发送一条消息，管理员即可收到。'
                : thread.length
                  ? `本轮对话 ${thread.length} 条。`
-                 : '还没说过话。发一条，管理员就看到了。'}</p>
+                 : '尚未发送消息。发送后管理员即可收到。'}</p>
              <button type="button" data-act="open-admin-chat">打开对话</button>
              <button type="button" data-act="open-direct-window">开私聊窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
@@ -3567,7 +3569,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
           <summary>可执行成员 · ${usable.length} 个</summary>
           <ul class="flat-list">${usable
-            .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未知')}</span></li>`)
+            .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未登记')}</span></li>`)
             .join('') || `<li class="flat-empty">${
               pickedMembers
                 ? `已选 ${pickedMembers} 个成员窗口，在「开工配置」确认后生效。`
@@ -3579,13 +3581,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <section class="flat-card">
         <h3>${cardIcon('stamp')}待批准的方案</h3>
         ${plan
-          ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 件事</p>
+          ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 条任务</p>
              <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
                translated((plan.document || {}).markdown_path) ||
                  fileNameOf((plan.document || {}).markdown_path),
              )}</p>
              <button type="button" data-act="approve-plan">批准，开始做</button>
-             <button type="button" data-act="reject-plan" title="驳回这份方案：退回给管理员，改一版再来找你">驳回方案</button>`
+             <button type="button" data-act="reject-plan" title="驳回方案：退回管理员修订后重新提交">驳回方案</button>`
           : '<p class="flat-empty">暂无待批准的方案。</p>'}
       </section>`;
     return wrap;
@@ -3628,9 +3630,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     const bits = [`群里 ${messages.length} 条消息：${who.join('、')}`];
     if (fresh.length) {
-      bits.push(`今天新来了 ${fresh.length} 条 —— 最后一条是 ${timeAgo(last.created_at)}`);
+      bits.push(`今天新增 ${fresh.length} 条 —— 最后一条为 ${timeAgo(last.created_at)}`);
     } else {
-      bits.push(`今天没有新消息 —— 最后一条是 ${timeAgo(last.created_at)}`);
+      bits.push(`今天暂无新消息 —— 最后一条为 ${timeAgo(last.created_at)}`);
     }
     const said = readableMessageBody(last, { firstLineOnly: true });
     if (said) bits.push(said);
@@ -3710,7 +3712,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     title.textContent = '项目群聊';
     const count = document.createElement('span');
     count.className = 'flat-chat-count';
-    count.textContent = state.messages.length ? `${state.messages.length} 条` : '还没消息';
+    count.textContent = state.messages.length ? `${state.messages.length} 条` : '暂无消息';
     const toggle = document.createElement('button');
     toggle.type = 'button';
     toggle.className = 'flat-chat-toggle';
@@ -3728,7 +3730,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!state.messages.length) {
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
-      empty.textContent = '群里还没有消息。';
+      empty.textContent = '群内暂无消息。';
       list.append(empty);
     }
     // 定向消息不属于群聊（只有发送方与收件方看得到），不能混进来。
@@ -3757,7 +3759,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     form.className = 'flat-chat-form';
     const input = document.createElement('input');
     input.type = 'text';
-    input.placeholder = '在项目群聊中发言（@ 管理员将直接通知管理员）';
+    input.placeholder = '在项目群聊中发言（@ 管理员即可直接通知管理员）';
     input.setAttribute('aria-label', '群聊消息');
     input.dataset.draft = 'chat';
     const send = document.createElement('button');
@@ -3830,7 +3832,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-  // ---------------------------------------------------- 自己的 API key
+  // ---------------------------------------------------- 自有 API Key
 
   /** 把用户自己加的 key 读回来（只读列表与遮罩，key 本身不在这条路上）。 */
   async function loadUserKeys() {
@@ -3853,7 +3855,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const label = value('[data-userkey-label]');
     const key = value('[data-userkey-key]');
     if (!label || !key) {
-      if (error) error.textContent = '名字和 key 都要填。';
+      if (error) error.textContent = '名称与 Key 均为必填。';
       return;
     }
     const models = value('[data-userkey-models]')
@@ -4128,7 +4130,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'override' && task) {
       void doAction('/task/budget_override', {
         route: '/task/budget_override',
-        body: { task_id: task.task_id, reason: '人给一次机会：尝试预算已用完' },
+        body: { task_id: task.task_id, reason: '人工追加尝试：尝试预算已用完' },
       });
       return;
     }
@@ -4142,8 +4144,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         route: '/messages',
         body: {
           body: [
-            `请把这条活改派给还有额度的窗口：${task.title || task.task_id}（${task.task_id}）`,
-            `上次持有者：${task.owner || '无人持有'}`,
+            `请将该任务改派给仍有额度的窗口：${task.title || task.task_id}（${task.task_id}）`,
+            `上次执行方：${task.owner || '无人持有'}`,
             task.last_failure?.reason ? `失败原因：${task.last_failure.reason}` : '',
           ]
             .filter(Boolean)
@@ -4167,14 +4169,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (!draft) return;
       void (async () => {
         const answer = await askDecision({
-          title: '驳回这份方案',
+          title: '驳回方案',
           note: `方案 ${draft.plan_id}：驳回之后它会退回给管理员，改一版再来找你。`,
-          label: '为什么驳回（平台会记下来）',
+          label: '驳回原因（平台将记录）',
           placeholder: '例如：范围太大，先做核心链路',
         });
         if (!answer) return;
         if (!answer.text) {
-          state.error = '驳回方案要写为什么 —— 平台会记下这句话，下次改的时候用得上。';
+          state.error = '驳回方案需说明原因 —— 平台会记录该说明，供后续修订参考。';
           render();
           return;
         }
@@ -4192,27 +4194,27 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       void (async () => {
         const spec = {
           resume: {
-            title: '我来回答',
-            note: '你的回答会记在平台上，干活的人能看到；这条活会回到他手里继续做。',
-            label: '你的回答（可以留空，但写清楚点更好）',
+            title: '回答问题',
+            note: '你的回答会记录在平台，执行成员可见；该任务将交回其继续处理。',
+            label: '你的回答（可留空，建议写明）',
             route: '/human/resume',
           },
           reopen: {
-            title: '重新打开这条活',
-            note: '清掉现在的负责人，这条活回到「等人接」，谁都能再接。',
-            label: '为什么重新打开（可以留空）',
+            title: '重新打开任务',
+            note: '清除当前执行者，该任务回到「待领取」，任何成员均可领取。',
+            label: '重新打开的原因（可留空）',
             route: '/human/reopen',
           },
           release: {
-            title: '放回去重新找人做',
-            note: '这条活会回到「等人接」的列表，下一轮再找人。',
-            label: '为什么放回去（可以留空）',
+            title: '重新分派',
+            note: '该任务将回到「待领取」列表，等待下一轮分派。',
+            label: '重新分派的原因（可留空）',
             route: '/human/release',
           },
           cancel: {
-            title: '不做了',
-            note: '取消就是结束：这条活不会再有人做。',
-            label: '为什么不做了（必填）',
+            title: '取消任务',
+            note: '取消即终止：该任务不会再被执行。',
+            label: '取消原因（必填）',
             route: '/human/cancel',
           },
         }[decision];
@@ -4222,25 +4224,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           title: spec.title,
           note: spec.note,
           label: spec.label,
-          placeholder: decision === 'cancel' ? '例如：这条活的方向不对，先停' : '',
+          placeholder: decision === 'cancel' ? '例如：任务方向有误，先暂停' : '',
           override: needsOverride,
         });
         if (!answer) return;
         if (decision === 'cancel' && !answer.text) {
-          state.error = '不做了的话要写为什么 —— 平台会把这句话记下来。';
+          state.error = '取消任务需说明原因 —— 平台会记录该说明。';
           render();
           return;
         }
         if (needsOverride && !answer.override) {
           // 平台会回 409（R10 §8），但让人自己读那个码不如直接说清楚。
-          state.error = '这条活的尝试次数已经用完了。放回去之前要勾上「顺便再给一次机会」。';
+          state.error = '该任务的尝试次数已用尽。重新分派前需勾选「顺便追加一次尝试」。';
           render();
           return;
         }
         if (decision === 'cancel' && !CANCEL_STATES.has(String(task.status))) {
           // 列表里的状态可能已经过期了（这条活刚被别人收口）。先问一句，别把一个
           // 早就结束的活再取消一遍，也别因此去惊动管理员。
-          state.error = '这条活的状态已经变了（可能刚被别人处理过），不用再取消。刷新一下看看。';
+          state.error = '该任务状态已变更（可能已被处理），无需取消。请刷新后查看。';
           render();
           return;
         }
@@ -4284,9 +4286,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         route: '/messages',
         body: {
           body: [
-            `不做了：${envelope.reason}`,
+            `取消任务：${envelope.reason}`,
             `（这一条：${title}）`,
-            '管理员会就这一条原本要做的部分重新细化一版，或者确认不用再做了；其余按原计划继续。',
+            '管理员将针对原计划内容重新细化，或确认不再执行；其余部分按原计划继续。',
           ].join('\n'),
           // mention 让它进管理员的收件箱，refs 让它出现在「与管理员对话」面板里。
           mentions: adminId ? [adminId] : [],
@@ -4302,7 +4304,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     } catch (error) {
       // 活已经取消了（那一步成功了），通知失败不能把取消本身说成没成 —— 但得让人
       // 知道管理员**没**被通知到。
-      state.error = `活已经取消了，但没通知到管理员：${error.message}`;
+      state.error = `任务已取消，但未能通知管理员：${error.message}`;
       render();
     }
   }
@@ -4438,7 +4440,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (after === before) {
       // 没有新字，但"还有动静"的时间变了 —— 只改那一行。
       const stamp = box.querySelector('.flat-live-stamp');
-      if (stamp) stamp.innerHTML = `<i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自己更新`;
+      if (stamp) stamp.innerHTML = `<i class="flat-pulse"></i>${escape(liveStamp())} · 每 4 秒自动刷新`;
       return;
     }
     box.outerHTML = liveOutputBlock();

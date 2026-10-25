@@ -257,11 +257,11 @@ try {
     assert.ok(row.status, `「${row.name}」有一行状态`);
   }
   assert.ok(
-    rows.find((r) => r.name === '没有凭据的窗口').status.includes('接不了活'),
+    rows.find((r) => r.name === '没有凭据的窗口').status.includes('暂时无法领取任务'),
     '接不了活的窗口说清原因',
   );
   assert.ok(
-    rows.find((r) => r.name === 'Codex CLI').status.includes('正在做'),
+    rows.find((r) => r.name === 'Codex CLI').status.includes('执行中'),
     '在跑的窗口说「正在做」',
   );
 
@@ -276,8 +276,8 @@ try {
   console.log('窗口状态页:', facts);
   const factText = facts.join(' | ');
   assert.ok(factText.includes('状态'), '说了它在线还是离线');
-  assert.ok(factText.includes('用的模型'), '说了它用哪个模型');
-  assert.ok(factText.includes('本项目里的活'), '说了它在本项目里的活');
+  assert.ok(factText.includes('使用的模型'), '说了它用哪个模型');
+  assert.ok(factText.includes('本项目里的任务'), '说了它在本项目里的活');
   assert.ok(factText.includes('最近一次尝试'), '说了它上一次在干什么');
   assert.ok(
     await page.locator('#aoWorkspace .flat-window .flat-events').count() > 0,
@@ -286,7 +286,7 @@ try {
   // 轨迹读得懂：说了这是什么、每行带活的名字、机器字段不摆。
   const windowPaneText = await page.locator('#aoWorkspace .flat-window').innerText();
   assert.ok(windowPaneText.includes('它做过的动作'), '轨迹块说清了这叫什么');
-  assert.ok(windowPaneText.includes('平台记下来的'), '轨迹块说明了这是什么');
+  assert.ok(windowPaneText.includes('平台记录的本窗口动作'), '轨迹块说明了这是什么');
   assert.ok(
     windowPaneText.includes('开工链路 · 收一条真实任务'),
     '每一行带这条活的名字（动作 + 对象才是一句话）',
@@ -297,10 +297,10 @@ try {
   assert.ok(!windowPaneDom.includes('sha256:deadbeef'), '机器字段（哈希）不摆出来');
   assert.ok(windowPaneDom.includes('它没交出东西'), '给人看的字段（原因）摆出来');
 
-  // 轨迹能点开看详细任务：点「看这条活」→ 跳到那条活的详情（目标原文在）。
+  // 轨迹能点开看详细任务：点「查看任务详情」→ 跳到那条活的详情（目标原文在）。
   const jump = page.locator('#aoWorkspace .flat-window button[data-open-task]').first();
-  assert.equal(await jump.count(), 1, '轨迹行有「看这条活」');
-  assert.equal(await jump.innerText(), '看这条活', '按钮写的是「看这条活」');
+  assert.equal(await jump.count(), 1, '轨迹行有「查看任务详情」');
+  assert.equal(await jump.innerText(), '查看任务详情', '按钮写的是「查看任务详情」');
   await jump.click();
   await page.waitForTimeout(2500);
   const detailText = await page.locator('#aoWorkspace .flat-detail').innerText();
@@ -370,7 +370,7 @@ try {
   assert.ok(goal.includes('每一条都要说清'), '目标原文的开头也在');
   const body = await page.locator('#aoWorkspace .flat-wtask-body').first().innerText();
   assert.ok(body.includes('跑得起来'), '展开后有验收标准');
-  assert.ok(body.includes('office/**'), '展开后有「只允许改这些地方」');
+  assert.ok(body.includes('office/**'), '展开后有「允许修改的路径」');
 
   // 办公室每 15 秒整页重画一次：展开的那条活必须**仍然是展开的**，
   // 否则用户正看着的详情会在下一轮刷新里从手里跑掉。
@@ -397,7 +397,7 @@ try {
   await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();
   await page.waitForTimeout(1200);
   const modelBlock = page.locator('#aoWorkspace .flat-model');
-  assert.equal(await modelBlock.count(), 1, '窗口页有「它用哪个模型」这一块');
+  assert.equal(await modelBlock.count(), 1, '窗口页有「该窗口使用的模型」这一块');
   const modelDetails = modelBlock.locator('details.flat-model-list');
   assert.equal(await modelDetails.count(), 1, '池子里的模型是一个可折叠的清单');
   assert.equal(

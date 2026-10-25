@@ -145,7 +145,7 @@ async function submitFormalGoal(request, catalog) {
     (harnessId) => !isAdministratorHarness({ harness_id: harnessId }, ADMIN_IDENTITY),
   );
   if (!workers.length) {
-    throw new Error('没有可参与项目的成员窗口：管理员窗口不能作为执行者。');
+    throw new Error('没有可用于项目的成员窗口：管理员窗口不能作为执行者。');
   }
   // 群主只说一件事：项目目标。怎么拆成任务规格是管理员 Agent 的活，浏览器不再
   // 按成员数复制多份。机器可读的信封挂在 refs 上，群里那段话仍然是人话。
@@ -314,6 +314,6 @@ const adminAgent = mountAdminAgent({
 if (!status?.connected) {
   const note = document.createElement('p');
   note.className = 'ao-lobby-note';
-  note.textContent = '未连接正式平台：这里显示的是本机界面，任务、方案与额度都读不到。';
+  note.textContent = '未连接正式平台：当前为本机界面，无法读取任务、方案与额度。';
   $('#aoLobby').prepend(note);
 }

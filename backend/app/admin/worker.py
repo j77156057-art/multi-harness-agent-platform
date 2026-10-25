@@ -1173,11 +1173,11 @@ class AdminWorker:
         # 理由要**如实**：原执行者没有凭据、原执行者上一轮没交出活、和"按负载重排"，
         # 是三件不同的事。
         if dead and not self.admin.harness_has_credential(dead):
-            reason = f"执行者 {dead} 没有平台凭据，永远领不了这条活；改派给 {target}"
+            reason = f"执行方 {dead} 没有平台凭据，无法领取任务；改派给 {target}"
         elif dead and dead == target:
             reason = f"原执行者 {dead} 上一轮没能交出交付物，重新派一次"
         else:
-            reason = f"管理员把这条活分给更闲的窗口：{dead or '原执行者'} → {target}"
+            reason = f"管理员将该任务改派给负载较低的窗口：{dead or '原执行者'} → {target}"
         if self.dry_run:
             print(
                 json.dumps(

@@ -151,7 +151,7 @@ try {
   const live = page.locator('#flatLive');
   await live.waitFor({ state: 'visible', timeout: 20000 });
   const head = await live.innerText();
-  assert.match(head, /它现在正在做什么/, '详情写的是"正在做什么"');
+  assert.match(head, /当前正在执行/, '详情写的是"正在做什么"');
   assert.match(head, /还在动/, '写着它还在动');
 
   // 3. 输出长了，页面自己跟上（不刷新、不点）。

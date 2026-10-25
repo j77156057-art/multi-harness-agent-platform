@@ -140,8 +140,8 @@ try {
   assert.match(digest, /你 2 条/, '人说的几条');
   assert.match(digest, /管理员窗口 1 条/, '管理员窗口说的几条');
   assert.match(digest, /其他成员 1 条/, '其他成员说的几条');
-  assert.match(digest, /今天新来了 2 条/, '今天有没有新消息（本机时区）');
-  assert.match(digest, /最后一条是/, '说的是最后一条');
+  assert.match(digest, /今天新增 2 条/, '今天有没有新消息（本机时区）');
+  assert.match(digest, /最后一条为/, '说的是最后一条');
 
   // 4. 任务号 → 任务名、窗口 id → 登记名
   const messages = await page.locator('.flat-msg').allInnerTexts();

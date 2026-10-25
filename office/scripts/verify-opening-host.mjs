@@ -101,7 +101,7 @@ await page.waitForSelector('#openingDialog', { state: 'visible' });
     throw error;
   }
   const summaryNote = await dialog.locator('.oop-sum-note').textContent();
-  assert.match(summaryNote, /只提交一条项目目标/);
+  assert.match(summaryNote, /仅提交一条项目目标/);
   assert.doesNotMatch(summaryNote, /每个选中的在线 Harness/);
   await dialog.locator('[data-action="confirm"]').click();
   await page.waitForFunction(() => window.officePreviewState?.opening?.readyCount === 1, {}, { timeout: 30000 });
