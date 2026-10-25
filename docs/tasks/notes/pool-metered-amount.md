@@ -8,7 +8,8 @@
 工作区：.worktrees/codex/
 依赖任务：FORMAL-MULTI-HARNESS-01
 真相源引用：R10 §16（完成证据）、§37.7（schema_version 提升只针对新增事件）；AGENTS.md §2/§3/§5b
-当前状态：doing（实现与定点测试已就位；待 Merge Gate）
+当前状态：done（实现与定点测试已就位并在 main 上；2026-10-26 由 Mavis 逐条核实并真跑，见「验证结果」）
+commit：`2c02969`（实现随这次合并进 main；单条提交 `pool-metered-amount` 不在任何分支上）
 test_id：DOC-SCHEMA-001 DOC-STATE-001 DOC-TRACE-001
 
 | 项 | 内容 |
