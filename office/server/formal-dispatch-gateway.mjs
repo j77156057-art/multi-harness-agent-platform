@@ -6,6 +6,10 @@ const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
 const BASE_HARNESSES=new Set(['codex','claude-code','opencode','qoder','codebuddy']);
+// 声明出来的基座（`adapters/cli.json`）：平台知道它们（`known_bases()` 读声明表），
+// 办公室本地照着它登记 —— 「加一个新 harness 不用改代码」在本地这一侧也成立。
+// 模板由平台给（与 `GenericCliAdapter` 造注册表的是同一份），这里不自己拼。
+const declaredBaseTemplates=(members)=>Array.isArray(members?.base_adapters)?members.base_adapters:[];
 // Administrator identity is *not* a gateway constant any more (R10-fix-15): the
 // platform delegates it through ``AP_ADMIN_SUBJECTS``, and the opening guide lets
 // the owner pick which registered window that is. This variable is an optional
@@ -336,9 +340,11 @@ export function createFormalGateway(config={}){
           // 登记在册但没有凭据的窗口领不了任务，派给它的活会永远停在 ready。
           credential_count:Number(h.credential_count||0),
           capabilities:JSON.parse(h.capabilities_json||'[]'),running_tasks:h.running_tasks})),
-          base_adapters:Object.entries(BASE_ADAPTERS)
-            .filter(([id])=>!listed.some(h=>h.harness_id===id&&h.registration_version))
-            .map(([id,t])=>({harness_id:id,name:t.name,provider:t.provider,adapter:t.adapter}))});return true;
+          base_adapters:[
+            ...Object.entries(BASE_ADAPTERS).map(([id,t])=>({harness_id:id,name:t.name,provider:t.provider,
+              adapter:t.adapter,adapter_version:t.adapter_version,capabilities:t.capabilities})),
+            ...declaredBaseTemplates(members),
+          ].filter(t=>!listed.some(h=>h.harness_id===t.harness_id&&h.registration_version))});return true;
       }
       if(req.method==='POST'&&route==='/harnesses'){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>12000)throw fail(413,'body_too_large');}
@@ -346,12 +352,14 @@ export function createFormalGateway(config={}){
         const fields=['source_harness_id','instance_id','name'];
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||
           fields.some(k=>typeof body[k]!=='string'||!body[k].trim()))throw fail(400,'invalid_harness_registration');
-        if(!ident(body.source_harness_id)||!BASE_HARNESSES.has(body.source_harness_id)||
+        const listed=await call('/harnesses');
+        // 基座 id 以**平台知道的**为准：内置那几家 + 声明出来的。
+        const knownBases=new Set([...BASE_HARNESSES,...declaredBaseTemplates(listed).map(t=>t.harness_id)]);
+        if(!ident(body.source_harness_id)||!knownBases.has(body.source_harness_id)||
           !ident(body.instance_id)||body.name.length>120)
           throw fail(400,'invalid_harness_registration');
         if(!windowIdFor(body.source_harness_id,body.instance_id))
           throw fail(400,'instance_id_must_be_member_or_window');
-        const listed=await call('/harnesses');
         const source=listed.harnesses?.find(item=>item.harness_id===body.source_harness_id);
         if(!source||!source.registration_version)throw fail(404,'source_harness_not_registered');
         const capabilities=JSON.parse(source.capabilities_json||'[]');
@@ -375,12 +383,16 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string'||!body.harness_id.trim())
           throw fail(400,'invalid_base_registration');
-        const template=BASE_ADAPTERS[body.harness_id];
+        const members=await call('/harnesses');
+        // 内置那几家用本地模板；声明出来的用**平台给的**模板（同一份，别自己拼）。
+        const template=BASE_ADAPTERS[body.harness_id]||
+          declaredBaseTemplates(members).find(t=>t.harness_id===body.harness_id);
         if(!template)throw fail(400,'unknown_base_harness');
         const registration={registered_by:operator,harness_id:body.harness_id,name:template.name,
-          provider:template.provider,adapter:template.adapter,adapter_version:template.adapter_version,
-          capabilities:template.capabilities,max_parallel_tasks:1,status:'online',
-          registration_version:template.registration_version};
+          provider:template.provider,adapter:template.adapter,
+          adapter_version:template.adapter_version||'1.0.0',
+          capabilities:template.capabilities||['coding'],max_parallel_tasks:1,status:'online',
+          registration_version:template.registration_version||'reg-001'};
         const result=await call('/harnesses',registration);
         json(res,200,{...result,harness_id:body.harness_id,name:template.name,provider:template.provider});return true;
       }

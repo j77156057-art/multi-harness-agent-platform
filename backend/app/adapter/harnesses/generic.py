@@ -171,6 +171,31 @@ def declared_bases() -> set[str]:
     return set(load_declarations())
 
 
+def base_template(declaration: CliDeclaration) -> dict[str, Any]:
+    """What the registry needs to know about a declared base.
+
+    **One source of truth**: the same values go into the registration
+    :class:`GenericCliAdapter` builds and into the listing the office reads --
+    otherwise the office would register a window the platform does not
+    recognise.
+    """
+    return {
+        "harness_id": declaration.base,
+        "name": declaration.display_name or f"{declaration.binary} CLI",
+        "provider": declaration.base,
+        "adapter": declaration.adapter or f"{declaration.base}-cli",
+        "adapter_version": "1.0.0",
+        "capabilities": list(declaration.capabilities),
+        "registration_version": "reg-001",
+    }
+
+
+def declared_base_templates() -> list[dict[str, Any]]:
+    """Every declared base, as registry templates (sorted by base name)."""
+    declarations = load_declarations()
+    return [base_template(declarations[base]) for base in sorted(declarations)]
+
+
 class GenericCliAdapter(CliHarness):
     """The ``CliHarness`` a declaration describes."""
 
@@ -182,14 +207,15 @@ class GenericCliAdapter(CliHarness):
         declaration: CliDeclaration,
         prefix: str = "/api/v1",
     ) -> None:
+        template = base_template(declaration)
         registration = HarnessRegistration(
             harness_id=harness_id,
-            name=declaration.display_name or f"{declaration.binary} CLI",
-            provider=declaration.base,
-            adapter=declaration.adapter or f"{declaration.base}-cli",
-            adapter_version="1.0.0",
-            capabilities=declaration.capabilities,
-            registration_version="reg-001",
+            name=template["name"],
+            provider=template["provider"],
+            adapter=template["adapter"],
+            adapter_version=template["adapter_version"],
+            capabilities=tuple(template["capabilities"]),
+            registration_version=template["registration_version"],
         )
         super().__init__(client, registration, prefix=prefix)
         self.declaration = declaration

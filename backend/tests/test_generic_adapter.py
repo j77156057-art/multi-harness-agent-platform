@@ -76,6 +76,50 @@ def test_a_declared_base_is_a_formal_identity(declared):
     assert "newcli" in known_bases()
 
 
+def test_a_declared_base_is_offered_as_a_registry_template(declared):
+    """声明出来的基座：办公室本地按它登记窗口，所以模板得露出来。"""
+    declared({"adapters": [NEW_CLI]})
+
+    templates = generic.declared_base_templates()
+    assert templates == [
+        {
+            "harness_id": "newcli",
+            "name": "New CLI",
+            "provider": "newcli",
+            "adapter": "newcli-print",
+            "adapter_version": "1.0.0",
+            "capabilities": ["coding", "review"],
+            "registration_version": "reg-001",
+        }
+    ]
+
+
+def test_the_offered_template_is_the_one_the_adapter_registers(declared, tmp_path):
+    """模板与 ``GenericCliAdapter`` 造的那份注册**同一口径**。
+
+    两处各写一遍就会漂：办公室登记出来的窗口，平台认不出它的 base。
+    """
+    declared({"adapters": [{**NEW_CLI, "binary": str(_binary(tmp_path))}]})
+
+    template = generic.declared_base_templates()[0]
+    registration = _adapter(tmp_path).registration
+    assert template["name"] == registration.name
+    assert template["provider"] == registration.provider
+    assert template["adapter"] == registration.adapter
+    assert template["adapter_version"] == registration.adapter_version
+    assert tuple(template["capabilities"]) == registration.capabilities
+    assert template["registration_version"] == registration.registration_version
+
+
+def test_a_declared_base_without_a_display_name_still_gets_one(declared):
+    """没写 display_name 的声明：名字退回 binary，别空着。"""
+    declared({"adapters": [{**NEW_CLI, "display_name": ""}]})
+
+    template = generic.declared_base_templates()[0]
+    assert template["name"] == "newcli-test-bin CLI"
+    assert template["adapter"] == "newcli-print"
+
+
 def test_the_adapter_names_the_executable_not_a_builtin(declared, tmp_path):
     declared({"adapters": [{**NEW_CLI, "binary": str(_binary(tmp_path))}]})
     adapter = adapter_for_harness(SimpleNamespace(), "newcli-member-1")
