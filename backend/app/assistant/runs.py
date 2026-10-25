@@ -48,7 +48,12 @@ def _summarise_observation(observation: Any) -> str:
 
 
 def read_runs(data_dir: Path | str, *, limit: int = MAX_RUNS) -> list[dict[str, Any]]:
-    """最近几轮助手的步骤摘要（新的在前）。"""
+    """最近几轮助手的步骤摘要（新的在前）。
+
+    A run that never finished is still worth showing (its steps are the record
+    of what it did before it stopped) -- but it says so: ``status`` is
+    "未跑完" rather than an empty field.
+    """
     directory = trace_dir(data_dir)
     if not directory.is_dir():
         return []
@@ -107,7 +112,10 @@ def _read_one(path: Path) -> dict[str, Any] | None:
     return {
         "run_id": tail.get("run_id") or path.stem,
         "finished_at": tail.get("finished_at"),
-        "status": tail.get("status"),
+        # A run whose closing line never landed (the platform was stopped
+        # mid-turn) has no status.  Say so plainly instead of showing an empty
+        # field: "没有跑完" and "状态未知" are different facts.
+        "status": tail.get("status") or ("未跑完" if steps else "没有记录"),
         "model": tail.get("model"),
         "self_check": tail.get("self_check"),
         "calls_used": tail.get("calls_used"),
