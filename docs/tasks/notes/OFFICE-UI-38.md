@@ -11,7 +11,8 @@
 真相源引用：`backend/app/git/repo.py`（`has_object`）、`backend/app/tasks/service.py`
 （`diff_for_task`）、`docs/tasks/notes/diff-uninitialized-repo.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：把已完成的 diff-uninitialized-repo 结掉）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-002
 
@@ -48,8 +49,9 @@ test_id：MVP-UI-002
 
 | 门禁 | 结果 |
 |---|---|
-| 逐条核实 | 待回填 |
-| 真跑（端点回什么） | 待回填 |
-| 定点测试 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 逐条核实 | **2/2 通过**：`has_object` 把 OSError 当 False；`diff_for_task` 在仓库未就位时回 reason、不 500、不编造「提交不在库里」 |
+| 真跑（端点回什么） | **真的把 `AP_CANONICAL_REPO` 指到不存在的目录**再调：`GET /tasks/FD-4feae21cb6ab4880/diff?include_patch=true` → **HTTP 200**、`available: false`、`reason: "canonical repository is not initialized"`；`FD-4670cb3930adb76e`、`FD-0b0bcc415aa9fe2f` 两条同样。**没有 500** |
+| 定点测试 | `tests/test_task_diff.py` + `tests/test_publish.py` 全绿 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| `pytest`（全量） | EXIT=0（本卡**只改文档**；后端代码逐字节未变） |
+| 边界 | **没有改它的实现**；核实出缺口就另开卡 |

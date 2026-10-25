@@ -170,7 +170,7 @@
 | OFFICE-UI-35 | Mavis | OFFICE-UI-31 | done（**助手回答不再半截**：group.tasks 摘要化 + 可分页；分布是整表的、缺多少条说清楚） | `agent/local/mavis/OFFICE-UI-35/a1` | `MVP-UI-050` |
 | OFFICE-UI-36 | Mavis | OFFICE-UI-31 | done（**助手的取证策略**：事实本轮重新取，记忆只用来理解指代；记忆行标明身份） | `agent/local/mavis/OFFICE-UI-36/a1` | `MVP-UI-051` |
 | diff-uninitialized-repo | Codex | — | done（**diff 端点在正式仓库路径不对时 500 → 老实回 available:false**：`has_object` 把 OSError 当 False，`diff_for_task` 在仓库未就位时回 reason 不 500；实现已在 main 上，2026-10-26 由 Mavis 逐条核实并收尾） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
-| OFFICE-UI-38 | Mavis | OFFICE-UI-31 | →doing（**接手 codex 的在途**：把已完成的 diff-uninitialized-repo 逐条核实并结掉） | `agent/local/mavis/OFFICE-UI-38/a1` | `MVP-UI-002` |
+| OFFICE-UI-38 | Mavis | OFFICE-UI-31 | done（**接手 codex 的在途**：把已完成的 diff-uninitialized-repo 逐条核实并结掉；真跑：仓库路径不存在时端点回 200 + available:false，不 500） | `agent/local/mavis/OFFICE-UI-38/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | done（P1 ReAct 引擎、白名单工具、反思层与机械门；scripted/ruff/docstate/discipline 全绿，提交 `aaa8da5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p2 | Codex | assistant-react-loop | done（P2 池子免费档通道、assistant worker 私聊轮询、真实平台首跑与接线修复；全量 pytest 绿，提交 `1c65241`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；部署时机待定） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
