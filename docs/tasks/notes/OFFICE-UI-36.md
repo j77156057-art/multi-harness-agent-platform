@@ -11,7 +11,8 @@
 真相源引用：`backend/app/assistant/memory.py`（记忆行）、
 `backend/app/assistant/prompts.py`（铁律）、`backend/app/assistant/worker.py`（开场白）、
 `backend/app/assistant/loop.py`（引擎，只读）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`8734746`（助手的取证策略：事实本轮重新取，记忆只用来理解指代）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-051
 
@@ -51,9 +52,10 @@ test_id：MVP-UI-051
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 同题两遍的第二遍 | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_assistant_evidence_policy.py` 新增 3 项（提示词里那条「本轮的事实本轮去取」在、提示词说明记忆是**上一轮**的读数、记忆行标身份）+ 记忆测试补 1 项（第三方的话不猜成用户说的）；助手全套全绿（**含 codex 的 `test_assistant_loop.py`**） |
+| 真跑：同一道题问两遍（8849 真平台 + 4174 预览） | **第 1 遍**：「上一轮 [c7] 记下过 74 条及一组状态分布，但**那是上一轮的读数**，本轮没有重新取证，因此不能把它当作『现在』[c7]」→ **不再把过期数字当本轮结论**（此前它会把上一轮那句「在 FD-76… 处被截断」当今天的结论转述）。**第 2 遍**：它**自己取证了** → 「本项目共 74 条任务，其中 73 条还没人领，已被领走 1 条[s1]。依据：total=74，unclaimed.count=73，claimed.count=1[s1]」 |
+| **没做完的一半（如实记下）** | **「主动去取证」仍是模型的选择**：第 1 遍它选择诚实地说「本轮未记上，建议重新取」，并没有自己去取。要让它**必须**取证，就得动引擎的机械门（`loop.py` —— codex 的在途范围），本张不做 |
+| 办公室全部冒烟 | 32/35（3 条是与本卡无关的环境依赖：verify-anchors、verify-harness-connections、verify-project-workspace，与 OFFICE-UI-28~35 同） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44；`ruff check` + `ruff format --check` 全绿 |
+| `pytest`（全量） | EXIT=0 |
+| 边界 | 引擎 `loop.py` 与工具表 `tools.py` 一行没改；`prompts.py` 只**加一条铁律**，不改 codex 写的任何一句 |
