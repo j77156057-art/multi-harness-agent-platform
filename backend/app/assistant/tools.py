@@ -19,6 +19,25 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 _STATUS = re.compile(r"^[a-z][a-z_-]{0,38}$")
 _MAX_SAY_CHARS = 4000
 
+#: 群任务表一次给多少条（摘要的窗口大小）与上限。
+_GROUP_TASKS_DEFAULT_LIMIT = 20
+_GROUP_TASKS_MAX_LIMIT = 100
+
+
+def _bounded_int(value: Any, *, default: int, low: int, high: int) -> int:
+    """一个界内的整数；模型传了怪东西就当没传（用默认值），不因此失败。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def _clip(text: str, limit: int) -> str:
+    """太长的标题只留开头 —— 摘要里要的是「哪一条」，不是整段标题。"""
+    value = str(text or "").strip()
+    return value if len(value) <= limit else value[:limit] + "…"
+
 
 class ToolRefused(ValueError):
     """A tool call that failed *before* doing anything: bad shape, bad arg."""
@@ -218,13 +237,93 @@ def build_registry(
         }
 
     def group_tasks(args: dict[str, Any]) -> dict[str, Any]:
+        """The group's task list -- as a **summary**, not the whole table.
+
+        The whole table used to be one observation: dozens of tasks with every
+        field each, tens of kilobytes.  The model only saw the first half of it
+        and then honestly reported "the list is cut off at FD-76…" -- which
+        reads like "the answer never finished".  So the tool now hands over a
+        complete summary (counts, distribution, who holds what) and says how
+        many rows it left out and how to page through them.
+        """
         params: dict[str, Any] = {}
         status = str(args.get("status") or "").strip()
         if status:
             if not _STATUS.fullmatch(status):
                 raise ToolRefused(f"status {status!r} is not a plain lowercase token")
             params["status"] = status
-        return client.get(f"/groups/{group_id}/tasks", **params)
+        limit = _bounded_int(
+            args.get("limit"),
+            default=_GROUP_TASKS_DEFAULT_LIMIT,
+            low=1,
+            high=_GROUP_TASKS_MAX_LIMIT,
+        )
+        offset = _bounded_int(args.get("offset"), default=0, low=0, high=_GROUP_TASKS_MAX_LIMIT)
+        # Paging is the model's **explicit** request: without it the call stays
+        # exactly what it was (one plain read), and the tool cuts the window
+        # itself -- a whole table in one observation is what the model could not
+        # finish reading in the first place.
+        paged = args.get("limit") is not None or args.get("offset") is not None
+        if paged:
+            params["limit"] = limit
+            params["offset"] = offset
+        data = client.get(f"/groups/{group_id}/tasks", **params)
+        tasks = [row for row in (data.get("tasks") or []) if isinstance(row, dict)]
+        total = int(data.get("total") or len(tasks))
+        if not paged:
+            tasks = tasks[:limit]
+
+        by_status: dict[str, int] = {}
+        unclaimed: list[dict[str, Any]] = []
+        claimed: list[dict[str, Any]] = []
+        for row in tasks:
+            state = str(row.get("status") or "unknown")
+            by_status[state] = by_status.get(state, 0) + 1
+            entry = {
+                "task_id": row.get("task_id"),
+                "title": _clip(str(row.get("title") or ""), 60),
+                "status": state,
+            }
+            holder = str(row.get("owner") or "")
+            if holder:
+                entry["owner"] = holder
+                claimed.append(entry)
+            else:
+                unclaimed.append(entry)
+
+        # The distribution and the unclaimed count come from the **whole** list
+        # when the platform says so: a window's own counts would read as the
+        # list's counts ("21 未领取" instead of "73 未领取").
+        whole_by_status = data.get("by_status")
+        if isinstance(whole_by_status, dict) and whole_by_status:
+            by_status = {str(key): int(value) for key, value in whole_by_status.items()}
+        whole_unclaimed = data.get("unclaimed_total")
+
+        shown = len(tasks)
+        omitted = max(0, total - offset - shown)
+        unclaimed_count = int(whole_unclaimed) if whole_unclaimed is not None else len(unclaimed)
+        return {
+            "total": total,
+            "by_status": by_status,
+            "unclaimed": {
+                "count": unclaimed_count,
+                "count_note": (
+                    "全表里没有持有者的条数"
+                    if whole_unclaimed is not None
+                    else "本窗口内没有持有者的条数"
+                ),
+                "items": unclaimed,
+            },
+            "claimed": {"count": len(claimed), "items": claimed},
+            "window": {"offset": offset, "limit": limit, "shown": shown},
+            "omitted": omitted,
+            "note": (
+                f"共 {total} 条，本窗口（offset={offset}）给出 {shown} 条"
+                + (f"，还有 {omitted} 条没列（要全量请用 offset/limit 翻页）" if omitted else "")
+                + "。本工具给的是摘要：总数、状态分布、没被领的与已有人领的清单；"
+                "要看某一条的细节，用 task.get 或 task.forensics。"
+            ),
+        }
 
     def say(args: dict[str, Any]) -> dict[str, Any]:
         to = _required_id(args, "to")
