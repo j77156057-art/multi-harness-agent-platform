@@ -11,7 +11,7 @@
 `backend/app/api/routes.py`（`GET /harnesses`）、
 `office/server/formal-dispatch-gateway.mjs`（办公室本地网关的基座列表与登记）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`e5c46d8`）
 commit：`f100e96`（办公室本地接上声明表：加新 harness 不用改代码）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-043
