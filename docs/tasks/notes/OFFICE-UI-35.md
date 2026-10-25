@@ -11,7 +11,7 @@
 真相源引用：`backend/app/assistant/tools.py`（工具的返回形状）、
 `backend/app/assistant/loop.py`（引擎，只读）、`backend/app/assistant/prompts.py`（姿势，
 只读）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`1cc9ad7`）
 commit：`3c3ea23`（助手回答不再半截：group.tasks 摘要化 + 可分页）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-050
