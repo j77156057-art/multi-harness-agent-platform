@@ -13,7 +13,7 @@
 `backend/app/auth/__main__.py`（令牌签发）、`backend/app/pool/sources.py`（池子槽位）、
 `office/server/formal-dispatch-gateway.mjs`（办公室登记路径）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`77e1570`）
 commit：`13d0dcd`（「接一个新 harness」的操作手册）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-044
