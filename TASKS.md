@@ -164,7 +164,7 @@
 | OFFICE-UI-31 | Mavis | OFFICE-UI-30 | done（**助手的深取证档**：新读面 `GET /tasks/{task_id}/forensics` 给更深的输出/stderr/出处/脱敏，助手只读工具 `task.forensics`） | `agent/local/mavis/OFFICE-UI-31/a1` | `MVP-UI-046` |
 | OFFICE-UI-32 | Mavis | OFFICE-UI-31 | done（**向导的「任务目标」输入框不再藏在折叠线以下**：搬到表单最前，第一屏可见；组件照旧） | `agent/local/mavis/OFFICE-UI-32/a1` | `MVP-UI-047` |
 | OFFICE-UI-33 | Mavis | OFFICE-UI-31 | done（**平台助手默认内置在工作区域**：常驻入口 + 项目速览 + 随时能问；顶栏那块改名「巡检与上报」，名字归位） | `agent/local/mavis/OFFICE-UI-33/a1` | `MVP-UI-048` |
-| OFFICE-UI-34 | Mavis | OFFICE-UI-31 | →doing（**助手面板改成对话式界面**：能连续对话 + 有记忆 + 看得见它自己 react） | `agent/local/mavis/OFFICE-UI-34/a1` | `MVP-UI-049` |
+| OFFICE-UI-34 | Mavis | OFFICE-UI-31 | done（**助手面板改成对话式界面**：对话流 + 记忆（它记得上一轮）+ 看得见它这一轮做了什么） | `agent/local/mavis/OFFICE-UI-34/a1` | `MVP-UI-049` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |

@@ -11,7 +11,8 @@
 `backend/app/assistant/memory.py`（会话记忆）、`backend/app/assistant/worker.py`（接入点）、
 `backend/app/assistant/loop.py`（引用机制，只读）、`backend/app/api/routes.py`（轨迹读面）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（助手面板改成对话式界面：能连续对话、有记忆、看得见它自己 react）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-049
 
@@ -53,9 +54,11 @@ test_id：MVP-UI-049
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 多轮记忆端到端 | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_assistant_memory.py` 新增 8 项（记忆只取同一条私聊线程、按时间排、排除本轮提问、谁说的、记忆有界、长轮次截断、轨迹摘要、巨大 observation 截断、没有 trace 目录不是错误） |
+| 真跑（8849 真平台 + 4174 预览） | 面板三块：**项目速览**（平台事实：18 条 · 待领取 1 · 执行中 0 · 待处理 0 · 未完成 13 · 已完成 4；还没人领 1 条；正在做「当前没有窗口在执行」）、**它这一轮做了什么**（折叠的轨迹块：最近一轮 `opencode-cli/deepseek-v4.1-flash-free`，2 步，其中一步是 `group.tasks`，带它的思考「需要任务清单：总条数与未领取情况只能从 group.tasks 取…不猜数字」）、**对话**（我问的与它答的按时间交替，回车即发，输入框吸底） |
+| 多轮记忆端到端 | 在工作区域里连着问两轮：第一轮「本项目现在有几条任务？」→「group.tasks 清单共 74 条[s1]…73 条无人领取」；第二轮「**刚才那个数字**里，有多少条还没人领？」→「本项目现在共 74 条任务**[c3]**。其中 73 条无人领取…[c3]」—— 它**引用了上一轮那一条（c3）**，说明记忆真的进去了（记忆走引擎既有的引用机制：`context` 就是 `[c1]…`，机械门照旧校验） |
+| 办公室全部冒烟 | 32/35（3 条是与本卡无关的环境依赖：verify-anchors、verify-harness-connections、verify-project-workspace，与 OFFICE-UI-28~33 同） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44；`ruff check` + `ruff format --check` 全绿 |
+| `pytest`（全量） | EXIT=0 |
+| 一处环境干扰（如实记下） | 开着真跑进程（8849 平台 + 助手 worker）跑全量时，`test_cli_reported_usage::test_the_summary_keeps_the_two_ledgers_apart` 会红一次；**停掉真跑进程后全量 EXIT=0**。判为真跑进程并发写同一份 data 目录所致，与本卡改动无关：那条测试单跑、文件级、与 pool 相关合跑、缩小到 87 个文件跑、6 个大文件 + 它合跑，**五种组合都绿** |
+| 边界 | `assistant/**` 是 codex 的 `assistant-react-loop` 卡的「允许修改」范围：这一张只**新增** `memory.py`、`runs.py` 两个文件 + `worker.py` 一处接入（17 行），引擎 `loop.py`、工具表、prompt 一律没动 |
