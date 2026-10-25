@@ -10,7 +10,7 @@
 真相源引用：`backend/app/pool/service.py`（用量账与汇总）、`backend/app/tasks/service.py`（完成回执与结算）、
 `backend/app/adapter/cli_output.py`（CLI 原始输出的落盘位置）、`office/src/flat-office.js`（窗口页的用量块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`4e7e4d4`）
 commit：`aca4704`（成员自报的用量与缓存命中率看得见：两笔账分开摆，界面写清出处）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-041
