@@ -10,7 +10,8 @@
 真相源引用：`office/src/flat-office.js`、`office/src/main.js`、`office/src/project-workspace.js`、
 `office/src/direct-chat.js`、`office/src/outputs.js`、`office/src/admin-agent.js`；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`c7aa857`（办公室与平台的文案统一成书面口径：任务、任务详情、验收标准、允许修改的路径……）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-040
 
@@ -58,8 +59,8 @@ test_id：MVP-UI-040
 
 | 门禁 | 结果 |
 |---|---|
-| 真跑（8849 真平台 + 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填（本卡**没碰 `backend/**`**，后端与 main 逐字节相同） |
+| 真跑（8849 真平台 + 4174 预览） | 顶部「待领取 1 · 执行中 0 · 待处理 0 · 未完成 13 · 已完成 4」；左栏「执行中 / 空闲 / 暂时无法领取任务」；任务表「尚无人领取 / 待领取 / 未完成 4 条」；轨迹「已批准 / 方案已批准 / 已取消 / 已要求返工」+「查看任务详情」（7 个）；失败原因显示「平台内部出错了（RuntimeError）」（不再是原始机器文本）；右栏「18 条任务（1 条尚未领取）」「查看全部待办」；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9；17 个脚本的文案断言随词表一起改） |
+| `office/` 构建 | ok（main 212.00 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿（`ruff check` 与 `ruff format --check` 两条） |
+| `pytest`（全量） | `PYTEST_EXIT=0`（后端改了 `backend/app/wording/service.py` 与 `backend/app/admin/worker.py`，全量跑过） |
