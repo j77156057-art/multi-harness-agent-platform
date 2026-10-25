@@ -10,7 +10,8 @@
 真相源引用：`office/src/opening-host.js`（向导宿主）、
 `office/contributions/office-opening-phone/office-opening-phone.js`（锁定的向导组件，只读）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（向导的「任务目标」输入框不再落在折叠线以下）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-047
 
@@ -49,7 +50,8 @@ test_id：MVP-UI-047
 
 | 门禁 | 结果 |
 |---|---|
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 目标框位置（改前/改后几何） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
+| 真跑（8849 真平台 + 4174 预览） | 打开向导的 config 阶段，量目标输入框的几何：**改前** `top=912`（滚动区可视区只到 `bottom=798` → 落在折叠线以下，第一眼看不到）；**改后** `top=251`（可视区 208~798 → 第一屏可见），且它是表单的**第一项**。画面确认：目标框现在是向导里的第一项 |
+| 搬动没有把它弄坏 | 新增 `office/scripts/verify-opening-goal.mjs`（进冒烟清单）：填目标 → 选管理员与成员 → 「查看配置摘要」→ 摘要里**照旧**出现目标原文（组件的状态、校验、摘要都没坏；没有新增第二个输入框） |
+| 办公室全部冒烟 | 31/34（3 条是与本卡无关的环境依赖：verify-anchors、verify-harness-connections、verify-project-workspace，与 OFFICE-UI-28~31 同） |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| 代码 | 本卡**只动前端**（`office/src/opening-host.js` + 一个走查脚本），后端与 OFFICE-UI-31 逐字节相同（`pytest` 全量已在那一轮跑过并 EXIT=0） |
