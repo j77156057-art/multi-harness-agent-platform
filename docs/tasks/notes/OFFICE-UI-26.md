@@ -10,7 +10,8 @@
 真相源引用：`backend/app/pool/service.py`（用量账与汇总）、`backend/app/tasks/service.py`（完成回执与结算）、
 `backend/app/adapter/cli_output.py`（CLI 原始输出的落盘位置）、`office/src/flat-office.js`（窗口页的用量块）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`aca4704`（成员自报的用量与缓存命中率看得见：两笔账分开摆，界面写清出处）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-041
 
@@ -49,9 +50,9 @@ test_id：MVP-UI-041
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `office/` 构建 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_cli_reported_usage.py` 9 项全过（三种形状 / 重复行不重复计 / 认不出是 None / 全 0 不记 / 两笔账分开 / 提交结果后账上多一笔） |
+| 真跑（8849 真平台 + 4174 预览） | Claude Code 窗口：「成员自报：消耗总 token 2,839,011（输入 2,759,660 · 输出 79,351 · 命中缓存 2,642,176）」「成员自报：缓存命中率 96%」；Codex CLI 窗口：「额度池：消耗总 token 36（输入 15 · 输出 21 · 命中缓存 0）」「额度池：缓存命中率 0%」；OpenCode 窗口：成员自报 60,920,848（命中缓存 59,877,096）· 命中率 99%；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `office/` 构建 | ok（main 213.23 kB JS） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿（`ruff check` 与 `ruff format --check` 两条） |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
