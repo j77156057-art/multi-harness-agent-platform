@@ -11,7 +11,7 @@
 `backend/app/assistant/memory.py`（会话记忆）、`backend/app/assistant/worker.py`（接入点）、
 `backend/app/assistant/loop.py`（引用机制，只读）、`backend/app/api/routes.py`（轨迹读面）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done（已合入 main：`8e09a0f`）
+当前状态：done（已合入 main：`8e09a0f`，`bb7ac69`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（助手面板改成对话式界面：能连续对话、有记忆、看得见它自己 react）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-049
