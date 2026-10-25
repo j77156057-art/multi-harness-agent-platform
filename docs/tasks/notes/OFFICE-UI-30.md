@@ -11,7 +11,8 @@
 `backend/app/api/routes.py`（新读面）、`backend/app/assistant/tools.py`（工具表）、
 `backend/app/assistant/prompts.py`（姿势与红线）、`docs/harness-onboarding.md`（流程手册）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`6b8cbc5`（助手的适配体检 + 声明草案）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-045
 
@@ -19,7 +20,7 @@ test_id：MVP-UI-045
 |---|---|
 | 依赖 | OFFICE-UI-28、pool-generic-adapter |
 | test_id | `MVP-UI-045` |
-| 允许修改 | `backend/app/api/routes.py`、`backend/app/adapter/harnesses/generic.py`、`backend/app/assistant/tools.py`、`backend/app/assistant/prompts.py`、`backend/tests/**`、`docs/claims/mavis--OFFICE-UI-30.md`、`docs/tasks/notes/OFFICE-UI-30.md`、`docs/traceability.md`、`TASKS.md` |
+| 允许修改 | `backend/app/api/routes.py`、`backend/app/adapter/harnesses/generic.py`、`backend/app/pool/sources.py`、`backend/app/assistant/tools.py`、`backend/app/assistant/prompts.py`、`backend/tests/**`、`docs/claims/mavis--OFFICE-UI-30.md`、`docs/tasks/notes/OFFICE-UI-30.md`、`docs/traceability.md`、`TASKS.md` |
 | 禁止修改 | `docs/spec/**`、`backend/app/auth/**`（权限矩阵不动）、`backend/app/admin/worker.py`（codex 在途）、其他 Harness 的工作区与分支 |
 
 ## 做什么
@@ -50,8 +51,8 @@ test_id：MVP-UI-045
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_assistant_bases.py` 新增 6 项（缺口清单的算法 + 读面 + 工具表）；连同 `test_assistant_loop.py` 共 35 项全过 |
+| 真跑（8849 真平台 + 4174 预览） | `GET /api/v1/harnesses/bases` 对本机的 gemini 声明给出模板 + **两条缺口**（「没有 review_args：这个 CLI 不能做只读审阅」「池子侧没有这个 CLI 的槽位：它现在不能给别的窗口供模型」），内置 6 家（claude-code / codebuddy / codex / opencode / pi / qoder）也在，`declaration_error` 为 null |
+| 办公室全部冒烟 | 30/33（3 条是与本卡无关的环境依赖，与 OFFICE-UI-28/29 同） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44；`ruff check` + `ruff format --check` 全绿 |
+| `pytest`（全量） | EXIT=0 |
