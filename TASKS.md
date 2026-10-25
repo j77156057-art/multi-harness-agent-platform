@@ -129,7 +129,8 @@
 | codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
 | R10-fix-17 | Codex | FORMAL-MULTI-HARNESS-01 | doing（接替关系进平台字段；实现与 R10 正文（§9、§38.12）已就位，**规范复审由仓库主人 2026-10-22 拍板**） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
-| pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
+| pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | done（**计量档的 token 与余额**：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口，单价不猜；实现已在 main 上，2026-10-26 由 Mavis 逐条核实并收尾） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
+| OFFICE-UI-40 | Mavis | OFFICE-UI-31 | →doing（**接手 codex 的在途**：结掉 pool-metered-amount：逐条核实 + 定点测试真跑 + 顺带把那张 GBK 卡转 UTF-8） | `agent/local/mavis/OFFICE-UI-40/a1` | `DOC-SCHEMA-001` |
 | OFFICE-UI-01 | Codex | 无 | done（办公室的数据版界面收进本仓 office/；已合入 main） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | done（**池子消费侧通用化**：新 CLI 凭声明当正式成员；池子四小坑 + `GenericCliAdapter` + 接线；实现经 `2c02969` 合入 main，2026-10-26 由 Mavis 逐条核实并收尾） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -302,6 +303,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- review-contract-gate → docs/claims/codex--review-contract-gate.md -->
 <!-- cli-roster-enumerate → docs/claims/codex--cli-roster-enumerate.md -->
 <!-- assistant-diagnose-pack → docs/claims/codex--assistant-diagnose-pack.md -->
+<!-- OFFICE-UI-40 → docs/claims/mavis--OFFICE-UI-40.md -->
 
 
 
@@ -374,7 +376,9 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | assistant-react-loop-p3 | [卡](docs/tasks/notes/assistant-react-loop-p3.md) | | |
 | review-contract-gate | [提案](docs/proposals/review-contract-gate.md) | [认领](docs/claims/codex--review-contract-gate.md) | [任务卡](docs/tasks/notes/review-contract-gate.md) |
 | cli-roster-enumerate | [卡](docs/tasks/notes/cli-roster-enumerate.md) | | |
+| pool-metered-amount | [卡](docs/tasks/notes/pool-metered-amount.md) | | |
 | assistant-diagnose-pack | [卡](docs/tasks/notes/assistant-diagnose-pack.md) | | |
+| OFFICE-UI-40 | [卡](docs/tasks/notes/OFFICE-UI-40.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |

@@ -26,6 +26,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 
 | test_id | 检查什么 | 强制状态 | 由谁检查 |
 |---|---|---|---|
+| `DOC-SCHEMA-001` | **接手 codex 的在途：结掉 `pool-metered-amount`**（计量档的 token 与余额：流式请求的 token 被记账、三种协议的 usage 都收得到、余额读 provider 自己的只读接口、单价不猜、没被计过的记「未计上」而不是 0）—— 逐条核实 + 定点测试真跑；那张 GBK 卡顺手转成 UTF-8 | 🟡 部分有断言 | `backend/tests/test_pool_metered.py` + `test_pool_stream_usage.py`（真起本地 HTTP 服务发流式请求）；**前端检查不在本仓门禁内**（CI 里没有 node）|
 | `DOC-STATE-001` | 状态机自洽：allowlist 封闭性、迁移表单值 next、自环清单、非终态出边 | ✅ 有断言 | `tools/docstate` structure/allowlist/transitions/r10-events/loops/states 组 |
 | `DOC-SCHEMA-001` | canonical schema 自洽：§8 唯一键引用的列已声明、§11 DDL 列已登记、§37.6 必要字段 | ✅ 有断言 | `tools/docstate` schema/schema-keys/schema-list 组 |
 | `DOC-TRACE-001` | test_id 无悬空：全文出现的 ID 必须落在阶段列表之一 | ✅ 有断言 | `tools/docstate` trace 组 |
