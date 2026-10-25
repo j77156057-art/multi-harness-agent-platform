@@ -10,7 +10,8 @@
 真相源引用：`office/src/flat-office.js`（工作区与左栏）、
 `office/src/project-workspace.js`（新建项目）、`office/server/formal-dispatch-gateway.mjs`（本地网关）、
 `backend/app/assistant/tools.py`（助手的只读工具）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（平台助手默认内置在工作区域）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-048
 
@@ -52,7 +53,12 @@ test_id：MVP-UI-048
 
 | 门禁 | 结果 |
 |---|---|
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 助手问答端到端 | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
+| 真跑（8849 真平台 + 4174 预览） | **入口常驻**：左栏第一屏就有「平台助手」（显示「最近回答 · 刚刚」），**不依赖平台注册表里有没有某个窗口**（以前要找得到 `office-admin` 才显示这一行）。**速览是平台事实**（前端直算，模型不在也有）：18 条（待领取 1 · 执行中 0 · 待处理 0 · 未完成 13 · 已完成 4）、还没人领 1 条（自循环验收-1020 · 编写办公室工位屏幕与平台回执对照说明）、正在做「当前没有窗口在执行」 |
+| 助手问答端到端 | 在工作区域里真问「本项目现在有几条任务？有哪些还没人领？」→ 助手**真回答了**，并带工具引用：`group.tasks 清单共 74 条[s1]；按 owner 与 assigned_to 均为空计，73 条无人领取；唯一有 owner 的是 4feae21（owner=OpenCode，status=in_progress）[s1]` |
+| 口径说清楚 | 助手的计数是**本群**口径（同一个群里还并着别的项目），面板里明写这一点；本项目的口径看「项目速览」。两个数字不一样不是谁算错了 |
+| 名字归位 | 顶栏那块（列事实、报异常）改名「**巡检与上报**」；管理员窗口按注册表本名列在窗口名单里，不再冒充「平台助手」。两个入口不再同名 |
+| 助手只读 | 助手面板里没有分派/处置/审核类动作（新走查断言了这一点）；它只回答，不改现状 |
+| 办公室全部冒烟 | 32/35（3 条是与本卡无关的环境依赖：verify-anchors、verify-harness-connections、verify-project-workspace，与 OFFICE-UI-28~32 同） |
+| 新增走查 | `office/scripts/verify-office-assistant.mjs`（入口常驻、速览是事实、常用问题、只读）+ `office/scripts/verify-opening-goal.mjs`（UI-32 的那条）都进了冒烟清单 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| 代码 | 本卡**只动前端**（`office/src/flat-office.js`、`flat-office.css`、`admin-agent.js` 与两个走查脚本），后端与 OFFICE-UI-31 逐字节相同（`pytest` 全量已在那一轮跑过并 EXIT=0） |
