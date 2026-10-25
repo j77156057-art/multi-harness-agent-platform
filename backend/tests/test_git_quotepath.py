@@ -43,7 +43,7 @@ def test_git_returns_raw_paths_for_non_ascii_and_spaces(tmp_path):
     """平台自己的 git 调用必须拿到原始路径（这是修好的前提）。
 
     真实场景：成员在一个**新的**中文目录下写文件，``git status --porcelain``
-    报的是那个目录（``?? docs/prep/自循环验收-1020/``），平台再���
+    报的是那个目录（``?? docs/prep/自循环验收-1020/``），平台再用
     ``ls-files --others`` 把它展开成文件。两条都得是原始路径。
     """
     work = _repo(tmp_path)

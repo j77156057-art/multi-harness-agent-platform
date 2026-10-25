@@ -118,7 +118,7 @@ class Database:
         ``msvcrt.locking``，POSIX 用 ``fcntl.flock``）。进锁后重新确认当前
         模式，已是 WAL 则立即返回，避免无谓的排他锁与写放大。
 
-        Windows 上还有第三��坑：文件被独占锁定时``open()`` 本身就会抛
+        Windows 上还有第三个坑：文件被独占锁定时``open()`` 本身就会抛
         ``PermissionError``，所以**打开锁文件也要重试**，不能只重试加锁。
         """
         with self.connect() as conn:

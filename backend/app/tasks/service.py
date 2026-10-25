@@ -90,7 +90,7 @@ DIRECT_REF = "direct"
 # 目标归群主，成员只能**提**；管理员听见之后把话带给群主（R10-fix-22）。
 GOAL_CHANGE_REF = "goal-change"
 
-# 「有窗口中途加入这个项目」的签名（R10 §19）：办公室加人时带���它，
+# 「有窗口中途加入这个项目」的签名（R10 §19）：办公室加人时带上它，
 # 管理员据此知道，并把还在等人领的活改派给新来的窗口（R10-fix-23）。
 ADD_MEMBER_REF = "add-member"
 #: 机器可读的那一半："add-member-json:{harness_id}".
