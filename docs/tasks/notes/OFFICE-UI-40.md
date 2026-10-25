@@ -12,7 +12,7 @@
 `backend/app/pool/balance.py`（provider 自己报的余额）、
 `backend/tests/test_pool_metered.py`、`docs/tasks/notes/pool-metered-amount.md`（被收尾的
 那张卡）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`98918bb`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：结掉 pool-metered-amount）
 验证结果：见文末「验证结果」表。
 test_id：DOC-SCHEMA-001
