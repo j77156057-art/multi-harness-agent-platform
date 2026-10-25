@@ -175,7 +175,7 @@
 | assistant-react-loop | Codex | — | done（P1 ReAct 引擎、白名单工具、反思层与机械门；scripted/ruff/docstate/discipline 全绿，提交 `aaa8da5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p2 | Codex | assistant-react-loop | done（P2 池子免费档通道、assistant worker 私聊轮询、真实平台首跑与接线修复；全量 pytest 绿，提交 `1c65241`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-free-set-watch | Codex | — | doing（免费档目录变更哨已实装：`python -m app.pool.free_set_watch`，快照 diff＋alerts 现成入队；**实现与 7 条 scripted 已在 main 上**（`9d73000`），2026-10-26 由 Mavis 核实并真跑两遍；**部署方式已定案**（哨与投递各一个独立进程，见 `docs/deploy-free-set-watch.md`），**装不装等仓库主人给收件人**） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003`（新检查 ID 待复审） |
-| OFFICE-UI-42 | Mavis | OFFICE-UI-31 | →doing（**free-set-watch 的部署方式定案**：两个独立进程 + 安装门槛 + 落地说明 + 本机整链验证） | `agent/local/mavis/OFFICE-UI-42/a1` | `MVP-ADAPTER-005` |
+| OFFICE-UI-42 | Mavis | OFFICE-UI-31 | done（**free-set-watch 的部署方式定案**：哨与投递各一个独立进程，安装门槛=先有收件人，落地说明 `docs/deploy-free-set-watch.md`，本机整链验证通过） | `agent/local/mavis/OFFICE-UI-42/a1` | `MVP-ADAPTER-005` |
 | OFFICE-UI-39 | Mavis | OFFICE-UI-31 | done（**接手 codex 的在途**：收尾 pool-free-set-watch —— 实现与 7 条 scripted 已在 main 上且绿，真跑两遍 `--once`（建基线不喊人 / 同名单静默）；**部署时机待仓库主人定**，三个选项已写进卡片） | `agent/local/mavis/OFFICE-UI-39/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p3 | Codex | assistant-react-loop | done（P3 审核助攻 review_pack 工具＋prompt 审核协议；全量 pytest 绿；守门另立提案 review-contract-gate 待复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | review-contract-gate | Codex | assistant-react-loop-p3 | done（A+B 已实施：approve 逐条覆盖 acceptance 契约；缺失/非法 check 发布拒绝；全量 pytest `1036 passed`，commit `10a50bb`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |

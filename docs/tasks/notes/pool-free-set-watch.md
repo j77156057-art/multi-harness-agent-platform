@@ -73,15 +73,27 @@ test_id：MVP-ADAPTER-003
 | `pytest`（全量） | EXIT=0（实现代码逐字节未变） |
 | 边界 | **没有改它的实现**；也没有擅自部署 —— 哨会发告警（outbound），挂不挂是运维决定 |
 
-### 部署（待仓库主人定）
+### 部署（2026-10-26 定案，OFFICE-UI-42）
 
-三个选项，代价各不相同：
+**两个独立进程，与平台进程并列**：
 
-| 选项 | 怎么跑 | 代价 / 影响 |
-|---|---|---|
-| **A 常驻** | 一个独立进程 `python -m app.pool.free_set_watch --loop --interval N` | 目录一变就告警（延迟 ≤ N）。**注意不能挂进 `run_all_sweeps`** —— sweeper 家族有「sweeps 永不做 outbound（连告警排队都不做）」的不变量，哨是独立入口才合平台规矩 |
-| **B 定时** | 计划任务/cron 定期打 `python -m app.pool.free_set_watch --once` | 告警延迟 = 计划周期；不占常驻进程 |
-| **C 暂不部署** | 不跑 | 哨不上工：**免费档变了没人被喊**，人得自己看池子清单（办公室「额度池」那块能看到当前档位，但不会主动提醒） |
+```
+python -m app.pool.free_set_watch --loop --interval 900   # 哨：入队
+python -m app.alerts --loop --interval 60                  # 投递：送出去
+```
 
-无论选哪个，投递都沿 **alerts 现有面**（`python -m app.alerts` 投，收件人沿现有 webhook）——
-本卡没有新增任何表结构、事件或路由。
+**为什么不是计划任务/cron**：那是某台机器的事，不是仓库的事；仓库只给「跑什么、跑多久、
+怎么停」。
+
+**为什么不能挂进平台进程**：平台有「sweeps 永不做 outbound（连告警排队都不做）」的
+不变量，哨会发告警，所以它是**独立入口**才合规矩。
+
+**安装门槛**：投递端要 `AP_ALERT_WEBHOOK_URL`（HTTPS）+ `AP_ALERT_WEBHOOK_SECRET`；
+**没有收件人就别装** —— 装了也只是「变了记录在本地账里、没人知道」。本仓库目前也没有
+告警读面（`routes.py` 里没有 alerts 的读端点），队列里的告警只能直接查
+`alert_deliveries` 表。
+
+完整的起停、排错、账怎么查、以及一次整链验证（哨认出变化 → 账里多一条 `pending` →
+投递端因没配收件人而**明说**跳过）见 **`docs/deploy-free-set-watch.md`**。
+
+无论怎么部署，投递都沿 **alerts 现有面** —— 本卡没有新增任何表结构、事件或路由。

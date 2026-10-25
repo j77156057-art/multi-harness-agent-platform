@@ -12,7 +12,8 @@
 （投递）、`backend/app/alerts/__main__.py`（投递入口）、
 `docs/tasks/notes/pool-free-set-watch.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（free-set-watch 的部署方式定案）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADAPTER-005
 
@@ -49,7 +50,10 @@ test_id：MVP-ADAPTER-005
 
 | 门禁 | 结果 |
 |---|---|
-| 部署方式定案 | 待回填 |
-| 本机整链验证 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 部署方式定案 | **两个独立进程，与平台进程并列**：哨 `python -m app.pool.free_set_watch --loop --interval 900`（只入队）、投递 `python -m app.alerts --loop --interval 60`（HMAC 签名投递）。**不挂进平台进程** —— 平台有「sweeps 永不做 outbound」的不变量，哨是独立入口才合规矩。**不用计划任务/cron** —— 那是某台机器的事，仓库只给「跑什么、跑多久、怎么停」 |
+| 安装门槛 | 投递端要 `AP_ALERT_WEBHOOK_URL`（HTTPS）+ `AP_ALERT_WEBHOOK_SECRET`；**没有收件人就别装**（装了只是「变了记录在本地账里、没人知道」）。本仓库**没有告警读面**，队列只能直接查 `alert_deliveries` 表 |
+| 落地说明 | 新增 `docs/deploy-free-set-watch.md`：是什么/不是什么、两个进程怎么起、怎么停、账在哪看与三种状态、排错表、一次整链验证记录 |
+| **本机整链验证** | 在快照里加一个不存在的名字（模拟「供应商新增了免费模型」）→ **哨** `{"changed": true, "first_snapshot": false}` → **账** 里多了一条 `kind=pool.free_set_changed source_key=a9b68f20… status=pending attempts=0` → **投递端** `{"configured": false, "detected": 0, "delivered": 0, "failed": 0, "pending": 1}`（本机没配收件人 → **明说**没投，不假装投出去了）→ 快照已还原 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| `pytest`（全量） | EXIT=0（本卡**只改文档**；后端代码逐字节未变，全量已在 OFFICE-UI-40 那一轮跑过并 EXIT=0） |
+| 边界 | **没有改它的实现**；**没有擅自留常驻进程**（本机只手动跑一次做验证）；**没有替主人选收件人** |
