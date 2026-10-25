@@ -8,7 +8,8 @@
 工作区：.worktrees/codex/
 依赖任务：assistant-react-loop（P1，提交 `aaa8da5`）
 真相源引用：MVP-ADAPTER-003（模型通道/CLI 槽消费语义同族；新检查 ID 不自造，待规范复审）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing
+当前状态：done
+commit：`1c65241`
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
@@ -41,7 +42,13 @@ P1 引擎接真模型（池子直连免费档五家，零 USD）与真私聊（a
 
 ## 状态
 
-登记完毕，实现中。提交：`a6cdf57`（feat(assistant-react-loop-p2)：助手接通池子直连免费档与私聊自循环）。
+完成时间：2026-10-23
+commit：`1c65241`（真平台首跑后的 CLI 接线、私聊可见性与投递错误修复；P2 主实现提交为 `a6cdf57`）。
+
+### 验收结果
+
+- assistant 三件套定点测试通过；真实平台首跑完成注册、免费档调用、私聊回复与 trace 落账。
+- 全量 pytest `[100%]` 通过；ruff、docstate、discipline 全绿。
 
 ### 修订（同卡，2026-10-23 晚）
 

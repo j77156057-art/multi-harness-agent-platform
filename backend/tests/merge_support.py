@@ -146,6 +146,7 @@ def build_chain(
     verify_command=None,
     auto_verify: bool = True,
     rename: tuple[str, str] | None = None,
+    acceptance: list[dict[str, object]] | None = None,
 ) -> Chain:
     database = make_database(tmp_path)
     repo = CanonicalRepo(tmp_path / "canonical.git")
@@ -153,7 +154,7 @@ def build_chain(
     base = repo.ref_commit(repo.integration_ref)
     assert base is not None
     seed_project(database, integration_commit=base)
-    seed_task(database, task_id=task_id)
+    seed_task(database, task_id=task_id, acceptance=acceptance)
     # Both sides of the review must be registry-known with distinct providers
     # (rules-tighten F5); harness-1 owns, reviewer-1 reviews.
     register_harness(database, HARNESS, provider="openai")

@@ -57,16 +57,19 @@ def seed_task(
     budget_override_by: str | None = None,
     exclusive_resources: list[str] | None = None,
     budget_tokens: int | None = None,
+    acceptance: list[dict[str, object]] | None = None,
 ) -> None:
     now = datetime.now(UTC).isoformat()
     snapshot_id = None
     with database.transaction() as conn:
-        if exclusive_resources is not None or budget_tokens is not None:
+        if exclusive_resources is not None or budget_tokens is not None or acceptance is not None:
             spec: dict[str, object] = {"id": task_id}
             if exclusive_resources is not None:
                 spec["exclusive_resources"] = exclusive_resources
             if budget_tokens is not None:
                 spec["budget_tokens"] = budget_tokens
+            if acceptance is not None:
+                spec["acceptance"] = acceptance
             snapshot_id = f"snap-{task_id}"
             conn.execute(
                 "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"

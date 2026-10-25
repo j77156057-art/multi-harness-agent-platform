@@ -8,7 +8,7 @@
 工作区：.worktrees/codex/
 依赖任务：FORMAL-MULTI-HARNESS-01（正式 harness 接替/领任务主链）
 真相源引用：R10 §7（Adapter 的十六动词与收据）、§19.2（额度池语义沿 `docs/claims/codex--FORMAL-MULTI-HARNESS-01.md` 与 `pool-*` 任务卡落档）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing（实现与定点测试已就位；待仓库主人复核与合并）
+当前状态：waiting（实现与验收完成；提交未合入 main，待仓库主人复核移植/合并方式）
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
@@ -46,5 +46,11 @@ discipline + mock 二进制冒烟）。
 ## 状态
 
 实现与定点测试已就位。分支 `agent/local/codex/OFFICE-UI-01/a1`，
-提交：`c4c16a1`（feat(pool-generic-adapter)，含池子四小坑、通用适配器、
+commit：`c4c16a1`（feat(pool-generic-adapter)，含池子四小坑、通用适配器、
 接线与登记；实现与定点测试同一次提交）。
+
+### 合并状态
+
+该 commit 尚未合入 `main`。当前 `main` 已有后续 pool/adapter 文件结构改动，
+直接 cherry-pick 会造成大量冲突/删除；待仓库主人决定是否从当前 `main`
+移植通用适配器功能，不把“实现完成”误记为“已合入”。

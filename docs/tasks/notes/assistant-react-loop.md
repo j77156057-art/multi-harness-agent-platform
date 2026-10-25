@@ -8,7 +8,8 @@
 工作区：.worktrees/codex/
 依赖任务：—（设计提案 docs/proposals/assistant-react-loop.md 已备，待仓库主人复核）
 真相源引用：MVP-ADAPTER-003（模型通道语义与 adapter 稳定性同族；新检查 ID 待规范复审后回填真相源）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing（P1 引擎与 scripted 测试已就位；worker/池子直连在 P2；规范条目待复核）
+当前状态：done（P1 引擎、工具白名单、prompt、反思层与机械门已验收；后续 worker/池子直连由 P2 承接）
+commit：`aaa8da5`
 test_id：MVP-ADAPTER-003
 
 | 项 | 内容 |
@@ -39,5 +40,10 @@ scripted 全测）。
 
 ## 状态
 
-P1 实现与定点测试已就位。分支 `agent/local/codex/OFFICE-UI-01/a1`，
-提交：`aaa8da5`（feat(assistant-react-loop): 平台助手升级为自有 ReAct 引擎（P1））。
+完成时间：2026-10-23
+commit：`aaa8da5`（feat(assistant-react-loop): 平台助手升级为自有 ReAct 引擎（P1））。
+
+### 验收结果
+
+- `tests/test_assistant_loop.py` scripted 全绿：工具流程、引用机械门、预算、反思、trace 与注入隔离均通过。
+- ruff、docstate、discipline 通过；P1 后续由 P2/P3 任务卡分别验收。

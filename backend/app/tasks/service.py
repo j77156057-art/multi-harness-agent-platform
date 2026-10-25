@@ -1101,6 +1101,71 @@ class SchedulerService:
                 code="review.cross_provider_required",
             )
 
+    @staticmethod
+    def _acceptance_contract_ids(
+        conn: sqlite3.Connection, *, task_id: str, snapshot_id: str | None
+    ) -> set[str]:
+        """Read the immutable acceptance contract attached to a task."""
+        if not snapshot_id:
+            return set()
+        row = conn.execute(
+            "SELECT content_json FROM plan_snapshots WHERE snapshot_id = ?", (snapshot_id,)
+        ).fetchone()
+        if row is None:
+            return set()
+        try:
+            snapshot = json.loads(str(row["content_json"]))
+        except (TypeError, ValueError):
+            return set()
+        for item in snapshot.get("tasks", ()) if isinstance(snapshot, dict) else ():
+            if not isinstance(item, dict) or str(item.get("id") or "").strip() != task_id:
+                continue
+            acceptance = item.get("acceptance", ())
+            if not isinstance(acceptance, list):
+                return set()
+            return {
+                str(contract.get("id")).strip()
+                for contract in acceptance
+                if isinstance(contract, dict) and str(contract.get("id") or "").strip()
+            }
+        return set()
+
+    def _assert_review_contract(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        task: sqlite3.Row,
+        findings: list[dict[str, object]],
+    ) -> None:
+        """Require an approve finding for every acceptance contract item."""
+        required = self._acceptance_contract_ids(
+            conn,
+            task_id=str(task["task_id"]),
+            snapshot_id=str(task["plan_snapshot_id"] or "") or None,
+        )
+        if not required:
+            return
+        covered: set[str] = set()
+        unknown: set[str] = set()
+        for finding in findings:
+            contract_id = str(finding.get("contract_id") or "").strip()
+            if not contract_id:
+                continue
+            if contract_id not in required:
+                unknown.add(contract_id)
+            covered.add(contract_id)
+        if unknown:
+            raise Conflict(
+                f"findings reference unknown acceptance contracts: {sorted(unknown)}",
+                code="review.contract_unknown",
+            )
+        missing = sorted(required - covered)
+        if missing:
+            raise Conflict(
+                f"approve must address every acceptance contract; missing: {missing}",
+                code="review.contract_missing",
+            )
+
     def review_claim(
         self,
         *,
@@ -1308,6 +1373,8 @@ class SchedulerService:
                     f"{task_id} is {status.value}; review needs awaiting_review",
                     code="review.requires_verify_receipt",
                 )
+            if verdict == "approve":
+                self._assert_review_contract(conn, task=task, findings=findings)
             attempt = conn.execute(
                 "SELECT owner FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
             ).fetchone()

@@ -11,10 +11,12 @@ budget. The findings are recorded on the review row now, served by
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.adapter.formal_worker import build_goal
 from app.api.app import create_app
+from app.tasks.service import Conflict
 from tests.merge_support import REVIEWER, build_chain, status_of
 
 #: The app rejects non-loopback Host headers, so the client needs a loopback URL.
@@ -193,3 +195,101 @@ def test_an_approving_review_asks_for_no_rework(tmp_path):
     goal = build_goal({"id": chain.task_id}, harness_id="qoder", review=_context(chain)["review"])
 
     assert "REWORK" not in goal, "approval must not be turned into a rework instruction"
+
+
+def test_approval_requires_each_acceptance_contract_to_be_addressed(tmp_path):
+    chain = build_chain(
+        tmp_path,
+        acceptance=[
+            {"id": "A-1", "check": "cmd", "evidence_source": "tests", "description": "a"},
+            {"id": "A-2", "check": "human", "description": "b"},
+        ],
+    )
+    claimed = chain.service.review_claim(
+        task_id=chain.task_id, attempt_id=chain.attempt_id, reviewer_harness_id=REVIEWER
+    )
+    with pytest.raises(Conflict) as caught:
+        chain.service.submit_review(
+            task_id=chain.task_id,
+            attempt_id=chain.attempt_id,
+            reviewer_harness_id=REVIEWER,
+            verdict="approve",
+            reviewed_commit=chain.head_commit,
+            review_revision=1,
+            findings=[{"contract_id": "A-1", "message": "checked"}],
+            review_id=str(claimed["review_id"]),
+        )
+    assert getattr(caught.value, "code", None) == "review.contract_missing"
+
+
+def test_approval_accepts_explicit_no_evidence_for_a_contract(tmp_path):
+    chain = build_chain(
+        tmp_path,
+        acceptance=[
+            {"id": "A-1", "check": "human", "description": "human check"},
+            {"id": "A-2", "check": "human", "description": "another check"},
+        ],
+    )
+    claimed = chain.service.review_claim(
+        task_id=chain.task_id, attempt_id=chain.attempt_id, reviewer_harness_id=REVIEWER
+    )
+    result = chain.service.submit_review(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        reviewer_harness_id=REVIEWER,
+        verdict="approve",
+        reviewed_commit=chain.head_commit,
+        review_revision=1,
+        findings=[
+            {"contract_id": "A-1", "message": "checked"},
+            {"contract_id": "A-2", "no_evidence": True, "message": "仍需人工查验"},
+        ],
+        review_id=str(claimed["review_id"]),
+    )
+    assert result["verdict"] == "approve"
+
+
+def test_approval_rejects_unknown_contract_ids(tmp_path):
+    chain = build_chain(
+        tmp_path,
+        acceptance=[{"id": "A-1", "check": "human", "description": "human check"}],
+    )
+    claimed = chain.service.review_claim(
+        task_id=chain.task_id, attempt_id=chain.attempt_id, reviewer_harness_id=REVIEWER
+    )
+    with pytest.raises(Conflict) as caught:
+        chain.service.submit_review(
+            task_id=chain.task_id,
+            attempt_id=chain.attempt_id,
+            reviewer_harness_id=REVIEWER,
+            verdict="approve",
+            reviewed_commit=chain.head_commit,
+            review_revision=1,
+            findings=[
+                {"contract_id": "A-1", "message": "checked"},
+                {"contract_id": "A-unknown", "message": "not in the plan"},
+            ],
+            review_id=str(claimed["review_id"]),
+        )
+    assert caught.value.code == "review.contract_unknown"
+
+
+def test_request_changes_does_not_require_contract_coverage(tmp_path):
+    chain = build_chain(
+        tmp_path,
+        acceptance=[{"id": "A-1", "check": "human", "description": "human check"}],
+    )
+    claimed = chain.service.review_claim(
+        task_id=chain.task_id, attempt_id=chain.attempt_id, reviewer_harness_id=REVIEWER
+    )
+    result = chain.service.submit_review(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        reviewer_harness_id=REVIEWER,
+        verdict="request_changes",
+        reviewed_commit=chain.head_commit,
+        review_revision=1,
+        findings=[{"message": "please add evidence"}],
+        review_id=str(claimed["review_id"]),
+    )
+    assert result["verdict"] == "request_changes"

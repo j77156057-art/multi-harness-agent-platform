@@ -11,7 +11,8 @@
 真相源引用：R10 §19.2（额度池语义）、§10（事件账本语义）；AGENTS.md
 §1/§2/§4/§5/§5b；`docs/proposals/assistant-react-loop.md`（P2/P3 路线图
 "证据束取样器"条目）
-当前状态：doing（取证束打包＋诊断姿势 prompt＋scripted 测试）
+当前状态：done（取证束打包、诊断姿势 prompt 与 scripted 测试完成）
+commit：`17914d5`
 test_id：`MVP-ADAPTER-003`
 
 | 项 | 值 |
@@ -58,4 +59,6 @@ test_id：`MVP-ADAPTER-003`
 
 ### 验收结果
 
-（完成时回填）
+- commit：`17914d5`。
+- `tests/test_assistant_loop.py` 诊断用例全绿：四读齐、失败事件最新三条过滤、缺失 output/verification 诚实透传、非标识符拒收、白名单闭合。
+- 全量 pytest `[100%]` 通过；ruff、docstate、discipline 全绿。
