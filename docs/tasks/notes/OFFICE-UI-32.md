@@ -10,7 +10,7 @@
 真相源引用：`office/src/opening-host.js`（向导宿主）、
 `office/contributions/office-opening-phone/office-opening-phone.js`（锁定的向导组件，只读）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：\d000ee2\）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（向导的「任务目标」输入框不再落在折叠线以下）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-047
