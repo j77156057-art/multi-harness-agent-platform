@@ -11,7 +11,7 @@
 真相源引用：`backend/app/assistant/memory.py`（记忆行）、
 `backend/app/assistant/prompts.py`（铁律）、`backend/app/assistant/worker.py`（开场白）、
 `backend/app/assistant/loop.py`（引擎，只读）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`6678c1a`）
 commit：`8734746`（助手的取证策略：事实本轮重新取，记忆只用来理解指代）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-051
