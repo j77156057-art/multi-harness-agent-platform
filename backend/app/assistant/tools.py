@@ -81,6 +81,9 @@ def build_registry(
     def task_get(args: dict[str, Any]) -> dict[str, Any]:
         return client.get(f"/tasks/{_required_id(args, 'task_id')}")
 
+    def harness_bases(_args: dict[str, Any]) -> dict[str, Any]:
+        return client.get("/harnesses/bases")
+
     def task_diff(args: dict[str, Any]) -> dict[str, Any]:
         task_id = _required_id(args, "task_id")
         include_patch = bool(args.get("include_patch") or False)
@@ -211,6 +214,13 @@ def build_registry(
 
     tools = [
         Tool("pool.status", "read", "额度池现状：各档逐家可用与否、余量", pool_status),
+        Tool(
+            "harness.bases",
+            "read",
+            "能当正式成员的基座：内置那几家 + 声明出来的，每个带一份缺口清单"
+            "（缺什么、为什么缺）",
+            harness_bases,
+        ),
         Tool("task.get", "read", "一个任务的完整状态与账本", task_get),
         Tool(
             "task.diff",

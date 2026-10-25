@@ -2122,6 +2122,68 @@ def task_output(
     }
 
 
+@read.get("/harnesses/bases")
+def harness_bases() -> dict[str, Any]:
+    """The bases a CLI can answer for, and what each one still lacks.
+
+    For "how do I add a new harness here": the built-in bases need no
+    declaration, and every declared one comes with its template plus the
+    gaps that keep it from being usable (no read-only review, no pool slot, no
+    declared tier).
+
+    A declaration is **trusted input** (it names a binary and its argv) --
+    operator-owned, never written by the platform.  This face only reads it and
+    reports what is missing; the draft of a new declaration is the human's to
+    write and install.
+    """
+    from app.adapter.formal_worker import ADAPTER_TYPES
+    from app.adapter.harnesses.generic import (
+        base_gaps,
+        base_template,
+        load_declarations,
+    )
+    from app.pool.sources import declared_cli_slots
+
+    slots = {
+        str(slot.get("name") or ""): slot
+        for slot in declared_cli_slots()
+        if str(slot.get("name") or "")
+    }
+    bases: list[dict[str, Any]] = []
+    error: str | None = None
+    try:
+        declarations = load_declarations()
+    except ValueError as exc:
+        # A declaration file that cannot be read is an error the human must see
+        # (the platform refuses to start on it); it is not "no declarations".
+        declarations = {}
+        error = str(exc)
+    for base in sorted(declarations):
+        declaration = declarations[base]
+        template = base_template(declaration)
+        bases.append(
+            {
+                **template,
+                "source": "declared",
+                "declaration": {
+                    "binary": declaration.binary,
+                    "args": list(declaration.args),
+                    "prompt_via_stdin": declaration.prompt_via_stdin,
+                    "pool_protocol": declaration.pool_protocol,
+                    "review_args": list(declaration.review_args),
+                    "model": declaration.model,
+                    "capabilities": list(declaration.capabilities),
+                },
+                "gaps": base_gaps(declaration, pool_slot=slots.get(base)),
+            }
+        )
+    return {
+        "bases": bases,
+        "builtin_bases": sorted(ADAPTER_TYPES),
+        "declaration_error": error,
+    }
+
+
 @read.get("/tasks/{task_id}/events")
 def task_events(
     task_id: str,

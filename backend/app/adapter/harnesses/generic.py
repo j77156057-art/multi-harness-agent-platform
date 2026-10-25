@@ -196,6 +196,31 @@ def declared_base_templates() -> list[dict[str, Any]]:
     return [base_template(declarations[base]) for base in sorted(declarations)]
 
 
+def base_gaps(declaration: CliDeclaration, *, pool_slot: dict[str, Any] | None = None) -> list[str]:
+    """这个基座还缺什么 —— 一句一条，只讲**查得到**的。
+
+    两类缺项：声明自己缺的（没写只读审阅的 argv、``{model}`` 没有 model），
+    以及池子侧缺的（没有槽位 → 池子不服务它；槽位没有 tier → 平台不提供它）。
+
+    池子侧的事实由调用方给（``pool_slot``）：槽位那一层不在适配器这一层，
+    这里只**读**它。
+    """
+    gaps: list[str] = []
+    if not declaration.review_args:
+        gaps.append("没有 review_args：这个 CLI 不能做只读审阅（能改文件的审阅不算审阅）")
+    if any("{model}" in part for part in declaration.args) and not declaration.model:
+        gaps.append("args 里有 {model} 却没有 model：这份声明平台会拒绝")
+    slot = pool_slot or {}
+    if slot:
+        if not str(slot.get("tier") or "").strip():
+            gaps.append("槽位没有声明 tier：平台不会提供它（额度不明的东西不能看着像免费的）")
+    else:
+        gaps.append(
+            "池子侧没有这个 CLI 的槽位：它现在不能给别的窗口供模型（要加一条 cli_slots 并声明 tier）"
+        )
+    return gaps
+
+
 class GenericCliAdapter(CliHarness):
     """The ``CliHarness`` a declaration describes."""
 
