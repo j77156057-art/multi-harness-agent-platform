@@ -207,14 +207,14 @@ try {
   await page.waitForSelector('#aoWorkspace .flat-handoff', { timeout: 20000 });
 
   // 4. 界面：工单那段干净；现场另起一节，一句人话；机器那坨收在折叠里。
-  const goalText = await page.locator('#aoWorkspace .flat-spec', { hasText: '这件事要做什么' }).innerText();
+  const goalText = await page.locator('#aoWorkspace .flat-spec', { hasText: '任务目标' }).innerText();
   assert.ok(goalText.includes(HUMAN_GOAL), '工单是干净的人话');
   assert.ok(!goalText.includes('Breakpoint report'), '工单里不再夹着机器那坨');
 
   const handoff = await page.locator('#aoWorkspace .flat-handoff').innerText();
-  assert.match(handoff, /上一次是 Claude Code 干的/, '说清是谁做的（登记名，不是 id）');
+  assert.match(handoff, /上一次由 Claude Code 执行/, '说清是谁做的（登记名，不是 id）');
   assert.match(handoff, /窗口的命令退出了（退出码 1）/, '失败原因是人话');
-  assert.match(handoff, /没有产出文件/, '说清有没有产出');
+  assert.match(handoff, /未产出文件/, '说清有没有产出');
   assert.ok(!handoff.includes('FD-93c9e4fa07914dbc'), '机器 id 不上屏');
 
   const folds = await page.locator('#aoWorkspace .flat-handoff details').allInnerTexts();
@@ -223,7 +223,7 @@ try {
 
   // 它自己最后说的话，从机器日志里挑出来的那句是人话。
   const handoffText = await page.locator('#aoWorkspace .flat-handoff').innerText();
-  assert.match(handoffText, /它自己最后说的是：/, '它自己最后说的那句摆出来了');
+  assert.match(handoffText, /其最后输出为：/, '它自己最后说的那句摆出来了');
   assert.match(handoffText, /503 No available accounts/, '那句是人话，不是 JSON');
 
   assert.deepEqual(errors, [], '页面没有报错');

@@ -202,7 +202,7 @@ try {
   const ask = page.locator('.flat-userkey-ask');
   await ask.waitFor({ state: 'visible', timeout: 10000 });
   const askText = await ask.innerText();
-  assert.match(askText, /免费额度用完了/, '卡片说的是人话');
+  assert.match(askText, /免费额度已用尽/, '卡片说的是人话');
   assert.match(askText, /我的测试 key/, '说的是哪一个 key');
   assert.doesNotMatch(askText, /the free and metered quotas/, '平台的英文理由不上界面');
   assert.equal(await ask.locator('button[data-act="deny-user-key"]').count(), 1, '有「先不用」');

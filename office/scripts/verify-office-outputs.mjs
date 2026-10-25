@@ -206,11 +206,11 @@ try {
   // 每一轮的结果来自事件：交上去了 / 放弃了（带原因）。
   const roundHeads = await page.locator('.outputs-attempt-head').allInnerTexts();
   assert.ok(
-    roundHeads.some(text => text.includes('交上去了')),
+    roundHeads.some(text => text.includes('已提交')),
     `交上去的那轮标出来了：${JSON.stringify(roundHeads)}`,
   );
   assert.ok(
-    roundHeads.some(text => text.includes('放弃了')),
+    roundHeads.some(text => text.includes('已放弃')),
     `失败的那轮标出来了：${JSON.stringify(roundHeads)}`,
   );
   assert.match(
@@ -255,7 +255,7 @@ try {
   // 组内按尝试序号倒序：同一条活里也是新的尝试在前。
   assert.match(attemptHeads[0], /第 2 次尝试/, '同一条活的多次尝试，新的在前');
   assert.match(attemptHeads[1], /第 1 次尝试/, '第 1 次尝试也在');
-  assert.match(attemptHeads.join('\n'), /这一轮：放弃了/, '失败的那一轮标出来了');
+  assert.match(attemptHeads.join('\n'), /这一轮：已放弃/, '失败的那一轮标出来了');
 
   // 3. 输出里的 HTML 要转义 —— CLI 说 <b>done</b> 时，页面上是字面量。
   const words = await page

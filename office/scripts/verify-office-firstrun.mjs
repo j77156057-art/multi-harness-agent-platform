@@ -166,7 +166,7 @@ try {
   assert.equal(await page.locator('#aoWorkspace .flat-filters').count(), 0, '没有活可筛时不摆筛选条');
   assert.equal(await page.locator('#aoWorkspace .flat-pager').count(), 0, '没有东西可翻时不摆分页条');
   const empty = await page.locator('#aoWorkspace .flat-empty').first().innerText();
-  assert.ok(empty.includes('还没有任务'), '左栏说清还没有活');
+  assert.ok(empty.includes('暂无任务'), '左栏说清还没有活');
 
   const start = page.locator('#aoWorkspace .flat-start');
   assert.equal(await start.count(), 1, '中间那栏给一个能点的下一步');

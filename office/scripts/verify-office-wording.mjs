@@ -73,7 +73,7 @@ const STATUS = {
 // 平台那边的翻译表（真平台的规则一样）。
 const TABLE = {
   [REASON]: REASON_TEXT,
-  submit_result: '交上去了',
+  submit_result: '已提交',
 };
 
 const start = async (options = {}) => {
@@ -180,7 +180,7 @@ try {
       await page.locator('.flat-task').first().click();
       await page.waitForSelector('.flat-event', { timeout: 20000 });
       const summary = page.locator('.flat-event summary').first();
-      assert.match(await summary.innerText(), /交上去了/, '事件名显示的是人话');
+      assert.match(await summary.innerText(), /已提交/, '事件名显示的是人话');
       const title = await summary.getAttribute('title');
       assert.match(title || '', /submit_result/, '机器那一份没丢（在 title 里）');
       assert.match(title || '', /413/, '事件编号也在 title 里');

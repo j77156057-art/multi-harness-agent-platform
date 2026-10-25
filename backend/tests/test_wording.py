@@ -31,12 +31,12 @@ def test_a_timeout_reason_says_what_took_too_long() -> None:
 
 
 def test_an_event_name_becomes_a_sentence() -> None:
-    assert service.translate("submit_result", kind="event")["text"] == "交上去了"
-    assert service.translate("plan.approve", kind="event")["text"] == "方案批准了"
+    assert service.translate("submit_result", kind="event")["text"] == "已提交"
+    assert service.translate("plan.approve", kind="event")["text"] == "方案已批准"
 
 
 def test_a_status_becomes_a_word() -> None:
-    assert service.translate("awaiting_review", kind="status")["text"] == "等着审"
+    assert service.translate("awaiting_review", kind="status")["text"] == "待审核"
 
 
 def test_a_harness_id_becomes_its_registered_name() -> None:
@@ -125,7 +125,7 @@ def test_machine_marks_in_a_sentence_become_readable() -> None:
     assert "FD-0b0bcc415aa9fe2f" not in cleaned
     assert "attempt" not in cleaned
     assert "exclusive_paths" not in cleaned
-    assert "这条活" in cleaned
+    assert "该任务" in cleaned
     assert "第 1 轮" in cleaned
     assert "唯一允许的路径" in cleaned
 
@@ -216,7 +216,7 @@ def test_a_windows_unsigned_exit_code_becomes_the_number_people_say() -> None:
 
 
 def test_a_released_lease_says_what_happened() -> None:
-    assert service.translate("harness released", kind="reason")["text"].startswith("租约被放开了")
+    assert service.translate("harness released", kind="reason")["text"].startswith("租约已释放")
 
 
 def test_a_field_name_in_prose_is_not_translated() -> None:
@@ -237,7 +237,7 @@ def test_two_task_ids_keep_their_short_forms() -> None:
     assert "FD-e88e4c97e92843c9" not in cleaned
     assert "b0302ac" in cleaned
     assert "e88e4c9" in cleaned
-    assert "这条活" not in cleaned
+    assert "该任务" not in cleaned
 
 
 def test_a_reason_with_a_task_id_in_front_is_still_a_reason() -> None:

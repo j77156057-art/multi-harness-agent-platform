@@ -25,12 +25,17 @@
 
 范围：
 
-- `office/src/flat-office.js`、`office/src/main.js`、`office/src/project-workspace.js`、
-  `office/src/direct-chat.js`、`office/src/outputs.js`、`office/src/admin-agent.js`
-  —— 只改**界面上给人看的文字**。
+- `office/src/**` —— 只改**界面上给人看的文字**。
+- `office/scripts/**` —— 冒烟里的文案断言（冒烟是文案的规格书）。
+- `backend/app/wording/service.py` —— **人话词表**：办公室显示事件名与失败原因时
+  优先用平台翻出来的，平台够不着才用本地那张表；只改前端的话，屏幕上还是平台
+  那套口语（真跑抓到过：事件名露出 `approve`、失败原因露出 `formal worker
+  error: RuntimeError`）。两张表逐字对齐。
+- `backend/app/admin/worker.py` —— 管理员改派时写进事件里的那两句人话。
+  H-8 已查：没有别的 Harness 在途碰这个文件。
 - 真跑截图逐屏看过（断言绿不等于读起来专业）。
 
-**不碰** 后端、不碰 `docs/spec/**`、不动其他 Harness 的工作区与分支（纯文案）。
+**不碰** `docs/spec/**`、不动其他 Harness 的工作区与分支。
 
 ## 怎么做到不出错
 

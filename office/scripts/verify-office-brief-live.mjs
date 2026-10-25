@@ -63,7 +63,7 @@ try {
   const flat = (s) => s.replace(/\s+/g, ' ');
   let text = flat(await brief.innerText());
   assert.match(text, /FD-1/, '任务书里有第一条任务');
-  assert.match(text, /1 条没人接/, '待领取的条数是 1');
+  assert.match(text, /另有 1 条任务尚未领取/, '待领取的条数是 1');
   assert.doesNotMatch(text, /FD-9/, '还没有第二条');
 
   // 平台那边新派了一条任务（标题带项目名 → 落在本项目范围内）。
@@ -73,7 +73,7 @@ try {
 
   text = flat(await brief.innerText());
   assert.match(text, /FD-9/, '新任务自己长出来了（不用关掉对话框）');
-  assert.match(text, /2 条没人接/, '待领取的条数跟着变');
+  assert.match(text, /另有 2 条任务尚未领取/, '待领取的条数跟着变');
   assert.ok(await brief.isVisible(), '对话框一直开着');
 
   // 3. 刷新不把用户拉回顶部

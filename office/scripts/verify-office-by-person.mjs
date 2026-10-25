@@ -125,15 +125,15 @@ try {
   const busy = groups.filter({ has: page.locator('.flat-group-name', { hasText: '成员一' }) });
   assert.equal(await busy.count(), 1, '有活的那块归到做活的人名下');
   const busyText = await busy.innerText();
-  assert.match(busyText, /在忙/, '手上有在做的活 → 在忙');
-  assert.match(busyText, /手上 1 条/, '手上几条写清楚了');
-  assert.match(busyText, /做完了 1 条/, '做完了几条写清楚了');
+  assert.match(busyText, /忙碌/, '手上有在做的活 → 在忙');
+  assert.match(busyText, /进行中 1 条/, '手上几条写清楚了');
+  assert.match(busyText, /已完成 1 条/, '做完了几条写清楚了');
   assert.doesNotMatch(busyText, /\bm1\b/, '块里不印 id，只印登记名');
 
   // 2. 没人接过的活归到「还没人接」。
-  const none = groups.filter({ has: page.locator('.flat-group-name', { hasText: '还没人接' }) });
+  const none = groups.filter({ has: page.locator('.flat-group-name', { hasText: '尚无人领取' }) });
   assert.equal(await none.count(), 1, '没人接的活有自己的一块');
-  assert.match(await none.innerText(), /等人接/, '这一块等人接');
+  assert.match(await none.innerText(), /待领取/, '这一块等人接');
 
   // 3. 归堆的行里不重复写"谁在做"（块头已经写了）。
   const rowsText = await busy.locator('.flat-task').allInnerTexts();
@@ -152,7 +152,7 @@ try {
   assert.equal(await page.locator('.flat-group').count(), 2, '切回来又是按人归堆');
 
   // 5. 状态筛选与分组不打架。
-  await page.locator('.flat-filters button', { hasText: '正在做' }).click();
+  await page.locator('.flat-filters button', { hasText: '执行中' }).click();
   await page.waitForTimeout(400);
   assert.equal(await page.locator('.flat-task').count(), 1, '筛"正在做"只剩在办的那条');
   assert.equal(await page.locator('.flat-group').count(), 1, '筛完还是按人归堆');

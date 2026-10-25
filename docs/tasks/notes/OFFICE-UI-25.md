@@ -18,8 +18,8 @@ test_id：MVP-UI-040
 |---|---|
 | 依赖 | OFFICE-UI-24 |
 | test_id | `MVP-UI-040` |
-| 允许修改 | `office/src/**`（只改界面上给人看的文字）、`docs/claims/mavis--OFFICE-UI-25.md`、`docs/tasks/notes/OFFICE-UI-25.md`、`docs/traceability.md`、`TASKS.md` |
-| 禁止修改 | `backend/**`、`docs/spec/**`、其他 Harness 的工作区与分支 |
+| 允许修改 | `office/src/**`（只改界面上给人看的文字）、`office/scripts/**`（文案断言）、`backend/app/wording/service.py`（人话词表）、`backend/app/admin/worker.py`（两句人话）、`backend/tests/test_wording.py`、`docs/claims/mavis--OFFICE-UI-25.md`、`docs/tasks/notes/OFFICE-UI-25.md`、`docs/traceability.md`、`TASKS.md` |
+| 禁止修改 | `docs/spec/**`、`backend/app/api/routes.py`、`backend/app/tasks/**`、`backend/app/pool/**`、其他 Harness 的工作区与分支 |
 
 ## 做什么
 

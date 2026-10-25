@@ -65,7 +65,7 @@ const baseOf = id => String(id || '').replace(/-(member|window)-[A-Za-z0-9_-]+$/
 const REASON_LABEL = {
   not_registered: '未登记',
   offline: '离线',
-  no_credential: '无平台凭据（领不了活）',
+  no_credential: '无平台凭据（无法领取任务）',
   self_reported_degraded: '自报降级',
   last_attempt_failed: '上次尝试失败',
 };
@@ -106,7 +106,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   dialog.id = 'adminAgentDialog'; dialog.className = 'agent-dialog';
   dialog.innerHTML = `<header class="agent-head"><div><h2>平台助手 · 盯着项目</h2>
     <p>只看不改：它把平台上的事实列出来，不做规划、不分派、不改谁负责。超时或长时间没进展时，报给本项目的管理员。</p>
-    <details class="agent-rules"><summary>职责边界（点开查看）</summary>
+    <details class="agent-rules"><summary>职责边界（展开查看）</summary>
       <p>平台助手负责：定时巡检、进度记录、停滞判定、催促与上报。收件人是本项目的管理员窗口。</p>
       <p>不属于平台助手：拆解任务表、裁决竞争、重新分工、续期重开取消、领取与提交审核 —— 这些是管理员窗口与正式分派面板的事。求助/接单（split / request_help / accept_help / reject_help / release / abandon）始终是窗口侧权限，助手不代任何成员发起。</p>
     </details></div>
@@ -419,7 +419,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       .sort((a, b) => (b.queued + b.active) - (a.queued + a.active));
     if (!busyRows.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
-      p.textContent = '本项目现在没有窗口在排队，也没有窗口在干活。';
+      p.textContent = '本项目当前没有窗口排队，也没有窗口在执行任务。';
       patrol.append(p);
     } else {
       const loadTable = document.createElement('table'); loadTable.className = 'agent-table';
@@ -447,9 +447,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
     // 1b. 谁现在能用 —— 只读观察面：可用/降级/无凭据/最近失败原因 + 当前模型。
     // 这里不派单、不改派、不代谁决定要不要换模型；换不换是管理员和人的事。
-    const who = section('谁能干活',
-      '谁现在能接活、用的哪个模型、最近一次为什么失败。'
-      + '模型是各 CLI 自己的配置里读到的，读不到就写「未知」。');
+    const who = section('可执行成员',
+      '当前可执行任务的窗口、其使用的模型与最近一次失败原因。'
+      + '模型取自各 CLI 自身的配置；读取不到时标注「未登记」。');
     if (availabilityError) {
       const p = document.createElement('p'); p.className = 'agent-note is-missing';
       p.textContent = `平台读不到可用性（${availabilityError}）：现在说不出"谁能用"，不是"没人能用"。`;
@@ -527,8 +527,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(poolSection);
 
     // 2. 停滞提醒 —— 助手只判定与上报，不在这里处置（续期/重开/取消/改派都是管理员的事）。
-    const stalls = section('卡住的事',
-      `窗口还在线不代表它在干活 —— 只有平台记录上的状态变了才算真进展。连续 ${STALL_WINDOWS} 次没动静就标成卡住，再久就报给管理员。这里不提供处置按钮。`);
+    const stalls = section('停滞的任务',
+      `窗口在线不代表正在执行任务 —— 只有平台记录上的状态变了才算真进展。连续 ${STALL_WINDOWS} 次没动静就标成卡住，再久就报给管理员。这里不提供处置按钮。`);
     if (!inflight.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '当前没有在办任务。'; stalls.append(p); }
     for (const item of inflight) {
       const row = document.createElement('article'); row.className = 'agent-row' + (item.escalated ? ' is-escalate' : item.stalled ? ' is-stall' : '');
@@ -545,9 +545,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     // 办公室只列事实并**转达请求**：改派由管理员窗口决定并执行，UI 不派单。
     const failedTasks = tasks.filter(t => t.status === 'abandoned' || t.status === 'stale');
     const usableWindows = availability.filter(item => item.usable);
-    const takeover = section('没做成的活',
-      '哪条活没做成、哪些窗口现在还能接活（连它们用的哪个模型）。'
-      + '要换人请按「请管理员换个人做」——那只是请求，换不换由管理员决定；'
+    const takeover = section('未完成的任务',
+      '未完成的任务，以及当前可执行任务的窗口（及其使用的模型）。'
+      + '要改派请按「请管理员改派」——那只是请求，换不换由管理员决定；'
       + '办公室自己不派单。');
     if (!failedTasks.length) {
       const p = document.createElement('p'); p.className = 'agent-note';
@@ -556,16 +556,16 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     }
     for (const task of failedTasks) {
       const row = document.createElement('article'); row.className = 'agent-row';
-      const owner = task.owner || '（无持有者）';
+      const owner = task.owner || '（无执行方）';
       const state = STATE_LABEL[task.status] || task.status;
       const candidates = usableWindows.map(item => ({
         id: item.harness_id,
         name: nameOf(item.harness_id),
-        model: item.model || '未知模型',
+        model: item.model || '模型未登记',
       }));
       const head = document.createElement('p');
       head.textContent = `「${task.title || task.task_id}」${state} · 上次持有者 ${owner}`
-        + (candidates.length ? ` · 现在能接的有 ${candidates.length} 个窗口` : ' · 现在没有能接活的窗口');
+        + (candidates.length ? ` · 当前可执行任务的窗口：${candidates.length} 个` : ' · 当前没有可执行任务的窗口');
       row.append(head);
       // 为什么倒的：平台记下的最后一次 abandon/release 理由（不是猜的）。
       const reason = task.last_failure && task.last_failure.reason;
@@ -584,7 +584,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const spent = Number(task.attempt_no || 0) >= Number(task.max_attempts || 0);
       if (spent) {
         const again = actionButton('请求再给一次机会（预算豁免）', () => grantBudgetOverride(task),
-          '这条活的尝试预算已经用完（R10 §8）。只有人能给它一次机会——平台和管理员窗口都不给自己豁免。');
+          '该任务的尝试预算已用尽（R10 §8）。仅人工可追加一次尝试 —— 平台与管理员窗口均不能自行豁免。');
         actions.append(again);
       }
       let select = null;
@@ -603,7 +603,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         actions.append(select);
       }
       const btn = actionButton(
-        adminRecipient ? '请管理员换个人做' : '请管理员换个人做（本项目未指定管理员）',
+        adminRecipient ? '请管理员改派' : '请管理员改派（本项目未指定管理员）',
         () => requestReassign(task, select ? select.value : ''),
         adminRecipient
           ? `把改派请求递到管理员窗口 ${nameOf(adminRecipient)}（由它决定并执行）`
@@ -902,7 +902,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     const recipientName = recipient ? nameOf(recipient) : '';
     const btn = actionButton(recipient ? `上报管理员（${recipientName}）` : '上报管理员（未配置收件人）',
       () => sendReport(item, kind),
-      recipient ? `把这条上报写入项目群聊并 @ ${recipient}` : '本项目还没有指定管理员窗口：请先在开工向导里选择管理员');
+      recipient ? `把这条上报写入项目群聊并 @ ${recipient}` : '本项目尚未指定管理员窗口：请先在开工向导中选择管理员');
     btn.disabled = !recipient;
     wrap.append(btn);
     return wrap;
@@ -932,12 +932,12 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     if (!adminRecipient) { showAction('请求失败：本项目还没有指定管理员窗口', false); return; }
     const usable = availability.filter(item => item.usable);
     const candidates = usable.map(item =>
-      `${nameOf(item.harness_id)}（${item.model || '未知模型'}）`);
+      `${nameOf(item.harness_id)}（${item.model || '模型未登记'}）`);
     const lines = [
       `@${adminRecipient} 平台助手转达的改派请求：`,
       `任务「${task.title || task.task_id}」（${task.task_id}）状态：${STATE_LABEL[task.status] || task.status}`,
-      `上次持有者：${task.owner || '（无持有者）'}`,
-      `现在能接活的窗口（平台侧事实）：${candidates.length ? candidates.join('、') : '（没有）'}`,
+      `上次持有者：${task.owner || '（无执行方）'}`,
+      `当前可执行任务的窗口（平台侧事实）：${candidates.length ? candidates.join('、') : '（无）'}`,
       `指定接手窗口：${target ? nameOf(target) : '由管理员按负载挑'}`,
       '',
       '这条消息只是请求：改派、收口、放弃由管理员窗口决定并执行，平台助手不派单。',
@@ -1010,7 +1010,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   }
 
   async function publishBacklog() {
-    if (!snapshot) { showAction('还没有巡检结果', false); return; }
+    if (!snapshot) { showAction('尚无巡检结果', false); return; }
     const lines = [
       ...snapshot.derived.filter(d => d.count).map(d => `· ${d.label} ${d.count} 条，首次出现 ${new Date(d.first).toLocaleString()}，已积压 ${windowsOf(d.age)} 个进度窗口`),
       ...snapshot.manual.map(m => `· [管理员登记] ${m.text}，首次登记 ${new Date(m.first).toLocaleString()}，已催促 ${m.reminders.length} 次`),

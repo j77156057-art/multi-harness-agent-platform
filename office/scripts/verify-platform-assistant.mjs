@@ -41,19 +41,19 @@ const audit = await page.evaluate(() => {
   const forbidden = /分派|领取审核|提交审核|续期|重开|重新打开|释放|取消|去重|打开管理员/;
   const offenders = texts.filter(t => forbidden.test(t));
   const reports = [...dialog.querySelectorAll('button')].filter(b => /^上报管理员/.test(b.textContent.trim()));
-  // 「谁能干活」是只读观察面：它可以列窗口、模型和不可用的原因，但不能带任何按钮
+  // 「可执行成员」是只读观察面：它可以列窗口、模型和不可用的原因，但不能带任何按钮
   // （换模型、改派、接手都是管理员/人的决定，助手不代劳）。
   // 段落的标题现在是给人看的说法。
   const sections = [...dialog.querySelectorAll('.agent-section')];
-  const availability = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('谁能干活')) || null;
+  const availability = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('可执行成员')) || null;
   // 「进度总览」：排队/在办/谁在跑都在这一节里。**管理员窗口不能出现在这里**
   // 的成员表里 —— 它不是干活的人，它是收件人。
   const patrol = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('进度总览')) || null;
   // 「额度」也一样：它只说池子里有什么、谁的额度被谁花了，不能有动作。
   const pool = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('额度')) || null;
-  // 「没做成的活」：只列事实 + 递请求。按钮只能是「请管理员换个人做」，
+  // 「未完成的任务」：只列事实 + 递请求。按钮只能是「请管理员换个人做」，
   // 而且没有指定管理员时必须是禁用的（请求递不出去）。
-  const takeover = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('没做成的活')) || null;
+  const takeover = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('未完成的任务')) || null;
   // 「等你批准的方案」：给人最终审核的那一版 + 人的批准按钮。
   const plan = sections.find(s => (s.querySelector('h3')?.textContent || '').includes('等你批准的方案')) || null;
   return {
@@ -85,7 +85,7 @@ const audit = await page.evaluate(() => {
   };
 });
 if (audit.offenders.length) throw new Error('platform assistant still offers administrator actions: ' + JSON.stringify(audit.offenders));
-if (!audit.availability) throw new Error('platform assistant has no 「谁能干活」 section');
+if (!audit.availability) throw new Error('platform assistant has no 「可执行成员」 section');
 if (audit.availability.buttons.length) throw new Error('the availability section must stay read-only: ' + JSON.stringify(audit.availability.buttons));
 if (!/本项目范围内没有登记在册的窗口|本项目 \d+ 个窗口/.test(audit.availability.text)) {
   throw new Error('the availability section does not scope windows to the active project: ' + audit.availability.text.slice(0, 200));
@@ -95,11 +95,11 @@ if (!audit.plan) throw new Error('platform assistant has no 「等你批准的�
 // （按钮文案是给人看的说法，平台那边的动作名是"批准并派单"。）
 const planButtons = audit.plan.buttons.filter(t => t && t !== '批准，开始做');
 if (planButtons.length) throw new Error('the plan section offers more than the human approval: ' + JSON.stringify(planButtons));
-if (!audit.takeover) throw new Error('platform assistant has no 「没做成的活」 section');
+if (!audit.takeover) throw new Error('platform assistant has no 「未完成的任务」 section');
 // 这一节只能有「请管理员换个人做」——不能有直接派单/改派的按钮。
-const takeoverButtons = audit.takeover.buttons.filter(t => t && t !== '请管理员换个人做' && !t.startsWith('请管理员换个人做'));
+const takeoverButtons = audit.takeover.buttons.filter(t => t && t !== '请管理员改派' && !t.startsWith('请管理员改派'));
 if (takeoverButtons.length) throw new Error('the takeover section offers more than a request: ' + JSON.stringify(takeoverButtons));
-if (audit.takeover.buttons.some(t => t.startsWith('请管理员换个人做')) && audit.takeover.disabled < audit.takeover.buttons.length) {
+if (audit.takeover.buttons.some(t => t.startsWith('请管理员改派')) && audit.takeover.disabled < audit.takeover.buttons.length) {
   // 没有指定管理员 Harness 时，请求按钮必须是禁用的。
   const state = await page.evaluate(() => window.adminAgentState || null);
   if (!state || !state.adminRecipient) {

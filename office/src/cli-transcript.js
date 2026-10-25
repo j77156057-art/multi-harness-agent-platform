@@ -27,23 +27,23 @@ const MAX_TOOL_LABEL = 160;
  * 猜错比不翻译更糟。
  */
 const TOOL_VERB = {
-  shell: '跑了命令',
-  bash: '跑了命令',
-  read: '读了文件',
-  write: '写了文件',
-  edit: '改了文件',
-  multiedit: '改了文件',
-  apply_patch: '改了文件',
-  grep: '搜了代码',
-  glob: '找了文件',
-  list: '看了目录',
-  ls: '看了目录',
-  task: '派了个活',
-  agent: '派了个活',
-  webfetch: '抓了网页',
-  websearch: '搜了网',
-  todowrite: '记了待办',
-  todoread: '看了待办',
+  shell: '执行命令',
+  bash: '执行命令',
+  read: '读取文件',
+  write: '写入文件',
+  edit: '修改文件',
+  multiedit: '修改文件',
+  apply_patch: '修改文件',
+  grep: '搜索代码',
+  glob: '查找文件',
+  list: '查看目录',
+  ls: '查看目录',
+  task: '分派任务',
+  agent: '分派任务',
+  webfetch: '抓取网页',
+  websearch: '网络检索',
+  todowrite: '记录待办',
+  todoread: '查看待办',
 };
 
 /** 工具的输入里，哪个字段最值得说。 */
@@ -88,11 +88,11 @@ function commandLabel(verb, value) {
   const chain = /^(?:cd\s+)?(.+?)\s*&&\s*(.+)$/.exec(short);
   const withC = /^(.*?)\s+-C\s+(\S+)\s+(.+)$/.exec(short);
   if (dir && chain) {
-    return `在 ${dir[1]} 里跑了 ${clip(chain[2].trim(), 60)}`;
+    return `在 ${dir[1]} 中执行了 ${clip(chain[2].trim(), 60)}`;
   }
   if (dir && withC) {
     const command = `${withC[1].trim()} ${withC[3].trim()}`.trim();
-    return `在 ${dir[1]} 里跑了 ${clip(command, 60)}`;
+    return `在 ${dir[1]} 中执行了 ${clip(command, 60)}`;
   }
   // 没有工作目录就照旧说（`跑了命令：npm test`；codex 那条只给命令本身）。
   return verb ? `${verb}：${clip(short, 60)}` : clip(short, 60);

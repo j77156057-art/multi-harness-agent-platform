@@ -61,7 +61,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   root.innerHTML = `
     <section class="project-lobby" aria-labelledby="projectLobbyTitle">
       <div class="project-lobby-body">
-        <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填上名字和成员，就能进这个项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
+        <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填写名称与成员，即可进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
           <p class="project-lobby-hint" data-worker-hint hidden></p>
           <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>点击「新建项目」，填写项目名称并指定参与成员</li><li><span>2</span>创建后进入「开工配置」，描述项目目标</li><li><span>3</span>在开工向导中指定管理员与成员，由管理员细化并分派任务</li></ol>
         </div>
@@ -69,7 +69,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><h2 id="projectHistoryTitle">项目历史</h2><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
         <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
           <div class="project-section-head"><h2 id="projectPlatformTitle">平台上已有的项目</h2><span data-platform-count></span></div>
-          <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」就能进那个项目的办公室 —— 不用重新建一个。</p>
+          <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」即可进入该项目的办公室 —— 无需重新创建。</p>
           <div class="project-platform-list" data-platform-list></div>
         </section>
         </div>
@@ -94,7 +94,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   dialog.className = 'harness-dialog';
   dialog.setAttribute('aria-labelledby', 'harnessDialogTitle');
   dialog.innerHTML = `
-    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">连接工作窗口</h2><p>这里检查本机装了哪些 AI 工具、能不能连上模型，并把它们登记成能干活的窗口。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
+    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">连接工作窗口</h2><p>这里检查本机装了哪些 AI 工具、能不能连上模型，并把它们登记为可执行任务的窗口。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
     <div class="harness-tools"><button type="button" data-refresh-connections>重新检测</button><span data-connection-summary role="status">正在扫描本机…</span></div>
     <section class="harness-list" data-harness-list aria-label="Harness 列表"></section>
     <section class="harness-base" aria-labelledby="harnessBaseTitle"><div><span class="eyebrow">BASE HARNESS</span><h3 id="harnessBaseTitle">登记基座 Harness</h3><p>把平台内置适配器登记为正式基座；只有基座登记后，才能为它注册独立成员窗口。适配器与能力由服务端模板决定，浏览器只选择名称。</p></div><div class="harness-base-form"><label>基座 Harness<select data-base-source><option value="">读取可登记基座…</option></select></label><button type="button" data-register-base>登记基座</button></div><p class="harness-help" data-base-result role="status">登记写入正式注册表，同一版本可重复提交。</p></section>
@@ -112,9 +112,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   createDialog.className = 'project-create-dialog';
   createDialog.setAttribute('aria-labelledby', 'projectCreateTitle');
   createDialog.innerHTML = `
-    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填完即进入开工配置，无需再点一次。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
+    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填写后直接进入开工配置，无需再次点击。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
     <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
-    <footer class="project-create-foot"><span data-create-hint>创建后会直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
+    <footer class="project-create-foot"><span data-create-hint>创建后将直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
   root.append(createDialog);
 
 
@@ -329,9 +329,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         .slice(0, 3)
         .join('、');
       const more = workers.length > 3 ? ` 等 ${workers.length} 个` : '';
-      hint.textContent = `已经有 ${workers.length} 个窗口能干活了（${names}${more}）。要加新的，点「连接工作窗口」。`;
+      hint.textContent = `已经有 ${workers.length} 个窗口可执行任务了（${names}${more}）。要加新的，点「连接工作窗口」。`;
     } else if (roster.length) {
-      hint.textContent = '本机登记了窗口，但它们现在都不能接活（没登录、没凭据或掉线了）。点「连接工作窗口」看看。';
+      hint.textContent = '本机已登记窗口，但当前均无法执行任务（未登录、无凭据或已掉线）。点「连接工作窗口」查看。';
     } else {
       hint.textContent = '本机还没有登记任何工作窗口。点「连接工作窗口」可以检查本机装了哪些 AI 工具、把它们登记进来。';
     }
