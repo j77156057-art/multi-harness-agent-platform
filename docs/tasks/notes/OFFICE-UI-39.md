@@ -12,7 +12,7 @@
 `backend/tests/test_pool_free_set_watch.py`（7 条 scripted）、
 `docs/tasks/notes/pool-free-set-watch.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`49f2583`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：收尾 pool-free-set-watch）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADAPTER-003
