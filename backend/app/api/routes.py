@@ -1998,8 +1998,36 @@ def list_tasks(
     group_id: str,
     service: SchedulerDep,
     status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
-    return {"tasks": service.list_tasks(group_id, status=status)}
+    """The group's task list.
+
+    Paging is optional and **off by default** (no ``limit`` → the whole list,
+    as before).  A caller that only needs a window asks for one: the assistant
+    does — it used to pull every task's every field into a single observation,
+    and the model only saw the first half of it.
+    """
+    tasks = service.list_tasks(group_id, status=status)
+    total = len(tasks)
+    window = tasks[offset:] if limit is None else tasks[offset : offset + limit]
+    # The counts of the **whole** list, not of the window: a caller that pages
+    # through it still gets the distribution of the list it is paging.
+    by_status: dict[str, int] = {}
+    unclaimed_total = 0
+    for task in tasks:
+        state = str(task.get("status") or "unknown")
+        by_status[state] = by_status.get(state, 0) + 1
+        if not task.get("owner"):
+            unclaimed_total += 1
+    return {
+        "tasks": window,
+        "total": total,
+        "by_status": by_status,
+        "unclaimed_total": unclaimed_total,
+        "offset": offset,
+        "has_more": offset + len(window) < total,
+    }
 
 
 @read.get("/groups/{group_id}/plans")
