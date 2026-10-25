@@ -43,6 +43,7 @@ from app.lease.service import iso, parse_iso, release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
 from app.security.scan import MESSAGE_CODE, SECURITY_CODE, SecretScanBlocked, scan_for_block
 from app.spec import EventKind, TaskStatus
+from app.usage.cli_reported import record_reported_usage
 
 
 class NotFound(LookupError):
@@ -562,6 +563,26 @@ class SchedulerService:
 
     # ------------------------------------------------------------ work paths
 
+    def _record_reported_usage(self, *, task_id: str, attempt_id: str) -> None:
+        """这一轮成员 CLI 用了多少 token（它自己报的那部分）。
+
+        成员用**自带模型**跑的活，平台不在那条链路上，所以用量得**从 CLI 的原始
+        输出里解析**（平台的数据目录里就有每个 attempt 的输出，办公室的「它最后
+        说了什么」读的就是它）。
+
+        解析不出来就是**没有** —— 不写 0。记账失败（磁盘满、路径不对）也不该让
+        这一轮失败：用量是观测，不是成败。
+        """
+        try:
+            record_reported_usage(
+                data_dir=settings.data_dir,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                harness_id=self._attempt_owner(attempt_id),
+            )
+        except (OSError, ValueError):
+            return
+
     def _attempt_owner(self, attempt_id: str) -> str:
         rows = self.database.read(
             "SELECT owner FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
@@ -678,7 +699,9 @@ class SchedulerService:
                 now=moment,
             ):
                 raise_incidents(conn, task_id=task_id, now=moment)
-            return record
+        # 账记在事务外：读文件、解析、落账都不该占着数据库的事务。
+        self._record_reported_usage(task_id=task_id, attempt_id=attempt_id)
+        return record
 
     def request_help(
         self, *, task_id: str, attempt_id: str, fencing_epoch: int, reason: str
@@ -1032,7 +1055,9 @@ class SchedulerService:
             )
             if release_lease_too:
                 release_lease(conn, task_id=task_id, attempt_id=attempt_id, reason=event.value)
-            return {"task_id": task_id, "event": event.value, "seq": record.seq}
+        # 这一轮也消耗了 token（放回队列、放弃都不是「没跑」）：记上。
+        self._record_reported_usage(task_id=task_id, attempt_id=attempt_id)
+        return {"task_id": task_id, "event": event.value, "seq": record.seq}
 
     # ---------------------------------------------------------------- review
 

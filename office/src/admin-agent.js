@@ -658,7 +658,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       planSection.append(actions);
     } else {
       const p = document.createElement('p'); p.className = 'agent-note';
-      p.textContent = '当前没有待审的方案稿（管理员细化后会在��里出现）。';
+      p.textContent = '当前没有待审的方案稿（管理员细化后会在此处出现）。';
       planSection.append(p);
     }
     body.append(planSection);
