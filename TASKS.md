@@ -132,7 +132,8 @@
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | OFFICE-UI-01 | Codex | 无 | done（办公室的数据版界面收进本仓 office/；已合入 main） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
-| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | done（**池子消费侧通用化**：新 CLI 凭声明当正式成员；池子四小坑 + `GenericCliAdapter` + 接线；实现经 `2c02969` 合入 main，2026-10-26 由 Mavis 逐条核实并收尾） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| OFFICE-UI-37 | Mavis | OFFICE-UI-31 | →doing（**接手 codex 的在途：把已完成的 pool-generic-adapter 逐条核实并结掉**） | `agent/local/mavis/OFFICE-UI-37/a1` | `MVP-ADAPTER-004` |
 | OFFICE-UI-02 | Mavis | OFFICE-UI-01 | done（界面收拾：状态词/按钮/版式/活气；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
 | OFFICE-UI-03 | Mavis | OFFICE-UI-02 | done（用户自己的 API key：平台保管、不点头不花；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
 | OFFICE-UI-04 | Mavis | OFFICE-UI-02 | done（平台上的翻译：机器文本 → 人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-018` |
@@ -287,6 +288,8 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-35 → docs/claims/mavis--OFFICE-UI-35.md -->
 <!-- OFFICE-UI-36 → docs/claims/mavis--OFFICE-UI-36.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
+<!-- OFFICE-UI-37 → docs/claims/mavis--OFFICE-UI-37.md -->
+<!-- OFFICE-UI-37 → docs/claims/mavis--OFFICE-UI-37.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
 <!-- assistant-react-loop-p2 → docs/claims/codex--assistant-react-loop-p2.md -->
@@ -356,6 +359,8 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-35 | [卡](docs/tasks/notes/OFFICE-UI-35.md) | | |
 | OFFICE-UI-36 | [卡](docs/tasks/notes/OFFICE-UI-36.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
+| OFFICE-UI-37 | [卡](docs/tasks/notes/OFFICE-UI-37.md) | | |
+| OFFICE-UI-37 | [卡](docs/tasks/notes/OFFICE-UI-37.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |
 | assistant-react-loop-p2 | [卡](docs/tasks/notes/assistant-react-loop-p2.md) | | |
