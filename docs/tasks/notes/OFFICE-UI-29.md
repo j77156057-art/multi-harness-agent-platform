@@ -13,7 +13,8 @@
 `backend/app/auth/__main__.py`（令牌签发）、`backend/app/pool/sources.py`（池子槽位）、
 `office/server/formal-dispatch-gateway.mjs`（办公室登记路径）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`13d0dcd`（「接一个新 harness」的操作手册）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-044
 
@@ -50,5 +51,6 @@ test_id：MVP-UI-044
 
 | 门禁 | 结果 |
 |---|---|
-| 手册里的路径/端点核对 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
+| 手册里的路径/标识符/命令/配置项核对 | 30 处**全部对得上**（脚本核过：仓库路径存在、标识符在它该在的文件里、命令入口存在、配置项与权限键确实在那儿） |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| 代码 | 本卡**只写文档**，代码与 main 逐字节相同（`pytest` 全量已在 OFFICE-UI-28 那一轮跑过并 EXIT=0） |
