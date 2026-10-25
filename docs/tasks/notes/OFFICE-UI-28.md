@@ -11,7 +11,8 @@
 `backend/app/api/routes.py`（`GET /harnesses`）、
 `office/server/formal-dispatch-gateway.mjs`（办公室本地网关的基座列表与登记）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`f100e96`（办公室本地接上声明表：加新 harness 不用改代码）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-043
 
@@ -51,9 +52,9 @@ test_id：MVP-UI-043
 
 | 门禁 | 结果 |
 |---|---|
-| 后端新增单测 | 待回填 |
-| 网关测试（`node --test server/formal-gateway-admin.test.mjs`） | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| 办公室全部冒烟 | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 后端新增单测 | `backend/tests/test_generic_adapter.py` 3 条：声明 → 注册表模板、模板与 `GenericCliAdapter` 造的那份注册**同一口径**、没写 display_name 时名字退回 binary |
+| 网关测试（`node --test server/formal-gateway-admin.test.mjs`） | 11/11 通过（新增 1 条：声明出来的基座出现在列表里 + 登记时用的是**平台给的那份**模板） |
+| 真跑（8849 真平台 + 4174 预览） | 给本机装的 gemini CLI 写了一份声明（`data/adapters/cli.json`），办公室「连接工作窗口 · 登记基座 Harness」的下拉框里出现「Gemini CLI · gemini-print」；页面无报错 |
+| 办公室全部冒烟 | ok（30/33；3 条恒失败是环境依赖：Godot dev server、本机 ollama `qwen3:4b`、在册凭据窗口 7≠9） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿（`ruff check` 与 `ruff format --check` 两条） |
+| `pytest`（全量） | `PYTEST_EXIT=0` |
