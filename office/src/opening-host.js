@@ -29,7 +29,7 @@ export function validateOpeningConfig(request, catalog, { connected = false } = 
   } else if (admin?.kind !== 'harness' || !admin.instance_id) return '请选择管理员 Harness（本项目由它在开工向导里负责规划与审查）';
   else if (!available(admin.instance_id)) return '管理员已不可用，请重新选择';
   const ids = request.workers;
-  if (!Array.isArray(ids) || !ids.length || new Set(ids).size !== ids.length) return '请选择不重复的普通成员';
+  if (!Array.isArray(ids) || !ids.length || new Set(ids).size !== ids.length) return '请选择互不重复的普通成员';
   if (ids.some(id => !available(id))) return '有普通成员已不可用';
   if (admin.kind === 'harness' && ids.includes(admin.instance_id)) return '同一注册实例不能同时担任管理员和成员；请选择同 Harness 的另一个 instance_id';
   const cap = catalog.capacity;
@@ -43,7 +43,7 @@ export function validateOpeningConfig(request, catalog, { connected = false } = 
 }
 
 export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPreview, onOpen, onDispatch, members = [], harnesses = [], administratorIds = [] }) {
-  root.innerHTML = `<div class="opening-welcome" id="openingWelcome"><span>新的一轮，从这里开始</span><button class="primary" id="openingStartBtn">开工</button><button class="opening-preview" id="openingPreviewBtn">先看看场景</button></div>
+  root.innerHTML = `<div class="opening-welcome" id="openingWelcome"><span>本轮协作，从这里开始</span><button class="primary" id="openingStartBtn">开工</button><button class="opening-preview" id="openingPreviewBtn">先看看场景</button></div>
     <dialog id="openingDialog" aria-label="开工向导"><div class="opening-bar"><span>开工配置</span><button id="openingCloseBtn" aria-label="关闭开工配置">×</button></div><div id="openingPhoneSlot"></div><p class="opening-boundary" id="openingBoundary">${catalog.mode === 'formal' ? '正式平台 · 目标交给管理员 Agent 细化并分派' : '模拟配置与群聊 · 未启动真实 Harness'}</p></dialog>`;
   const welcome = root.querySelector('#openingWelcome');
   const dialog = root.querySelector('#openingDialog');
@@ -70,7 +70,7 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   const patchSummaryNote = () => {
     if (activeCatalog.mode !== 'formal') return;
     for (const note of slot.querySelectorAll('.oop-sum-note')) {
-      const text = '确认后只提交一条项目目标；管理员 Agent 会细化并分派，成员 worker 再自己领取执行。';
+      const text = '确认后仅提交一条项目目标；管理员窗口负责细化与分派，成员窗口领取后执行。';
       if (note.textContent !== text) note.textContent = text;
     }
   };
@@ -81,22 +81,100 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   const patchAdminLabel = () => {
     for (const label of slot.querySelectorAll('label.oop-label')) {
       if (!label.textContent.includes('唯一管理员实例')) continue;
-      label.textContent = '管理员实例（只能选一个；其他实例在下面选为成员）';
+      label.textContent = '管理员窗口（必选，只能选一个；其余窗口在下方选为成员）';
     }
   };
   const adminLabelObserver = new MutationObserver(patchAdminLabel);
   adminLabelObserver.observe(slot, {childList: true, subtree: true});
-  // 同理：手机组件里那个"返回首屏"是**手机**的首页。这套外壳没有手机首页，
+  // 同理：手机组件里那个"返回首页"是**手机**的首页。这套外壳没有手机首页，
   // 那个按钮实际只是把对话框关掉，所以把字改回"关闭"（只动渲染出来的文字，
   // 锁定的文件本身不改）。
   const patchHomeLabel = () => {
     for (const btn of slot.querySelectorAll('.oop-btn')) {
       if (btn.dataset.action) continue;
-      if (btn.textContent.trim() === '返回首屏') btn.textContent = '关闭';
+      if (btn.textContent.trim() === '返回首页') btn.textContent = '关闭';
     }
   };
   const homeLabelObserver = new MutationObserver(patchHomeLabel);
   homeLabelObserver.observe(slot, {childList: true, subtree: true});
+  // 组件把「任务目标」排在表单的最后一项：实测它在滚动区下方一百多像素处
+  // （目标框 top=912，而可视区只到 bottom=798），第一次用的人第一眼看不到自己要
+  // 写什么，得先选项目、管理员、成员、传阅轮数再往下滚。
+  //
+  // 组件是锁定贡献（文件不能改），这里沿用同一手法：每次重渲染后把**组件自己的**
+  // 目标输入框那一组搬到表单最前面。搬的是同一个节点 —— 组件的状态、校验、摘要
+  // 全都照旧，也不引入第二个输入框（两处输入框必然不同步）。
+  const promoteGoalField = () => {
+    const goal = slot.querySelector('textarea[data-field="goal"]');
+    if (!goal) return;
+    const group = goal.closest('.oop-group');
+    const form = group ? group.parentElement : null;
+    if (!group || !form || form.firstElementChild === group) return;
+    form.prepend(group);
+  };
+  const goalFieldObserver = new MutationObserver(promoteGoalField);
+  goalFieldObserver.observe(slot, {childList: true, subtree: true});
+  // 锁定组件的措辞是给机器看的（实例 / 打工人 / Harness / instance_id / 宿主 /
+  // 唯一管理员 / (harness)），而这条向导是**第一次用的人**走的第一条路。
+  // 这里统一改渲染出来的文字：只改显示，不改组件的校验与行为（锁定文件本身不动）。
+  //
+  // 顺序有意义：具体句式排在通用词之前，否则「普通打工人」会先被拆成
+  // 「普通成员窗口」这种半截话。
+  const JARGON_FIXES = [
+    [/未选择唯一管理员/g, '请先选择管理员窗口'],
+    [/至少选择 1 名普通打工人/g, '请至少选择 1 个成员窗口'],
+    [/请至少勾选 1 个普通打工人/g, '请至少勾选 1 个成员窗口'],
+    [/同一实例不得兼任管理员与打工人/g, '同一窗口不能同时担任管理员与成员'],
+    [/实例已不在当前目录/g, '该该窗口已不在当前名单中中'],
+    [/实例不可用/g, '窗口不可用'],
+    [/打工人数量/g, '成员窗口数量'],
+    [/普通打工人/g, '参与成员'],
+    [/打工人/g, '成员窗口'],
+    [/管理员实例/g, '管理员窗口'],
+    [/成员实例/g, '成员窗口'],
+    [/唯一管理员/g, '管理员窗口'],
+    [/容量\(宿主\)/g, '可用'],
+    [/宿主容量/g, '可用数量'],
+    [/已注册窗口/g, '已登记窗口'],
+    [/同 Harness 的不同 instance_id 可同时加入/g, '同一程序的不同窗口可同时加入'],
+    [/管理员 Agent/g, '管理员窗口'],
+    [/成员 worker/g, '成员窗口'],
+    [/已创建开工聊聊/g, '已创建开工群聊'],
+    [/重播演出/g, '再看一遍'],
+    [/（请宿主确认）/g, ''],
+    [/请宿主确认/g, ''],
+    [/（harness）/g, ''],
+  ];
+  const patchJargon = () => {
+    for (const node of slot.querySelectorAll('*')) {
+      for (const child of node.childNodes) {
+        if (child.nodeType !== 3) continue;
+        const text = child.nodeValue || '';
+        if (!text) continue;
+        let next = text;
+        for (const [pattern, to] of JARGON_FIXES) next = next.replace(pattern, to);
+        // 「可用 7」「已选 7」后面补个单位，读起来才像句话。
+        next = next.replace(/可用 (\d+)(?! 个)/g, '可用 $1 个');
+        next = next.replace(/已选 (\d+)(?! 个)/g, '已选 $1 个');
+        // 摘要里管理员那一行带着实例 id（[codex-window-admin]）：界面上给人看的是名字。
+        next = next.replace(/^([^\[\n]+)\[[^\]\n]+\]/, '$1');
+        if (next !== text) child.nodeValue = next;
+      }
+    }
+  };
+  const jargonObserver = new MutationObserver(patchJargon);
+  jargonObserver.observe(slot, {childList: true, subtree: true});
+  // 正式平台下这一屏是组件的**彩排**（演示对话），不是真实回复 —— 说清楚，
+  // 否则第一次用的人会把演示里那句「在的，马上开工」当成成员真的回话了。
+  const patchPerformLabel = () => {
+    if (activeCatalog.mode !== 'formal') return;
+    for (const note of slot.querySelectorAll('.oop-perform-demo')) {
+      const text = '正式平台 · 任务回执已收到，目标已发到项目群聊；下方为界面演示，不是真实回复。';
+      if (note.textContent !== text) note.textContent = text;
+    }
+  };
+  const performLabelObserver = new MutationObserver(patchPerformLabel);
+  performLabelObserver.observe(slot, {childList: true, subtree: true});
   // The project phone phase hides the office shell. Keep the configuration
   // dialog outside that hidden subtree so the role/member selector remains
   // reachable after clicking "新建任务".

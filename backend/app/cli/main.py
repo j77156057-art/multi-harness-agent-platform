@@ -272,6 +272,7 @@ class Commands:
                 "author_id": a.author,
                 "body": a.body,
                 "mentions": list(a.mention or []),
+                "refs": list(a.ref or []),
                 "direct": bool(a.direct),
             },
         )
@@ -436,6 +437,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--direct",
         action="store_true",
         help="定向消息：只能被发送方与收件方看到",
+    )
+    p.add_argument(
+        "--ref",
+        action="append",
+        default=None,
+        help="消息签名（可重复）。goal-change = 这条是要改目标（成员窗口提，管理员听见）",
     )
 
     p = add("log", "读群聊消息")

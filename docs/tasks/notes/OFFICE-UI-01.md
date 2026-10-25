@@ -8,7 +8,9 @@
 工作区：.worktrees/codex/
 依赖任务：无
 真相源引用：R10 §19（群聊与上下文：@mention 是唯一的直达通道）、§22（群主只说目标，管理员细化并分派）；AGENTS.md §1/§2/§4/§5/§5b
-当前状态：doing
+当前状态：done（已合入 main）
+commit：`ae758b4`（office/ 进仓那一笔）；本次合入 main 的 merge commit 待回填
+验证结果：见文末「验证结果」表（2026-10-24 在合并后的 main 上真跑复核）。
 test_id：MVP-UI-010 DOC-TRACE-001
 
 | 项 | 内容 |
@@ -59,13 +61,32 @@ test_id：MVP-UI-010 DOC-TRACE-001
 
 ## 验证结果
 
+2026-10-24 合并 `agent/local/codex/OFFICE-UI-01/a1` 进 main 时，在**合并后的 main** 上
+重新真跑复核（平台 8850 跑合并后的后端，办公室 4202 跑合并后的构建，真数据副本）：
+
 | 门禁 | 结果 |
 |---|---|
 | `tools/docstate` | 98 项检查，0 失败 |
-| `tools/discipline` | 44 项检查，0 失败（1 个告警：主工作区被其他人占用，不属于本分支） |
-| `ruff check` / `ruff format --check` | 全绿（195 个文件已格式化） |
-| `pytest`（全量） | `PYTEST_EXIT=0` |
-| `office/` 构建 | `npm ci && npm run build` 通过（产物 153 kB JS / 48 kB CSS） |
-| `office/scripts/verify-*.mjs` | 17 条中 14 通过；3 条失败均为**环境依赖**（要 5197 端口的 dev server；本机 ollama 没有 `qwen3:4b`；平台在册窗口数量与断言不同） |
+| `tools/discipline` | 44 项检查，0 失败（合并受控窗口内 rootworktree 一项会红：MERGE_HEAD 悬着而合并锁已释放；mergeguard 持锁续跑时该项自动放行，merge commit 落地后复测全绿） |
+| `ruff check` / `ruff format --check` | 全绿（218 个文件已格式化） |
+| `pytest`（全量） | 合并后 main 上全量跑：4 条红 —— 3 条 `test_gate_utf8` 是「合并未提交期间 discipline 正红」的连带现象（它断言 discipline 必须退出 0），门禁转绿后复测通过；1 条 `test_generic_adapter` 是 Pi 适配器合进来后通用适配器的基座表少 `pi`（已补 `pi` 并复测全绿）。**两笔合并都落地后的最终树上全量复跑：`PYTEST_EXIT=0`** |
+| `office/` 构建 | `vite build` 通过：29 个模块，`main` 187.08 kB JS / 61.56 kB CSS，三个页面（`index.html` / `direct.html` / `outputs.html`）都在 |
+| `office/scripts/verify-*.mjs` | **30 条中 27 通过**；3 条失败均为**环境依赖**（要 5197 端口的 Godot dev server；本机 ollama 没有 `qwen3:4b`；平台在册凭据窗口数 7 ≠ 断言的 9） |
+| 真跑截图 | 大厅 / 办公室 / 群聊摘要 / 输出页 / **新增的私聊页**，均无 JS 报错；私聊页空状态是人话（「还没有私聊。发一条，只有你和管理员看得到。」） |
 
 前端冒烟脚本**不在本仓门禁内**（CI 里没有 node），它们是本地冒烟；这一条已写进 `docs/dev-convention.md` 的盲区。
+
+### 合入 main 时解的冲突（5 处）
+
+| 文件 | 解法 |
+|---|---|
+| `backend/app/admin/worker.py` | 两个分支都留：`CANCEL_REF`（取消通知）与 `DIRECT_REF`（私聊自动回复）各带自己的 `continue` —— 冲突块外那行 `continue` 是共享的，只留一边会让另一边**永远不被调用** |
+| `backend/app/pool/service.py` | 取 main 侧（`data_dir` 进发现缓存的键），但路径换成 codex 的 `pool_config_path()`：合并后的 import 块里已经没有 `POOL_CONFIG_PATH` 了，照抄 main 侧会 `NameError` |
+| `backend/tests/test_api_events_messages.py` | 取 main 侧（带类型注解的 `def bodies(viewer: str \| None) -> list[str]:`） |
+| `TASKS.md` | 三处任务表区块**两排都留**（只留 main 侧会丢掉 codex 自己 10 行在途登记） |
+| `office/README.md` | 留 main 的大段，标题用 codex 那句更全的「## 与管理员对话：群里的与私聊」 |
+
+另外补了一处**合并才暴露的语义缺口**：`backend/app/adapter/harnesses/generic.py` 的
+`BUILTIN_BASES` 里没有 `pi`（codex 的分支基于 Pi 适配器合入之前的基点），而 main 已有
+专门的 Pi 适配器类 → `test_generic_adapter.py` 断言「通用适配器要保护每一个自带类适配器的
+基座」红。已把 `pi` 补进基座表（**没有放宽断言**），复测全绿。

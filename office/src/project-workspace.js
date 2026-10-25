@@ -60,17 +60,21 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   root.innerHTML = `
     <section class="project-lobby" aria-labelledby="projectLobbyTitle">
-      <header class="project-lobby-head">
-        <div class="project-brand"><span class="project-brand-mark">AO</span><div><strong>Agent Office</strong><span>项目工作区</span></div></div>
-        <span class="project-isolation"><i></i> 本机项目历史</span>
-      </header>
       <div class="project-lobby-body">
-        <div class="project-lobby-copy"><p class="eyebrow">PROJECT DESK / 01</p><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点击「新建项目」填写项目名称、数据源与成员，确认后直接进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接 Harness</button></div>
-          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>01</span>填写项目名称与成员</li><li><span>02</span>直接进入开工配置</li><li><span>03</span>开工向导里由 Harness 担任管理员与成员</li></ol>
+        <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填写名称与成员，即可进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
+          <p class="project-lobby-hint" data-worker-hint hidden></p>
+          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>点击「新建项目」，填写项目名称并指定参与成员</li><li><span>2</span>创建后进入「开工配置」，描述项目目标</li><li><span>3</span>在开工向导中指定管理员与成员，由管理员细化并分派任务</li></ol>
         </div>
-        <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><span class="eyebrow">HISTORY</span><h2 id="projectHistoryTitle">项目历史</h2></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
+        <div class="project-lobby-side">
+        <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><h2 id="projectHistoryTitle">项目历史</h2><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
+        <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
+          <div class="project-section-head"><h2 id="projectPlatformTitle">平台上已有的项目</h2><span data-platform-count></span></div>
+          <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」即可进入该项目的办公室 —— 无需重新创建。</p>
+          <div class="project-platform-list" data-platform-list></div>
+        </section>
+        </div>
       </div>
-      <footer class="project-lobby-foot"><span>项目历史保存在本机浏览器，同一入口的标签页共享</span><span>不同入口实例（如评审端口）不共享</span></footer>
+      <footer class="project-lobby-foot"><span>这份项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到它</span></footer>
     </section>`;
 
   // 4176 是跨提供方评审实例，和 4174 不同源，项目历史本来就不共享。这里把
@@ -90,7 +94,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   dialog.className = 'harness-dialog';
   dialog.setAttribute('aria-labelledby', 'harnessDialogTitle');
   dialog.innerHTML = `
-    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">Harness 与模型连接</h2><p>分别检查本机程序、模型端点与正式任务注册状态。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
+    <header class="harness-dialog-head"><div><span class="eyebrow">CONNECTIONS</span><h2 id="harnessDialogTitle">连接工作窗口</h2><p>这里检查本机装了哪些 AI 工具、能不能连上模型，并把它们登记为可执行任务的窗口。</p></div><button type="button" data-close-connections aria-label="关闭">关闭</button></header>
     <div class="harness-tools"><button type="button" data-refresh-connections>重新检测</button><span data-connection-summary role="status">正在扫描本机…</span></div>
     <section class="harness-list" data-harness-list aria-label="Harness 列表"></section>
     <section class="harness-base" aria-labelledby="harnessBaseTitle"><div><span class="eyebrow">BASE HARNESS</span><h3 id="harnessBaseTitle">登记基座 Harness</h3><p>把平台内置适配器登记为正式基座；只有基座登记后，才能为它注册独立成员窗口。适配器与能力由服务端模板决定，浏览器只选择名称。</p></div><div class="harness-base-form"><label>基座 Harness<select data-base-source><option value="">读取可登记基座…</option></select></label><button type="button" data-register-base>登记基座</button></div><p class="harness-help" data-base-result role="status">登记写入正式注册表，同一版本可重复提交。</p></section>
@@ -108,9 +112,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   createDialog.className = 'project-create-dialog';
   createDialog.setAttribute('aria-labelledby', 'projectCreateTitle');
   createDialog.innerHTML = `
-    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填完即进入开工配置，无需再点一次。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
-    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>成员 Harness（不含管理员；管理员在开工向导里选）</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
-    <footer class="project-create-foot"><span data-create-hint>创建后会直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
+    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填写后直接进入开工配置，无需再次点击。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
+    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
+    <footer class="project-create-foot"><span data-create-hint>创建后将直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
   root.append(createDialog);
 
 
@@ -144,13 +148,115 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 旧版本的项目只活在内存里；升级后第一次打开大厅时，可以从正式任务按项目名
   // 恢复最近一个项目。按钮只在没有本地历史时出现，且不写平台 project_id。
   let recoverable = null;
+  // 平台上已有的项目（按任务标题的「项目名 · 」前缀归堆）。
+  let platformProjects = [];
+
+  /**
+   * 任务标题是「项目名 · 任务名」，所以项目名就是前缀。
+   *
+   * 这不是平台给的项目列表（平台那边项目名常常就是编号），但它是**真实存在**
+   * 的活——按前缀归堆，人才知道自己有几个项目在跑。
+   */
+  function platformProjectsFrom(tasks) {
+    const groups = new Map();
+    for (const task of tasks) {
+      const title = typeof task.title === 'string' ? task.title : '';
+      const cut = title.indexOf(' · ');
+      if (cut <= 0) continue;
+      const name = title.slice(0, cut).trim();
+      if (!name) continue;
+      if (!groups.has(name)) groups.set(name, { name, taskIds: [], count: 0, latest: 0 });
+      const group = groups.get(name);
+      group.count += 1;
+      if (task.task_id) group.taskIds.push(String(task.task_id));
+      group.latest = Math.max(group.latest, Number(task.state_changed_seq || 0));
+    }
+    return [...groups.values()].sort((a, b) => b.latest - a.latest);
+  }
+
+  function renderPlatformProjects() {
+    const section = root.querySelector('[data-platform]');
+    const list = root.querySelector('[data-platform-list]');
+    const count = root.querySelector('[data-platform-count]');
+    if (!section || !list) return;
+    if (!platformProjects.length) {
+      section.hidden = true;
+      return;
+    }
+    section.hidden = false;
+    count.textContent = `${platformProjects.length} 个`;
+    list.replaceChildren();
+    for (const project of platformProjects) {
+      const row = document.createElement('article');
+      row.className = 'project-platform-item';
+      const title = document.createElement('div');
+      title.className = 'project-platform-main';
+      const name = document.createElement('strong');
+      name.textContent = project.name;
+      const meta = document.createElement('span');
+      meta.textContent = `${project.count} 件事`;
+      title.append(name, meta);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'project-platform-open';
+      button.textContent = '打开';
+      button.addEventListener('click', () => openPlatformProject(project));
+      row.append(title, button);
+      list.append(row);
+    }
+  }
+
+  /** 平台上在线、且不是管理员/助手的窗口 —— 它们才是能干活的人。 */
+  function onlineMemberIds() {
+    const admin = actingAdministratorId(formalState);
+    const online = (formalState?.harnesses || [])
+      .filter(item => item.status === 'online' &&
+        !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
+      .map(item => item.harness_id);
+    return online.length ? online : members.map(member => member.id);
+  }
+
+  /**
+   * 打开平台上的一个项目：把它变成一个本机项目（这样下次还在历史里），然后进办公室。
+   */
+  function openPlatformProject(project) {
+    const existing = projects.find((item) => item.name === project.name);
+    if (existing) {
+      activeId = existing.id;
+      persistActive();
+      render();
+      onOpenProject(clone(existing));
+      return;
+    }
+    sequence += 1;
+    const local = {
+      id: `platform-${String(sequence).padStart(3, '0')}`,
+      index: String(sequence).padStart(2, '0'),
+      name: project.name,
+      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      // 平台上已经在做的事，不是"待开工"。
+      phase: 'scene',
+      source: 'platform',
+      members: onlineMemberIds(),
+      taskIds: project.taskIds,
+    };
+    projects.push(local);
+    activeId = local.id;
+    persistProjects();
+    persistActive();
+    render();
+    onOpenProject(clone(local));
+  }
+
   async function loadRecoverableProject() {
-    if (projects.length) return;
     try {
       const response = await fetch('/api/formal/tasks', {cache: 'no-store'});
-      if (!response.ok || projects.length) return;
+      if (!response.ok) return;
       const data = await response.json();
       const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
+      platformProjects = platformProjectsFrom(tasks);
+      renderPlatformProjects();
+      if (projects.length) return;
       const candidates = tasks.filter(task => typeof task.title === 'string' && task.title.includes(' · '));
       if (!candidates.length) return;
       const latest = candidates.reduce((best, task) =>
@@ -161,11 +267,15 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         .filter(task => String(task.title).startsWith(`${name} · `))
         .map(task => task.task_id).filter(Boolean);
       recoverable = {name, taskIds};
-      recoverButton.textContent = `恢复最近项目：${name}`;
+      // 说人话：以前写「恢复最近项目：xxx」，读的人不知道"恢复"是什么。
+      recoverButton.textContent = `打开这个项目（已有 ${taskIds.length} 件事）`;
       recoverButton.hidden = false;
     } catch {}
   }
   void loadRecoverableProject();
+  // 名册要在大厅打开时就读一次：「已经有几个能干活的了」这句话依赖它。
+  // 以前只有注册之后才刷新，所以大厅里从来没人看到过这句提示。
+  void loadFormalStatus();
 
   function renderFormalRegistration(state) {
     formalState = state;
@@ -192,14 +302,52 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
   }
 
+  /**
+   * 「连接工作窗口」这扇门对第一次用的人没用 ——
+   * 它是"本机还没登记机器人"时的补救动作。
+   *
+   * 所以平台上已经有能干活的人时，这句话直接说明白，让人跳过它；
+   * 真的一个都没有时，才提醒他可能得先登记。
+   */
+  function renderWorkerHint() {
+    const hint = root.querySelector('[data-worker-hint]');
+    if (!hint) return;
+    const roster = formalState?.harnesses || [];
+    const admin = actingAdministratorId(formalState);
+    const workers = roster.filter(
+      (item) =>
+        item.status === 'online' &&
+        !isAdministratorHarness(item, admin) &&
+        !isPlatformAssistantHarness(item) &&
+        Number(item.credential_count ?? 1) > 0,
+    );
+    if (workers.length) {
+      // 名单不要全铺出来 —— 一屏七个名字读起来像日志。写"有几个"，
+      // 名字让「连接工作窗口」那扇门自己去列。
+      const names = workers
+        .map((item) => item.name || item.harness_id)
+        .slice(0, 3)
+        .join('、');
+      const more = workers.length > 3 ? ` 等 ${workers.length} 个` : '';
+      hint.textContent = `已经有 ${workers.length} 个窗口可执行任务了（${names}${more}）。要加新的，点「连接工作窗口」。`;
+    } else if (roster.length) {
+      hint.textContent = '本机已登记窗口，但当前均无法执行任务（未登录、无凭据或已掉线）。点「连接工作窗口」查看。';
+    } else {
+      hint.textContent = '本机还没有登记任何工作窗口。点「连接工作窗口」可以检查本机装了哪些 AI 工具、把它们登记进来。';
+    }
+    hint.hidden = false;
+  }
+
   async function loadFormalStatus() {
     try {
       const response = await fetch('/api/formal/status', {cache: 'no-store'});
       const state = response.ok ? await response.json() : null;
       renderFormalRegistration(state);
+      renderWorkerHint();
       return state;
     } catch {
       renderFormalRegistration(null);
+      renderWorkerHint();
       return null;
     }
   }
@@ -238,7 +386,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     // 永远停在「读取正式注册表…/暂无正式注册 Harness」——本机明明有 10 个已注册窗口。
     registerSources(state.harnesses || []);
     const online = (state.harnesses || []).filter(item => item.status === 'online').map(item => ({
-      id: item.harness_id, name: item.name || item.harness_id, role: 'Harness 成员', status: item.status,
+      id: item.harness_id, name: item.name || item.harness_id, role: '成员窗口', status: item.status,
       // 没有平台凭据的窗口领不了任务：派给它的活会永远停在 ready。
       credential_count: Number(item.credential_count ?? 1),
     }));
@@ -246,8 +394,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item));
     const actionable = memberCandidates.filter(item => item.credential_count > 0);
     const idle = memberCandidates.filter(item => item.credential_count === 0);
-    projectScope.textContent = `正式项目范围：${state.project_id} / ${state.group_id} · ${actionable.length} 个可领活的成员窗口`
-      + (idle.length ? `（另有 ${idle.length} 个窗口登记在册但没有平台凭据，领不了活）` : '');
+    // 不摆项目号/群号：那两个串是给机器看的，第一次用的人看到只会以为界面漏了东西。
+    projectScope.textContent = `正式平台登记了 ${actionable.length} 个可执行任务窗口`
+      + (idle.length ? `（另有 ${idle.length} 个窗口未配置凭据，无法接收任务）` : '') + '。';
     renderMembers(dedupByName(actionable));
   }).catch(() => { projectScope.textContent = '正式项目范围暂不可用；本窗口仍可创建本地项目。'; });
 
@@ -431,12 +580,13 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.projectId = project.id;
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
-      const action = project.phase === 'scene' ? '进入办公室' : '配置开工';
+      const action = project.phase === 'scene' ? '进入办公室' : '去配置';
       card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status ${project.phase}">${status}</span><button type="button" class="project-card-open">${action}</button>`;
       card.querySelector('strong').textContent = project.name;
-      // Only the date fits next to the status chip; the identity gets its own
-      // column so the line never ellipsizes to "2026/10/…".
-      card.querySelector('.project-card-main span').textContent = `${project.id} · ${project.createdAt.split(' ')[0]}`;
+      // 卡的副行只说"什么时候建的"：项目编号是给查问题的人看的，不该占着这一行
+      // （完整的编号留在 title 里，鼠标悬上去能看到）。
+      card.querySelector('.project-card-main span').textContent = `${project.createdAt.split(' ')[0]} 建`;
+      card.querySelector('.project-card-main span').title = project.id;
       card.querySelector('button').addEventListener('click', () => {
         activeId = project.id;
         persistActive();
@@ -479,20 +629,18 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   recoverButton.addEventListener('click', () => {
     if (!recoverable || projects.length) return;
-    const admin = actingAdministratorId(formalState);
-    const onlineMembers = (formalState?.harnesses || [])
-      .filter(item => item.status === 'online' &&
-        !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
-      .map(item => item.harness_id);
     sequence += 1;
     const project = {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
       name: recoverable.name,
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-      phase: 'phone',
+      // 恢复出来的项目在平台上**已经有活了**（taskIds 是从平台读回来的），
+      // 所以它不是"待开工"，而是"已经在干"：卡片上要写「已开工 / 进入办公室」，
+      // 而不是"先配置一下"——点下去直接就是办公室，写错了会让人以为还得再配一次。
+      phase: 'scene',
       source: 'platform',
-      members: onlineMembers.length ? onlineMembers : members.map(member => member.id),
+      members: onlineMemberIds(),
       taskIds: recoverable.taskIds,
     };
     projects.push(project);

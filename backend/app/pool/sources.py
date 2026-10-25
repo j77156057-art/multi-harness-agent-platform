@@ -49,6 +49,26 @@ CLI_TIERS = ("free", "reserve", "metered")
 KNOWN_CLI_STORES = ("opencode",)
 
 
+def declared_cli_slots() -> list[dict[str, Any]]:
+    """The slots an operator declared in the pool config -- **no CLI is spawned**.
+
+    The live list is :func:`discover_cli_slots` (it runs the CLIs to find out what
+    they can do); this one is the *declared* side only, cheap enough for a read
+    face that answers "what is still missing for this CLI?".
+    """
+    path = pool_config_path()
+    if not path.exists():
+        return []
+    try:
+        document = _read_json(path)
+    except (OSError, ValueError):
+        return []
+    slots = document.get("cli_slots") if isinstance(document, dict) else None
+    if not isinstance(slots, list):
+        return []
+    return [slot for slot in slots if isinstance(slot, dict)]
+
+
 def pool_config_path() -> Path:
     """Where the pool's own declarations live.
 
@@ -94,6 +114,10 @@ DEFAULT_CLI_SLOTS = (
         # with the same argv contract; the roster is re-listed on a TTL, so
         # the pool adjusts when opencode adds or retires a free model.
         "enumerate": {"args": ["models"], "pattern": r"^opencode/.+-free$"},
+        # 名册：这个 CLI **自己说**它能跑哪些模型（一次列举，不花额度）。
+        # 名册不是档位 —— 它只说「有这些」，不说「这些免费不免费」。所以平台
+        # 仍然只提供**声明过**的那几个，多出来的那些要告诉人（见 pool 的 rosters）。
+        "roster": {"args": ["models"], "pattern": r"^(opencode/\S+)$", "group": 1},
     },
     {
         "name": "codebuddy",
@@ -110,6 +134,12 @@ DEFAULT_CLI_SLOTS = (
             "{workdir}",
         ],
         "prompt_via_stdin": True,
+        # 名册：codebuddy 把可用模型写在 `--model` 的说明里，一次列举不花额度。
+        "roster": {
+            "args": ["--help"],
+            "pattern": r"Currently supported: \(([^)]*)\)",
+            "group": 1,
+        },
     },
     {
         "name": "codebuddy",
@@ -132,6 +162,8 @@ DEFAULT_CLI_SLOTS = (
         "model": "Qwen3.8-Flash",
         "tier": "free",
         "binary": "qoderclicn",
+        # 名册：qoder 的 CLI 自己会列（`--list-models`，不花额度）。
+        "roster": {"args": ["--list-models"], "pattern": r"^(?!MODEL$)(\S+)$", "group": 1},
         "args": [
             "-p",
             "--output-format",
@@ -165,6 +197,25 @@ DEFAULT_CLI_SLOTS = (
         # The slot only exists once the user has signed the CLI in: offering a
         # quota that cannot be spent would be a lie.
         "requires": {"file": ".mmx/config.json", "key": "api_key"},
+    },
+    {
+        # 仓库主人：codebuddy 的 step-5 也是免费的（`--model` 说明里它排在
+        # hy3-x 之后）。免费与否是**人的事实**，不是平台能猜出来的 ——
+        # 所以它进声明（声明就是人的决定）。
+        "name": "codebuddy",
+        "model": "step-5-preview",
+        "tier": "free",
+        "binary": "codebuddy",
+        "args": [
+            "-p",
+            "--output-format",
+            "stream-json",
+            "--permission-mode",
+            "bypassPermissions",
+            "--add-dir",
+            "{workdir}",
+        ],
+        "prompt_via_stdin": True,
     },
     {
         "name": "qoder",
@@ -276,7 +327,7 @@ def _codex_upstreams(home: Path, relay_ports: tuple[int, ...]) -> list[Upstream]
                 base_url=base_url,
                 credential=("literal", "local-relay"),
                 origin=str(path),
-                note="codex CLI already uses this chain; the key lives in the chain, not here",
+                note="codex CLI 本来就用这条链路；key 在链路里，不在池子里",
             )
         )
     return found
@@ -317,7 +368,7 @@ def _claude_upstream(home: Path, relay_ports: tuple[int, ...]) -> list[Upstream]
             models=tuple(models),
             credential=("config", str(path), "env.ANTHROPIC_AUTH_TOKEN"),
             origin=str(path),
-            note="the provider the Claude CLI is configured to use",
+            note="Claude CLI 自己配的那个 provider",
         )
     ]
 
@@ -358,7 +409,7 @@ def _opencode_upstreams(home: Path, relay_ports: tuple[int, ...]) -> list[Upstre
                 models=models,
                 credential=credential,
                 origin=str(path),
-                note="provider the opencode CLI is configured with",
+                note="opencode CLI 自己配的那个 provider",
             )
         )
     return found
@@ -437,7 +488,7 @@ def _minimax_upstream(home: Path) -> list[Upstream]:
             models=("MiniMax-M3.1-Flash-Preview",),
             credential=("config", str(path), credential or "api_key"),
             origin=str(path),
-            note="the MiniMax subscription the mmx CLI is signed in with (kept in reserve)",
+            note="mmx CLI 登录用的 MiniMax 订阅（留着当兜底）",
             tier="reserve",
         )
     ]
@@ -446,6 +497,18 @@ def _minimax_upstream(home: Path) -> list[Upstream]:
 def _port_of(base_url: str) -> int | None:
     match = re.search(r":(\d+)(?:/|$)", base_url)
     return int(match.group(1)) if match else None
+
+
+def pool_config_write_path() -> Path:
+    """Where a **new** declaration is written: the data directory.
+
+    The read path (:func:`pool_config_path`) falls back to a historical
+    CWD-relative location so an old checkout keeps working.  A write must not
+    land there: the platform runs with the backend directory as its CWD, so the
+    declaration would end up inside the checkout instead of the data directory
+    the platform was pointed at.
+    """
+    return Path(settings.data_dir) / "pool" / "config.json"
 
 
 def _slot_key(slot: dict[str, Any]) -> tuple[str, str]:
@@ -513,6 +576,200 @@ def _enumerate_roster(
     except re.error:
         return []
     return [line for line in _ENUM_ROSTER.get(key, (now, []))[1] if pattern.fullmatch(line)]
+
+
+def _listing_lines(
+    slot: dict[str, Any], source: CliModelSource, runner: ListingRunner | None
+) -> list[str]:
+    """The CLI's own listing (cached, TTL).  A listing costs no quota."""
+    spec = slot.get("roster")
+    if not isinstance(spec, dict):
+        return []
+    args = [str(arg) for arg in (spec.get("args") or ())]
+    if not args:
+        return []
+    binary = source.resolve_binary()
+    key = (binary, " ".join(args))
+    now = time.monotonic()
+    cached = _ENUM_ROSTER.get(key)
+    if cached is None or now - cached[0] > ENUM_TTL_SECONDS:
+        try:
+            roster = (runner or _run_listing)(binary, args)
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            roster = []
+        _ENUM_ROSTER[key] = (now, roster)
+    return list(_ENUM_ROSTER.get(key, (now, []))[1])
+
+
+def cli_roster(
+    slot: dict[str, Any], source: CliModelSource, runner: ListingRunner | None
+) -> list[str]:
+    """What the CLI itself says it can run.
+
+    The roster is **not a tier**: it says what exists, not what is free.  The
+    pool still serves only the models the operator declared; the ones the CLI
+    knows but nobody declared are reported, so the human can see "the CLI can
+    do this, and nobody said whether it costs anything".
+    """
+    spec = slot.get("roster")
+    if not isinstance(spec, dict):
+        return []
+    lines = _listing_lines(slot, source, runner)
+    pattern_text = str(spec.get("pattern") or "")
+    try:
+        pattern = re.compile(pattern_text) if pattern_text else None
+    except re.error:
+        return []
+    group = int(spec.get("group") or 0)
+    names: list[str] = []
+    for line in lines:
+        if pattern is None:
+            names.append(line.strip())
+            continue
+        match = pattern.search(line)
+        if not match:
+            continue
+        value = match.group(group) if group <= (match.lastindex or 0) else match.group(0)
+        for part in str(value).split(","):
+            name = part.strip()
+            if name:
+                names.append(name)
+    return names
+
+
+def discover_cli_rosters(
+    config_path: Path | None = None,
+    home: Path | None = None,
+    *,
+    listing_runner: ListingRunner | None = None,
+) -> dict[str, list[str]]:
+    """What every CLI says it can run, keyed by the CLI's name.
+
+    Read-only and quota-free: a listing is a question, not a model call.
+    """
+    path = config_path or pool_config_path()
+    declared: list[dict[str, Any]] = []
+    document = _read_json(path) if path.exists() else {}
+    if isinstance(document, dict):
+        slots = document.get("cli_slots")
+        if isinstance(slots, list):
+            declared = [slot for slot in slots if isinstance(slot, dict)]
+    rosters: dict[str, list[str]] = {}
+    for slot in _merge_slots(declared):
+        spec = slot.get("roster")
+        if not isinstance(spec, dict):
+            continue
+        name = str(slot.get("name") or "cli-slot")
+        source = CliModelSource(
+            name=name,
+            model=str(slot.get("model") or ""),
+            binary=str(slot.get("binary") or ""),
+            args=tuple(str(part) for part in (slot.get("args") or ())),
+        )
+        names = cli_roster(slot, source, listing_runner)
+        if not names:
+            continue
+        merged = list(rosters.get(name) or [])
+        for entry in names:
+            if entry not in merged:
+                merged.append(entry)
+        rosters[name] = merged
+    return rosters
+
+
+def invalidate_rosters() -> None:
+    """Forget the cached CLI listings.
+
+    The probe asks for them again: a listing costs no quota, only a process
+    spawn, and a stale roster is exactly what "did we miss a new free model?"
+    is about.
+    """
+    _ENUM_ROSTER.clear()
+
+
+class PoolDeclarationError(ValueError):
+    """A model cannot be given a tier (unknown CLI, unknown model, bad tier)."""
+
+
+#: The fields a new slot **inherits** from the CLI's other slots: how to run
+#: that CLI.  A model is a different thing, not a different program.
+_SLOT_CONTRACT_FIELDS = (
+    "binary",
+    "args",
+    "prompt_via_stdin",
+    "file_arg",
+    "message_flag",
+    "timeout_seconds",
+    "store",
+    "catalogue",
+    "requires",
+)
+
+
+def declare_cli_model(
+    cli: str,
+    model: str,
+    tier: str,
+    *,
+    config_path: Path | None = None,
+    roster: list[str] | None = None,
+) -> dict[str, Any]:
+    """Give a model the CLI says it can run a tier (free / metered / reserve).
+
+    Three rules:
+
+    * **Only what the CLI itself lists** may be declared -- the platform does
+      not invent models.  (``roster`` is that list; ``None`` means "no
+      listing available", and the check is skipped rather than guessed.)
+    * **The tier is the human's call**: free or paid is a fact about the
+      account, not something the platform can sniff out.
+    * **The argv contract is inherited**: the new slot runs the CLI the same
+      way the CLI's other slots do -- a different contract would not run.
+    """
+    name = str(cli or "").strip()
+    model_name = str(model or "").strip()
+    tier_name = str(tier or "").strip().lower()
+    if not name or not model_name:
+        raise PoolDeclarationError("which CLI and which model must be named")
+    if tier_name not in CLI_TIERS:
+        raise PoolDeclarationError(
+            "the tier must be free, reserve or metered -- the platform will not "
+            "guess whether spending this quota costs money"
+        )
+    path = config_path or pool_config_write_path()
+    declared: list[dict[str, Any]] = []
+    document = _read_json(path) if path.exists() else {}
+    if isinstance(document, dict):
+        slots = document.get("cli_slots")
+        if isinstance(slots, list):
+            declared = [slot for slot in slots if isinstance(slot, dict)]
+    siblings = [slot for slot in _merge_slots(declared) if str(slot.get("name") or "") == name]
+    if not siblings:
+        raise PoolDeclarationError(f"the pool has no slot for {name}")
+    if roster is not None:
+        known = {str(entry).split("/")[-1] for entry in roster}
+        if model_name not in known:
+            raise PoolDeclarationError(
+                f"{name} does not list {model_name} itself -- the pool does not "
+                "offer models the CLI cannot run"
+            )
+    contract = {key: siblings[0][key] for key in _SLOT_CONTRACT_FIELDS if key in siblings[0]}
+    slot: dict[str, Any] = {"name": name, "model": model_name, "tier": tier_name}
+    slot.update(contract)
+    kept = [
+        entry
+        for entry in declared
+        if not (
+            str(entry.get("name") or "") == name
+            and str(entry.get("model") or "").strip() == model_name
+        )
+    ]
+    kept.append(slot)
+    payload = dict(document) if isinstance(document, dict) else {}
+    payload["cli_slots"] = kept
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return slot
 
 
 def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -639,7 +896,7 @@ def discover_cli_slots(
                 models=(pool_id,),
                 credential=None,
                 origin=str(path),
-                note="the CLI itself is the only client allowed to spend this quota",
+                note="只有这个 CLI 自己能用这份额度",
                 cli=source,
                 tier=tier,
             )
@@ -719,7 +976,43 @@ def discover_upstreams(
         if port_key is not None:
             by_port[port_key] = upstream
         unique.append(upstream)
+    # The user's own keys go in **after** the fold above, on purpose: that loop
+    # folds two upstreams pointing at the same host:port into one (one quota,
+    # one identity).  A key the user typed in is a **different credential** even
+    # when the address is the same, so it must not be folded away.
+    unique.extend(user_key_upstreams())
     return unique
+
+
+def user_key_upstreams() -> list[Upstream]:
+    """The keys the **user** gave the platform, as upstreams of the ``user`` tier.
+
+    They are read at call time (like every other upstream's credential) and
+    they carry the ``user`` tier, which the router only spends after the user
+    has said yes.
+    """
+    from app.pool import user_keys  # local import: keeps the module cycle out
+
+    found: list[Upstream] = []
+    for key in user_keys.entries():
+        found.append(
+            Upstream(
+                name=f"user:{key.id}",
+                protocol=key.protocol,
+                base_url=key.base_url,
+                models=key.models,
+                credential=("file", str(user_keys.key_dir() / f"{key.id}.key")),
+                origin="你自己的 key",
+                note="你自己的 key —— 平台不会自己花，要你点了同意",
+                tier=user_keys.USER_TIER,
+                extra={
+                    "key_id": key.id,
+                    "label": key.label,
+                    "approval": key.approval,
+                },
+            )
+        )
+    return found
 
 
 def _port_key(base_url: str) -> tuple[str, str] | None:

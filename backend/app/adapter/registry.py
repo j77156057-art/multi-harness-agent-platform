@@ -156,7 +156,8 @@ class HarnessRegistry:
             dict(row)
             for row in self.database.read(
                 "SELECT h.harness_id, h.provider, h.adapter, h.status, h.registration_version,"
-                " h.capabilities_json, r.name, r.adapter_version, r.max_parallel_tasks,"
+                " h.capabilities_json, h.model_mode, h.model_id, h.model_tier,"
+                " r.name, r.adapter_version, r.max_parallel_tasks,"
                 " (SELECT COUNT(*) FROM leases l WHERE l.owner = h.harness_id"
                 " AND l.kind = 'development' AND l.released_at IS NULL"
                 " AND l.lease_until > ?) AS running_tasks,"

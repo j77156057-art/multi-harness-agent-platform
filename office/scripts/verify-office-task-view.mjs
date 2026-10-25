@@ -51,7 +51,11 @@ try {
   await page.waitForSelector('#aoWorkspace .flat-head', { timeout: 20000 });
   assert.ok(await page.locator('#aoWorkspace .flat-body').count() > 0, 'the office has a body');
   assert.ok(await page.locator('#aoWorkspace .flat-rail').count() > 0, 'the office has the right rail');
-  assert.ok(await page.locator('#aoWorkspace .flat-chat').count() > 0, 'the office has the console');
+  // 群聊不再是底部那条了：它是左栏里的一个会话，中间那栏铺开。
+  assert.ok(
+    await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).count() > 0,
+    'the office has the group chat conversation',
+  );
 
   // 旧场景的东西不该再出现：场景导航、手机入口、3D 画布。
   for (const selector of ['#officeViewBtn', '#corridorViewBtn', '#phoneBtn', '#godotFrame', '.seat-picker', '.action-toolbar']) {
@@ -59,8 +63,13 @@ try {
   }
 
   // 顶栏只有三样东西：项目、连接状态、入口。
+  // （连接状态的措辞改成了"已连接平台"——顶栏不再印项目 id —— 断的是
+  // "顶栏说明了连接状态"这件事，不是那句话必须长什么样。）
   const topbar = await page.locator('.ao-topbar').innerText();
-  assert.ok(topbar.includes('正式平台') || topbar.includes('未连接'), 'the top bar states the connection');
+  assert.ok(
+    /已连接平台|未连接平台|正式平台|未连接/.test(topbar),
+    `the top bar states the connection: ${topbar.slice(0, 80)}`,
+  );
   assert.ok(await page.locator('#aoStartBtn').count() === 1, 'the top bar has the start button');
   assert.ok(await page.locator('#adminAgentBtn').count() === 1, 'the platform assistant stays reachable');
 

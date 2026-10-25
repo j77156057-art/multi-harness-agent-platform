@@ -121,7 +121,7 @@ subprocess.run([sys.executable, str(SCRIPT)], cwd=str(REPO_ROOT), ...)
 ```
 
 于是**一旦合并冲突**：`MERGE_HEAD` 留下、`merge-pending.json` 没写。
-下一次进���的 `_classify_pending_merge()`（`cli.py:484-488`）看到
+下一次进来时的 `_classify_pending_merge()`（`cli.py:484-488`）看到
 「`pending is None` 且 `MERGE_HEAD` 存在」→ 按 fail-closed 判成
 「别人的合并」→ `exit 7`。
 

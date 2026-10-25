@@ -1,10 +1,11 @@
 """A harness adapter built from a declaration, not from a Python class.
 
-The platform ships five CLI adapters because five CLIs were measured by hand.
-A sixth CLI should not need a sixth class: its binary, argv contract, read-only
-variant and protocol are facts an operator can write down.  This module reads
-those facts from ``<AP_DATA_DIR>/adapters/cli.json`` and builds the same
-``CliHarness`` the built-ins build.
+The platform ships one adapter class per CLI that was measured by hand (the
+built-in bases below).  A CLI nobody measured should not need a class: its
+binary, argv contract, read-only variant and protocol are facts an operator
+can write down.  This module reads those facts from
+``<AP_DATA_DIR>/adapters/cli.json`` and builds the same ``CliHarness`` the
+built-ins build.
 
 What is deliberately **not** automatic:
 
@@ -38,7 +39,10 @@ from app.config import settings
 #: The bases the platform already ships an adapter class for.  A declaration
 #: may not take one of these names: the built-in was measured, the declaration
 #: was not, and a silent override would make the receipt lie.
-BUILTIN_BASES = ("codex", "claude-code", "opencode", "qoder", "codebuddy")
+#:
+#: ``pi`` is here because the platform ships a measured Pi adapter too: a
+#: declaration must not be able to shadow it.
+BUILTIN_BASES = ("codex", "claude-code", "opencode", "pi", "qoder", "codebuddy")
 
 #: A declared base is a lowercase, hyphen-separated identifier.
 BASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -167,6 +171,56 @@ def declared_bases() -> set[str]:
     return set(load_declarations())
 
 
+def base_template(declaration: CliDeclaration) -> dict[str, Any]:
+    """What the registry needs to know about a declared base.
+
+    **One source of truth**: the same values go into the registration
+    :class:`GenericCliAdapter` builds and into the listing the office reads --
+    otherwise the office would register a window the platform does not
+    recognise.
+    """
+    return {
+        "harness_id": declaration.base,
+        "name": declaration.display_name or f"{declaration.binary} CLI",
+        "provider": declaration.base,
+        "adapter": declaration.adapter or f"{declaration.base}-cli",
+        "adapter_version": "1.0.0",
+        "capabilities": list(declaration.capabilities),
+        "registration_version": "reg-001",
+    }
+
+
+def declared_base_templates() -> list[dict[str, Any]]:
+    """Every declared base, as registry templates (sorted by base name)."""
+    declarations = load_declarations()
+    return [base_template(declarations[base]) for base in sorted(declarations)]
+
+
+def base_gaps(declaration: CliDeclaration, *, pool_slot: dict[str, Any] | None = None) -> list[str]:
+    """这个基座还缺什么 —— 一句一条，只讲**查得到**的。
+
+    两类缺项：声明自己缺的（没写只读审阅的 argv、``{model}`` 没有 model），
+    以及池子侧缺的（没有槽位 → 池子不服务它；槽位没有 tier → 平台不提供它）。
+
+    池子侧的事实由调用方给（``pool_slot``）：槽位那一层不在适配器这一层，
+    这里只**读**它。
+    """
+    gaps: list[str] = []
+    if not declaration.review_args:
+        gaps.append("没有 review_args：这个 CLI 不能做只读审阅（能改文件的审阅不算审阅）")
+    if any("{model}" in part for part in declaration.args) and not declaration.model:
+        gaps.append("args 里有 {model} 却没有 model：这份声明平台会拒绝")
+    slot = pool_slot or {}
+    if slot:
+        if not str(slot.get("tier") or "").strip():
+            gaps.append("槽位没有声明 tier：平台不会提供它（额度不明的东西不能看着像免费的）")
+    else:
+        gaps.append(
+            "池子侧没有这个 CLI 的槽位：它现在不能给别的窗口供模型（要加一条 cli_slots 并声明 tier）"
+        )
+    return gaps
+
+
 class GenericCliAdapter(CliHarness):
     """The ``CliHarness`` a declaration describes."""
 
@@ -178,14 +232,15 @@ class GenericCliAdapter(CliHarness):
         declaration: CliDeclaration,
         prefix: str = "/api/v1",
     ) -> None:
+        template = base_template(declaration)
         registration = HarnessRegistration(
             harness_id=harness_id,
-            name=declaration.display_name or f"{declaration.binary} CLI",
-            provider=declaration.base,
-            adapter=declaration.adapter or f"{declaration.base}-cli",
-            adapter_version="1.0.0",
-            capabilities=declaration.capabilities,
-            registration_version="reg-001",
+            name=template["name"],
+            provider=template["provider"],
+            adapter=template["adapter"],
+            adapter_version=template["adapter_version"],
+            capabilities=tuple(template["capabilities"]),
+            registration_version=template["registration_version"],
         )
         super().__init__(client, registration, prefix=prefix)
         self.declaration = declaration

@@ -303,6 +303,92 @@ def test_goal_for_another_admin_is_not_dispatched(tmp_path, monkeypatch):
     assert client.dispatches == []
 
 
+def test_a_cancel_notice_makes_the_administrator_refine_that_part(tmp_path, monkeypatch):
+    """人取消了一条活 → 管理员就**这一部分**重新细化。
+
+    范围要窄：被取消那条的工单原文就是要求，重新细化整个目标会把还在做的活
+    再派一遍。细化结果照旧走草案 → 传阅 → 人审，不直接派单。
+    """
+    admin = FakeAdmin(
+        tasks=[
+            {
+                "title": "写对照说明",
+                "goal": "写一份对照说明",
+                "exclusive_paths": ["docs/x.md"],
+                "acceptance": "docs/x.md exists",
+                "harness_id": "member-window",
+            }
+        ]
+    )
+    admin.assignable = ["member-window"]
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 11,
+                "sender_type": "human",
+                "body": "不做了：方向不对",
+                "task_id": "FD-9",
+                "refs": [
+                    "to-admin",
+                    "task-cancelled",
+                    "task-cancelled:FD-9",
+                    'task-cancelled-json:{"task_id":"FD-9","title":"写对照说明","reason":"方向不对"}',
+                ],
+            }
+        ]
+    )
+    client.task_detail = {
+        "task_id": "FD-9",
+        "status": "cancelled",
+        "title": "写对照说明",
+        "spec": {"goal": "写一份对照说明"},
+    }
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert len(admin.refine_calls) == 1
+    requirement = admin.refine_calls[0]["requirement"]
+    assert "写一份对照说明" in requirement, "要求就是被取消那条自己的工单原文"
+    assert "方向不对" in requirement, "取消的原因也给它"
+    assert admin.refine_calls[0]["max_tasks"] == 1, "只细化这一部分"
+    # 照旧走草案 → 传阅，不直接派单。
+    assert client.dispatches == []
+    assert len(client.plan_drafts) == 1
+    assert client.plan_drafts[0]["opened_by"] == "admin-window"
+
+
+def test_a_cancel_notice_without_a_work_order_is_not_guessed(tmp_path, monkeypatch):
+    """读不到工单原文就**不猜**范围：明说，让人再说一次要做什么。"""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 12,
+                "sender_type": "human",
+                "body": "不做了：方向不对",
+                "task_id": "FD-9",
+                "refs": [
+                    "task-cancelled",
+                    'task-cancelled-json:{"task_id":"FD-9","title":"写对照说明","reason":"方向不对"}',
+                ],
+            }
+        ]
+    )
+    client.task_detail = {"task_id": "FD-9", "status": "cancelled", "title": "写对照说明"}
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert admin.refine_calls == [], "没有工单原文就不细化"
+    assert client.plan_drafts == []
+    assert any("工单原文" in str(message.get("body", "")) for message in client.messages)
+
+
 def test_goal_handler_circulates_the_plan_instead_of_dispatching_it(tmp_path, monkeypatch):
     """After the refinement the plan is **circulated**, not dispatched.
 
@@ -731,3 +817,129 @@ def test_a_private_question_the_model_cannot_answer_says_so_privately(tmp_path, 
     assert sent["mentions"] == ["office-operator"]
     assert "没有答上来" in sent["body"]
     assert "boom" in sent["body"]
+
+
+def test_a_member_asking_for_a_goal_change_is_heard(tmp_path, monkeypatch):
+    """成员窗口说「这个目标要改」：管理员要听见，并把原话带给群主。
+
+    目标是群主的（§19）：管理员听见之后**转达**，自己不改目标。
+    """
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 11,
+                "sender_type": "harness",
+                "sender_id": "member-window",
+                "body": "这个目标做不到：要改成只做那半边",
+                "task_id": "FD-1",
+                "refs": ["goal-change"],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.last_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+    }
+    # 首轮只锚定不处理（历史不重放）—— 这次要处理的是「之后」的消息。
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    said = " ".join(str(item.get("body") or "") for item in client.messages)
+    assert said, "管理员要在群里说话（把成员的话带给群主）"
+    assert "member-window" in said, "要说清是谁说的"
+    assert "要改成只做那半边" in said, "要原话转达"
+    # 群主的回答要接得住：目标摆成待答。
+    assert worker.state.pending_goal, "群主的回答要有地方接"
+    assert worker.state.pending_goal["goal"] == "把两边都做完"
+
+
+def test_the_owners_answer_to_a_member_goal_change_is_used(tmp_path, monkeypatch):
+    """群主回答之后，管理员照新的说法重新细化（方案随之修订）。"""
+    admin = FakeAdmin()
+    client = FakeClient()
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.last_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+    }
+    worker.state.pending_goal = {
+        **worker.state.last_goal,
+        "questions": ["成员窗口 member-window 说目标要改"],
+        "seq": 11,
+    }
+    worker.state.last_message_seq = 11
+    worker.state.initialized = True
+    client.inbox = [
+        {"created_seq": 12, "sender_type": "human", "body": "那就只做那半边"},
+    ]
+
+    worker.poll_messages()
+
+    assert admin.refine_calls, "群主回答后要重新细化"
+    assert admin.refine_calls[0]["answers"] == ["那就只做那半边"]
+
+
+def test_a_member_message_is_not_treated_as_an_answer(tmp_path, monkeypatch):
+    """成员的话不能被当成群主对目标的回答（那会把别人的话写进群主的回执）。"""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 13,
+                "sender_type": "harness",
+                "sender_id": "member-window",
+                "body": "随便说句话",
+                "refs": [],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.pending_goal = {
+        "goal": "把两边都做完",
+        "goal_id": "g-1",
+        "max_tasks": 2,
+        "members": ["member-window"],
+        "seq": 11,
+    }
+    worker.state.last_message_seq = 11
+
+    worker.poll_messages()
+
+    assert not admin.refine_calls, "成员的闲聊不能被当成群主的回答"
+
+
+def test_a_window_joining_midway_is_heard(tmp_path, monkeypatch):
+    """中途加入的窗口：管理员知道、在群里说一声、并把等人领的活改派给它。"""
+    admin = FakeAdmin()
+    admin.credentials["member-3"] = True
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 21,
+                "sender_type": "human",
+                "sender_id": "office-operator",
+                "body": "Qoder · 成员3 中途加入了这个项目。",
+                "refs": ["add-member", "add-member-json:member-3", "to-admin"],
+            }
+        ],
+        tasks=[{"task_id": "FD-9", "title": "还在等人领的活", "owner": "member-window"}],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    said = " ".join(str(item.get("body") or "") for item in client.messages)
+    assert "member-3" in said, "管理员要在群里说出来（团队多了一个人）"
+    assert client.cancels, "还没人领的活要改派给新来的窗口"
+    # 已经在跑的活不换人：这里只有一条等人领的活。
+    assert len(client.cancels) == 1

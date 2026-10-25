@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.pool import user_keys
 from app.pool.balance import cached_balances
 from app.pool.inventory import build_inventory, cached_minimax_quota
 from app.pool.sources import (
@@ -55,6 +56,7 @@ from app.pool.translate import (
     responses_stream_to_openai_stream,
     responses_to_chat,
 )
+from app.usage.cli_reported import read_reported_records
 
 #: How long a discovered upstream list / model list is reused.
 DISCOVERY_TTL_SECONDS = 30.0
@@ -91,6 +93,8 @@ class Usage:
     duration_ms: int
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: 缓存命中的 token（读缓存）。
+    cached_tokens: int = 0
     #: False when the CLI did not report its usage at all -- then the zeros
     #: are the absence of a number, not a measurement.
     usage_reported: bool = True
@@ -116,6 +120,19 @@ _DISCOVERY: dict[tuple[Any, ...], tuple[float, list[Upstream]]] = {}
 _MODELS: dict[tuple[Any, ...], tuple[float, list[dict[str, Any]]]] = {}
 
 
+def invalidate_discovery() -> None:
+    """Forget the cached upstream list and model list.
+
+    Called when something the discovery reads **changes** -- today that is the
+    user adding or removing one of their own keys.  Without this, a key added
+    a second ago could stay invisible for up to the discovery TTL, and the
+    worker would be told "no upstream serves that model" instead of "the user
+    has to say yes".
+    """
+    _DISCOVERY.clear()
+    _MODELS.clear()
+
+
 def _usage_blobs(event: dict[str, Any]) -> list[dict[str, Any]]:
     """Every usage object in one SSE event, wherever the protocol puts it.
 
@@ -134,6 +151,27 @@ def _usage_blobs(event: dict[str, Any]) -> list[dict[str, Any]]:
     return found
 
 
+def _cached_tokens(usage: dict[str, Any]) -> int:
+    """缓存**命中**的 token 数：各家协议把它放在不同的地方。
+
+    * OpenAI chat: ``usage.prompt_tokens_details.cached_tokens``
+    * OpenAI Responses: ``usage.input_tokens_details.cached_tokens``
+    * Anthropic: ``usage.cache_read_input_tokens``
+
+    只认**读**缓存（命中）。写缓存（``cache_creation_input_tokens``）不算命中。
+    """
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+    if isinstance(details, dict):
+        value = details.get("cached_tokens")
+        if isinstance(value, int | float):
+            return int(value)
+    for key in ("cache_read_input_tokens", "cached_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int | float):
+            return int(value)
+    return 0
+
+
 class _UsageSniffer:
     """Watch an SSE stream for the usage the upstream reports.
 
@@ -146,6 +184,9 @@ class _UsageSniffer:
     def __init__(self) -> None:
         self.prompt = 0
         self.completion = 0
+        #: 缓存命中的 token（读缓存）。没有就是 0 —— 那是「provider 没报」，
+        #: 不是「一次都没命中」，两者的区别在汇总时说。
+        self.cached = 0
 
     def feed(self, line: str) -> None:
         text = line.strip()
@@ -168,6 +209,7 @@ class _UsageSniffer:
                 self.completion,
                 int(usage.get("output_tokens") or usage.get("completion_tokens") or 0),
             )
+            self.cached = max(self.cached, _cached_tokens(usage))
 
     def watched(self, lines: Iterator[str]) -> Iterator[str]:
         for line in lines:
@@ -216,8 +258,19 @@ class PoolService:
         return self._upstreams
 
     def _discovery_key(self) -> tuple[Any, ...]:
-        """What the discovery depends on -- the cache is shared, so the key must say it."""
-        return (str(self.home), self.relay_ports, str(pool_config_path().resolve()))
+        """What the discovery depends on -- the cache is shared, so the key must say it.
+
+        The **data dir** is part of it since 2026-10-23: the user's own keys
+        live under it (``data/user-keys/``), so two data dirs are two different
+        sets of upstreams.  Leaving it out meant one data dir's keys could be
+        served to another (and the keys of a *different* test/run leak in).
+        """
+        return (
+            str(self.home),
+            self.relay_ports,
+            str(pool_config_path().resolve()),
+            str(settings.data_dir),
+        )
 
     def models(self, *, refresh: bool = False) -> list[dict[str, Any]]:
         """The unified model list: every model the relay can serve, and from where.
@@ -295,6 +348,37 @@ class PoolService:
 
     # -------------------------------------------------------------- routing
 
+    def _guard_user_upstream(self, upstream: Upstream, *, model: str = "") -> None:
+        """A user's own key is only spent when the user said yes.
+
+        Without this the pool would happily spend somebody's own money the
+        moment a model matched -- which is exactly what "asking" is supposed
+        to prevent.  So an unapproved key is **asked about** (the office shows
+        the question) and the request is refused with a reason a worker can
+        act on.
+        """
+        if upstream.tier != user_keys.USER_TIER:
+            return
+        key_id = str(upstream.extra.get("key_id") or "")
+        if not key_id:
+            return
+        if user_keys.approved(key_id):
+            return
+        user_keys.raise_request(
+            key_id=key_id,
+            reason=(
+                "the free and metered quotas could not serve this request; "
+                "the platform asked the user about their own key"
+            ),
+            model=model,
+        )
+        raise PoolError(
+            "this model would be served with the user's own key, and the user has "
+            "not said yes yet (the office is asking)",
+            status=409,
+            code="pool_user_key_pending",
+        )
+
     def route(self, model: str) -> Route:
         """Find the upstream that serves ``model``.
 
@@ -313,12 +397,14 @@ class PoolService:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is None:
                     break
+                self._guard_user_upstream(upstream, model=wanted)
                 return Route(upstream=upstream, model=wanted, upstream_model=wanted)
         lowered = wanted.lower()
         for entry in entries:
             if str(entry["id"]).lower() == lowered:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is not None:
+                    self._guard_user_upstream(upstream, model=str(entry["id"]))
                     return Route(upstream=upstream, model=wanted, upstream_model=str(entry["id"]))
         known = ", ".join(str(entry["id"]) for entry in entries[:12]) or "(none discovered)"
         raise PoolError(
@@ -612,6 +698,7 @@ class PoolService:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
                 completion_tokens=sniffer.completion,
+                cached_tokens=sniffer.cached,
                 consumer=consumer,
                 note="streamed",
             )
@@ -669,6 +756,7 @@ class PoolService:
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
                 completion_tokens=sniffer.completion,
+                cached_tokens=sniffer.cached,
                 consumer=consumer,
                 note="streamed (responses)",
             )
@@ -710,6 +798,7 @@ class PoolService:
                 duration_ms=duration,
                 prompt_tokens=int((usage or {}).get("prompt_tokens") or 0),
                 completion_tokens=int((usage or {}).get("completion_tokens") or 0),
+                cached_tokens=_cached_tokens(usage or {}),
                 # The CLI did not report its usage: say so, instead of
                 # recording a zero that reads as "this call was free".
                 usage_reported=usage is not None,
@@ -748,6 +837,11 @@ class PoolService:
     # ----------------------------------------------------------- accounting
 
     def _account(self, usage: Usage) -> None:
+        # 自己的 key：用户点的是"用一次"，那就**只花这一次**。
+        # 放在记账之前：记账失败（磁盘满、路径不对）也不该让这次授权留着 ——
+        # 留着就等于"用户点了一次，平台可以一直花"。
+        if usage.upstream.startswith("user:"):
+            user_keys.spend_once(usage.upstream.split(":", 1)[1])
         if self.usage_path is None:
             return
         try:
@@ -764,6 +858,7 @@ class PoolService:
                             "duration_ms": usage.duration_ms,
                             "prompt_tokens": usage.prompt_tokens,
                             "completion_tokens": usage.completion_tokens,
+                            "cached_tokens": usage.cached_tokens,
                             "usage_reported": usage.usage_reported,
                             "credits": usage.credits,
                             "session_id": usage.session_id,
@@ -777,6 +872,19 @@ class PoolService:
         except OSError:
             # Accounting must never break a request.
             pass
+
+    def rosters(self) -> dict[str, list[str]]:
+        """What every CLI says it can run (the catalogue, not a tier).
+
+        Read-only: a listing costs no quota.  The office uses it to say "the
+        CLI can do this too, but nobody said what it costs".
+        """
+        from app.pool.sources import discover_cli_rosters
+
+        try:
+            return discover_cli_rosters()
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            return {}
 
     def inventory(self) -> dict[str, Any]:
         """What is **left** in each tier, not just what was spent.
@@ -823,8 +931,13 @@ class PoolService:
                 "requests": 0,
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
+                "cached_tokens": 0,
                 "upstreams": {},
                 "consumers": {},
+                #: 每个窗口（consumer）在这个小时里烧了多少 token。
+                "consumer_tokens": {},
+                #: 成员**自报**的那部分（自带模型跑的活），同样按小时分桶。
+                "reported_consumer_tokens": {},
             }
         outside = 0
         if self.usage_path is not None and self.usage_path.exists():
@@ -850,10 +963,37 @@ class PoolService:
                 bucket["requests"] += 1
                 bucket["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
                 bucket["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 upstream = str(record.get("upstream") or "?")
                 bucket["upstreams"][upstream] = bucket["upstreams"].get(upstream, 0) + 1
                 consumer = str(record.get("consumer") or "?")
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
+                spent = bucket["consumer_tokens"].setdefault(
+                    consumer,
+                    {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0},
+                )
+                spent["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+                spent["completion_tokens"] += int(record.get("completion_tokens") or 0)
+                spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
+        # 成员自报的那部分：同一份账，按小时分桶，**不混进**额度池的总数。
+        for record in read_reported_records(self._reported_home()):
+            stamp = _parse_timestamp(str(record.get("at") or ""))
+            if stamp is None:
+                continue
+            key = stamp.replace(minute=0, second=0, microsecond=0).isoformat()
+            bucket = buckets.get(key)
+            if bucket is None:
+                continue
+            consumer = str(record.get("consumer") or "")
+            if not consumer:
+                continue
+            spent = bucket["reported_consumer_tokens"].setdefault(
+                consumer,
+                {"prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0},
+            )
+            spent["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+            spent["completion_tokens"] += int(record.get("completion_tokens") or 0)
+            spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
         return {
             "bucket": "hour",
             "hours": hours,
@@ -862,6 +1002,43 @@ class PoolService:
             "outside_window": outside,
             "buckets": list(buckets.values()),
         }
+
+    def _reported_by_consumer(self) -> dict[str, dict[str, Any]]:
+        """「成员自报」那本账：按窗口汇总。
+
+        与额度池那本**分开**：这些调用没有走过额度池，不该算进「额度池花了多少」。
+        """
+        found: dict[str, dict[str, Any]] = {}
+        for record in read_reported_records(self._reported_home()):
+            consumer = str(record.get("consumer") or "")
+            if not consumer:
+                continue
+            spent = found.setdefault(
+                consumer,
+                {
+                    "requests": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "cached_tokens": 0,
+                },
+            )
+            spent["requests"] += 1
+            spent["prompt_tokens"] += int(record.get("prompt_tokens") or 0)
+            spent["completion_tokens"] += int(record.get("completion_tokens") or 0)
+            spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
+        for spent in found.values():
+            spent["cache_hit_rate"] = (
+                round(spent["cached_tokens"] / spent["prompt_tokens"], 4)
+                if spent["prompt_tokens"] > 0
+                else None
+            )
+        return found
+
+    def _reported_home(self) -> Path:
+        """「成员自报」那本账所在的数据目录。"""
+        if self.usage_path is not None:
+            return self.usage_path.parent.parent
+        return Path(settings.data_dir)
 
     def _corrections(self) -> dict[tuple[str, str, str, str], dict[str, Any]]:
         """The corrections the pool's own log needs.
@@ -916,6 +1093,9 @@ class PoolService:
         corrections = self._corrections()
         requests = 0
         unknown = 0
+        # 「成员自报」那本账（成员用自带模型跑的活，平台不在那条链路上）。
+        # 单独一栏：**额度池的数不掺它** —— 否则「额度池用了多少」就说不清了。
+        reported = self._reported_by_consumer()
         try:
             for line in self.usage_path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -934,6 +1114,7 @@ class PoolService:
                         "requests": 0,
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
+                        "cached_tokens": 0,
                         "tokens_unknown": 0,
                         "credits": 0.0,
                         "models": {},
@@ -962,23 +1143,71 @@ class PoolService:
                 else:
                     bucket["prompt_tokens"] += prompt_tokens
                     bucket["completion_tokens"] += completion_tokens
+                    bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 bucket["models"][model] = bucket["models"].get(model, 0) + 1
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
                 spent = consumers.setdefault(
-                    consumer, {"requests": 0, "upstreams": {}, "models": {}}
+                    consumer,
+                    {
+                        "requests": 0,
+                        "upstreams": {},
+                        "models": {},
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "duration_ms": 0,
+                    },
                 )
                 spent["requests"] += 1
                 spent["upstreams"][str(record.get("upstream") or "?")] = (
                     spent["upstreams"].get(str(record.get("upstream") or "?"), 0) + 1
                 )
                 spent["models"][model] = spent["models"].get(model, 0) + 1
+                if not (corrected is not None or record.get("usage_reported") is False):
+                    spent["prompt_tokens"] += prompt_tokens
+                    spent["completion_tokens"] += completion_tokens
+                    spent["cached_tokens"] += int(record.get("cached_tokens") or 0)
+                duration = record.get("duration_ms")
+                if isinstance(duration, int | float) and duration > 0:
+                    spent["duration_ms"] += int(duration)
         except OSError:
             pass
+        # 每秒生成多少 token：生成 token ÷ 生成耗时。数不到就**不给数**
+        # （给 0 会被读成「一次都没生成」）。
+        for spent in consumers.values():
+            seconds = spent["duration_ms"] / 1000
+            spent["generation_rate"] = (
+                round(spent["completion_tokens"] / seconds, 1) if seconds > 0 else None
+            )
+            spent["cache_hit_rate"] = (
+                round(spent["cached_tokens"] / spent["prompt_tokens"], 4)
+                if spent["prompt_tokens"] > 0
+                else None
+            )
+        # 成员自报的那部分**挂在同一个 consumer 下面**（同一个窗口），
+        # 但另起一个 ``reported``：两笔账的出处不同，不能混成一个数。
+        for consumer, numbers in reported.items():
+            spent = consumers.setdefault(
+                consumer,
+                {
+                    "requests": 0,
+                    "upstreams": {},
+                    "models": {},
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "cached_tokens": 0,
+                    "duration_ms": 0,
+                },
+            )
+            spent["reported"] = numbers
         return {
             "upstreams": summary,
             "consumers": consumers,
             "requests": requests,
             "tokens_unknown": unknown,
+            "reported_requests": sum(
+                int(numbers.get("requests") or 0) for numbers in reported.values()
+            ),
         }
 
 

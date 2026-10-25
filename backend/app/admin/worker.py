@@ -37,7 +37,12 @@ import httpx
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
 from app.db.connection import Database
-from app.tasks.service import DIRECT_REF
+from app.tasks.service import (
+    ADD_MEMBER_JSON_REF,
+    ADD_MEMBER_REF,
+    DIRECT_REF,
+    GOAL_CHANGE_REF,
+)
 
 GOAL_REF = "project-goal"
 GOAL_ANSWER_REF = "project-goal-answer"
@@ -48,6 +53,13 @@ REASSIGN_REQUEST_REF = "reassign-request"
 #: The optional target window: "reassign-to:<harness_id>".  Without it the
 #: administrator picks the least loaded window that can actually take work.
 REASSIGN_TARGET_REF = "reassign-to:"
+#: The owner cancelled a task.  Cancelling is a **human** decision and it is final
+#: for that task -- but the plan it came from still lists it, so the administrator
+#: has to hear about it: otherwise it keeps working on a plan that no longer
+#: holds.  The office sends this message right after a successful cancel.
+CANCEL_REF = "task-cancelled"
+#: The machine-readable part of that message: "task-cancelled-json:{...}".
+CANCEL_JSON_REF = "task-cancelled-json:"
 #: The task states a re-point may act on: the work is not deliverable from
 #: there (failed) or not progressing (lease lost).
 REASSIGNABLE_STATES = ("abandoned", "stale", "ready", "changes_requested")
@@ -82,6 +94,13 @@ class WorkerState:
     #: A request is a *message*, and messages are replayed on every poll: the
     #: same request must not re-point the task twice.
     handled_request_seqs: list[int] = field(default_factory=list)
+    #: The last goal the administrator worked on.  Kept so that the owner's
+    #: answer to a member's "the goal has to change" can be handled (the
+    #: answer re-refines that goal instead of being dropped).
+    last_goal: dict[str, Any] | None = None
+    #: The member messages about the goal already handled (one message, one
+    #: answer -- messages are replayed on every poll).
+    handled_goal_change_seqs: list[int] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> WorkerState:
@@ -102,6 +121,10 @@ class WorkerState:
                 handled_request_seqs=[int(x) for x in data.get("handled_request_seqs") or []],
                 pending_circulation=data.get("pending_circulation"),
                 pending_refinement=data.get("pending_refinement"),
+                last_goal=data.get("last_goal"),
+                handled_goal_change_seqs=[
+                    int(x) for x in data.get("handled_goal_change_seqs") or []
+                ],
             )
         except (OSError, ValueError, TypeError):
             # A corrupt cursor must not replay every historical goal. Start
@@ -152,6 +175,40 @@ class PlatformClient:
                 response=response,
             )
         return data if isinstance(data, dict) else {"data": data}
+
+
+def _cancel_payload(message: dict[str, Any]) -> dict[str, Any] | None:
+    """The cancel notice: which task, why, and what it was called.
+
+    The office puts the human-readable sentence in the body and the machine
+    part in a ref (``task-cancelled-json:{...}``), so the group conversation
+    does not turn into raw JSON.
+    """
+    refs = message.get("refs") or []
+    if CANCEL_REF not in refs:
+        return None
+    payload: dict[str, Any] = {}
+    for ref in refs:
+        text = str(ref or "").strip()
+        if text.startswith(CANCEL_JSON_REF):
+            text = text[len(CANCEL_JSON_REF) :]
+        elif not text.startswith("{"):
+            continue
+        try:
+            candidate = json.loads(text)
+        except ValueError:
+            continue
+        if isinstance(candidate, dict) and str(candidate.get("task_id") or "").strip():
+            payload = candidate
+            break
+    task_id = str(payload.get("task_id") or "").strip()
+    if not task_id:
+        return None
+    return {
+        "task_id": task_id,
+        "title": str(payload.get("title") or "").strip(),
+        "reason": str(payload.get("reason") or "").strip(),
+    }
 
 
 def _goal_payload(message: dict[str, Any]) -> dict[str, Any] | None:
@@ -296,9 +353,22 @@ class AdminWorker:
                 continue
             self.state.last_message_seq = seq
             self.state.initialized = True
-            if _sender_type(message) != "human":
-                continue
             refs = message.get("refs") or []
+            if _sender_type(message) != "human":
+                # 不是人的话，**不是全都丢掉**（R10-fix-22）：成员窗口说「这个
+                # 目标要改」，管理员必须听见。别的闲聊只记在运行日志里，不惊动
+                # 任何人（逐条回应是要花钱的）。
+                if GOAL_CHANGE_REF in refs:
+                    self.handle_member_goal_change(message, seq=seq)
+                else:
+                    print(
+                        json.dumps(
+                            {"member_message": message.get("sender_id"), "seq": seq},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+                continue
             if GOAL_REF in refs:
                 payload = _goal_payload(message)
                 if payload:
@@ -307,11 +377,20 @@ class AdminWorker:
             if REASSIGN_REQUEST_REF in refs:
                 self.handle_reassign_request(message, seq=seq)
                 continue
+            if CANCEL_REF in refs:
+                self.handle_cancel_notice(message, seq=seq)
+                continue
             if DIRECT_REF in refs:
                 # A private question. It is answered privately and is NOT fed to
                 # the pending goal: the group receipt is public, so replaying the
                 # owner's private words there would break the channel.
                 self.handle_direct_message(message, seq=seq)
+                continue
+            if ADD_MEMBER_REF in refs:
+                # A window joined the project half way through: the administrator
+                # has to know (and the work that nobody picked up yet can go to
+                # it).
+                self.handle_add_member(message, seq=seq)
                 continue
             if self.state.pending_goal and (
                 GOAL_ANSWER_REF in refs
@@ -329,6 +408,122 @@ class AdminWorker:
                     self.handle_goal(pending)
         self.state.save(self.state_path)
         return bool(messages)
+
+    def handle_add_member(self, message: dict[str, Any], *, seq: int) -> None:
+        """A window joined the project half way through.
+
+        The administrator does three things:
+
+        * it **knows** (the message is handled once; messages replay on every
+          poll);
+        * it **says so in the group** -- the people in the group should see that
+          the team grew;
+        * it gives the newcomer the work **nobody has picked up yet** (the
+          tasks still waiting).  Work that is already running is not taken away
+          from whoever is doing it -- moving that around is the human's call
+          (the "re-point this task" request).
+        """
+        if seq in self.state.handled_request_seqs:
+            return
+        member = ""
+        for ref in message.get("refs") or []:
+            if str(ref).startswith(ADD_MEMBER_JSON_REF):
+                member = str(ref)[len(ADD_MEMBER_JSON_REF) :].strip()
+        if not member:
+            print(
+                json.dumps({"add_member_ignored": "no member id", "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        self.state.handled_request_seqs.append(seq)
+        self.state.handled_request_seqs = self.state.handled_request_seqs[-200:]
+        self.state.save(self.state_path)
+        self._post_admin_message(f"成员窗口 {member} 中途加入了这个项目。还没人领的活可以派给它。")
+        moved: list[str] = []
+        if not self.dry_run and self.admin.harness_has_credential(member):
+            try:
+                page = self.client.get(f"/groups/{self.group_id}/tasks", status="ready")
+            except httpx.HTTPStatusError:
+                page = {}
+            for task in page.get("tasks") or []:
+                task_id = str(task.get("task_id") or "")
+                if not task_id:
+                    continue
+                try:
+                    detail = self.client.get(f"/tasks/{task_id}")
+                except httpx.HTTPStatusError:
+                    continue
+                try:
+                    self._reassign_one(
+                        task_id,
+                        detail,
+                        member,
+                        str(detail.get("owner") or ""),
+                        token=str(seq),
+                    )
+                    moved.append(task_id)
+                except httpx.HTTPStatusError as exc:
+                    print(
+                        json.dumps(
+                            {"add_member_reassign_error": str(exc), "task_id": task_id},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
+        print(
+            json.dumps(
+                {"member_added": member, "tasks_given": moved, "seq": seq},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def handle_member_goal_change(self, message: dict[str, Any], *, seq: int) -> None:
+        """A member says the goal has to change: the administrator hears it.
+
+        The goal belongs to the owner (R10 §19): a member cannot change it.  So
+        the administrator does two things and one non-thing:
+
+        * it **knows** -- the request is recorded and not replayed;
+        * it **tells the owner**, quoting the member, in the group -- that is
+          where the owner reads, and the office shows it;
+        * it does **not** change the goal by itself.
+
+        The owner's answer is then picked up by the pending-goal path, so the
+        administrator re-refines the goal with that answer and the plan follows.
+        """
+        sender = str(message.get("sender_id") or "").strip()
+        body = str(message.get("body") or "").strip()
+        if not sender or not body or sender == self.admin_harness_id:
+            return
+        if seq in self.state.handled_goal_change_seqs:
+            return
+        self.state.handled_goal_change_seqs.append(seq)
+        self.state.handled_goal_change_seqs = self.state.handled_goal_change_seqs[-200:]
+        task_id = str(message.get("task_id") or "")
+        where = f"（{task_id}）" if task_id else ""
+        self._post_admin_message(
+            f"成员窗口 {sender}{where} 说目标要改：{body}\n"
+            "要不要改、改成什么，由群主说；管理员会照新的说法修订方案。"
+        )
+        # 群主的回答要接得住：把「当前目标」摆成待答状态。管理员本来就在等群主
+        # 回答时**合并**进去，别把那个问题顶掉（顶掉 = 那个问题永远没人答）。
+        if self.state.last_goal:
+            pending = dict(self.state.pending_goal or {}) or dict(self.state.last_goal)
+            pending["questions"] = [
+                *(pending.get("questions") or []),
+                f"成员窗口 {sender} 说目标要改：{body}",
+            ]
+            pending["seq"] = seq
+            self.state.pending_goal = pending
+        self.state.save(self.state_path)
+        print(
+            json.dumps(
+                {"member_goal_change": sender, "task_id": task_id, "seq": seq},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     def handle_direct_message(self, message: dict[str, Any], *, seq: int) -> None:
         """Answer a private question from the owner, in the same private channel.
@@ -389,6 +584,8 @@ class AdminWorker:
         seq = int(payload.get("seq") or 0)
         if not force and seq in self.state.processed_goal_seqs:
             return
+        # 记住这次的目标：成员后来提「目标要改」时，群主的回答要能据此重新细化。
+        self.state.last_goal = dict(payload)
         if self.dry_run:
             print(
                 json.dumps(
@@ -775,6 +972,75 @@ class AdminWorker:
                     flush=True,
                 )
 
+    # ------------------------------------------------------ cancel notices
+
+    def handle_cancel_notice(self, message: dict[str, Any], *, seq: int) -> None:
+        """The owner cancelled a task: re-refine **that part** of the plan.
+
+        The scope stays narrow on purpose.  The cancelled task's own work order
+        is the requirement; re-refining the whole goal would dispatch work that
+        is already running a second time.  Everything else in the plan keeps
+        going, and the new refinement goes through the usual route (draft ->
+        circulation -> the owner approves -> dispatch).
+
+        If the work order cannot be read, nothing is invented: the administrator
+        says so in the group and waits for the human to say what the part was.
+        """
+        payload = _cancel_payload(message)
+        if payload is None:
+            print(
+                json.dumps({"cancel_notice_ignored": "no task id", "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        task_id = payload["task_id"]
+        try:
+            task = self.client.get(f"/tasks/{task_id}")
+        except httpx.HTTPStatusError:
+            print(
+                json.dumps(
+                    {"cancel_notice_ignored": "task not found", "task_id": task_id, "seq": seq},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+        spec = task.get("spec") or {}
+        requirement = str(spec.get("goal") or "").strip()
+        if not requirement:
+            # 没有工单原文就**不猜**范围：把一句话丢给模型让它自己补，那是编。
+            self._post_admin_message(
+                f"群主取消了一条活（{task_id}），但平台读不到它的工单原文，"
+                "所以我没有重新细化。请人再说一次那部分要做什么。"
+            )
+            print(
+                json.dumps({"cancel_notice_without_spec": task_id, "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+        reason = payload.get("reason") or "（没写原因）"
+        title = payload.get("title") or str(task.get("title") or task_id)
+        self.handle_goal(
+            {
+                "goal_id": f"cancel-{task_id}",
+                "goal": (
+                    f"{requirement}\n\n"
+                    f"（这一条已被群主取消：{reason}。请就**它原本要做的这部分**重新细化一版；"
+                    "如果这部分已经不需要了，就不要产出任务。）"
+                ),
+                "project_name": None,
+                "members": [],
+                "max_tasks": 1,
+                "answers": [],
+                "admin": self.admin_harness_id,
+                "seq": seq,
+            }
+        )
+        print(
+            json.dumps({"cancel_refined": task_id, "title": title, "seq": seq}, ensure_ascii=False),
+            flush=True,
+        )
+
     # ------------------------------------------------------ re-point requests
 
     def handle_reassign_request(self, message: dict[str, Any], *, seq: int) -> None:
@@ -907,11 +1173,11 @@ class AdminWorker:
         # 理由要**如实**：原执行者没有凭据、原执行者上一轮没交出活、和"按负载重排"，
         # 是三件不同的事。
         if dead and not self.admin.harness_has_credential(dead):
-            reason = f"执行者 {dead} 没有平台凭据，永远领不了这条活；改派给 {target}"
+            reason = f"执行方 {dead} 没有平台凭据，无法领取任务；改派给 {target}"
         elif dead and dead == target:
             reason = f"原执行者 {dead} 上一轮没能交出交付物，重新派一次"
         else:
-            reason = f"管理员把这条活分给更闲的窗口：{dead or '原执行者'} → {target}"
+            reason = f"管理员将该任务改派给负载较低的窗口：{dead or '原执行者'} → {target}"
         if self.dry_run:
             print(
                 json.dumps(

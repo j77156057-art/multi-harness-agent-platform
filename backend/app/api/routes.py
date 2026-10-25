@@ -15,8 +15,9 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from app.adapter import cli_output
+from app.adapter import cli_output, model_choice
 from app.adapter.dispatch import dispatch, eligible_tasks
+from app.adapter.harnesses.generic import declared_base_templates
 from app.adapter.models import configured_model
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
@@ -208,7 +209,18 @@ def register_harness(
 
 @management.get("/harnesses")
 def list_harnesses(database: DatabaseDep, _principal: _guard("harness:register")):
-    return {"harnesses": HarnessRegistry(database).listing()}
+    """The registry, plus the bases an operator declared.
+
+    The declared bases (``adapters/cli.json``) are the ones the office
+    registers windows for -- without them the office can only offer the
+    handful of bases it knows by heart, and adding a new CLI would need a
+    code change on the office side too.  Same route, same permission: no new
+    endpoint, no new matrix row.
+    """
+    return {
+        "harnesses": HarnessRegistry(database).listing(),
+        "base_adapters": declared_base_templates(),
+    }
 
 
 @management.post("/groups/{group_id}/dispatch")
@@ -632,6 +644,11 @@ def availability(
                 "model": model["model"],
                 "model_alias": model.get("model_alias"),
                 "model_source": model["source"],
+                # 人给这个窗口指定的模型来源（自带 / 额度池里的哪个模型），
+                # 以及**人点头时那一档**（档位会变：免费额度改成收费之后，平台不再花它）。
+                "model_mode": str(row.get("model_mode") or "cli"),
+                "model_id": str(row["model_id"]) if row.get("model_id") else None,
+                "model_tier": str(row["model_tier"]) if row.get("model_tier") else None,
                 "degraded": degraded,
                 "last_probe_at": probe["created_at"] if probe else None,
                 "warnings": [
@@ -655,6 +672,68 @@ def availability(
             }
         )
     return {"availability": entries}
+
+
+def _pool_models() -> list[dict[str, Any]]:
+    """额度池现在有哪些模型（每条带它属于哪一档）。
+
+    池子是活的：额度会下线、配置会改，**档位也会变**（某个 free 改成 metered）。
+    **读不到**就返回空清单 —— 空清单表示「查不到」，不是「一个模型都没有」，
+    所以调用方不要拿它当「池子空了」来拒绝人。
+    """
+    from app.pool.service import PoolService  # local import: keeps the module cycle out
+
+    try:
+        return list(PoolService().models())
+    except Exception:
+        return []
+
+
+@adapter.post("/model-selection")
+def set_model_selection(
+    body: schemas.ModelSelectionRequest,
+    database: DatabaseDep,
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """人给某个窗口指定用哪个模型；下一轮这个窗口干活时，平台照办。
+
+    权限复用 ``harness:register``（人可用）：这是**人**对部署的决定，harness 令牌
+    改它一律 403（harness 改自己的模型 = 自己给自己批额度）。
+
+    存之前先核对池子里有没有这个模型：存下一个池子里没有的模型，只会让界面显示
+    「已保存」而下一轮悄悄回落 —— 那比当场拒绝更坏。
+    """
+    tier = ""
+    if body.model_mode == "pool":
+        models = _pool_models()
+        available = {str(entry.get("id")) for entry in models}
+        if available and body.model_id not in available:
+            raise ApiError(
+                "request.invalid",
+                400,
+                f"the pool has no model named {body.model_id} right now",
+            )
+        entry = next((item for item in models if str(item.get("id")) == body.model_id), None)
+        tier = str((entry or {}).get("tier") or "")
+        if tier == model_choice.PAID_TIER and not body.paid_consent:
+            # 按量计费：每调用一次都花钱。人没点头就不许花 —— 这一条写在服务端，
+            # 界面点不点得到都不算数。
+            raise ApiError(
+                "model.paid_consent_required",
+                409,
+                "这个模型按量计费（每调用一次都花钱），要你明确点头才用它",
+            )
+    try:
+        choice = model_choice.save_choice(
+            database,
+            harness_id=body.harness_id,
+            model_mode=body.model_mode,
+            model_id=body.model_id,
+            model_tier=tier,
+        )
+    except model_choice.ModelChoiceError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    return {"selection": choice.as_dict()}
 
 
 @adapter.get("/list_ready_tasks")
@@ -1919,8 +1998,36 @@ def list_tasks(
     group_id: str,
     service: SchedulerDep,
     status: Annotated[str | None, Query()] = None,
+    limit: Annotated[int | None, Query(ge=1, le=1000)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> dict[str, Any]:
-    return {"tasks": service.list_tasks(group_id, status=status)}
+    """The group's task list.
+
+    Paging is optional and **off by default** (no ``limit`` → the whole list,
+    as before).  A caller that only needs a window asks for one: the assistant
+    does — it used to pull every task's every field into a single observation,
+    and the model only saw the first half of it.
+    """
+    tasks = service.list_tasks(group_id, status=status)
+    total = len(tasks)
+    window = tasks[offset:] if limit is None else tasks[offset : offset + limit]
+    # The counts of the **whole** list, not of the window: a caller that pages
+    # through it still gets the distribution of the list it is paging.
+    by_status: dict[str, int] = {}
+    unclaimed_total = 0
+    for task in tasks:
+        state = str(task.get("status") or "unknown")
+        by_status[state] = by_status.get(state, 0) + 1
+        if not task.get("owner"):
+            unclaimed_total += 1
+    return {
+        "tasks": window,
+        "total": total,
+        "by_status": by_status,
+        "unclaimed_total": unclaimed_total,
+        "offset": offset,
+        "has_more": offset + len(window) < total,
+    }
 
 
 @read.get("/groups/{group_id}/plans")
@@ -2041,6 +2148,187 @@ def task_output(
             "updated_at": stdout["updated_at"] or stderr["updated_at"],
         }
     }
+
+
+@read.get("/harnesses/bases")
+def harness_bases() -> dict[str, Any]:
+    """The bases a CLI can answer for, and what each one still lacks.
+
+    For "how do I add a new harness here": the built-in bases need no
+    declaration, and every declared one comes with its template plus the
+    gaps that keep it from being usable (no read-only review, no pool slot, no
+    declared tier).
+
+    A declaration is **trusted input** (it names a binary and its argv) --
+    operator-owned, never written by the platform.  This face only reads it and
+    reports what is missing; the draft of a new declaration is the human's to
+    write and install.
+    """
+    from app.adapter.formal_worker import ADAPTER_TYPES
+    from app.adapter.harnesses.generic import (
+        base_gaps,
+        base_template,
+        load_declarations,
+    )
+    from app.pool.sources import declared_cli_slots
+
+    slots = {
+        str(slot.get("name") or ""): slot
+        for slot in declared_cli_slots()
+        if str(slot.get("name") or "")
+    }
+    bases: list[dict[str, Any]] = []
+    error: str | None = None
+    try:
+        declarations = load_declarations()
+    except ValueError as exc:
+        # A declaration file that cannot be read is an error the human must see
+        # (the platform refuses to start on it); it is not "no declarations".
+        declarations = {}
+        error = str(exc)
+    for base in sorted(declarations):
+        declaration = declarations[base]
+        template = base_template(declaration)
+        bases.append(
+            {
+                **template,
+                "source": "declared",
+                "declaration": {
+                    "binary": declaration.binary,
+                    "args": list(declaration.args),
+                    "prompt_via_stdin": declaration.prompt_via_stdin,
+                    "pool_protocol": declaration.pool_protocol,
+                    "review_args": list(declaration.review_args),
+                    "model": declaration.model,
+                    "capabilities": list(declaration.capabilities),
+                },
+                "gaps": base_gaps(declaration, pool_slot=slots.get(base)),
+            }
+        )
+    return {
+        "bases": bases,
+        "builtin_bases": sorted(ADAPTER_TYPES),
+        "declaration_error": error,
+    }
+
+
+#: How much of a transcript the forensics face hands out.  Deeper than the
+#: office's live tail (32KB / 200 lines) and still bounded -- a 5 MB transcript
+#: does not belong in a model context.
+FORENSICS_MAX_BYTES = 256 * 1024
+FORENSICS_MAX_LINES = 2000
+FORENSICS_HARD_MAX_BYTES = 1024 * 1024
+FORENSICS_HARD_MAX_LINES = 20000
+
+
+@read.get("/tasks/{task_id}/forensics")
+def task_forensics(
+    task_id: str,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    attempt_id: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """The deeper evidence an assistant needs to say *where* it got stuck.
+
+    More of the CLI's own output than the live tail, the stderr side as well,
+    and the **provenance** of every byte: which task, which attempt, which log
+    file, how many bytes, how many lines, when it was last written.
+
+    Lines that carry a credential-looking value are masked **here**, so the
+    raw value never reaches the reader; the count of masked lines travels with
+    the text.
+    """
+    task = service.get_task(task_id)
+    if attempt_id:
+        attempt_id = str(attempt_id)
+        current = attempt_id == str(task.get("current_attempt_id") or "")
+        known = database.read(
+            "SELECT attempt_id FROM task_attempts WHERE attempt_id = ? AND task_id = ?",
+            (attempt_id, task_id),
+        )
+        if not known:
+            return {"forensics": None}
+    else:
+        attempt_id = task.get("current_attempt_id")
+        current = attempt_id is not None
+        if not attempt_id:
+            rows = database.read(
+                "SELECT attempt_id FROM task_attempts WHERE task_id = ?"
+                " ORDER BY attempt_no DESC LIMIT 1",
+                (task_id,),
+            )
+            if not rows:
+                return {"forensics": None}
+            attempt_id = str(rows[0]["attempt_id"])
+    stdout_path, stderr_path = cli_output.log_paths(settings.data_dir, task_id, str(attempt_id))
+    stdout = cli_output.read_tail(
+        stdout_path, max_bytes=FORENSICS_MAX_BYTES, max_lines=FORENSICS_MAX_LINES
+    )
+    stderr = cli_output.read_tail(
+        stderr_path, max_bytes=FORENSICS_MAX_BYTES, max_lines=FORENSICS_MAX_LINES
+    )
+    stdout_text, stdout_masked = cli_output.redact(stdout["text"])
+    stderr_text, stderr_masked = cli_output.redact(stderr["text"])
+    attempt = database.read(
+        "SELECT status, owner, head_commit, attempt_no FROM task_attempts WHERE attempt_id = ?",
+        (str(attempt_id),),
+    )
+    attempt_row = dict(attempt[0]) if attempt else {}
+    return {
+        "forensics": {
+            "task_id": task_id,
+            "attempt_id": str(attempt_id),
+            "attempt_no": attempt_row.get("attempt_no"),
+            "current": current,
+            "attempt_status": attempt_row.get("status"),
+            "harness_id": attempt_row.get("owner") or task.get("owner"),
+            "stdout": {
+                "text": stdout_text,
+                "bytes": stdout["bytes"],
+                "read_lines": stdout["lines"],
+                "returned_lines": len(stdout_text.splitlines()),
+                "redacted_lines": stdout_masked,
+            },
+            "stderr": {
+                "text": stderr_text,
+                "bytes": stderr["bytes"],
+                "read_lines": stderr["lines"],
+                "returned_lines": len(stderr_text.splitlines()),
+                "redacted_lines": stderr_masked,
+            },
+            "source": {
+                "stdout_log": str(stdout_path.relative_to(settings.data_dir))
+                if stdout_path.is_relative_to(settings.data_dir)
+                else stdout_path.name,
+                "stderr_log": str(stderr_path.relative_to(settings.data_dir))
+                if stderr_path.is_relative_to(settings.data_dir)
+                else stderr_path.name,
+                "stdout_updated_at": stdout["updated_at"],
+                "stderr_updated_at": stderr["updated_at"],
+            },
+            "bounds": {
+                "max_bytes": FORENSICS_MAX_BYTES,
+                "max_lines": FORENSICS_MAX_LINES,
+                "hard_max_bytes": FORENSICS_HARD_MAX_BYTES,
+                "hard_max_lines": FORENSICS_HARD_MAX_LINES,
+            },
+        }
+    }
+
+
+@read.get("/assistant/runs")
+def assistant_runs() -> dict[str, Any]:
+    """助手最近几轮做了什么（只读）。
+
+    The engine writes every step to a local trace file; this face reads those
+    traces into a **summary** the office can show -- what the assistant thought,
+    which tool it called, what it saw.  The raw material (a 256KB forensics
+    dump, say) stays on the server: the summary says how big it was and how it
+    began, not the whole thing.
+    """
+    from app.assistant.runs import read_runs
+
+    return {"runs": read_runs(settings.data_dir)}
 
 
 @read.get("/tasks/{task_id}/events")

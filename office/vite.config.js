@@ -20,7 +20,7 @@ export default defineConfig({
   preview: { host: '127.0.0.1' },
   build: {
     target: 'esnext',
-    // 私聊窗口是独立页面（与管理员的定向消息）。
-    rollupOptions: { input: { main: 'index.html', direct: 'direct.html' } },
+    // 独立页面有三个：办公室本体、与管理员的私聊、各窗口说了什么。
+    rollupOptions: { input: { main: 'index.html', direct: 'direct.html', outputs: 'outputs.html' } },
   },
 });

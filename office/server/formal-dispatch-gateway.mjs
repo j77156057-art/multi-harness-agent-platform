@@ -1,9 +1,15 @@
 import fs from 'node:fs';
 
+import { parseTranscript } from '../src/cli-transcript.js';
+
 const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
 const BASE_HARNESSES=new Set(['codex','claude-code','opencode','qoder','codebuddy']);
+// 声明出来的基座（`adapters/cli.json`）：平台知道它们（`known_bases()` 读声明表），
+// 办公室本地照着它登记 —— 「加一个新 harness 不用改代码」在本地这一侧也成立。
+// 模板由平台给（与 `GenericCliAdapter` 造注册表的是同一份），这里不自己拼。
+const declaredBaseTemplates=(members)=>Array.isArray(members?.base_adapters)?members.base_adapters:[];
 // Administrator identity is *not* a gateway constant any more (R10-fix-15): the
 // platform delegates it through ``AP_ADMIN_SUBJECTS``, and the opening guide lets
 // the owner pick which registered window that is. This variable is an optional
@@ -57,7 +63,7 @@ export function createFormalGateway(config={}){
     if(!trimmed||trimmed.startsWith('['))throw fail(503,'administrator_credential_unavailable');
     return fs.readFileSync(trimmed,'utf8');
   }
-  async function call(path,body,credential){
+  async function call(path,body,credential,method,timeoutMs){
     // `undefined` = the operator; `null`/`''` used to mean "open" by accident,
     // so an explicit call site must pass a credential and defaulting is done here,
     // once.
@@ -66,9 +72,9 @@ export function createFormalGateway(config={}){
     if(process.env.ADMIN_DEBUG_ROUTES){console.error('ADMIN-DEBUG call',path,'cred type',typeof credential,'first',String(credential).slice(0,6));}
     if(!/^apt_[a-f0-9]{64}$/.test(token)){throw fail(503,'administrator_credential_unavailable');}
     let response;
-    try{response=await fetch(new URL('/api/v1'+path,upstream),{method:body?'POST':'GET',
+    try{response=await fetch(new URL('/api/v1'+path,upstream),{method:method||(body?'POST':'GET'),
       headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},
-      ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10000),redirect:'error'});}
+      ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeoutMs||10000),redirect:'error'});}
     catch{throw fail(503,'formal_backend_unavailable');}
     // 1 MB was too tight for a read that pages 200 events: one attempt's output
     // once went into the event log and the task history grew past it, so the
@@ -79,6 +85,84 @@ export function createFormalGateway(config={}){
     if(!response.ok)throw fail(response.status,data.error?.code||'backend_rejected');
     return data;
   }
+  /**
+   * 让**平台**把机器写的文本洗成人话（一次问一批）。
+   *
+   * 结论第一句常常是"FD-0b0bcc415aa9fe2f（attempt .a1）· 提交 32f84d6" ——
+   * 人读到的是编号，不是"这件事"。失败原因常常是 `HarnessLeaseLost` 这种
+   * 给日志看的错误码。规则在平台的翻译服务里（单一出处），界面不自己造一套。
+   * 平台够不着就照旧显示原文，不让这一屏白掉。
+   *
+   * @param {string[]} texts 要洗的原文
+   * @param {string} kind 平台那边的分类（text=自由文本 / reason=失败原因）
+   * @returns {Promise<Map<string,string>>} 原文 → 人话
+   */
+  async function translateBatch(texts, kind) {
+    const wanted = [...new Set((texts || []).filter(Boolean).map((text) => String(text)))];
+    if (!wanted.length) return new Map();
+    try {
+      const result = await call('/wording/translate', { texts: wanted, kind });
+      // 钥匙用**发出去的原文**。平台回显的 original 与它一致；但平台那边也会
+      // 去掉首尾空白再回显，所以两种都存一份，省得按哪种都找不回来。
+      const map = new Map();
+      for (const row of result.texts || []) {
+        const original = String(row.original || '');
+        const text = String(row.text || '');
+        if (!original) continue;
+        map.set(original, text);
+        const trimmed = original.trim();
+        if (trimmed && trimmed !== original) map.set(trimmed, text);
+      }
+      return map;
+    } catch {
+      // 平台够不着：照旧。
+      return new Map();
+    }
+  }
+
+  /** 输出窗口：结论（自由文本）与失败原因（错误码）分别洗。 */
+  async function humanizeRows(rows) {
+    const texts = [];
+    const reasons = [];
+    for (const row of rows || []) {
+      for (const attempt of row.attempts || []) {
+        for (const item of attempt.texts || []) {
+          const text = String(item.text || '');
+          if (text) texts.push(text);
+        }
+        const reason = String(attempt.reason || '');
+        if (reason) reasons.push(reason);
+      }
+    }
+    const [cleaned, spoken] = await Promise.all([
+      translateBatch(texts, 'text'),
+      translateBatch(reasons, 'reason'),
+    ]);
+    for (const row of rows || []) {
+      for (const attempt of row.attempts || []) {
+        for (const item of attempt.texts || []) {
+          const next = cleaned.get(String(item.text || ''));
+          if (next) item.text = next;
+        }
+        const next = spoken.get(String(attempt.reason || ''));
+        if (next) attempt.reason = next;
+      }
+    }
+  }
+
+  /**
+   * 方案正文：管理员写的方案也是机器写的，里面有 `exclusive_paths`、
+   * `FD-…` 这类标记。给人看的那一份要洗过 —— 批准之前，人读的就是这份。
+   */
+  async function humanizePlan(plan) {
+    const draft = plan && plan.draft;
+    const doc = draft && draft.document;
+    if (!doc || !doc.markdown) return;
+    const cleaned = await translateBatch([String(doc.markdown)], 'text');
+    const next = cleaned.get(String(doc.markdown));
+    if (next) doc.markdown = next;
+  }
+
   // The scope (who the operator is, and which group this gateway serves) does
   // not change between requests, but it was re-fetched on **every** call: the
   // office's harness screens ask for one task and one output per window, so a
@@ -133,6 +217,54 @@ export function createFormalGateway(config={}){
    supersedes:t.supersedes||null,
    // 时间戳：办公室要按"最近更新"排序、要让人看见一条活多久没动了。
    created_at:t.created_at||null,updated_at:t.updated_at||null});
+  /**
+   * 把**工单**和平台追加的**现场报告**拆开。
+   *
+   * 上一轮没做完时，平台会把上一次尝试的现场报告（错误、CLI 自己的话、动过哪些
+   * 文件）**追加到工单后面**，让接手的人能接着做 —— 那是给干活的人看的，不是给
+   * 人看的。真数据里那条工单有 2957 字，后面 2900 字是一坨机器 JSON。
+   *
+   * 所以这里按平台自己的标记拆开：工单还给工单，现场报告单独一个字段。
+   *
+   * 标记来自平台（backend/app/adapter/formal_worker.py 的 build_goal 与
+   * backend/app/admin/worker.py 的 _goal_with_handoff）。平台哪天改了这句话，
+   * 这里就拆不开 —— 退回今天的样子（工单里带机器那坨），**不会丢东西**。
+   */
+  const HANDOFF_MARKER='The previous attempt did NOT finish; here is its breakpoint report.';
+  const HANDOFF_JSON_MARKER='Breakpoint report (verbatim):';
+  function splitHandoff(spec){
+    const source=spec||{};
+    const goal=String(source.goal||'');
+    const at=goal.indexOf(HANDOFF_MARKER);
+    if(at<0)return source;
+    const human=goal.slice(0,at).trim();
+    const rest=goal.slice(at);
+    const jsonAt=rest.indexOf(HANDOFF_JSON_MARKER);
+    const raw=jsonAt>=0?rest.slice(jsonAt+HANDOFF_JSON_MARKER.length).trim():'';
+    let report=null;
+    try{report=JSON.parse(raw);}catch{report=null;}
+    return {...source,goal:human,handoff:report,handoff_raw:raw};
+  }
+
+  /**
+   * 现场报告里的失败原因 → 人话。
+   *
+   * 走**平台**的规则表（跟输出页的失败原因同一条路）：认得出的换成人话，认不出的
+   * 原样留着（宁可原样，也不要编一个错的说法）。平台够不着就照旧显示原文。
+   */
+  async function humanizeHandoff(spec){
+    const report=spec&&spec.handoff;
+    if(!report||!report.error)return spec;
+    try{
+      const result=await call('/wording/translate',{texts:[String(report.error)],kind:'reason'});
+      const row=(result.texts||[])[0];
+      if(row&&row.translated&&row.text)return {...spec,handoff:{...report,error_human:row.text}};
+    }catch{
+      // 平台够不着：照旧。
+    }
+    return spec;
+  }
+
   async function handle(req,res){
     if(!(req.url===PREFIX||req.url.startsWith(PREFIX+'/')))return false;
     try{
@@ -208,9 +340,11 @@ export function createFormalGateway(config={}){
           // 登记在册但没有凭据的窗口领不了任务，派给它的活会永远停在 ready。
           credential_count:Number(h.credential_count||0),
           capabilities:JSON.parse(h.capabilities_json||'[]'),running_tasks:h.running_tasks})),
-          base_adapters:Object.entries(BASE_ADAPTERS)
-            .filter(([id])=>!listed.some(h=>h.harness_id===id&&h.registration_version))
-            .map(([id,t])=>({harness_id:id,name:t.name,provider:t.provider,adapter:t.adapter}))});return true;
+          base_adapters:[
+            ...Object.entries(BASE_ADAPTERS).map(([id,t])=>({harness_id:id,name:t.name,provider:t.provider,
+              adapter:t.adapter,adapter_version:t.adapter_version,capabilities:t.capabilities})),
+            ...declaredBaseTemplates(members),
+          ].filter(t=>!listed.some(h=>h.harness_id===t.harness_id&&h.registration_version))});return true;
       }
       if(req.method==='POST'&&route==='/harnesses'){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>12000)throw fail(413,'body_too_large');}
@@ -218,12 +352,14 @@ export function createFormalGateway(config={}){
         const fields=['source_harness_id','instance_id','name'];
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||
           fields.some(k=>typeof body[k]!=='string'||!body[k].trim()))throw fail(400,'invalid_harness_registration');
-        if(!ident(body.source_harness_id)||!BASE_HARNESSES.has(body.source_harness_id)||
+        const listed=await call('/harnesses');
+        // 基座 id 以**平台知道的**为准：内置那几家 + 声明出来的。
+        const knownBases=new Set([...BASE_HARNESSES,...declaredBaseTemplates(listed).map(t=>t.harness_id)]);
+        if(!ident(body.source_harness_id)||!knownBases.has(body.source_harness_id)||
           !ident(body.instance_id)||body.name.length>120)
           throw fail(400,'invalid_harness_registration');
         if(!windowIdFor(body.source_harness_id,body.instance_id))
           throw fail(400,'instance_id_must_be_member_or_window');
-        const listed=await call('/harnesses');
         const source=listed.harnesses?.find(item=>item.harness_id===body.source_harness_id);
         if(!source||!source.registration_version)throw fail(404,'source_harness_not_registered');
         const capabilities=JSON.parse(source.capabilities_json||'[]');
@@ -247,12 +383,16 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string'||!body.harness_id.trim())
           throw fail(400,'invalid_base_registration');
-        const template=BASE_ADAPTERS[body.harness_id];
+        const members=await call('/harnesses');
+        // 内置那几家用本地模板；声明出来的用**平台给的**模板（同一份，别自己拼）。
+        const template=BASE_ADAPTERS[body.harness_id]||
+          declaredBaseTemplates(members).find(t=>t.harness_id===body.harness_id);
         if(!template)throw fail(400,'unknown_base_harness');
         const registration={registered_by:operator,harness_id:body.harness_id,name:template.name,
-          provider:template.provider,adapter:template.adapter,adapter_version:template.adapter_version,
-          capabilities:template.capabilities,max_parallel_tasks:1,status:'online',
-          registration_version:template.registration_version};
+          provider:template.provider,adapter:template.adapter,
+          adapter_version:template.adapter_version||'1.0.0',
+          capabilities:template.capabilities||['coding'],max_parallel_tasks:1,status:'online',
+          registration_version:template.registration_version||'reg-001'};
         const result=await call('/harnesses',registration);
         json(res,200,{...result,harness_id:body.harness_id,name:template.name,provider:template.provider});return true;
       }
@@ -269,6 +409,142 @@ export function createFormalGateway(config={}){
           return {...base,...(await call('/tasks/'+encodeURIComponent(t.task_id)+'/verification'))};
         }));
         json(res,200,{tasks});return true;
+      }
+      if(req.method==='GET'&&route==='/outputs'){
+        // **每个窗口都说了什么**：一次请求看完本群所有活、每一次尝试的 CLI 原话。
+        //
+        // 为什么要放在服务端而不是让浏览器自己去问：一条活一次请求，几十条活
+        // 就是几十个往返，浏览器那边先把页面卡住。服务端并行取，浏览器只等一次。
+        //
+        // attempt_id 是**算出来的**（`{task_id}.a{attempt_no}`，见
+        // backend/app/claim/service.py），所以不需要先捞一遍事件才知道有哪些
+        // 尝试 —— 直接按 1..attempt_no 枚举即可；平台对不存在的 attempt 会回
+        // `{output: null}`，那种直接跳过。
+        const MAX_ATTEMPTS=8; // 一条活最多摊开多少次尝试（平台的 max_attempts 通常是 3）
+        const group=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const taskIds=new Set((group.tasks||[]).map(t=>t.task_id));
+        // 每一轮**真正的结果**在事件里，不在 attempt 的状态列上 ——
+        // 那列在提交之后就停在 verifying/in_progress 不动了（真数据实测：一条
+        // 已经 merged 的活，它的 attempt 状态还是 verifying）。事件才记着
+        // 这一轮是"交上去了"还是"放弃了"，以及为什么放弃。
+        //
+        // 事件**整群一次取**（平台的 /events 一页 1000 条，这个群的历史
+        // 一次就装得下），而不是逐条活去取：逐活取要多发 40 个请求，
+        // 真平台上这一下就是 3.7 秒。取回来再按本群的活裁掉。
+        const outcomes=new Map();
+        let since=0;
+        for(let page=0;page<10;page+=1){
+          const res=await call('/events?since_seq='+since+'&limit=1000').catch(()=>null);
+          const events=(res&&res.events)||[];
+          for(const evt of events){
+            if(!taskIds.has(evt.aggregate_id))continue;
+            const aid=evt.payload&&evt.payload.attempt_id;
+            if(!aid)continue;
+            const name=String(evt.event_name||'');
+            const reason=String((evt.payload&&evt.payload.reason)||'');
+            if(name==='submit_result')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'交上去了',reason:''});
+            else if(name==='abandon')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'放弃了',reason});
+            else if(name==='release')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'放开了',reason});
+            else if(name==='claim_for_revision'||name==='reassign')outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'被换掉了',reason});
+            else if(!outcomes.has(evt.aggregate_id+'|'+aid))outcomes.set(evt.aggregate_id+'|'+aid,{outcome:'',reason:''});
+          }
+          if(!res||!res.has_more)break;
+          since=Number(res.next_seq||since);
+        }
+        const rows0=(group.tasks||[]).map(async t=>{
+          const total=Number(t.attempt_no||0);
+          if(!total)return null;
+          const from=Math.max(1,total-MAX_ATTEMPTS+1);
+          const attempts=await Promise.all(Array.from({length:total-from+1},(_,i)=>from+i).map(async n=>{
+            const attemptId=`${t.task_id}.a${n}`;
+            const out=await call('/tasks/'+encodeURIComponent(t.task_id)+'/output?attempt_id='+encodeURIComponent(attemptId)).catch(()=>null);
+            const output=out&&out.output?out.output:null;
+            if(!output)return null;
+            const stdout=String(output.stdout||'');
+            const stderr=String(output.stderr||'');
+            if(!stdout.trim()&&!stderr.trim())return null;
+            const round=outcomes.get(t.task_id+'|'+attemptId)||{outcome:'',reason:''};
+            // 机器日志在**服务端**就拆成人话与"做了哪些步"：浏览器只要结论，
+            // 不用把几十万字的会话日志拉过去再自己拆（真数据里一条活的 stdout
+            // 能有 26 KB，几十条活就是几百 KB）。
+            const transcript=parseTranscript(stdout);
+            return {
+              attempt_no:n,
+              attempt_id:attemptId,
+              attempt_status:output.attempt_status||null,
+              outcome:round.outcome,
+              reason:round.reason,
+              harness_id:output.harness_id||null,
+              current:Boolean(output.current),
+              // 人话：它说了什么（最后一段在前）与它做了哪些步。
+              texts:transcript.texts.map((item)=>({kind:item.kind,text:item.text})),
+              tools:transcript.tools.slice(-12).map((item)=>({label:item.label,status:item.status})),
+              // 原始记录只留尾巴，给想看原文的人（展开才看）。
+              stdout_tail:stdout.slice(-2000),
+              stderr:stderr.slice(-1500),
+            };
+          }));
+          const live=attempts.filter(Boolean);
+          if(!live.length)return null;
+          return {
+            task_id:t.task_id,
+            title:t.title||t.task_id,
+            status:t.status,
+            owner:t.owner||null,
+            updated_at:t.updated_at||null,
+            attempt_total:total,
+            attempts:live,
+          };
+        });
+        const rows=(await Promise.all(rows0)).filter(Boolean);
+        // 结论里常有编号（FD-…、attempt .a1、commit 的 hash、exclusive_paths）——
+        // 让**平台**统一洗成人话（规则在平台的翻译服务里，界面不自己造一套）。
+        await humanizeRows(rows);
+        json(res,200,{outputs:rows,project_id:config.project,group_id:config.group});return true;
+      }
+      if(req.method==='GET'&&route==='/user-keys'){
+        // 用户自己的 API key：平台替用户保管，但**不自己花** —— 要用得用户点头。
+        const result=await call('/pool/user-keys');
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&route==='/user-keys'){
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/pool/user-keys',{
+          label:String(body.label||''),
+          protocol:String(body.protocol||'openai_chat'),
+          base_url:String(body.base_url||''),
+          key:String(body.key||''),
+          models:Array.isArray(body.models)?body.models.map(String):[],
+        });
+        json(res,200,result);return true;
+      }
+      const keyId=/^\/user-keys\/([A-Za-z0-9_-]+)(\/(approve|deny))?$/.exec(route);
+      if(keyId){
+        const id=encodeURIComponent(keyId[1]);
+        if(req.method==='DELETE'&&!keyId[2]){
+          const result=await call('/pool/user-keys/'+id,undefined,undefined,'DELETE');
+          json(res,200,result);return true;
+        }
+        if(req.method==='POST'&&keyId[3]){
+          // keyId[2] 是 "/approve"（带斜杠），keyId[3] 才是动作名 —— 拼 URL 用后者，
+          // 否则会拼成 ".../k123//approve"，平台那边是 404（点"同意"一点反应也没有）。
+          let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>2000)throw fail(413,'body_too_large');}
+          let body={};if(raw.trim()){try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}}
+          const result=await call('/pool/user-keys/'+id+'/'+keyId[3],{mode:String(body.mode||'once')});
+          json(res,200,result);return true;
+        }
+      }
+      if(req.method==='POST'&&(route==='/wording/translate'||route==='/wording/summarize')){
+        // 平台自己的"翻译"：机器写的文本 → 人话。界面只负责显示。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>200000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        // 规则层很快；模型层要跑管理员那台 CLI（几十秒），所以给更长的时限。
+        const timeoutMs=route.endsWith('/summarize')?120000:10000;
+        const result=await call('/'+route.replace(/^\//,''),body,undefined,undefined,timeoutMs);
+        json(res,200,result);return true;
       }
       if(req.method==='GET'&&route==='/events'){
         // 群范围内的事件流：成员的动态表、成员的求助都从这里读。
@@ -291,9 +567,24 @@ export function createFormalGateway(config={}){
         const availability=await call('/adapter/availability');
         json(res,200,availability);return true;
       }
+      if(req.method==='POST'&&route==='/model-selection'){
+        // 人给某个窗口指定「用自带模型 / 用额度池的哪个模型」。平台照办：
+        // 下一轮这个窗口干活时就按它安排。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/adapter/model-selection',{
+          harness_id:String(body.harness_id||''),
+          model_mode:String(body.model_mode||'cli'),
+          model_id:body.model_id==null?'':String(body.model_id),
+        });
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/plan'){
         // 方案定稿：给人看的那一份（草稿 + 传阅记录），以及由人点「批准并派单」。
         const plan=await call('/groups/'+encodeURIComponent(config.group)+'/plans');
+        // 批准之前人读的就是这一份，所以先把方案里的机器标记洗成人话。
+        await humanizePlan(plan);
         json(res,200,plan);return true;
       }
       if(req.method==='POST'&&route==='/task/budget_override'){
@@ -313,11 +604,49 @@ export function createFormalGateway(config={}){
         const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/approve',{decided_by:operator});
         json(res,200,result);return true;
       }
+      if(req.method==='POST'&&route==='/plan/reject'){
+        // 驳回是批准的**对称面**：人不能只会点头。R10 §10 有 `draft | plan.reject`
+        // 这条边（落到 draft_rejected），旧的人操作面里本来就有「驳回计划」。
+        // 原因必填 —— 没有原因的驳回在平台的决策记录里只剩一个动作。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.plan_id!=='string'||!ident(body.plan_id)||
+          typeof body.reason!=='string'||!body.reason.trim())throw fail(400,'invalid_plan_fields');
+        const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/reject',
+          {decided_by:operator,reason:body.reason.trim()});
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/pool'){
         // 平台自己的额度池：池子里有哪些额度、谁的额度被谁花了。
         // 池子的接口只认 harness 主体，所以这里用管理员 harness 的凭据读。
-        const pool=await call('/pool/status',undefined,config.adminTokenFile);
+        // 冷启动那一次要问三个 CLI 的名册（各 spawn 一次），10 秒不够 —— 超时了
+        // 办公室会以为「池子是空的」。
+        const pool=await call('/pool/status',undefined,config.adminTokenFile,undefined,30000);
         json(res,200,pool);return true;
+      }
+      if(req.method==='POST'&&route==='/pool/declaration'){
+        // 人给「CLI 自己说它能用」的模型定档：免费还是收费由人说了算。平台写进
+        // 声明（沿用同一家的调用约定）后重探一遍，立刻就能选。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const result=await call('/pool/declaration',{
+          cli:String(body.cli||''),
+          model:String(body.model||''),
+          tier:String(body.tier||''),
+        },undefined,'POST',30000);
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&route==='/pool/probe'){
+        // 人点的「重新探一遍」：平台清掉发现缓存，重读一遍各家 CLI 的额度，
+        // 回一份新的清单（新增的免费额度、变成收费的额度都要看得见）。
+        const pool=await call('/pool/probe',undefined,config.adminTokenFile,'POST',30000);
+        json(res,200,pool);return true;
+      }
+      if(req.method==='GET'&&route==='/assistant/runs'){
+        // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
+        const result=await call('/assistant/runs');
+        json(res,200,result);return true;
       }
       if(req.method==='GET'&&route==='/messages'){
         const sinceRaw=url.searchParams.get('since_seq')||'0';
@@ -424,10 +753,18 @@ export function createFormalGateway(config={}){
       if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}$/.test(route)){
         const id=route.split('/').at(-1),task=await call('/tasks/'+id);
         if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
-        const diff=await call('/tasks/'+id+'/diff?include_patch=true');
-        const events=await call('/tasks/'+id+'/events?limit=200');
+        // 改动与事件是**锦上添花**：平台那边算不出 diff（提交不在正式仓库里、
+        // 正式仓库路径不对）时，它会回 500 —— 那是"没有改动"，不是"这条活
+        // 坏了"。所以这两样各自失败就各自空着，不能把整条详情一起带崩
+        // （那会让人以为这条活坏了，其实只是看不到 diff）。
+        const diff=await call('/tasks/'+id+'/diff?include_patch=true').catch(()=>null);
+        const events=await call('/tasks/'+id+'/events?limit=200').catch(()=>({events:[]}));
         // 规格（工单/验收/路径）一起给：办公室要让人**看着工单**做决定。
-        json(res,200,{task:{...safeTask(task),...(task.spec?{spec:task.spec}:{})},diff,events});return true;
+        // 工单里可能夹着平台追加的**现场报告**（一坨机器 JSON）—— 拆开，
+        // 人看的是工单，机器那部分单独摆（见 splitHandoff）；里面的失败原因
+        // 顺手翻成人话（见 humanizeHandoff）。
+        const spec=await humanizeHandoff(splitHandoff(task.spec||{}));
+        json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events});return true;
       }
       if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}\/output$/.test(route)){
         // The harness CLI's own output, as it streams. Read-only, and scoped to

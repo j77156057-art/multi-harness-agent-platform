@@ -1,4 +1,4 @@
-#projectWorkspace { min-height: 100vh; background: #eef2ef; }
+#projectWorkspace { min-height: 100vh; background: #eef0f3; }
 #projectWorkspace[hidden] { display: none; }
 /* Author display rules must not resurrect a closed <dialog>. A closed dialog
    rendered with `display:flex` is an invisible click trap over the office. */
@@ -11,134 +11,163 @@ body.project-phone-only #projectWorkspace { display: none; }
 /* 场景阶段大厅只能作为历史面板存在，绝不能再盖住办公室。单独用 phase 兜底：
    hidden 属性在异常路径上可能被重新写回 false，而 phase 是进入场景时写下的。 */
 body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
-.project-lobby { min-height: 100vh; display: flex; flex-direction: column; color: #253b38; background: #f4f7f3; }
-.project-lobby-head { display: flex; justify-content: space-between; align-items: center; padding: 22px 42px; border-bottom: 1px solid #d8e1da; background: #fff; }
+/* 大厅不再自己顶一个品牌头：应用外壳的顶栏已经是"Agent Office"了，
+   再来一次就是同一个名字出现两遍 —— 那正是"半成品"的观感。 */
+.project-lobby { min-height: 100%; display: flex; flex-direction: column; color: #1c2430; background: #f6f7f9; }
+.project-lobby-head { display: flex; justify-content: space-between; align-items: center; padding: 22px 42px; border-bottom: 1px solid #e3e6ea; background: #fff; }
 .project-brand { display: flex; align-items: center; gap: 12px; }
-.project-brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 9px; background: #253b38; color: #fff; font-size: 12px; font-weight: 700; }
+.project-brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 9px; background: #1c2430; color: #fff; font-size: 12px; font-weight: 700; }
 .project-brand strong, .project-brand span { display: block; }
 .project-brand strong { font-size: 16px; }
-.project-brand span:not(.project-brand-mark) { margin-top: 4px; color: #71827a; font-size: 10px; }
-.project-isolation { color: #5c7b6b; font-size: 11px; }
+.project-brand span:not(.project-brand-mark) { margin-top: 4px; color: #8a94a0; font-size: 10px; }
+.project-isolation { color: #5b6673; font-size: 11.5px; }
 .project-instance-note { margin: 0 0 14px; padding: 10px 12px; border: 1px solid #e4c98a; border-radius: 8px; background: #fff8e7; color: #6b5318; font-size: 12px; line-height: 1.6; }
 .project-instance-note a { color: #8a5a12; font-weight: 600; }
-.project-isolation i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #3c896d; }
-.project-lobby-body { width: min(1120px, calc(100% - 64px)); margin: auto; display: grid; grid-template-columns: minmax(260px, .78fr) minmax(0, 1.22fr); gap: 78px; align-items: center; flex: 1; padding: 62px 0; }
-.project-lobby-copy { max-width: 420px; }
-.project-lobby-copy .eyebrow, .project-section-head .eyebrow { margin: 0 0 12px; color: #648579; font: 10px monospace; letter-spacing: 1.8px; }
-.project-lobby-copy h1 { margin: 0; font-size: clamp(30px, 4vw, 48px); line-height: 1.15; font-weight: 600; letter-spacing: 0; }
-.project-lobby-copy p:not(.eyebrow) { margin: 18px 0 26px; color: #6c7d74; font-size: 13px; line-height: 1.9; }
+.project-isolation i { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #2f5d8c; }
+/* 大厅的版式：左一句"从哪开始"，右边一列卡片。
+   以前两栏之间隔 78px、下面还空一大片，看着像没排完 —— 现在收进来，
+   卡片自己成一块。 */
+.project-lobby-body { width: min(1080px, calc(100% - 64px)); margin: auto; display: grid; grid-template-columns: minmax(280px, .82fr) minmax(0, 1.18fr); gap: 40px; align-items: center; flex: 1; padding: 40px 0 44px; }
+.project-lobby-side { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.project-lobby-copy { max-width: 460px; }
+.project-lobby-copy h1 { margin: 0; font-size: clamp(28px, 3.4vw, 42px); line-height: 1.2; font-weight: 600; letter-spacing: 0; }
+.project-lobby-copy p:not(.eyebrow) { margin: 16px 0 24px; color: #5b6673; font-size: 13px; line-height: 1.85; }
 .project-lobby-copy p.project-instance-note { margin: 0 0 14px; color: #6b5318; font-size: 12px; line-height: 1.6; }
 .project-new { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; padding-inline: 22px; }
 .project-new svg { width: 16px; height: 16px; }
 .project-lobby-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-.project-create-settings { margin-top: 24px; padding: 16px; border: 1px solid #d6e2d8; border-radius: 8px; background: #fff; }
+.project-create-settings { margin-top: 24px; padding: 16px; border: 1px solid #e3e6ea; border-radius: 8px; background: #fff; }
 .project-settings-head { display: grid; gap: 4px; margin-bottom: 12px; }
 .project-settings-head .eyebrow { margin: 0; }
-.project-settings-head strong { color: #304d40; font-size: 13px; }
-.project-create-settings > label { display: grid; gap: 5px; margin-top: 10px; color: #5c7568; font-size: 11px; }
-.project-create-settings input, .project-create-settings select { box-sizing: border-box; width: 100%; padding: 8px 9px; border: 1px solid #c8d6cf; border-radius: 5px; background: #fff; color: #243b33; font: inherit; font-size: 11px; }
-.project-create-settings fieldset { display: grid; gap: 7px; margin: 13px 0 0; padding: 9px; border: 1px solid #e0e9e1; border-radius: 6px; }
-.project-create-settings legend { padding: 0 4px; color: #5c7568; font-size: 10px; }
-.project-member-option { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 7px; align-items: center; color: #304d40; font-size: 11px; }
+.project-settings-head strong { color: #1c2430; font-size: 13px; }
+.project-create-settings > label { display: grid; gap: 5px; margin-top: 10px; color: #5b6673; font-size: 11px; }
+.project-create-settings input, .project-create-settings select { box-sizing: border-box; width: 100%; padding: 8px 9px; border: 1px solid #d3d9e0; border-radius: 5px; background: #fff; color: #1c2430; font: inherit; font-size: 11px; }
+.project-create-settings fieldset { display: grid; gap: 7px; margin: 13px 0 0; padding: 9px; border: 1px solid #eef0f3; border-radius: 6px; }
+.project-create-settings legend { padding: 0 4px; color: #5b6673; font-size: 10px; }
+.project-member-option { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 7px; align-items: center; color: #1c2430; font-size: 11px; }
 .project-member-option input { width: auto; }
-.project-member-option small { color: #82928a; font-size: 10px; }
-.project-create-settings > p { margin: 10px 0 0; color: #82928a; font-size: 10px; line-height: 1.5; }
-.project-lobby-steps { display: grid; gap: 10px; margin: 30px 0 0; padding: 18px 0 0; border-top: 1px solid #dde7de; list-style: none; }
-.project-lobby-steps li { display: flex; align-items: baseline; gap: 10px; color: #5c7568; font-size: 12px; }
-.project-lobby-steps span { color: #7ba28d; font: 10px monospace; letter-spacing: 1px; }
-.project-create-dialog { width: min(560px, calc(100vw - 28px)); max-height: min(90dvh, 760px); display: none; flex-direction: column; overflow: hidden; padding: 0; border: 1px solid #c6d6ce; border-radius: 14px; background: #fbfdfa; color: #243b33; }
+.project-member-option small { color: #8a94a0; font-size: 10px; }
+.project-create-settings > p { margin: 10px 0 0; color: #8a94a0; font-size: 10px; line-height: 1.5; }
+/* 三步说明：正常的中文步骤，前面一个序号圈 —— 不用等宽英文数字撑门面。 */
+.project-lobby-steps { display: grid; gap: 9px; margin: 26px 0 0; padding: 16px 0 0; border-top: 1px solid #eef0f3; list-style: none; }
+.project-lobby-steps li { display: flex; align-items: center; gap: 9px; color: #5b6673; font-size: 12.5px; }
+.project-lobby-steps span { width: 18px; height: 18px; flex: none; display: grid; place-items: center; border-radius: 50%; background: #eaf1f8; color: #2f5d8c; font-size: 11px; font-weight: 650; }
+.project-create-dialog { width: min(560px, calc(100vw - 28px)); max-height: min(90dvh, 760px); display: none; flex-direction: column; overflow: hidden; padding: 0; border: 1px solid #d3d9e0; border-radius: 14px; background: #fbfcfd; color: #1c2430; }
 .project-create-dialog[open] { display: flex; }
 .project-create-dialog::backdrop { background: #16241f99; }
-.project-create-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 22px 24px 16px; border-bottom: 1px solid #e2ebe4; }
+.project-create-head { display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 22px 24px 16px; border-bottom: 1px solid #eef0f3; }
 .project-create-head h2 { margin: 4px 0 6px; font-size: 22px; font-weight: 600; }
-.project-create-head p { margin: 0; color: #6c7d74; font-size: 11px; }
-.project-create-head .eyebrow { margin: 0; color: #648579; font: 10px monospace; letter-spacing: 1.8px; }
-.project-create-close { border: 0; background: none; color: #7f9188; font-size: 22px; line-height: 1; cursor: pointer; }
+.project-create-head p { margin: 0; color: #5b6673; font-size: 11px; }
+.project-create-head .eyebrow { margin: 0; color: #8a94a0; font: 10px monospace; letter-spacing: 1.8px; }
+.project-create-close { border: 0; background: none; color: #8a94a0; font-size: 22px; line-height: 1; cursor: pointer; }
 .project-create-body { display: grid; gap: 6px; padding: 18px 24px 6px; overflow: auto; }
-.project-create-body > label { display: grid; gap: 5px; margin-bottom: 8px; color: #5c7568; font-size: 11px; }
-.project-create-body input, .project-create-body select { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #c8d6cf; border-radius: 6px; background: #fff; color: #243b33; font: inherit; font-size: 12px; }
-.project-create-body fieldset { display: grid; gap: 7px; margin: 0 0 8px; padding: 10px; border: 1px solid #e0e9e1; border-radius: 8px; }
-.project-create-body legend { padding: 0 4px; color: #5c7568; font-size: 10px; }
-.project-create-scope { margin: 0 0 8px; color: #82928a; font-size: 10px; line-height: 1.6; }
-.project-create-foot { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 24px 18px; border-top: 1px solid #e2ebe4; background: #fbfdfa; }
-.project-create-foot span { color: #7f9188; font-size: 10px; }
+.project-create-body > label { display: grid; gap: 5px; margin-bottom: 8px; color: #5b6673; font-size: 11px; }
+.project-create-body input, .project-create-body select { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid #d3d9e0; border-radius: 6px; background: #fff; color: #1c2430; font: inherit; font-size: 12px; }
+.project-create-body fieldset { display: grid; gap: 7px; margin: 0 0 8px; padding: 10px; border: 1px solid #eef0f3; border-radius: 8px; }
+.project-create-body legend { padding: 0 4px; color: #5b6673; font-size: 10px; }
+.project-create-scope { margin: 0 0 8px; color: #8a94a0; font-size: 10px; line-height: 1.6; }
+.project-create-foot { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 14px 24px 18px; border-top: 1px solid #eef0f3; background: #fbfcfd; }
+.project-create-foot span { color: #8a94a0; font-size: 10px; }
 .project-create-foot .project-new { flex: none; white-space: nowrap; }
-.project-connect { padding: 10px 16px; border: 1px solid #b9cfc0; border-radius: 5px; background: #fff; color: #426452; font-size: 12px; cursor: pointer; }
-.project-connect:hover { background: #f3f8f3; }
-.project-history { min-width: 0; padding: 25px 27px 23px; border: 1px solid #d6e2d8; border-radius: 10px; background: #fff; box-shadow: 0 14px 34px #254c3a0d; }
-.project-section-head { display: flex; justify-content: space-between; align-items: end; padding-bottom: 16px; border-bottom: 1px solid #e3ebe4; }
-.project-section-head h2 { margin: 0; font-size: 20px; font-weight: 600; }
-.project-section-head > span { color: #819087; font-size: 11px; }
+.project-connect { padding: 10px 16px; border: 1px solid #c9d3dd; border-radius: 5px; background: #fff; color: #2f5d8c; font-size: 12px; cursor: pointer; }
+.project-connect:hover { background: #f4f8fc; }
+.project-history { min-width: 0; padding: 22px 24px 20px; border: 1px solid #e3e6ea; border-radius: 12px; background: #fff; box-shadow: 0 2px 10px #1c24300d; }
+.project-section-head { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 12px; border-bottom: 1px solid #eef0f3; }
+.project-section-head h2 { margin: 0; font-size: 17px; font-weight: 650; }
+.project-section-head > span { color: #8a94a0; font-size: 11.5px; }
 .project-history-list { display: grid; gap: 8px; padding-top: 12px; }
-.project-empty { min-height: 210px; display: grid; align-content: center; justify-items: center; gap: 7px; color: #82928a; font-size: 11px; }
-.project-empty strong { color: #4c685a; font-size: 13px; }
-.project-empty-icon { width: 37px; height: 37px; display: grid; place-items: center; border: 1px dashed #b9cdbf; border-radius: 9px; color: #6b9a7f; font-size: 22px; }
-.project-recover { margin-top: 7px; padding: 7px 11px; border: 1px solid #b9cfc0; border-radius: 5px; background: #fff; color: #426452; font: inherit; font-size: 11px; cursor: pointer; }
-.project-recover:hover { background: #f3f8f3; }
-.project-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto auto; gap: 11px; align-items: center; min-height: 70px; padding: 10px 4px; border-bottom: 1px solid #edf1ed; }
+/* 空状态：一条安静的一行，不是半屏。
+   （以前 210px 高的大虚线加号框，占掉整页最显眼的位置 —— 那是最像 demo 的地方。） */
+.project-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 2px;
+  color: #8a94a0;
+  font-size: 12px;
+}
+
+.project-empty strong { color: #4c5a68; font-size: 12.5px; }
+
+.project-empty-icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #c6d0da;
+  border-radius: 7px;
+  color: #2f5d8c;
+  font-size: 15px;
+}
+.project-recover { margin-top: 7px; padding: 7px 11px; border: 1px solid #c9d3dd; border-radius: 5px; background: #fff; color: #2f5d8c; font: inherit; font-size: 11px; cursor: pointer; }
+.project-recover:hover { background: #f4f8fc; }
+.project-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto auto auto; gap: 11px; align-items: center; min-height: 70px; padding: 10px 4px; border-bottom: 1px solid #eef0f3; }
 .project-card:last-child { border-bottom: 0; }
-.project-card[data-active="1"] { background: #f4f9f5; box-shadow: inset 3px 0 #5d9a78; }
-.project-card-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #e4f0e8; color: #38644e; font: 11px monospace; }
+.project-card[data-active="1"] { background: #f4f8fc; box-shadow: inset 3px 0 #2f5d8c; }
+.project-card-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: #eaf1f8; color: #2f5d8c; font: 11px monospace; }
 .project-card-main { min-width: 0; }
 .project-card-main strong, .project-card-main span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-card-main strong { color: #304d40; font-size: 13px; }
+.project-card-main strong { color: #1c2430; font-size: 13px; }
 /* The creation timestamp is secondary: truncating it mid-string ("2026/10/…")
    hides both the date and the identity, so show the date and move the identity
    to its own column instead of ellipsizing the whole line. */
-.project-card-main span { margin-top: 5px; color: #87968e; font: 10px monospace; }
-.project-card-role { color: #587d66; font-size: 10px; white-space: nowrap; }
-.project-member-option:has(input:checked) span { color: #1f5140; font-weight: 600; }
-.project-member-option input:focus-visible { outline: 2px solid #4f8f74; outline-offset: 2px; }
-.project-card-status { padding: 5px 7px; border-radius: 4px; background: #eef5ee; color: #587d66; font-size: 10px; white-space: nowrap; }
+.project-card-main span { margin-top: 5px; color: #8a94a0; font: 10px monospace; }
+.project-card-role { color: #5b6673; font-size: 10px; white-space: nowrap; }
+.project-member-option:has(input:checked) span { color: #2f5d8c; font-weight: 600; }
+.project-member-option input:focus-visible { outline: 2px solid #5b6673; outline-offset: 2px; }
+.project-card-status { padding: 5px 7px; border-radius: 4px; background: #eef3f9; color: #5b6673; font-size: 10px; white-space: nowrap; }
 .project-card-status.scene { background: #eaf0fa; color: #58739a; }
 .project-card-status.phone { display: none; }
-.project-card-open { border: 1px solid #c9d9ce; border-radius: 5px; padding: 7px 10px; background: #fff; color: #426452; font-size: 11px; white-space: nowrap; }
-.project-card-open:hover { background: #f3f8f3; }
-.project-lobby-foot { display: flex; justify-content: space-between; padding: 17px 42px; border-top: 1px solid #d8e1da; color: #819087; font-size: 10px; }
-.harness-dialog { width: min(980px, calc(100vw - 24px)); max-height: 90dvh; overflow: auto; border: 1px solid #cad7d2; border-radius: 16px; padding: 24px; background: #fcfaf6; color: #243b33; }
+.project-card-open { border: 1px solid #d5dde6; border-radius: 5px; padding: 7px 10px; background: #fff; color: #2f5d8c; font-size: 11px; white-space: nowrap; }
+.project-card-open:hover { background: #f4f8fc; }
+/* 页脚一句话说完（以前两句话甩在两头，像没对齐）：历史只在本机。 */
+.project-lobby-foot { display: flex; justify-content: center; gap: 6px; padding: 14px 42px; border-top: 1px solid #e3e6ea; color: #8a94a0; font-size: 11px; }
+.project-lobby-foot span + span::before { content: '·'; margin-right: 6px; color: #c9d3dd; }
+.harness-dialog { width: min(980px, calc(100vw - 24px)); max-height: 90dvh; overflow: auto; border: 1px solid #d5dde6; border-radius: 16px; padding: 24px; background: #fbfcfd; color: #1c2430; }
 .harness-dialog::backdrop { background: #182b2588; }
 .harness-dialog-head { display: flex; justify-content: space-between; gap: 18px; align-items: start; }
 .harness-dialog-head h2, .model-connection h3 { margin: 5px 0 8px; font-size: 21px; }
-.harness-dialog-head p, .harness-boundary, .harness-help { color: #63756d; font-size: 12px; line-height: 1.6; }
-.harness-dialog-head button, .harness-tools button, .harness-card button, .model-connection-form button { border: 1px solid #bfd1c5; border-radius: 6px; padding: 8px 11px; background: #fff; color: #426452; cursor: pointer; }
-.harness-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0 12px; padding: 10px 12px; border: 1px solid #dce7df; border-radius: 8px; background: #f5f9f5; color: #5c7869; font-size: 12px; }
+.harness-dialog-head p, .harness-boundary, .harness-help { color: #5b6673; font-size: 12px; line-height: 1.6; }
+.harness-dialog-head button, .harness-tools button, .harness-card button, .model-connection-form button { border: 1px solid #c9d3dd; border-radius: 6px; padding: 8px 11px; background: #fff; color: #2f5d8c; cursor: pointer; }
+.harness-tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0 12px; padding: 10px 12px; border: 1px solid #e6e9ee; border-radius: 8px; background: #f5f8fc; color: #5b6673; font-size: 12px; }
 .harness-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.harness-card, .endpoint-row { border: 1px solid #d7e2d8; border-radius: 8px; padding: 13px; background: #fff; }
+.harness-card, .endpoint-row { border: 1px solid #e3e6ea; border-radius: 8px; padding: 13px; background: #fff; }
 .harness-card-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
 .harness-card-title strong { font-size: 13px; }
-.harness-card p { margin: 7px 0 0; color: #71837a; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.harness-card p { margin: 7px 0 0; color: #8a94a0; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 .harness-state { padding: 3px 6px; border-radius: 4px; font-size: 10px; white-space: nowrap; }
-.harness-state.installed { background: #e4f2e7; color: #36704d; }
+.harness-state.installed { background: #eaf1f8; color: #2f5d8c; }
 .harness-state.missing { background: #f4eee4; color: #8a6b3d; }
-.harness-register { margin-top: 17px; border-top: 1px solid #dce7df; padding-top: 16px; }
+.harness-register { margin-top: 17px; border-top: 1px solid #e6e9ee; padding-top: 16px; }
 .harness-register h3 { margin: 5px 0 8px; font-size: 17px; }
-.harness-register p { margin: 0; color: #63756d; font-size: 12px; line-height: 1.6; }
+.harness-register p { margin: 0; color: #5b6673; font-size: 12px; line-height: 1.6; }
 .harness-register-form { display: grid; grid-template-columns: 1fr 1fr 1.2fr auto; gap: 9px; align-items: end; margin-top: 12px; }
-.harness-register-form label { display: grid; gap: 5px; color: #5d7467; font-size: 10px; }
-.harness-register-form input, .harness-register-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #c8d6cf; border-radius: 6px; background: #fff; color: #243b33; font: inherit; font-size: 11px; }
-.harness-register-form button { height: 34px; border: 1px solid #294d42; border-radius: 6px; padding: 8px 13px; background: #294d42; color: #fff; cursor: pointer; white-space: nowrap; }
+.harness-register-form label { display: grid; gap: 5px; color: #5b6673; font-size: 10px; }
+.harness-register-form input, .harness-register-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #d3d9e0; border-radius: 6px; background: #fff; color: #1c2430; font: inherit; font-size: 11px; }
+.harness-register-form button { height: 34px; border: 1px solid #1c2430; border-radius: 6px; padding: 8px 13px; background: #1c2430; color: #fff; cursor: pointer; white-space: nowrap; }
 .harness-register-form button:disabled { opacity: .6; cursor: wait; }
 .harness-register .harness-help { margin-top: 9px; }
-.harness-base { margin-top: 17px; border-top: 1px solid #dce7df; padding-top: 16px; }
+.harness-base { margin-top: 17px; border-top: 1px solid #e6e9ee; padding-top: 16px; }
 .harness-base h3 { margin: 5px 0 8px; font-size: 17px; }
-.harness-base p { margin: 0; color: #63756d; font-size: 12px; line-height: 1.6; }
+.harness-base p { margin: 0; color: #5b6673; font-size: 12px; line-height: 1.6; }
 .harness-base-form { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: end; margin-top: 12px; }
-.harness-base-form label { display: grid; gap: 5px; color: #5d7467; font-size: 10px; }
-.harness-base-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #c8d6cf; border-radius: 6px; background: #fff; color: #243b33; font: inherit; font-size: 11px; }
-.harness-base-form button { height: 34px; border: 1px solid #294d42; border-radius: 6px; padding: 8px 13px; background: #294d42; color: #fff; cursor: pointer; white-space: nowrap; }
+.harness-base-form label { display: grid; gap: 5px; color: #5b6673; font-size: 10px; }
+.harness-base-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #d3d9e0; border-radius: 6px; background: #fff; color: #1c2430; font: inherit; font-size: 11px; }
+.harness-base-form button { height: 34px; border: 1px solid #1c2430; border-radius: 6px; padding: 8px 13px; background: #1c2430; color: #fff; cursor: pointer; white-space: nowrap; }
 .harness-base-form button:disabled { opacity: .6; cursor: wait; }
 .harness-base .harness-help { margin-top: 9px; }
 .harness-card-actions { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-.harness-card-actions a { color: #4d7861; font-size: 11px; }
+.harness-card-actions a { color: #2f5d8c; font-size: 11px; }
 .endpoint-row { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; grid-column: 1 / -1; }
-.endpoint-row span { color: #5d896c; font-size: 11px; }
-.endpoint-row code { color: #71837a; font-size: 10px; }
-.model-connection { margin-top: 17px; border-top: 1px solid #dce7df; padding-top: 16px; }
+.endpoint-row span { color: #5b6673; font-size: 11px; }
+.endpoint-row code { color: #8a94a0; font-size: 10px; }
+.model-connection { margin-top: 17px; border-top: 1px solid #e6e9ee; padding-top: 16px; }
 .model-connection-form { display: grid; grid-template-columns: 1fr 1fr 1.2fr 1fr auto; gap: 9px; align-items: end; }
-.model-connection-form label { display: grid; gap: 5px; color: #5d7467; font-size: 10px; }
-.model-connection-form input, .model-connection-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #c8d6cf; border-radius: 6px; background: #fff; color: #243b33; font: inherit; font-size: 11px; }
-.model-connection-form button { height: 34px; background: #294d42; color: #fff; }
-.harness-boundary { margin: 18px 0 0; padding-top: 12px; border-top: 1px solid #dce7df; }
+.model-connection-form label { display: grid; gap: 5px; color: #5b6673; font-size: 10px; }
+.model-connection-form input, .model-connection-form select { min-width: 0; box-sizing: border-box; padding: 8px; border: 1px solid #d3d9e0; border-radius: 6px; background: #fff; color: #1c2430; font: inherit; font-size: 11px; }
+.model-connection-form button { height: 34px; background: #1c2430; color: #fff; }
+.harness-boundary { margin: 18px 0 0; padding-top: 12px; border-top: 1px solid #e6e9ee; }
 @media (max-width: 760px) {
   .project-lobby-head { padding: 16px 18px; }  .project-isolation { font-size: 0; }
   .project-isolation i { margin: 0; }
@@ -161,4 +190,67 @@ body[data-project-phase="scene"] #projectWorkspace { display: none !important; }
   .harness-register-form label:nth-child(3), .harness-register-form button { grid-column: 1 / -1; }
   .endpoint-row { grid-template-columns: 1fr auto; }
   .endpoint-row code { grid-column: 1 / -1; }
+}
+
+/* ------------------------------------------- 平台上已有的项目（大厅里的一段） */
+
+.project-platform {
+  min-width: 0;
+  padding: 25px 27px 23px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 14px 34px #1c243012;
+}
+
+.project-platform-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #5b6673;
+  line-height: 1.6;
+}
+
+.project-platform-list { display: grid; gap: 8px; padding-top: 12px; }
+
+.project-platform-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #eef0f3;
+}
+
+.project-platform-item:last-child { border-bottom: 0; }
+.project-platform-main { display: grid; gap: 3px; min-width: 0; }
+.project-platform-main strong { font-size: 13px; font-weight: 600; color: #1c2430; }
+.project-platform-main span { font-size: 11px; color: #8a94a0; }
+
+/* 「打开」：一排一模一样的方框按钮看着像表格；做成安静的链接动作。 */
+.project-platform-open {
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: #2f5d8c;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.project-platform-open::after { content: ' →'; color: #a9b4c0; }
+.project-platform-open:hover { background: none; text-decoration: underline; text-underline-offset: 3px; }
+/* 大厅里那句"已经有几个能干活的了"——先说清楚，让人跳过那扇门。 */
+.project-lobby-hint {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid #cfe0ef;
+  border-radius: 6px;
+  background: #eaf1f8;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #1c2430;
+  max-width: 46ch;
 }

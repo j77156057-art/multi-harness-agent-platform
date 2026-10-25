@@ -263,6 +263,15 @@ class CliHarness(HttpAdapter):
         """Remove any temporary transport files created for the last command."""
         return None
 
+    def process_environment(self) -> dict[str, str] | None:
+        """Optional environment for the child CLI process.
+
+        Some adapters need their own configuration (Pi isolates its agent
+        directory so it cannot read the user's real config).  The values are
+        **added to** the worker's environment, never replacing it.
+        """
+        return None
+
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {}
 
@@ -587,6 +596,10 @@ class CliHarnessWorker:
         )
         run_kwargs["log_path"] = stdout_log
         run_kwargs["err_log_path"] = stderr_log
+        # 适配器自己要的环境（比如 Pi 隔离自己的 agent 目录）与额度池给的 route env
+        # 一起给子进程：两者都是**加到**worker 自己的环境上，不是替换它。
+        adapter_env = self.adapter.process_environment()
+        merged_env = {**(env or {}), **(adapter_env or {})}
         try:
             cli = self.runner.run(
                 argv,
@@ -594,7 +607,7 @@ class CliHarnessWorker:
                 timeout_seconds=timeout_seconds,
                 on_tick=self._tick(task_id),
                 tick_interval_seconds=float(self.heartbeat_seconds),
-                **({"env": env} if env else {}),
+                **({"env": merged_env} if merged_env else {}),
                 **run_kwargs,
             )
         except HarnessTimeout:

@@ -19,6 +19,25 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 _STATUS = re.compile(r"^[a-z][a-z_-]{0,38}$")
 _MAX_SAY_CHARS = 4000
 
+#: 群任务表一次给多少条（摘要的窗口大小）与上限。
+_GROUP_TASKS_DEFAULT_LIMIT = 20
+_GROUP_TASKS_MAX_LIMIT = 100
+
+
+def _bounded_int(value: Any, *, default: int, low: int, high: int) -> int:
+    """一个界内的整数；模型传了怪东西就当没传（用默认值），不因此失败。"""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def _clip(text: str, limit: int) -> str:
+    """太长的标题只留开头 —— 摘要里要的是「哪一条」，不是整段标题。"""
+    value = str(text or "").strip()
+    return value if len(value) <= limit else value[:limit] + "…"
+
 
 class ToolRefused(ValueError):
     """A tool call that failed *before* doing anything: bad shape, bad arg."""
@@ -80,6 +99,9 @@ def build_registry(
 
     def task_get(args: dict[str, Any]) -> dict[str, Any]:
         return client.get(f"/tasks/{_required_id(args, 'task_id')}")
+
+    def harness_bases(_args: dict[str, Any]) -> dict[str, Any]:
+        return client.get("/harnesses/bases")
 
     def task_diff(args: dict[str, Any]) -> dict[str, Any]:
         task_id = _required_id(args, "task_id")
@@ -186,14 +208,122 @@ def build_registry(
             "verification": verification.get("verification"),
         }
 
+    def task_forensics(args: dict[str, Any]) -> dict[str, Any]:
+        """The deeper evidence: more of the CLI output, the stderr side, and where
+        every byte came from.  The platform masks credential-looking lines
+        before this point, so the raw value is not here -- the count of masked
+        lines is, and the answer has to say so.
+        """
+        task_id = _required_id(args, "task_id")
+        pack = client.get(f"/tasks/{task_id}/forensics")
+        forensics = pack.get("forensics") if isinstance(pack, dict) else None
+        if not forensics:
+            return {"task_id": task_id, "forensics": None, "note": "no attempt transcript"}
+        events = client.get(f"/tasks/{task_id}/events", limit=200)
+        rows = events.get("events") if isinstance(events, dict) else []
+        failure_events = [
+            {
+                key: event.get(key)
+                for key in ("seq", "event_name", "created_at", "actor_id", "payload")
+            }
+            for event in rows
+            if isinstance(event, dict)
+            and str(event.get("event_name") or "") in ("abandon", "release", "submit_result")
+        ]
+        return {
+            "task_id": task_id,
+            "forensics": forensics,
+            "failure_events": failure_events[-5:],
+        }
+
     def group_tasks(args: dict[str, Any]) -> dict[str, Any]:
+        """The group's task list -- as a **summary**, not the whole table.
+
+        The whole table used to be one observation: dozens of tasks with every
+        field each, tens of kilobytes.  The model only saw the first half of it
+        and then honestly reported "the list is cut off at FD-76…" -- which
+        reads like "the answer never finished".  So the tool now hands over a
+        complete summary (counts, distribution, who holds what) and says how
+        many rows it left out and how to page through them.
+        """
         params: dict[str, Any] = {}
         status = str(args.get("status") or "").strip()
         if status:
             if not _STATUS.fullmatch(status):
                 raise ToolRefused(f"status {status!r} is not a plain lowercase token")
             params["status"] = status
-        return client.get(f"/groups/{group_id}/tasks", **params)
+        limit = _bounded_int(
+            args.get("limit"),
+            default=_GROUP_TASKS_DEFAULT_LIMIT,
+            low=1,
+            high=_GROUP_TASKS_MAX_LIMIT,
+        )
+        offset = _bounded_int(args.get("offset"), default=0, low=0, high=_GROUP_TASKS_MAX_LIMIT)
+        # Paging is the model's **explicit** request: without it the call stays
+        # exactly what it was (one plain read), and the tool cuts the window
+        # itself -- a whole table in one observation is what the model could not
+        # finish reading in the first place.
+        paged = args.get("limit") is not None or args.get("offset") is not None
+        if paged:
+            params["limit"] = limit
+            params["offset"] = offset
+        data = client.get(f"/groups/{group_id}/tasks", **params)
+        tasks = [row for row in (data.get("tasks") or []) if isinstance(row, dict)]
+        total = int(data.get("total") or len(tasks))
+        if not paged:
+            tasks = tasks[:limit]
+
+        by_status: dict[str, int] = {}
+        unclaimed: list[dict[str, Any]] = []
+        claimed: list[dict[str, Any]] = []
+        for row in tasks:
+            state = str(row.get("status") or "unknown")
+            by_status[state] = by_status.get(state, 0) + 1
+            entry = {
+                "task_id": row.get("task_id"),
+                "title": _clip(str(row.get("title") or ""), 60),
+                "status": state,
+            }
+            holder = str(row.get("owner") or "")
+            if holder:
+                entry["owner"] = holder
+                claimed.append(entry)
+            else:
+                unclaimed.append(entry)
+
+        # The distribution and the unclaimed count come from the **whole** list
+        # when the platform says so: a window's own counts would read as the
+        # list's counts ("21 未领取" instead of "73 未领取").
+        whole_by_status = data.get("by_status")
+        if isinstance(whole_by_status, dict) and whole_by_status:
+            by_status = {str(key): int(value) for key, value in whole_by_status.items()}
+        whole_unclaimed = data.get("unclaimed_total")
+
+        shown = len(tasks)
+        omitted = max(0, total - offset - shown)
+        unclaimed_count = int(whole_unclaimed) if whole_unclaimed is not None else len(unclaimed)
+        return {
+            "total": total,
+            "by_status": by_status,
+            "unclaimed": {
+                "count": unclaimed_count,
+                "count_note": (
+                    "全表里没有持有者的条数"
+                    if whole_unclaimed is not None
+                    else "本窗口内没有持有者的条数"
+                ),
+                "items": unclaimed,
+            },
+            "claimed": {"count": len(claimed), "items": claimed},
+            "window": {"offset": offset, "limit": limit, "shown": shown},
+            "omitted": omitted,
+            "note": (
+                f"共 {total} 条，本窗口（offset={offset}）给出 {shown} 条"
+                + (f"，还有 {omitted} 条没列（要全量请用 offset/limit 翻页）" if omitted else "")
+                + "。本工具给的是摘要：总数、状态分布、没被领的与已有人领的清单；"
+                "要看某一条的细节，用 task.get 或 task.forensics。"
+            ),
+        }
 
     def say(args: dict[str, Any]) -> dict[str, Any]:
         to = _required_id(args, "to")
@@ -211,6 +341,13 @@ def build_registry(
 
     tools = [
         Tool("pool.status", "read", "额度池现状：各档逐家可用与否、余量", pool_status),
+        Tool(
+            "harness.bases",
+            "read",
+            "能当正式成员的基座：内置那几家 + 声明出来的，每个带一份缺口清单"
+            "（缺什么、为什么缺）",
+            harness_bases,
+        ),
         Tool("task.get", "read", "一个任务的完整状态与账本", task_get),
         Tool(
             "task.diff",
@@ -232,6 +369,13 @@ def build_registry(
             "失败诊断证据束：任务状态 + 失败事件（最新至多 3 条，原样） + "
             "CLI 输出尾巴 + 验证回执（一次取证；不编原因）",
             task_diagnose,
+        ),
+        Tool(
+            "task.forensics",
+            "read",
+            "深取证：更长的 CLI 输出、stderr 与出处（哪条任务/哪一轮/哪个日志文件/多大/何时）；"
+            "像凭据的行平台已遮挡",
+            task_forensics,
         ),
         Tool("group.tasks", "read", "本群任务表（可选 status 过滤）", group_tasks),
         Tool(

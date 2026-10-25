@@ -110,10 +110,12 @@ try {
   const brief = page.locator('#flatBrief');
   await brief.waitFor({ state: 'visible' });
   const briefText = await brief.innerText();
-  assert.match(briefText, /谁接的/, '任务书里每条任务都写着谁接的');
-  assert.match(briefText, /做得怎么样/, '任务书里每条任务都写着做得怎么样');
-  assert.match(briefText, /claude-code/, '接过的人在任务书里');
-  assert.match(briefText, /打回返修/, '审核结论在任务书里');
+  assert.match(briefText, /执行方/, '任务书里每条任务都写着谁接的');
+  assert.match(briefText, /执行情况/, '任务书里每条任务都写着做得怎么样');
+  // 人名用**登记名**（"Claude Code"），不是窗口 id（"claude-code"）——
+  // 断的是"接过的人看得见"这件事，不是他长什么样。
+  assert.match(briefText, /Claude Code/, '接过的人在任务书里（写的是登记名）');
+  assert.match(briefText, /退回返修/, '审核结论在任务书里');
   assert.match(briefText, /CLI 不可用/, '没完成的原因在任务书里');
   assert.match(briefText, /任务书正文/, '方案原文仍然在后面');
   await page.keyboard.press('Escape');
@@ -135,8 +137,14 @@ try {
   await page.waitForTimeout(300);
 
   // 3.5 任务行里也要看得到谁接过（即使现在没人拿着）
+  // 按人归堆之后，"谁接过"写在**块头**上（行里不重复写一遍）：
+  // 没人拿着的那条要落在接过它的那块下面，而且行里说清"现在没人做"。
+  const groups = await page.locator('#aoWorkspace .flat-group').allInnerTexts();
+  const abandonedGroup = groups.find((text) => text.includes('被放弃的那条'));
+  assert.ok(abandonedGroup, '没人拿着的那条还在列表里');
+  assert.match(abandonedGroup, /Claude Code/, '它落在接过它的那块下面');
   const rows = await page.locator('#aoWorkspace .flat-task').allInnerTexts();
-  assert.ok(rows.some((r) => r.includes('之前是')), '没人拿着的任务也写明之前是谁接的');
+  assert.ok(rows.some((r) => r.includes('已放弃')), '行里的状态签说清这条没做成');
 
   // 3.8 没人接的活：请管理员派出去（办公室不代点，只发一条 @管理员 的群消息）
   const posted = [];

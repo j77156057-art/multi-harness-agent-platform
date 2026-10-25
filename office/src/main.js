@@ -33,9 +33,9 @@ const status = await fetch('/api/formal/status', { cache: 'no-store' })
   .then((response) => (response.ok ? response.json() : null))
   .catch(() => null);
 
-const roster = (status?.harnesses || []).filter(
-  (item) => item.status === 'online' && item.capabilities?.includes('coding'),
-);
+// 窗口名单：**在线的与离线的都留着** —— 离线的窗口也是这个团队的一员，
+// 人要看得见它现在不在（大厅里写死「在线」是骗人）。
+const roster = (status?.harnesses || []).filter((item) => item.capabilities?.includes('coding'));
 // 管理员是**外部 Harness 窗口**（群主在开工向导里选），不是平台 Agent。
 const ADMIN_IDENTITY = status?.admin?.identity || null;
 // "已登记"不等于"能干活"：没有平台凭据的窗口既不能当管理员（细化会失败），
@@ -66,9 +66,10 @@ app.innerHTML = `
     <div class="ao-topbar-actions">
       <span class="ao-conn" id="aoConn"><i></i><span>正在连接平台…</span></span>
       <button class="ao-btn" id="aoStartBtn" type="button" hidden>开工配置</button>
+      <button class="ao-btn" id="aoRefreshBtn" type="button" title="重新读平台的数据，并重新探一遍额度池">刷新</button>
       <span id="aoTopActions" class="ao-topbar-actions"></span>
       <button class="ao-btn" id="aoLobbyBtn" type="button">项目列表</button>
-      <span class="ao-user" title="群主">你</span>
+      <span class="ao-user" title="你就是群主：项目里的事都由你拍板">群主</span>
     </div>
   </header>
   <main class="ao-main">
@@ -78,14 +79,33 @@ app.innerHTML = `
   <div id="aoOpening"></div>
 `;
 
+// 顶栏的「刷新」：重读平台的数据，**并**重新探一遍额度池 ——
+// 新增的免费额度、变成收费的额度，都要人知道。
+$('#aoRefreshBtn')?.addEventListener('click', () => {
+  void office?.refresh?.({ probe: true });
+});
+
 const connection = $('#aoConn');
-if (status?.connected) {
+const connectionText = connection.querySelector('span');
+
+/** 顶栏的状态：平台连不连得上 + 几个窗口在线。 */
+function paintConnection({ connected, online, offline } = {}) {
+  if (connected === false) {
+    connection.classList.remove('is-live');
+    connection.classList.add('is-offline');
+    connectionText.textContent = '未连接平台';
+    return;
+  }
   connection.classList.add('is-live');
-  connection.querySelector('span').textContent = `正式平台 · ${status.project_id || ''}`;
-} else {
-  connection.classList.add('is-offline');
-  connection.querySelector('span').textContent = '未连接平台';
+  connection.classList.remove('is-offline');
+  const windows =
+    online === undefined
+      ? ''
+      : ` · 窗口 ${online} 在线${offline ? ` · ${offline} 离线` : ''}`;
+  connectionText.textContent = `已连接平台${windows}`;
 }
+
+paintConnection({ connected: Boolean(status?.connected) });
 
 let activeProject = null;
 let openingHost = null;
@@ -125,7 +145,7 @@ async function submitFormalGoal(request, catalog) {
     (harnessId) => !isAdministratorHarness({ harness_id: harnessId }, ADMIN_IDENTITY),
   );
   if (!workers.length) {
-    throw new Error('没有可参与项目的成员窗口：管理员窗口不能作为执行者。');
+    throw new Error('没有可用于项目的成员窗口：管理员窗口不能作为执行者。');
   }
   // 群主只说一件事：项目目标。怎么拆成任务规格是管理员 Agent 的活，浏览器不再
   // 按成员数复制多份。机器可读的信封挂在 refs 上，群里那段话仍然是人话。
@@ -141,7 +161,7 @@ async function submitFormalGoal(request, catalog) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
     body: JSON.stringify({
-      body: `项目目标（${projectName}）：${goal}\n管理员 Agent 将据此拆解任务；成员：${workers.join('、')}。`,
+      body: `项目目标（${projectName}）：${goal}\n管理员窗口将据此拆解任务；成员：${workers.join('、')}。`,
       refs: ['project-goal', `project-goal-json:${JSON.stringify(envelope)}`],
     }),
     cache: 'no-store',
@@ -197,7 +217,13 @@ openingHost = mountOpeningHost({
 
 const projectWorkspace = mountProjectWorkspace({
   root: $('#aoLobby'),
-  members: memberCandidates.map((h) => ({ id: h.harness_id, name: h.name, role: 'Harness 成员', status: 'online' })),
+  // 窗口的在线/离线是**平台上的事实**（不是一律 online）。
+  members: memberCandidates.map((h) => ({
+    id: h.harness_id,
+    name: h.name,
+    role: '成员窗口',
+    status: h.status === 'online' ? 'online' : 'offline',
+  })),
   onOpenProject(project) {
     activeProject = project;
     openingHost?.setProjectContext(project.name);
@@ -223,7 +249,22 @@ const projectWorkspace = mountProjectWorkspace({
       ),
     ]);
     if (!office) {
-      office = mountFlatOffice({ root: $('#aoWorkspace'), project: () => activeProject });
+      office = mountFlatOffice({
+        root: $('#aoWorkspace'),
+        project: () => activeProject,
+        // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
+        onStart: () => openingHost.open(),
+        // 顶栏的状态（在线/离线）跟着每轮刷新变。
+        onStatus: paintConnection,
+        // 中途加入一个新的窗口：写进项目成员，办公室那边已经通知管理员了。
+        onAddMember: (harnessId) => {
+          if (!activeProject) return;
+          const members = Array.from(new Set([...(activeProject.members || []), harnessId]));
+          projectWorkspace.updateProject(activeProject.id, { members });
+          activeProject = { ...activeProject, members };
+          openingHost?.setProjectMembers(members);
+        },
+      });
     } else {
       void office.refresh();
     }
@@ -273,6 +314,6 @@ const adminAgent = mountAdminAgent({
 if (!status?.connected) {
   const note = document.createElement('p');
   note.className = 'ao-lobby-note';
-  note.textContent = '未连接正式平台：这里显示的是本机界面，任务、方案与额度都读不到。';
+  note.textContent = '未连接正式平台：当前为本机界面，无法读取任务、方案与额度。';
   $('#aoLobby').prepend(note);
 }

@@ -85,7 +85,7 @@
 
 `_write_pending()` 在**冲突分支之后**，所以**只要合并冲突，它就不会被调用**。
 
-**后果**：下一次进��的 `_classify_pending_merge()`（`cli.py:484-488`）看到
+**后果**：下一次进来时的 `_classify_pending_merge()`（`cli.py:484-488`）看到
 「`pending is None` 且 `MERGE_HEAD` 存在」，按fail-closed 判成别人的合并：
 
 ```

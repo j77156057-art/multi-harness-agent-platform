@@ -64,7 +64,7 @@ try {
   await page.waitForTimeout(800);
   const text = await page.locator('.direct-shell').innerText();
   assert.match(text, /Codex \u00b7 \u7ba1\u7406\u5458/, '\u6807\u9898\u91cc\u5199\u7740\u7ba1\u7406\u5458\u662f\u8c01');
-  assert.match(text, /\u53ea\u6709\u4f60\u548c\u7ba1\u7406\u5458\u770b\u5f97\u5230/, '\u9875\u9762\u8bf4\u660e\u4e86\u9690\u79c1\u8303\u56f4');
+  assert.match(text, /\u4ec5\u60a8\u4e0e\u7ba1\u7406\u5458\u53ef\u89c1/, '\u9875\u9762\u8bf4\u660e\u4e86\u9690\u79c1\u8303\u56f4');
   assert.match(text, /\u53ea\u7ed9\u4f60\u770b\u7684\u90a3\u53e5/, '\u5b9a\u5411\u6d88\u606f\u5728\u5217\u8868\u91cc');
   assert.match(text, /\u6536\u5230\u4e86/, '\u7ba1\u7406\u5458\u7684\u56de\u8bdd\u5728\u5217\u8868\u91cc');
   assert.doesNotMatch(text, /\u7fa4\u91cc\u7684\u8bdd/, '\u666e\u901a\u7fa4\u6d88\u606f\u4e0d\u5f97\u6df7\u8fdb\u6765');
@@ -104,6 +104,9 @@ try {
   assert.ok(await page.locator('#aoWorkspace [data-act="open-direct-window"]').count(), '\u529e\u516c\u5ba4\u91cc\u6709\u201c\u5f00\u79c1\u804a\u7a97\u53e3\u201d');
 
   // 4. 定向消息不能混进群聊：那是群的带子，只有两端看得到的不能出现在里面
+  // 群聊是左栏里的一个会话：先点开它，才看得到群里的话。
+  await page.locator('#aoWorkspace .flat-conv', { hasText: '项目群聊' }).first().click();
+  await page.waitForSelector('#aoWorkspace .flat-chat', { timeout: 20000 });
   const groupChat = await page.locator('#aoWorkspace .flat-chat').innerText();
   assert.doesNotMatch(groupChat, /只给你看的那句/, '定向消息不得出现在群聊里');
 

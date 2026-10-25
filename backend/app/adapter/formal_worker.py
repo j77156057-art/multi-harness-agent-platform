@@ -25,6 +25,7 @@ from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.generic import GenericCliAdapter, load_declarations
 from app.adapter.harnesses.opencode import OpenCodeAdapter
+from app.adapter.harnesses.pi import PiAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
 from app.adapter.scope import path_in_scope
 from app.config import settings
@@ -39,6 +40,7 @@ ADAPTER_TYPES = {
     "codex": CodexAdapter,
     "claude-code": ClaudeCodeAdapter,
     "opencode": OpenCodeAdapter,
+    "pi": PiAdapter,
     "qoder": QoderAdapter,
     "codebuddy": CodeBuddyAdapter,
 }
@@ -449,7 +451,12 @@ def build_goal(
         + (
             "Do not run git add or git commit; the platform will submit your files after checking scope. "
             if harness_id == "claude-code"
-            else "Commit the deliverable on the current branch. "
+            else (
+                "Only write files inside exclusive_paths. Do not run shell commands or Git; "
+                "the platform will validate scope and create the commit. "
+                if harness_id == "pi"
+                else "Commit the deliverable on the current branch. "
+            )
         )
         + "Task specification: "
         + json.dumps(spec, ensure_ascii=False)
@@ -675,10 +682,16 @@ def run_one(
     scoped_runner = ScopedRunner(
         spec,
         service.repo_head(manager),
-        platform_commit=isinstance(adapter, ClaudeCodeAdapter),
+        # Claude 与 Pi 不自己提交：平台替它们提交（Claude 是因为它跑在沙箱里，
+        # Pi 是因为它不写 Git）。
+        platform_commit=isinstance(adapter, ClaudeCodeAdapter | PiAdapter),
         commit_message=f"chore({task['task_id']}): submit Claude deliverable"
         if isinstance(adapter, ClaudeCodeAdapter)
-        else "chore(formal): submit harness deliverable",
+        else (
+            f"chore({task['task_id']}): submit Pi deliverable"
+            if isinstance(adapter, PiAdapter)
+            else "chore(formal): submit harness deliverable"
+        ),
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
     # 额度池：平台说这条活该换额度，就走池子；没说，就用这个窗口自己的 provider。

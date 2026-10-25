@@ -33,6 +33,21 @@ class PlanDecision(BaseModel):
     reason: str | None = None
 
 
+class ModelSelectionRequest(BaseModel):
+    """人给某个窗口指定的模型来源（自带 / 额度池里的哪个模型）。
+
+    ``model_mode`` 只有两个取值：``cli``（用这个窗口自己 CLI 配置里的模型）与
+    ``pool``（走额度池）。``model_id`` 是**额度池里的模型 id**（原样存池子的 id），
+    界面靠它写回「哪家的什么模型」。
+    """
+
+    harness_id: str = Field(min_length=1)
+    model_mode: Literal["cli", "pool"] = "cli"
+    model_id: str | None = None
+    #: 人是否明确同意花**按量计费**的钱。没点头时平台拒绝（409），并说清为什么。
+    paid_consent: bool = False
+
+
 class HarnessRegistrationRequest(BaseModel):
     """The human-maintained R10 §6 registration record."""
 

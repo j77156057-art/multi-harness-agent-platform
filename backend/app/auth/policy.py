@@ -72,11 +72,10 @@ POLICY: dict[str, frozenset[str]] = {
     "group:create": frozenset({HUMAN}),
     "task:resume": frozenset({HUMAN}),
     "task:reopen": frozenset({HUMAN}),
-    # ��一条���尝试预算用完的活**再给一次机会**��R10 §8 ��"��Ƶ��"��
-    # ��˵��壻��˵�Ŀ���壻���ˣ��˲��ˣ���ˣ��Ŀ���˯���Ŀ��ˡ�
-    # ��һ���˲��ˣ��ƽ̨�����Լ��������ˣ���ˣ���ˣ���ˣ��ˣ��
-    # �����˲��ˣ��˲��ˣ��˯���ˣ���ˣ��˯���ˣ��
-    # ��ע���¼�Ŀ���ȡĿ���Ļ�Ŀ���һ���ˣ���˯��
+    # 给一条尝试预算用完的活**再给一次机会**（R10 §8 的"人工豁免"）。
+    # 这条边只有人能走：平台不给自己豁免，管理员窗口也不行。
+    # 一次豁免只多给一次尝试（一条活只能带一次），并记在任务上（谁给的、什么时候）。
+    # 决定行锚在任务最后一个事件上 —— 读历史的人能看到"在这个时间点上，人给了一次机会"。
     "task:attempt_budget_override": frozenset({HUMAN}),
     # release_escalated in §17 == /human/release here.
     "task:release_escalated": frozenset({HUMAN}),
@@ -106,6 +105,16 @@ POLICY: dict[str, frozenset[str]] = {
     # §39 硬规则 2 的权限面 —— 语义事实仍在服务层查（有没有这份分配），这里只回答
     # "谁能问这个键"。
     "claim:authorized": frozenset({HUMAN, HARNESS}),
+    # 用户**自己**的 API key：只有人能加、能点头、能删。
+    #
+    # 这是加性的一行（2026-10-23）：平台替用户保管他自己在办公室里加的
+    # provider key，但平台**不自己花**它 —— 要用得用户点头。harness 主体
+    # 拿不到这个面：借别人的钱必须是人的决定。
+    "pool:user_keys": frozenset({HUMAN}),
+    # 平台的"翻译"：把机器写的文本（失败原因、事件名、绝对路径、方案原文）
+    # 翻成人话。只给**人** —— 让机器自己给自己的日志翻成好话，那是给日志化妆。
+    # 纯加性的一行（2026-10-23）。
+    "wording:read": frozenset({HUMAN}),
 }
 
 #: 已知、但**任何主体类型都拿不到**的键（管理员 harness 私有面，admin-harness）。

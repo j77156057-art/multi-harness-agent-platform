@@ -258,6 +258,72 @@ test('the human dispatch route is gone: only the administrator dispatches', asyn
 // `/status` handed the browser that global list as "this project's members",
 // opening a second project would fold the other project's load into the patrol
 // summary. The only trustworthy membership is what this group's tasks mention.
+test('a declared base is offered and registered with the platform\'s own template', async (t) => {
+  // 声明出来的基座（`adapters/cli.json`）：平台知道它，办公室本地照着登记 ——
+  // 模板由平台给（与平台造注册表的是同一份），本地不自己拼。
+  let registered = null;
+  globalThis.fetch = responder({
+    '/api/v1/harnesses': (bearer, json, init) => {
+      if (init?.method === 'POST') {
+        registered = JSON.parse(String(init.body));
+        return json(200, { harness_id: registered.harness_id, registration_version: registered.registration_version });
+      }
+      return json(200, {
+        harnesses: [],
+        base_adapters: [
+          {
+            harness_id: 'newcli',
+            name: 'New CLI',
+            provider: 'newcli',
+            adapter: 'newcli-print',
+            adapter_version: '1.0.0',
+            capabilities: ['coding', 'review'],
+            registration_version: 'reg-001',
+          },
+        ],
+      });
+    },
+    '/api/v1/groups/g/tasks': (_bearer, json) => json(200, { tasks: [] }),
+  });
+  const gateway = gatewayFor({ adminTokenFile: tempFile(ADMIN) });
+
+  // 1. 它出现在「可登记的基座」列表里。
+  let status = null;
+  let payload = null;
+  await gateway.handle(
+    {
+      url: '/api/formal/status',
+      method: 'GET',
+      socket: { localPort: 4999, remoteAddress: '127.0.0.1' },
+      headers: { host: '127.0.0.1:4999', origin: 'http://127.0.0.1:4999', 'x-office-formal': '1' },
+    },
+    {
+      writeHead: (code) => {
+        status = code;
+      },
+      end: (text) => {
+        payload = JSON.parse(String(text));
+      },
+    },
+  );
+  assert.equal(status, 200);
+  const declaredBase = payload.base_adapters.find((item) => item.harness_id === 'newcli');
+  assert.ok(declaredBase, 'the declared base is offered, not just the built-ins');
+  assert.equal(declaredBase.adapter, 'newcli-print');
+  assert.equal(declaredBase.name, 'New CLI');
+
+  // 2. 登记它时，用的是**平台给的那份**模板。
+  const { status: regStatus } = await exchange(gateway, '/base-harnesses', { harness_id: 'newcli' });
+  assert.equal(regStatus, 200);
+  assert.ok(registered, 'the base was registered on the platform');
+  assert.equal(registered.harness_id, 'newcli');
+  assert.equal(registered.provider, 'newcli');
+  assert.equal(registered.adapter, 'newcli-print');
+  assert.equal(registered.adapter_version, '1.0.0');
+  assert.deepEqual(registered.capabilities, ['coding', 'review']);
+  assert.equal(registered.registration_version, 'reg-001');
+});
+
 test('the status roster is scoped to this project, not the global registry', async (t) => {
   globalThis.fetch = responder({
     '/api/v1/harnesses': (_bearer, json) =>

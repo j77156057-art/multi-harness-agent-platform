@@ -124,14 +124,50 @@
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 | FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | done（Codex/OpenCode/Claude Code 均真实领取、提交并 verify 通过；Claude 由平台在 exclusive_paths 检查后代为提交，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
 | FORMAL-MULTI-HARNESS-02 | Codex | FORMAL-MULTI-HARNESS-01 | claimed（管理员 token 真实派发三 Harness、逐项审核闭环；待 Merge Gate） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-ADMIN-REVIEW-001` |
+| FORMAL-PI-ADAPTER-01 | Codex（协调）；新增成员 Pi CLI + 本机 Ollama | FORMAL-MULTI-HARNESS-01 | doing（CLI 已安装；本机模型认证与适配器验证中；**适配器已移植到新 API**，Mavis 在 OFFICE-UI-01 的合并里一并带上） | `agent/local/pi/FORMAL-PI-ADAPTER-01/a1` | `MVP-ADAPTER-002` `MVP-ADAPTER-003` |
 | R10-fix-13 | OpenCode | auth-layer | doing（Stage A 规范登记 + Stage B 服务/状态机/路由/权限已完成并自测绿；Stage C 与 Claim 门禁强度待定） | `agent/local/opencode/R10-fix-13/a1` | `DOC-STATE-001` `DOC-MIRROR-001` |
 | codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
 | review-provider-record | OpenCode | auth-layer | doing（审查行改记注册面的 provider；测试绿，线上复核待下一条审查） | `agent/local/opencode/review-provider-record/a1` | `MVP-ADMIN-REVIEW-001` |
 | R10-fix-17 | Codex | FORMAL-MULTI-HARNESS-01 | doing（接替关系进平台字段；实现与 R10 正文（§9、§38.12）已就位，**规范复审由仓库主人 2026-10-22 拍板**） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
 | pool-metered-amount | Codex | FORMAL-MULTI-HARNESS-01 | doing（计量档的 token 与余额：流式请求一律记 0 token 的缺陷已修，余额读 provider 自己的只读接口；单价不猜） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` |
-| OFFICE-UI-01 | Codex | 无 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
+| OFFICE-UI-01 | Codex | 无 | done（办公室的数据版界面收进本仓 office/；已合入 main） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-010` `DOC-TRACE-001` |
 | R10-fix-18 | Codex | OFFICE-UI-01 | →doing | `agent/local/codex/OFFICE-UI-01/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` `DOC-TRACE-001` `MVP-UI-011` |
-| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | waiting（实现提交 `c4c16a1` 与定点验收已完成；该提交尚未合入 main，main 上 pool/adapter 已有后续结构变更，待仓库主人复核移植/合并方式） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| OFFICE-UI-02 | Mavis | OFFICE-UI-01 | done（界面收拾：状态词/按钮/版式/活气；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-012` `MVP-UI-013` `MVP-UI-014` |
+| OFFICE-UI-03 | Mavis | OFFICE-UI-02 | done（用户自己的 API key：平台保管、不点头不花；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-017` |
+| OFFICE-UI-04 | Mavis | OFFICE-UI-02 | done（平台上的翻译：机器文本 → 人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-018` |
+| OFFICE-UI-05 | Mavis | OFFICE-UI-02 | done（列表按「人」归堆：谁忙谁闲一眼看得出；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-020` |
+| OFFICE-UI-06 | Mavis | OFFICE-UI-05 | done（讲故事的「今天」：头顶一段人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-021` |
+| OFFICE-UI-07 | Mavis | OFFICE-UI-04 | done（工单里夹着的机器 JSON 拆开、现场说人话；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-022` |
+| OFFICE-UI-08 | Mavis | OFFICE-UI-04 | done（群聊摘要：最近群里在说什么；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-023` |
+| OFFICE-UI-09 | Mavis | OFFICE-UI-04 | done（取消一条活要通知管理员，管理员就剩下的范围重新细化；已合入 main） | `agent/local/mavis/OFFICE-UI-02/a1` | `MVP-UI-024` |
+| OFFICE-UI-10 | Mavis | OFFICE-UI-02 | done（第一次用的人有路：空状态说人话 + 下一步 + 术语清理 + 私聊等待提示；措辞按书面口径统一） | `agent/local/mavis/OFFICE-UI-10/a1` | `MVP-UI-025` |
+| OFFICE-UI-11 | Mavis | OFFICE-UI-10 | done（开工向导的措辞也按书面口径统一：实例/打工人/Harness/instance_id/宿主 全部换成人话；管理员标明必选；右栏成员说明改准） | `agent/local/mavis/OFFICE-UI-11/a1` | `MVP-UI-026` |
+| OFFICE-UI-12 | Mavis | OFFICE-UI-10 | done（左边改成会话列表：群聊、平台助手、每个窗口；点进去看它现在在做什么、进度） | `agent/local/mavis/OFFICE-UI-12/a1` | `MVP-UI-027` |
+| OFFICE-UI-13 | Mavis | OFFICE-UI-12 | done（任务详情上方留一条紧凑的活列表：换看另一条活不用先回任务表） | `agent/local/mavis/OFFICE-UI-13/a1` | `MVP-UI-028` |
+| OFFICE-UI-14 | Mavis | OFFICE-UI-12 | done（群聊已经是左栏的一个会话，底下那条重复的群聊条撤掉） | `agent/local/mavis/OFFICE-UI-14/a1` | `MVP-UI-029` |
+| OFFICE-UI-15 | Mavis | OFFICE-UI-12 | done（窗口页的任务详细清单：写明具体做什么、**不截断**、收成卡片、点开即看） | `agent/local/mavis/OFFICE-UI-15/a1` | `MVP-UI-030` |
+| OFFICE-UI-16 | Mavis | OFFICE-UI-12 | done（窗口页的模型选择：**真能选** —— 自带模型 vs 额度池的哪个模型，写清是哪一档额度、哪家 harness 的什么模型；平台照办） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-032` |
+| OFFICE-UI-17 | Mavis | OFFICE-UI-12 | done（窗口页的 token 度量：每秒生成 / 总消耗 / 每小时 / 缓存命中率） | `agent/local/mavis/OFFICE-UI-17/a1` | `MVP-UI-031` |
+| OFFICE-UI-18 | Mavis | — | done（输出页的绝对路径压短：命令说成「在 wt\69d9 里跑了 git log」） | `agent/local/mavis/OFFICE-UI-16/a1` | `MVP-UI-033` |
+| OFFICE-UI-19 | Mavis | OFFICE-UI-16 | done（模型选择的收口：**收费额度要点头**、清单折叠、**探针**（点刷新重探模型：免费变收费、新增免费额度都要知道）） | `agent/local/mavis/OFFICE-UI-19/a1` | `MVP-UI-034` |
+| OFFICE-UI-20 | Mavis | OFFICE-UI-19 | done（额度池清单**按 harness 折叠**；名册里没定档的模型**当场定档**：标成免费/收费） | `agent/local/mavis/OFFICE-UI-20/a1` | `MVP-UI-035` |
+| OFFICE-UI-21 | Mavis | OFFICE-UI-12 | done（**成员 harness 也能发信息**；成员要改目标时**管理员要听见**并把话带给群主） | `agent/local/mavis/OFFICE-UI-21/a1` | `MVP-UI-036` |
+| OFFICE-UI-22 | Mavis | OFFICE-UI-12 | done（状态栏**在线/离线**；**中途加入新的 harness**；加入以后**通知管理员**） | `agent/local/mavis/OFFICE-UI-22/a1` | `MVP-UI-037` |
+| OFFICE-UI-23 | Mavis | OFFICE-UI-12 | done（**把「它的轨迹」讲成人话**：说明这是什么、每行补上活的名字、payload 不摆机器字段） | `agent/local/mavis/OFFICE-UI-23/a1` | `MVP-UI-038` |
+| OFFICE-UI-24 | Mavis | OFFICE-UI-23 | done（轨迹**能点开看详细任务**：每一行带「看这条活」；展开的状态活过 15 秒重画） | `agent/local/mavis/OFFICE-UI-24/a1` | `MVP-UI-039` |
+| OFFICE-UI-25 | Mavis | OFFICE-UI-24 | done（办公室文案**书面化**：界面上的大白话统一成书面口径；平台与办公室两张词表逐字对齐） | `agent/local/mavis/OFFICE-UI-25/a1` | `MVP-UI-040` |
+| OFFICE-UI-26 | Mavis | OFFICE-UI-25 | done（**成员自报的用量与缓存命中率看得见**：两笔账分开摆，写清出处） | `agent/local/mavis/OFFICE-UI-26/a1` | `MVP-UI-041` |
+| OFFICE-UI-27 | Mavis | OFFICE-UI-26 | done（**清掉仓库里写坏的中文**：受版本控制的文件里 166 → 2，剩两个在已应用的迁移里，按 checksum 校验不能动） | `agent/local/mavis/OFFICE-UI-27/a1` | `MVP-UI-042` |
+| OFFICE-UI-28 | Mavis | pool-generic-adapter | done（**办公室本地接声明表**：加新 harness 不用改代码；不新增端点、不新增权限行） | `agent/local/mavis/OFFICE-UI-28/a1` | `MVP-UI-043` |
+| OFFICE-UI-29 | Mavis | OFFICE-UI-28 | done（**「接一个新 harness」的操作手册**写进仓：`docs/harness-onboarding.md`） | `agent/local/mavis/OFFICE-UI-29/a1` | `MVP-UI-044` |
+| OFFICE-UI-30 | Mavis | OFFICE-UI-29 | done（**助手的适配体检 + 声明草案**：新读面 `GET /harnesses/bases` 给缺口清单，助手只读工具 `harness.bases`；只出草案，装不装由人） | `agent/local/mavis/OFFICE-UI-30/a1` | `MVP-UI-045` |
+| OFFICE-UI-31 | Mavis | OFFICE-UI-30 | done（**助手的深取证档**：新读面 `GET /tasks/{task_id}/forensics` 给更深的输出/stderr/出处/脱敏，助手只读工具 `task.forensics`） | `agent/local/mavis/OFFICE-UI-31/a1` | `MVP-UI-046` |
+| OFFICE-UI-32 | Mavis | OFFICE-UI-31 | done（**向导的「任务目标」输入框不再藏在折叠线以下**：搬到表单最前，第一屏可见；组件照旧） | `agent/local/mavis/OFFICE-UI-32/a1` | `MVP-UI-047` |
+| OFFICE-UI-33 | Mavis | OFFICE-UI-31 | done（**平台助手默认内置在工作区域**：常驻入口 + 项目速览 + 随时能问；顶栏那块改名「巡检与上报」，名字归位） | `agent/local/mavis/OFFICE-UI-33/a1` | `MVP-UI-048` |
+| OFFICE-UI-34 | Mavis | OFFICE-UI-31 | done（**助手面板改成对话式界面**：对话流 + 记忆（它记得上一轮）+ 看得见它这一轮做了什么） | `agent/local/mavis/OFFICE-UI-34/a1` | `MVP-UI-049` |
+| OFFICE-UI-35 | Mavis | OFFICE-UI-31 | done（**助手回答不再半截**：group.tasks 摘要化 + 可分页；分布是整表的、缺多少条说清楚） | `agent/local/mavis/OFFICE-UI-35/a1` | `MVP-UI-050` |
+| OFFICE-UI-36 | Mavis | OFFICE-UI-31 | done（**助手的取证策略**：事实本轮重新取，记忆只用来理解指代；记忆行标明身份） | `agent/local/mavis/OFFICE-UI-36/a1` | `MVP-UI-051` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | done（P1 ReAct 引擎、白名单工具、反思层与机械门；scripted/ruff/docstate/discipline 全绿，提交 `aaa8da5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-react-loop-p2 | Codex | assistant-react-loop | done（P2 池子免费档通道、assistant worker 私聊轮询、真实平台首跑与接线修复；全量 pytest 绿，提交 `1c65241`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -165,6 +201,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- FORMAL-DISPATCH-01 → docs/claims/codex--FORMAL-DISPATCH-01.md -->
 <!-- FORMAL-MULTI-HARNESS-01 → docs/claims/codex--FORMAL-MULTI-HARNESS-01.md -->
 <!-- FORMAL-MULTI-HARNESS-02 → docs/claims/codex--FORMAL-MULTI-HARNESS-02.md -->
+<!-- FORMAL-PI-ADAPTER-01 → docs/claims/codex--FORMAL-PI-ADAPTER-01.md -->
 
 **本表只读**。每个 task 的认领记录在 `docs/claims/<harness>--<task-id>.md>`（迁移期也接受旧的 `<序号>-` 前缀，见 `docs/proposals/claim-denum.md`），
 各自独占文件、永不冲突。新认领请新建文件，不要往本表加行。
@@ -214,6 +251,41 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- R10-fix-13 → docs/claims/opencode--R10-fix-13.md -->
 <!-- codebuddy-cli-channel → docs/claims/opencode--codebuddy-cli-channel.md -->
 <!-- review-provider-record → docs/claims/opencode--review-provider-record.md -->
+<!-- OFFICE-UI-02 → docs/claims/mavis--OFFICE-UI-02.md -->
+<!-- OFFICE-UI-03 → docs/claims/mavis--OFFICE-UI-03.md -->
+<!-- OFFICE-UI-04 → docs/claims/mavis--OFFICE-UI-04.md -->
+<!-- OFFICE-UI-05 → docs/claims/mavis--OFFICE-UI-05.md -->
+<!-- OFFICE-UI-06 → docs/claims/mavis--OFFICE-UI-06.md -->
+<!-- OFFICE-UI-07 → docs/claims/mavis--OFFICE-UI-07.md -->
+<!-- OFFICE-UI-08 → docs/claims/mavis--OFFICE-UI-08.md -->
+<!-- OFFICE-UI-09 → docs/claims/mavis--OFFICE-UI-09.md -->
+<!-- OFFICE-UI-10 → docs/claims/mavis--OFFICE-UI-10.md -->
+<!-- OFFICE-UI-11 → docs/claims/mavis--OFFICE-UI-11.md -->
+<!-- OFFICE-UI-12 → docs/claims/mavis--OFFICE-UI-12.md -->
+<!-- OFFICE-UI-13 → docs/claims/mavis--OFFICE-UI-13.md -->
+<!-- OFFICE-UI-14 → docs/claims/mavis--OFFICE-UI-14.md -->
+<!-- OFFICE-UI-15 → docs/claims/mavis--OFFICE-UI-15.md -->
+<!-- OFFICE-UI-16 → docs/claims/mavis--OFFICE-UI-16.md -->
+<!-- OFFICE-UI-17 → docs/claims/mavis--OFFICE-UI-17.md -->
+<!-- OFFICE-UI-18 → docs/claims/mavis--OFFICE-UI-18.md -->
+<!-- OFFICE-UI-19 → docs/claims/mavis--OFFICE-UI-19.md -->
+<!-- OFFICE-UI-20 → docs/claims/mavis--OFFICE-UI-20.md -->
+<!-- OFFICE-UI-21 → docs/claims/mavis--OFFICE-UI-21.md -->
+<!-- OFFICE-UI-22 → docs/claims/mavis--OFFICE-UI-22.md -->
+<!-- OFFICE-UI-23 → docs/claims/mavis--OFFICE-UI-23.md -->
+<!-- OFFICE-UI-24 → docs/claims/mavis--OFFICE-UI-24.md -->
+<!-- OFFICE-UI-25 → docs/claims/mavis--OFFICE-UI-25.md -->
+<!-- OFFICE-UI-26 → docs/claims/mavis--OFFICE-UI-26.md -->
+<!-- OFFICE-UI-27 → docs/claims/mavis--OFFICE-UI-27.md -->
+<!-- OFFICE-UI-28 → docs/claims/mavis--OFFICE-UI-28.md -->
+<!-- OFFICE-UI-29 → docs/claims/mavis--OFFICE-UI-29.md -->
+<!-- OFFICE-UI-30 → docs/claims/mavis--OFFICE-UI-30.md -->
+<!-- OFFICE-UI-31 → docs/claims/mavis--OFFICE-UI-31.md -->
+<!-- OFFICE-UI-32 → docs/claims/mavis--OFFICE-UI-32.md -->
+<!-- OFFICE-UI-33 → docs/claims/mavis--OFFICE-UI-33.md -->
+<!-- OFFICE-UI-34 → docs/claims/mavis--OFFICE-UI-34.md -->
+<!-- OFFICE-UI-35 → docs/claims/mavis--OFFICE-UI-35.md -->
+<!-- OFFICE-UI-36 → docs/claims/mavis--OFFICE-UI-36.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
@@ -248,6 +320,41 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 
 | R10-fix-18 | [卡](docs/tasks/notes/R10-fix-18.md) | | |
 | OFFICE-UI-01 | [卡](docs/tasks/notes/OFFICE-UI-01.md) | | |
+| OFFICE-UI-02 | [卡](docs/tasks/notes/OFFICE-UI-02.md) | | |
+| OFFICE-UI-03 | [卡](docs/tasks/notes/OFFICE-UI-03.md) | | |
+| OFFICE-UI-04 | [卡](docs/tasks/notes/OFFICE-UI-04.md) | | |
+| OFFICE-UI-05 | [卡](docs/tasks/notes/OFFICE-UI-05.md) | | |
+| OFFICE-UI-06 | [卡](docs/tasks/notes/OFFICE-UI-06.md) | | |
+| OFFICE-UI-07 | [卡](docs/tasks/notes/OFFICE-UI-07.md) | | |
+| OFFICE-UI-08 | [卡](docs/tasks/notes/OFFICE-UI-08.md) | | |
+| OFFICE-UI-09 | [卡](docs/tasks/notes/OFFICE-UI-09.md) | | |
+| OFFICE-UI-10 | [卡](docs/tasks/notes/OFFICE-UI-10.md) | | |
+| OFFICE-UI-11 | [卡](docs/tasks/notes/OFFICE-UI-11.md) | | |
+| OFFICE-UI-12 | [卡](docs/tasks/notes/OFFICE-UI-12.md) | | |
+| OFFICE-UI-13 | [卡](docs/tasks/notes/OFFICE-UI-13.md) | | |
+| OFFICE-UI-14 | [卡](docs/tasks/notes/OFFICE-UI-14.md) | | |
+| OFFICE-UI-15 | [卡](docs/tasks/notes/OFFICE-UI-15.md) | | |
+| OFFICE-UI-16 | [卡](docs/tasks/notes/OFFICE-UI-16.md) | | |
+| OFFICE-UI-17 | [卡](docs/tasks/notes/OFFICE-UI-17.md) | | |
+| OFFICE-UI-18 | [卡](docs/tasks/notes/OFFICE-UI-18.md) | | |
+| OFFICE-UI-19 | [卡](docs/tasks/notes/OFFICE-UI-19.md) | | |
+| OFFICE-UI-20 | [卡](docs/tasks/notes/OFFICE-UI-20.md) | | |
+| OFFICE-UI-21 | [卡](docs/tasks/notes/OFFICE-UI-21.md) | | |
+| OFFICE-UI-22 | [卡](docs/tasks/notes/OFFICE-UI-22.md) | | |
+| OFFICE-UI-23 | [卡](docs/tasks/notes/OFFICE-UI-23.md) | | |
+| OFFICE-UI-24 | [卡](docs/tasks/notes/OFFICE-UI-24.md) | | |
+| OFFICE-UI-25 | [卡](docs/tasks/notes/OFFICE-UI-25.md) | | |
+| OFFICE-UI-26 | [卡](docs/tasks/notes/OFFICE-UI-26.md) | | |
+| OFFICE-UI-27 | [卡](docs/tasks/notes/OFFICE-UI-27.md) | | |
+| OFFICE-UI-28 | [卡](docs/tasks/notes/OFFICE-UI-28.md) | | |
+| OFFICE-UI-29 | [卡](docs/tasks/notes/OFFICE-UI-29.md) | | |
+| OFFICE-UI-30 | [卡](docs/tasks/notes/OFFICE-UI-30.md) | | |
+| OFFICE-UI-31 | [卡](docs/tasks/notes/OFFICE-UI-31.md) | | |
+| OFFICE-UI-32 | [卡](docs/tasks/notes/OFFICE-UI-32.md) | | |
+| OFFICE-UI-33 | [卡](docs/tasks/notes/OFFICE-UI-33.md) | | |
+| OFFICE-UI-34 | [卡](docs/tasks/notes/OFFICE-UI-34.md) | | |
+| OFFICE-UI-35 | [卡](docs/tasks/notes/OFFICE-UI-35.md) | | |
+| OFFICE-UI-36 | [卡](docs/tasks/notes/OFFICE-UI-36.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |

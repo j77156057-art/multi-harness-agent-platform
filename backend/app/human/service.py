@@ -301,7 +301,7 @@ class HumanOpsService:
                 (decided_by, task_id),
             )
             # 决定行要锚在一个事件序号上。这条动作**不新造事件名**（规范里
-            # 的事件集是闭集），所以锚在���任务最后一个事件上：读历史的人能看到
+            # 的事件集是闭集），所以锚在该任务最后一个事件上：读历史的人能看到
             # "在这个时间点上，人给了一次机会"。
             anchor = conn.execute(
                 "SELECT COALESCE(MAX(seq), 0) AS seq FROM task_events WHERE aggregate_id = ?",
