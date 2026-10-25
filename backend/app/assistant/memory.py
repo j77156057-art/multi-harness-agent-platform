@@ -67,19 +67,30 @@ def memory_context(
     turns: list[dict[str, Any]],
     *,
     assistant_id: str,
+    asker_id: str = "",
     limit: int = MAX_TURNS,
 ) -> list[str]:
     """把历史变成引擎的引用行。
 
-    每行一句：谁说的、什么内容。说话人分不清的（既不是助手也不是提问者）按
-    「对方」算 —— 宁可笼统，也不要把某人的身份猜错。
+    每行一句：**谁说的**、什么内容 —— 而且身份要分清「用户问的」与「你答的」。
+
+    这一条不是措辞讲究：记忆里**混着助手自己上一轮的回答**。若把它写成「对方说过」，
+    模型就分不清哪些是自己的旧答案、哪些是用户的陈述，于是转述上一轮的数字毫无阻力
+    （用户问「现在」，它答「上次」）。写明身份，它才知道哪一行能用来理解「刚才那个
+    数字」指什么，哪一行是**上一轮的读数**、不能当本轮结论。
     """
     lines: list[str] = []
     for message in turns[-limit:] if limit else []:
         body = str(message.get("body") or "").strip()
         if not body:
             continue
-        who = "助手" if _sender(message) == assistant_id else "对方"
+        sender = _sender(message)
+        if sender == assistant_id:
+            who = "你上一轮答的"
+        elif sender and sender == asker_id:
+            who = "用户上一轮问的"
+        else:
+            who = "这条私聊里另一方说的"
         clipped = body if len(body) <= MAX_TURN_CHARS else body[:MAX_TURN_CHARS] + "…"
-        lines.append(f"这一条私聊里{who}说过（seq {message.get('created_seq')}）：{clipped}")
+        lines.append(f"这条私聊的往来（{who}，seq {message.get('created_seq')}）：{clipped}")
     return lines
