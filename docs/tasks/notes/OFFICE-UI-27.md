@@ -13,7 +13,7 @@
 `backend/tests/test_git_quotepath.py`、`backend/tests/test_pool_user_keys.py`、
 `docs/claims/**`、`docs/incidents/**`、`docs/tasks/notes/**`；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`d139ca5`）
 commit：`1843d4c`（清掉仓库里写坏的中文：15 个文件的 166 个坏字节）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-042
