@@ -1998,3 +1998,58 @@
 .flat-model-actions {
   margin: 10px 0 0;
 }
+
+/* 平台助手（工作区域里常驻的那一块）：速览、提问、回答。 */
+.flat-assistant .flat-assistant-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.flat-assistant .flat-assistant-presets button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #dbe4ee;
+  background: #f6f9fc;
+  color: #35404d;
+  cursor: pointer;
+}
+
+.flat-assistant .flat-assistant-presets button:hover {
+  background: #eef4fa;
+}
+
+.flat-assistant .flat-assistant-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 8px;
+}
+
+.flat-assistant .flat-assistant-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.flat-assistant .flat-assistant-reply {
+  padding: 9px 0;
+  border-bottom: 1px solid #eef2f7;
+}
+
+.flat-assistant .flat-assistant-reply:last-child {
+  border-bottom: none;
+}
+
+.flat-assistant .flat-assistant-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}

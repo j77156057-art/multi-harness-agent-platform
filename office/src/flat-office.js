@@ -37,6 +37,16 @@ const escape = escapeHtml;
 const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
 const WAITING_STATES = new Set(['draft', 'ready', 'queued']);
 
+// 平台助手（后台那个**有模型、有只读工具**的助手主体）。
+//
+// 它不是一个要被勾选或注册的窗口：它在工作区域里**常驻**，随手能问 ——
+// 新建项目时不用另外选，平台注册表里有没有某个窗口也跟它无关。
+//
+// 以前左栏那一行「平台助手」指向的是 `office-admin`（管理员窗口，做巡检与上报），
+// 平台没注册它时整行就消失 —— 名字与职责都串了：巡检面板是"巡检与上报"，
+// 能读日志、调记录、回答问题的是这个助手主体。
+const ASSISTANT_ID = 'office-assistant';
+
 /** 状态的"紧急度"：越靠前越该先被人看见。 */
 const STATUS_RANK = {
   abandoned: 0, stale: 0, blocked: 0, needs_help: 0, escalated: 0, awaiting_human: 0,
@@ -1336,16 +1346,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!state.loaded && !roster.length) {
       addRow('window', null, '窗口名单', '正在读取…');
     }
-    const assistant = roster.find((item) => isPlatformAssistantHarness(item));
-    if (assistant) {
-      addRow('assistant', assistant.harness_id, '平台助手', windowStatusText(assistant.harness_id));
-    }
+    // 平台助手**常驻**：工作区域里一直有它，不用在新建项目时勾选，也不依赖平台
+    // 注册表里有没有某个窗口（以前这里要找得到 `office-admin` 才显示这一行）。
+    addRow('assistant', ASSISTANT_ID, '平台助手', assistantStatusText());
     if (adminId) {
       addRow('window', adminId, `管理员 · ${harnessName(adminId)}`, windowStatusText(adminId));
     }
     for (const item of roster) {
       if (item.harness_id === adminId) continue;
-      if (isPlatformAssistantHarness(item)) continue;
+      // 管理员窗口（office-admin）不是「平台助手」：它按注册表里的本名列出来。
+      // 它仍然不干活 —— 成员名单与「可执行成员」那边照样把它排除。
       addRow('window', item.harness_id, harnessName(item.harness_id), windowStatusText(item.harness_id));
     }
     return list;
@@ -1420,6 +1430,164 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return '空闲';
   }
 
+  /**
+   * 平台助手：工作区域里**常驻**的那一块。
+   *
+   * 两部分，缺一不可：
+   *   · **项目速览** —— 任务有没有下发、成员领了没有、现在到哪一步。这些是平台上
+   *     的事实，前端直接算：模型不在、助手没在跑，这一块照样给。
+   *   · **问它一句** —— 定向私聊给后台助手主体（`office-assistant`）。它有只读
+   *     工具：能读平台日志、调取任务记录，回答你关于这个项目的问题。
+   *
+   * 面板里没有分派、处置、审核这类动作：那些是管理员窗口与人的事。
+   */
+  function assistantPane() {
+    const panel = document.createElement('section');
+    panel.className = 'flat-detail flat-assistant';
+
+    const tasks = state.tasks || [];
+    const counts = countBy(tasks);
+    const waiting = tasks.filter((task) => WAITING_STATES.has(String(task.status)));
+    // 没人领 = 状态还在排队，但**没有持有者** —— 这就是「任务下发了没人接」。
+    const unclaimed = waiting.filter((task) => !holderIds(task).now);
+    const working = tasks.filter((task) => isRunning(task));
+    const byWindow = new Map();
+    for (const task of working) {
+      const who = holderIds(task).now || '未指定执行者';
+      byWindow.set(who, (byWindow.get(who) || 0) + 1);
+    }
+    const answers = assistantAnswers();
+
+    const head = document.createElement('div');
+    head.className = 'flat-detail-head';
+    head.innerHTML = `
+      <div>
+        <h2>平台助手</h2>
+        <p class="flat-summary">它读平台日志、调取记录，回答你关于这个项目的问题。</p>
+      </div>
+      <div class="flat-detail-actions">
+        <button type="button" data-act="assistant-detail">巡检与上报详情</button>
+      </div>`;
+    panel.append(head);
+
+    // ---- 项目速览（平台事实） ----
+    const facts = document.createElement('dl');
+    facts.className = 'flat-facts';
+    const rows = [
+      ['任务', `${tasks.length} 条：待领取 ${counts.waiting} · 执行中 ${counts.active} · 待处理 ${counts.review} · 未完成 ${counts.failed} · 已完成 ${counts.done}`],
+      ['还没人领', unclaimed.length
+        ? `${unclaimed.length} 条：${unclaimed.slice(0, 3).map((task) => task.title || task.task_id).join('、')}${unclaimed.length > 3 ? ' 等' : ''}`
+        : '没有（排队的活都有人领了）'],
+      ['正在做', byWindow.size
+        ? [...byWindow.entries()].map(([who, count]) => `${harnessName(who) || who}（${count} 条）`).join('、')
+        : '当前没有窗口在执行'],
+    ];
+    if (!tasks.length) rows.push(['本项目', '还没有任务 —— 助手只能回答平台上的事，没有活可查。']);
+    for (const [key, value] of rows) {
+      const dt = document.createElement('dt');
+      dt.textContent = key;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      facts.append(dt, dd);
+    }
+    const overview = document.createElement('section');
+    overview.className = 'flat-spec';
+    overview.innerHTML = '<h3>项目速览</h3>';
+    overview.append(facts);
+    panel.append(overview);
+
+    // ---- 问一句 ----
+    const ask = document.createElement('section');
+    ask.className = 'flat-spec flat-assistant-ask';
+    ask.innerHTML = '<h3>问它一句</h3>';
+    const presets = document.createElement('div');
+    presets.className = 'flat-assistant-presets';
+    for (const question of ['现在进度怎么样？', '有哪些任务还没人领？', '最近失败的活卡在哪一步？']) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = question;
+      button.dataset.act = 'assistant-preset';
+      button.dataset.question = question;
+      presets.append(button);
+    }
+    ask.append(presets);
+    const form = document.createElement('div');
+    form.className = 'flat-assistant-form';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'flatAssistantQuestion';
+    input.className = 'flat-assistant-input';
+    input.setAttribute('data-draft', 'assistant-question');
+    input.placeholder = '问一件关于这个项目的事…';
+    input.setAttribute('aria-label', '问平台助手');
+    const send = document.createElement('button');
+    send.type = 'button';
+    send.className = 'primary';
+    send.dataset.act = 'assistant-send';
+    send.textContent = '发送';
+    form.append(input, send);
+    ask.append(form);
+    const note = document.createElement('p');
+    note.className = 'flat-note';
+    note.textContent = '提问以定向私聊发给后台助手；它只读不改，回答里会写明依据。';
+    ask.append(note);
+    panel.append(ask);
+
+    // ---- 它的回答 ----
+    const replies = document.createElement('section');
+    replies.className = 'flat-spec flat-assistant-replies';
+    replies.innerHTML = '<h3>它的回答</h3>';
+    // 口径要说清楚：助手读的是**本群**的任务表（同一个群里还并着别的项目），
+    // 上面那份速览才是**本项目**的口径。两个数字不一样不是谁算错了。
+    const scope = document.createElement('p');
+    scope.className = 'flat-note';
+    scope.textContent = '助手读的是本群的任务表；同一个群里还并着别的项目，所以它的计数可能比上面的本项目多。本项目的口径看「项目速览」。';
+    replies.append(scope);
+    if (!answers.length) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '还没有回答。问一句，答案会出现在这里；若一直没有回答，多半是后台助手没有在运行。';
+      replies.append(empty);
+    } else {
+      for (const message of answers.slice(-8).reverse()) {
+        const item = document.createElement('article');
+        item.className = 'flat-assistant-reply';
+        const when = document.createElement('p');
+        when.className = 'flat-note';
+        when.textContent = timeAgo(message.created_at || message.created);
+        const body = document.createElement('p');
+        body.className = 'flat-assistant-text';
+        body.textContent = readableMessageBody(message) || String(message.body || '');
+        item.append(when, body);
+        replies.append(item);
+      }
+    }
+    panel.append(replies);
+    return panel;
+  }
+
+  /** 助手发来的定向消息（它回的是私聊，所以只有这一条线程）。 */
+  function assistantAnswers() {
+    return (state.messages || []).filter(
+      (message) => String(message.sender_id || message.author_id || '') === ASSISTANT_ID,
+    );
+  }
+
+  /** 左栏那一行的状态：它最近一次回答是什么时候。 */
+  function assistantStatusText() {
+    const answers = assistantAnswers();
+    if (!answers.length) return '随时能问';
+    return `最近回答 · ${timeAgo(answers[answers.length - 1].created_at || answers[answers.length - 1].created)}`;
+  }
+
+  /** 问一句：定向私聊发给后台助手主体。 */
+  async function askAssistant(question) {
+    const text = String(question || '').trim();
+    if (!text) return;
+    await api('/messages', { body: text, mentions: [ASSISTANT_ID], direct: true });
+    await refresh();
+  }
+
   /** 中间那一栏：按选中的会话给内容。 */
   function conversationPane(filtered, pager) {
     const pane = document.createElement('section');
@@ -1428,7 +1596,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       pane.append(chat());
       return pane;
     }
-    if (state.view.kind === 'assistant' || state.view.kind === 'window') {
+    if (state.view.kind === 'assistant') {
+      pane.append(assistantPane());
+      return pane;
+    }
+    if (state.view.kind === 'window') {
       pane.append(windowPane(state.view.id));
       return pane;
     }
@@ -2026,7 +2198,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         </div>
         <div class="flat-detail-actions">
           ${state.memberAdded === harnessId ? '<span class="flat-note">已通知管理员</span>' : ''}
-          ${isAssistant ? '<button type="button" data-act="open-assistant">打开平台助手面板</button>' : ''}
+          ${isAssistant ? '<button type="button" data-act="assistant-detail">巡检与上报详情</button>' : ''}
           ${
             joinable
               ? `<button type="button" data-act="add-member" data-harness="${escape(harnessId)}">加入这个项目</button>`
@@ -4050,9 +4222,24 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
       return;
     }
-    if (button.dataset.act === 'open-assistant') {
-      // 平台助手的完整面板是另一块（顶栏那个按钮），这里把它叫起来。
+    if (button.dataset.act === 'open-assistant' || button.dataset.act === 'assistant-detail') {
+      // 巡检与上报的详细面板是另一块（顶栏那个按钮），这里把它叫起来。
       document.getElementById('adminAgentBtn')?.click();
+      return;
+    }
+    if (button.dataset.act === 'assistant-preset') {
+      // 常用问题：点了就是问（不让人再抄一遍）。
+      void askAssistant(button.dataset.question || button.textContent);
+      return;
+    }
+    if (button.dataset.act === 'assistant-send') {
+      const input = root.querySelector('#flatAssistantQuestion');
+      const question = input ? input.value : '';
+      if (!String(question || '').trim()) {
+        input?.focus();
+        return;
+      }
+      void askAssistant(question);
       return;
     }
     if (button.dataset.act === 'start-project') {
