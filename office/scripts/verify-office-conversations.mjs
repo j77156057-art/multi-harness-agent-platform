@@ -148,6 +148,14 @@ const responses = {
           generation_rate: 42.5,
           cache_hit_rate: 0.2,
           duration_ms: 9400,
+          // 成员自报的那部分（自带模型跑的活，平台不在那条链路上）。
+          reported: {
+            requests: 2,
+            prompt_tokens: 2000,
+            completion_tokens: 300,
+            cached_tokens: 1800,
+            cache_hit_rate: 0.9,
+          },
         },
       },
       requests: 4,
@@ -165,6 +173,9 @@ const responses = {
           cached_tokens: 50,
           consumer_tokens: {
             'harness/codex-window': { prompt_tokens: 300, completion_tokens: 100, cached_tokens: 50 },
+          },
+          reported_consumer_tokens: {
+            'harness/codex-window': { prompt_tokens: 900, completion_tokens: 150, cached_tokens: 800 },
           },
         },
       ],
@@ -389,9 +400,22 @@ try {
   const metricText = metrics.join(' | ');
   console.log('度量:', metricText);
   assert.ok(metricText.includes('42.5 token/秒'), '写了每秒生成多少 token');
-  assert.ok(metricText.includes('1400'), '写了消耗总 token');
+  assert.ok(metricText.includes('1,400'), '写了消耗总 token（千分位）');
   assert.ok(metricText.includes('400'), '写了最近一小时多少 token');
   assert.ok(metricText.includes('20%'), '写了缓存命中率');
+  // 两笔账分开摆：额度池记的 / 成员自报的。
+  assert.ok(metricText.includes('额度池：消耗总 token'), '额度池那笔单独一行');
+  assert.ok(metricText.includes('成员自报：消耗总 token'), '成员自报那笔也摆出来');
+  assert.ok(metricText.includes('2,300'), '成员自报的消耗总 token 也在（2000 + 300，千分位）');
+  assert.ok(metricText.includes('90%'), '成员自报的缓存命中率也在');
+  const usageBlock = await page
+    .locator('#aoWorkspace .flat-window .flat-spec', { hasText: '用量' })
+    .first()
+    .innerText();
+  assert.ok(
+    usageBlock.includes('走额度池的调用由平台记账'),
+    '写清了用量这块的两笔账各是什么',
+  );
 
   // 8. 窗口页的模型选择：自带 / 额度池里的哪个模型，按额度属主分组折叠。
   await page.locator('#aoWorkspace .flat-conv', { hasText: 'Codex CLI' }).first().click();

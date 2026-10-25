@@ -1351,6 +1351,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return list;
   }
 
+  /** 大数字加千分位：token 到百万级，不分组根本读不出来。 */
+  function groupDigits(value) {
+    const number = Number(value || 0);
+    if (!Number.isFinite(number)) return '0';
+    return String(Math.trunc(number)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
   /** 一行摘要：只截断，不解释截断（解释留给展开正文的地方）。 */
   function oneLine(text) {
     const value = String(text || '').replace(/\s+/g, ' ').trim();
@@ -1368,16 +1375,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const usage = pool.usage || {};
     const consumers = usage.consumers || {};
     const entry = consumers[`harness/${harnessId}`] || null;
+    // **两笔账**：额度池记的（entry）与成员自报的（entry.reported）。
+    // 后者是成员用自带模型跑的活 —— 平台不在那条链路上，用量由成员自己的 CLI 报上来。
+    const reported = (entry && entry.reported) || null;
     const buckets = (pool.timeline && pool.timeline.buckets) || [];
     let lastHour = null;
+    let reportedHour = null;
     for (const bucket of buckets) {
       const spent = (bucket.consumer_tokens || {})[`harness/${harnessId}`];
-      if (!spent) continue;
-      if (!lastHour || String(bucket.at) > String(lastHour.at)) {
+      if (spent && (!lastHour || String(bucket.at) > String(lastHour.at))) {
         lastHour = { at: bucket.at, ...spent };
       }
+      const reportedSpent = (bucket.reported_consumer_tokens || {})[`harness/${harnessId}`];
+      if (reportedSpent && (!reportedHour || String(bucket.at) > String(reportedHour.at))) {
+        reportedHour = { at: bucket.at, ...reportedSpent };
+      }
     }
-    return { entry, lastHour };
+    return { entry, reported, lastHour, reportedHour };
   }
 
   /** 这个窗口现在怎么样（一行话）。全部是平台上的事实。 */
@@ -2070,43 +2084,74 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       panel.append(section);
     }
 
-    // token 度量：平台用量账里 consumer 就是 `harness/<id>`。
+    // token 度量：**两笔账**，各管各的。
+    //   · 额度池记的 —— 走额度池的调用，平台自己记的（consumer = `harness/<id>`）。
+    //   · 成员自报的 —— 成员用自带模型跑的活，平台不在那条链路上，用量由成员自己的
+    //     CLI 报上来，平台从它的原始输出里解析。
     const metrics = windowMetrics(harnessId);
-    if (metrics.entry) {
-      const entry = metrics.entry;
-      const total = Number(entry.prompt_tokens || 0) + Number(entry.completion_tokens || 0);
-      const rows = [
-        [
-          '每秒生成 token',
-          entry.generation_rate == null
-            ? '（无数据）'
-            : `${entry.generation_rate} token/秒`,
-        ],
-        [
-          '消耗总 token',
-          `${total}（输入 ${Number(entry.prompt_tokens || 0)} · 输出 ${Number(entry.completion_tokens || 0)} · 命中缓存 ${Number(entry.cached_tokens || 0)}）`,
-        ],
-        [
-          '最近一小时 token',
-          metrics.lastHour
-            ? `${Number(metrics.lastHour.prompt_tokens || 0) + Number(metrics.lastHour.completion_tokens || 0)}（${String(metrics.lastHour.at).slice(0, 13).replace('T', ' ')} 那个小时）`
-            : '（这一小时没有记录）',
-        ],
-        [
-          '缓存命中率',
-          entry.cache_hit_rate == null
-            ? '（无数据）'
-            : `${Math.round(Number(entry.cache_hit_rate) * 100)}%`,
-        ],
-      ];
-      const box = document.createElement('section');
-      box.className = 'flat-spec';
-      box.innerHTML = `<h3>用量</h3>
-        <dl class="flat-facts">${rows
-          .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
-          .join('')}</dl>
-        <p class="flat-note">数据来自平台用量账：每秒生成 = 生成 token ÷ 生成耗时；命中率 = 缓存命中 token ÷ 输入 token。无数据时标注「无数据」，不填 0。</p>`;
-      panel.append(box);
+    const poolEntry = metrics.entry;
+    const reportedEntry = metrics.reported;
+    if (poolEntry || reportedEntry) {
+      const rows = [];
+      if (poolEntry && Number(poolEntry.requests || 0) > 0) {
+        const total = Number(poolEntry.prompt_tokens || 0) + Number(poolEntry.completion_tokens || 0);
+        rows.push(
+          [
+            '额度池：消耗总 token',
+            `${groupDigits(total)}（输入 ${groupDigits(poolEntry.prompt_tokens)} · 输出 ${groupDigits(poolEntry.completion_tokens)} · 命中缓存 ${groupDigits(poolEntry.cached_tokens)}）`,
+          ],
+          [
+            '额度池：缓存命中率',
+            poolEntry.cache_hit_rate == null
+              ? '（无数据）'
+              : `${Math.round(Number(poolEntry.cache_hit_rate) * 100)}%`,
+          ],
+          [
+            '额度池：每秒生成 token',
+            poolEntry.generation_rate == null
+              ? '（无数据）'
+              : `${poolEntry.generation_rate} token/秒`,
+          ],
+          [
+            '额度池：最近一小时 token',
+            metrics.lastHour
+              ? `${groupDigits(Number(metrics.lastHour.prompt_tokens || 0) + Number(metrics.lastHour.completion_tokens || 0))}（${String(metrics.lastHour.at).slice(0, 13).replace('T', ' ')} 那个小时）`
+              : '（这一小时没有记录）',
+          ],
+        );
+      }
+      if (reportedEntry && Number(reportedEntry.requests || 0) > 0) {
+        const total =
+          Number(reportedEntry.prompt_tokens || 0) + Number(reportedEntry.completion_tokens || 0);
+        rows.push(
+          [
+            '成员自报：消耗总 token',
+            `${groupDigits(total)}（输入 ${groupDigits(reportedEntry.prompt_tokens)} · 输出 ${groupDigits(reportedEntry.completion_tokens)} · 命中缓存 ${groupDigits(reportedEntry.cached_tokens)}）`,
+          ],
+          [
+            '成员自报：缓存命中率',
+            reportedEntry.cache_hit_rate == null
+              ? '（无数据）'
+              : `${Math.round(Number(reportedEntry.cache_hit_rate) * 100)}%`,
+          ],
+          [
+            '成员自报：最近一小时 token',
+            metrics.reportedHour
+              ? `${groupDigits(Number(metrics.reportedHour.prompt_tokens || 0) + Number(metrics.reportedHour.completion_tokens || 0))}（${String(metrics.reportedHour.at).slice(0, 13).replace('T', ' ')} 那个小时）`
+              : '（这一小时没有记录）',
+          ],
+        );
+      }
+      if (rows.length) {
+        const box = document.createElement('section');
+        box.className = 'flat-spec';
+        box.innerHTML = `<h3>用量</h3>
+          <dl class="flat-facts">${rows
+            .map(([key, value]) => `<dt>${escape(key)}</dt><dd>${escape(value)}</dd>`)
+            .join('')}</dl>
+          <p class="flat-note">两笔账各管各的：走额度池的调用由平台记账；成员用自带模型跑的那部分，用量由成员自己的 CLI 报上来，平台从它的原始输出里解析。命中率 = 命中缓存的 token ÷ 总输入（总输入含缓存）。认不出的写「无数据」，不填 0。</p>`;
+        panel.append(box);
+      }
     }
 
     // 该窗口使用的模型：自带，还是额度池里的某个模型。选了就照办。
