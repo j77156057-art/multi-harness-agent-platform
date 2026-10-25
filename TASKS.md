@@ -158,6 +158,7 @@
 | OFFICE-UI-25 | Mavis | OFFICE-UI-24 | done（办公室文案**书面化**：界面上的大白话统一成书面口径；平台与办公室两张词表逐字对齐） | `agent/local/mavis/OFFICE-UI-25/a1` | `MVP-UI-040` |
 | OFFICE-UI-26 | Mavis | OFFICE-UI-25 | done（**成员自报的用量与缓存命中率看得见**：两笔账分开摆，写清出处） | `agent/local/mavis/OFFICE-UI-26/a1` | `MVP-UI-041` |
 | OFFICE-UI-27 | Mavis | OFFICE-UI-26 | done（**清掉仓库里写坏的中文**：受版本控制的文件里 166 → 2，剩两个在已应用的迁移里，按 checksum 校验不能动） | `agent/local/mavis/OFFICE-UI-27/a1` | `MVP-UI-042` |
+| OFFICE-UI-28 | Mavis | OFFICE-UI-26 | done（**办公室本地接声明表**：加新 harness 不用改代码；不新增端点、不新增权限行） | `agent/local/mavis/OFFICE-UI-28/a1` | `MVP-UI-043` |
 | pool-generic-adapter | Codex | FORMAL-MULTI-HARNESS-01 | doing（池子消费侧通用化：池子四小坑 + 通用适配器，新 CLI 凭声明当成员；待仓库主人复核与合并） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | diff-uninitialized-repo | Codex | — | doing（diff 端点在正式仓库路径不对时 500 → 老实回 available:false；`tasks/service.py` 为共享文件另有归属，单开卡） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-UI-002` |
 | assistant-react-loop | Codex | — | doing（平台助手升级为自有 ReAct agent，P1 引擎+工具+反思层 scripted 全测；提案待仓库主人复核） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
@@ -268,6 +269,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-25 → docs/claims/mavis--OFFICE-UI-25.md -->
 <!-- OFFICE-UI-26 → docs/claims/mavis--OFFICE-UI-26.md -->
 <!-- OFFICE-UI-27 → docs/claims/mavis--OFFICE-UI-27.md -->
+<!-- OFFICE-UI-28 → docs/claims/mavis--OFFICE-UI-28.md -->
 <!-- pool-generic-adapter → docs/claims/codex--pool-generic-adapter.md -->
 <!-- diff-uninitialized-repo → docs/claims/codex--diff-uninitialized-repo.md -->
 <!-- assistant-react-loop → docs/claims/codex--assistant-react-loop.md -->
@@ -328,6 +330,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-25 | [卡](docs/tasks/notes/OFFICE-UI-25.md) | | |
 | OFFICE-UI-26 | [卡](docs/tasks/notes/OFFICE-UI-26.md) | | |
 | OFFICE-UI-27 | [卡](docs/tasks/notes/OFFICE-UI-27.md) | | |
+| OFFICE-UI-28 | [卡](docs/tasks/notes/OFFICE-UI-28.md) | | |
 | pool-generic-adapter | [卡](docs/tasks/notes/pool-generic-adapter.md) | | |
 | diff-uninitialized-repo | [卡](docs/tasks/notes/diff-uninitialized-repo.md) | | |
 | assistant-react-loop | [卡](docs/tasks/notes/assistant-react-loop.md) | | |

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 
 from app.adapter import cli_output, model_choice
 from app.adapter.dispatch import dispatch, eligible_tasks
+from app.adapter.harnesses.generic import declared_base_templates
 from app.adapter.models import configured_model
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
@@ -208,7 +209,18 @@ def register_harness(
 
 @management.get("/harnesses")
 def list_harnesses(database: DatabaseDep, _principal: _guard("harness:register")):
-    return {"harnesses": HarnessRegistry(database).listing()}
+    """The registry, plus the bases an operator declared.
+
+    The declared bases (``adapters/cli.json``) are the ones the office
+    registers windows for -- without them the office can only offer the
+    handful of bases it knows by heart, and adding a new CLI would need a
+    code change on the office side too.  Same route, same permission: no new
+    endpoint, no new matrix row.
+    """
+    return {
+        "harnesses": HarnessRegistry(database).listing(),
+        "base_adapters": declared_base_templates(),
+    }
 
 
 @management.post("/groups/{group_id}/dispatch")
