@@ -10,7 +10,7 @@
 真相源引用：`office/src/flat-office.js`（工作区与左栏）、
 `office/src/project-workspace.js`（新建项目）、`office/server/formal-dispatch-gateway.mjs`（本地网关）、
 `backend/app/assistant/tools.py`（助手的只读工具）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`17c51cd`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（平台助手默认内置在工作区域）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-048
