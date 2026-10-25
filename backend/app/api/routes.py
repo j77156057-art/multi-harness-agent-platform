@@ -2288,6 +2288,21 @@ def task_forensics(
     }
 
 
+@read.get("/assistant/runs")
+def assistant_runs() -> dict[str, Any]:
+    """助手最近几轮做了什么（只读）。
+
+    The engine writes every step to a local trace file; this face reads those
+    traces into a **summary** the office can show -- what the assistant thought,
+    which tool it called, what it saw.  The raw material (a 256KB forensics
+    dump, say) stays on the server: the summary says how big it was and how it
+    began, not the whole thing.
+    """
+    from app.assistant.runs import read_runs
+
+    return {"runs": read_runs(settings.data_dir)}
+
+
 @read.get("/tasks/{task_id}/events")
 def task_events(
     task_id: str,

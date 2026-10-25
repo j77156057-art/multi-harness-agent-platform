@@ -247,6 +247,12 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     allEvents: false,
     events: [],
     chatExpanded: false,
+    // 助手面板要不要滚到最新（刚进面板、刚发完一句时）。
+    assistantScrollBottom: false,
+    // 提问送不出去时的实话（空 = 没问题）。
+    assistantError: '',
+    // 助手这一轮做了什么（引擎 trace 的摘要，只读）。
+    assistantRuns: [],
   };
 
   // 用户**正在输入**的东西。
@@ -1117,6 +1123,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 同一份消息摆两处只是重复，左栏那一行还带着「最后一条」的摘要。
     restoreDrafts();
     restoreScroll();
+    // 助手面板：进了面板或刚发完一句时，滚到最新那条（对话是往下长的）。
+    if (state.assistantScrollBottom) {
+      state.assistantScrollBottom = false;
+      const pane = root.querySelector('.flat-detail');
+      if (pane) pane.scrollTop = pane.scrollHeight;
+    }
     const sourceSelect = root.querySelector('#flatSourceSelect');
     if (sourceSelect) sourceSelect.value = state.source;
     root.dataset.flatState = 'ready';
@@ -1348,7 +1360,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     // 平台助手**常驻**：工作区域里一直有它，不用在新建项目时勾选，也不依赖平台
     // 注册表里有没有某个窗口（以前这里要找得到 `office-admin` 才显示这一行）。
-    addRow('assistant', ASSISTANT_ID, '平台助手', assistantStatusText());
+    addRow('assistant', ASSISTANT_ID, '平台助手', assistantStatusText(), () => {
+      state.view = { kind: 'assistant', id: ASSISTANT_ID };
+      state.assistantScrollBottom = true;
+      render();
+    });
     if (adminId) {
       addRow('window', adminId, `管理员 · ${harnessName(adminId)}`, windowStatusText(adminId));
     }
@@ -1456,7 +1472,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const who = holderIds(task).now || '未指定执行者';
       byWindow.set(who, (byWindow.get(who) || 0) + 1);
     }
-    const answers = assistantAnswers();
 
     const head = document.createElement('div');
     head.className = 'flat-detail-head';
@@ -1496,10 +1511,92 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     overview.append(facts);
     panel.append(overview);
 
-    // ---- 问一句 ----
+    // ---- 它这一轮做了什么（引擎 trace 的摘要） ----
+    // 折起来：它默认不是要看的东西，但「它自己动了几步、看到了什么」该随时能翻。
+    const trace = document.createElement('details');
+    trace.className = 'flat-spec flat-assistant-trace';
+    const runs = state.assistantRuns || [];
+    const latest = runs[0];
+    const summary = document.createElement('summary');
+    summary.textContent = latest
+      ? `它这一轮做了什么（${(latest.steps || []).length} 步 · ${latest.model || '模型未记上'}）`
+      : '它这一轮做了什么';
+    trace.append(summary);
+    if (!latest) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '还没有可看的记录（助手还没在这一轮里动过手）。';
+      trace.append(empty);
+    } else {
+      const head = document.createElement('p');
+      head.className = 'flat-note';
+      head.textContent = `状态 ${latest.status || '未知'} · 引用 ${latest.self_check || '未记上'}`;
+      trace.append(head);
+      const list = document.createElement('ol');
+      list.className = 'flat-assistant-steps';
+      for (const step of latest.steps || []) {
+        const row = document.createElement('li');
+        const what = document.createElement('b');
+        what.textContent = step.tool || step.kind || '一步';
+        row.append(what);
+        if (step.thought) {
+          const thought = document.createElement('p');
+          thought.className = 'flat-assistant-thought';
+          thought.textContent = step.thought;
+          row.append(thought);
+        }
+        if (step.observation) {
+          const observation = document.createElement('p');
+          observation.className = 'flat-note';
+          observation.textContent = `看到：${step.observation}`;
+          row.append(observation);
+        }
+        list.append(row);
+      }
+      trace.append(list);
+    }
+    panel.append(trace);
+
+    // ---- 对话（我问的 + 它答的，按时间交替） ----
     const ask = document.createElement('section');
     ask.className = 'flat-spec flat-assistant-ask';
-    ask.innerHTML = '<h3>问它一句</h3>';
+    ask.innerHTML = '<h3>对话</h3>';
+    // 口径要说清楚：助手读的是**本群**的任务表（同一个群里还并着别的项目），
+    // 上面那份速览才是**本项目**的口径。两个数字不一样不是谁算错了。
+    const scope = document.createElement('p');
+    scope.className = 'flat-note';
+    scope.textContent = '助手读的是本群的任务表；同一个群里还并着别的项目，所以它的计数可能比上面的本项目多。本项目的口径看「项目速览」。';
+    ask.append(scope);
+
+    const thread = document.createElement('div');
+    thread.className = 'flat-assistant-thread';
+    const turns = assistantThread();
+    if (!turns.length) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '还没有对话。问一句，它会记住这次谈话；若一直没有回答，多半是后台助手没有在运行。';
+      thread.append(empty);
+    }
+    for (const message of turns) {
+      const mine = String(message.sender_type || '') === 'human';
+      const item = document.createElement('article');
+      item.className = 'flat-assistant-turn ' + (mine ? 'is-mine' : 'is-assistant');
+      const who = document.createElement('p');
+      who.className = 'flat-assistant-who';
+      const label = document.createElement('b');
+      label.textContent = mine ? '我' : '平台助手';
+      const when = document.createElement('span');
+      when.className = 'flat-note';
+      when.textContent = timeAgo(message.created_at || message.created);
+      who.append(label, when);
+      const body = document.createElement('p');
+      body.className = 'flat-assistant-text';
+      body.textContent = readableMessageBody(message) || String(message.body || '');
+      item.append(who, body);
+      thread.append(item);
+    }
+    ask.append(thread);
+
     const presets = document.createElement('div');
     presets.className = 'flat-assistant-presets';
     for (const question of ['现在进度怎么样？', '有哪些任务还没人领？', '最近失败的活卡在哪一步？']) {
@@ -1518,7 +1615,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     input.id = 'flatAssistantQuestion';
     input.className = 'flat-assistant-input';
     input.setAttribute('data-draft', 'assistant-question');
-    input.placeholder = '问一件关于这个项目的事…';
+    input.placeholder = '问一句…（它记得这次谈话）';
     input.setAttribute('aria-label', '问平台助手');
     const send = document.createElement('button');
     send.type = 'button';
@@ -1527,43 +1624,28 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     send.textContent = '发送';
     form.append(input, send);
     ask.append(form);
+    if (state.assistantError) {
+      const failure = document.createElement('p');
+      failure.className = 'flat-assistant-error';
+      failure.textContent = state.assistantError;
+      ask.append(failure);
+    }
     const note = document.createElement('p');
     note.className = 'flat-note';
     note.textContent = '提问以定向私聊发给后台助手；它只读不改，回答里会写明依据。';
     ask.append(note);
     panel.append(ask);
 
-    // ---- 它的回答 ----
-    const replies = document.createElement('section');
-    replies.className = 'flat-spec flat-assistant-replies';
-    replies.innerHTML = '<h3>它的回答</h3>';
-    // 口径要说清楚：助手读的是**本群**的任务表（同一个群里还并着别的项目），
-    // 上面那份速览才是**本项目**的口径。两个数字不一样不是谁算错了。
-    const scope = document.createElement('p');
-    scope.className = 'flat-note';
-    scope.textContent = '助手读的是本群的任务表；同一个群里还并着别的项目，所以它的计数可能比上面的本项目多。本项目的口径看「项目速览」。';
-    replies.append(scope);
-    if (!answers.length) {
-      const empty = document.createElement('p');
-      empty.className = 'flat-empty';
-      empty.textContent = '还没有回答。问一句，答案会出现在这里；若一直没有回答，多半是后台助手没有在运行。';
-      replies.append(empty);
-    } else {
-      for (const message of answers.slice(-8).reverse()) {
-        const item = document.createElement('article');
-        item.className = 'flat-assistant-reply';
-        const when = document.createElement('p');
-        when.className = 'flat-note';
-        when.textContent = timeAgo(message.created_at || message.created);
-        const body = document.createElement('p');
-        body.className = 'flat-assistant-text';
-        body.textContent = readableMessageBody(message) || String(message.body || '');
-        item.append(when, body);
-        replies.append(item);
-      }
-    }
-    panel.append(replies);
     return panel;
+  }
+
+  /** 这条私聊里的对话（我问的 + 它答的），按时间排。 */
+  function assistantThread() {
+    return (state.messages || [])
+      .filter((message) =>
+        (Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
+      )
+      .sort((a, b) => Number(a.created_seq || 0) - Number(b.created_seq || 0));
   }
 
   /** 助手发来的定向消息（它回的是私聊，所以只有这一条线程）。 */
@@ -1584,7 +1666,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   async function askAssistant(question) {
     const text = String(question || '').trim();
     if (!text) return;
-    await api('/messages', { body: text, mentions: [ASSISTANT_ID], direct: true });
+    state.assistantScrollBottom = true;
+    state.assistantError = '';
+    try {
+      await api('/messages', { body: text, mentions: [ASSISTANT_ID], direct: true });
+    } catch (error) {
+      // 问不出去就说出来：静默失败会让人以为助手不理人。
+      state.assistantError = `这句话没能送出去：${String(error.message || error)}`;
+      render();
+      return;
+    }
     await refresh();
   }
 
@@ -4165,6 +4256,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   });
 
+  // 助手的提问框：回车就发（Shift+回车留着换行）。
+  root.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || event.shiftKey) return;
+    const input = event.target;
+    if (!input || input.id !== 'flatAssistantQuestion') return;
+    event.preventDefault();
+    void askAssistant(input.value);
+  });
+
   root.addEventListener('click', (event) => {    // 任务行里的「看本次失败的真实日志」：选那条活，再把日志滚到眼前。
     const jump = event.target.closest('[data-jump="log"]');
     if (jump) {
@@ -4624,10 +4724,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         online,
         offline: state.availability.length - online,
       });
-      const [pool, plan, messages] = await Promise.all([
+      const [pool, plan, messages, runs] = await Promise.all([
         probed ? Promise.resolve(probed) : api('/pool').catch(() => null),
         api('/plan').catch(() => null),
         api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
+        // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
+        api('/assistant/runs').catch(() => ({ runs: [] })),
         loadUserKeys(),
       ]);
       // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
@@ -4643,6 +4745,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       }
       state.plan = plan;
       state.messages = messages.messages || [];
+      state.assistantRuns = runs.runs || [];
       state.events = events.events || [];
       // 人话从平台来（问过的会缓存，不会每 15 秒问一次）。
       await loadWording();

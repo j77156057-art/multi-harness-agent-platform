@@ -643,6 +643,11 @@ export function createFormalGateway(config={}){
         const pool=await call('/pool/probe',undefined,config.adminTokenFile,'POST',30000);
         json(res,200,pool);return true;
       }
+      if(req.method==='GET'&&route==='/assistant/runs'){
+        // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
+        const result=await call('/assistant/runs');
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/messages'){
         const sinceRaw=url.searchParams.get('since_seq')||'0';
         const limitRaw=url.searchParams.get('limit')||'100';
