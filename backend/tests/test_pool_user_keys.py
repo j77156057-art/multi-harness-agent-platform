@@ -116,7 +116,7 @@ def test_the_question_is_raised_once_per_key(store: Path) -> None:
     user_keys.raise_request(key_id=key.id, reason="又来一次", task_id="FD-2")
     second = user_keys.pending()
     assert second is not None
-    # 同���个 key 只留一个问题，不攒成一堆。
+    # 同一个 key 只留一个问题，不攒成一堆。
     assert len(user_keys._read().requests) == 1
     user_keys.clear_request(key.id)
     assert user_keys.pending() is None
