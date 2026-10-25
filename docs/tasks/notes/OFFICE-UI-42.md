@@ -12,7 +12,7 @@
 （投递）、`backend/app/alerts/__main__.py`（投递入口）、
 `docs/tasks/notes/pool-free-set-watch.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`56bd334`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（free-set-watch 的部署方式定案）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADAPTER-005
