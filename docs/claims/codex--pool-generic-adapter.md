@@ -59,3 +59,8 @@
 4. mock 二进制冒烟：声明式 CLI 以真实子进程跑完 command → 输出解析 →
    stdin 通道，argv/输入/解析全部按声明发生（smoke 脚本留档工作区外）；
 5. `tools/docstate`、`tools/discipline`、`ruff`（check + format，197 文件）全绿。
+
+## 2026-10-26：逐条核实并收尾（OFFICE-UI-37，Mavis）
+
+实现经 `2c02969` 已合入 main（原写的「`c4c16a1` 尚未合入」是过时描述）。
+逐条核实 9/9 通过，证据与真跑记录见 `docs/tasks/notes/pool-generic-adapter.md`。

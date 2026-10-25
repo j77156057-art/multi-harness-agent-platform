@@ -12,7 +12,8 @@
 `backend/app/pool/sources.py`（池子四小坑）、`backend/app/adapter/formal_worker.py`（接线）、
 `docs/tasks/notes/pool-generic-adapter.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：把已完成的 pool-generic-adapter 结掉）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADAPTER-004
 
@@ -51,7 +52,9 @@ test_id：MVP-ADAPTER-004
 
 | 门禁 | 结果 |
 |---|---|
-| 逐条核实 | 待回填 |
-| 真跑（8849 真平台 + 4174 预览） | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 逐条核实 | **9/9 通过**：内置槽显式 tier、未知 store 拒绝提供、声明与内置合并、`enabled:false` 整体关闭（实测 opencode 槽位归 0）、池子配置优先 `data/pool/config.json`、自环防护按上游归属（`_base_of` + `_owned_by_harness`）、`GenericCliAdapter` 与声明表在 main、接线四个函数都在、登记三处都在 |
+| 真跑（8849 真平台 + 4174 预览） | `GET /harnesses/bases` → 声明基座 `gemini`（`gemini-print`）+ 两条缺口（没有 review_args / 池子侧没有槽位）+ 内置 6 家 + `declaration_error` 为 null；`GET /pool/status` → 21 个上游 |
+| 被收尾的那张卡 | `docs/tasks/notes/pool-generic-adapter.md` 的状态改成 done，「合并状态」段**更正**为「实现经 `2c02969` 合入 main」并附逐条核实表 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| `pytest`（全量） | EXIT=0（本卡**只改文档**；后端代码逐字节未变，全量已在合并 codex 分支那轮跑过并 EXIT=0） |
+| 边界 | **没有改它的实现** —— 代码已在 main 上且全量绿；核实出缺口就另开卡，不在结卡里顺手改 |
