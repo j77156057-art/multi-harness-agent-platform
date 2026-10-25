@@ -97,6 +97,23 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
   };
   const homeLabelObserver = new MutationObserver(patchHomeLabel);
   homeLabelObserver.observe(slot, {childList: true, subtree: true});
+  // 组件把「任务目标」排在表单的最后一项：实测它在滚动区下方一百多像素处
+  // （目标框 top=912，而可视区只到 bottom=798），第一次用的人第一眼看不到自己要
+  // 写什么，得先选项目、管理员、成员、传阅轮数再往下滚。
+  //
+  // 组件是锁定贡献（文件不能改），这里沿用同一手法：每次重渲染后把**组件自己的**
+  // 目标输入框那一组搬到表单最前面。搬的是同一个节点 —— 组件的状态、校验、摘要
+  // 全都照旧，也不引入第二个输入框（两处输入框必然不同步）。
+  const promoteGoalField = () => {
+    const goal = slot.querySelector('textarea[data-field="goal"]');
+    if (!goal) return;
+    const group = goal.closest('.oop-group');
+    const form = group ? group.parentElement : null;
+    if (!group || !form || form.firstElementChild === group) return;
+    form.prepend(group);
+  };
+  const goalFieldObserver = new MutationObserver(promoteGoalField);
+  goalFieldObserver.observe(slot, {childList: true, subtree: true});
   // 锁定组件的措辞是给机器看的（实例 / 打工人 / Harness / instance_id / 宿主 /
   // 唯一管理员 / (harness)），而这条向导是**第一次用的人**走的第一条路。
   // 这里统一改渲染出来的文字：只改显示，不改组件的校验与行为（锁定文件本身不动）。
