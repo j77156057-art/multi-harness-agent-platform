@@ -12,7 +12,8 @@
 `backend/app/pool/balance.py`（provider 自己报的余额）、
 `backend/tests/test_pool_metered.py`、`docs/tasks/notes/pool-metered-amount.md`（被收尾的
 那张卡）、`docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：结掉 pool-metered-amount）
 验证结果：见文末「验证结果」表。
 test_id：DOC-SCHEMA-001
 
@@ -49,8 +50,10 @@ test_id：DOC-SCHEMA-001
 
 | 门禁 | 结果 |
 |---|---|
-| 逐条核实（6 条） | 待回填 |
-| 定点测试真跑 | 待回填 |
-| 转码 | 待回填 |
-| `tools/docstate` / `tools/discipline` | 待回填 |
-| `pytest`（全量） | 待回填 |
+| 逐条核实（6 条） | **6/6 通过**：① 流式 token 被记账（真跑，usage.jsonl 有 `prompt=120 completion=45`，**不是 0**）② `_usage_blobs()` 一个地方收三种协议（Responses `response.usage` / chat 顶层 / Anthropic `message.usage`+`message_delta`）③ 余额读 provider 自己的只读接口（`/user/balance`、`/v1/usage`），读不到给原因不编 0 ④ 单价不猜（只报 token 与余额）⑤ 没被计过的记「未计上」（`tokens_unknown`）不是 0 ⑥ 定点测试与门禁全绿 |
+| 真跑（手动，不是单元级） | 真起一个本地 HTTP 服务回带 usage 的 Responses 流 → 池子走 `responses_stream` 真发一次 → 3 个流式块回来，`usage.jsonl` 记 1 条（`note="streamed (responses)"`），`usage_summary` 里能看到 consumer `harness/manual-run` |
+| 定点测试真跑 | `tests/test_pool_metered.py` + `test_pool_stream_usage.py` + `test_pool_token_metrics.py` 全绿 |
+| 「转 GBK」这件事 | **不需要转** —— 那张卡本来就是 UTF-8（U+FFFD 0 个），在 Windows 控制台里显示乱码是**终端按 GBK 读 UTF-8 文件**的缘故。已在卡片里写清，免得下一个人再去「修」一个没坏的东西 |
+| `tools/docstate` / `tools/discipline` | 98/98、44/44 |
+| `pytest`（全量） | EXIT=0（本卡**只改文档**；后端代码逐字节未变） |
+| 边界 | **没有改它的实现**；核实出缺口就另开卡 |

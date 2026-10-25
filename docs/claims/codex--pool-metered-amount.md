@@ -64,3 +64,8 @@
 - 不改 `backend/migrations/**`；不改生产项目素材与外部 Harness 工作树。
 - 余额只读 provider 的公开只读接口，**不下单、不改配置**；读失败一律降级为
   "问不到"，不影响池子状态路由。
+
+## 2026-10-26：逐条核实并收尾（OFFICE-UI-40，Mavis）
+
+实现已在 main 上。6 条完成标准逐条核实 + 手动真跑（真起本地 HTTP 服务发Responses 流，usage.jsonl 记到 prompt=120 completion=45）记录见
+`docs/tasks/notes/pool-metered-amount.md` 的「验证结果」。
