@@ -10,7 +10,7 @@
 真相源引用：`office/src/flat-office.js`、`office/src/main.js`、`office/src/project-workspace.js`、
 `office/src/direct-chat.js`、`office/src/outputs.js`、`office/src/admin-agent.js`；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`0be3103`）
 commit：`c7aa857`（办公室与平台的文案统一成书面口径：任务、任务详情、验收标准、允许修改的路径……）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-040
