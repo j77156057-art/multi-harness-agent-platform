@@ -49,6 +49,26 @@ CLI_TIERS = ("free", "reserve", "metered")
 KNOWN_CLI_STORES = ("opencode",)
 
 
+def declared_cli_slots() -> list[dict[str, Any]]:
+    """The slots an operator declared in the pool config -- **no CLI is spawned**.
+
+    The live list is :func:`discover_cli_slots` (it runs the CLIs to find out what
+    they can do); this one is the *declared* side only, cheap enough for a read
+    face that answers "what is still missing for this CLI?".
+    """
+    path = pool_config_path()
+    if not path.exists():
+        return []
+    try:
+        document = _read_json(path)
+    except (OSError, ValueError):
+        return []
+    slots = document.get("cli_slots") if isinstance(document, dict) else None
+    if not isinstance(slots, list):
+        return []
+    return [slot for slot in slots if isinstance(slot, dict)]
+
+
 def pool_config_path() -> Path:
     """Where the pool's own declarations live.
 

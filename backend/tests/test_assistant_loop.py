@@ -122,6 +122,7 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
     assert body["direct"] is True and body["author_id"] == "office-assistant"
     assert set(_registry(FakeClient())) == {
         "pool.status",
+        "harness.bases",
         "task.get",
         "task.diff",
         "task.verification",
