@@ -11,7 +11,7 @@
 `backend/app/api/routes.py`（新读面）、`backend/app/assistant/tools.py`（工具表）、
 `backend/app/assistant/prompts.py`（姿势与红线）、`backend/app/security/scan.py`（凭据识别）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`0c149dd`）
 commit：`fb819ba`（助手的深取证档）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-046
