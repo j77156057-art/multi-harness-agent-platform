@@ -6,7 +6,7 @@
 负责 Harness：Mavis
 开始时间：2026-10-25 12:45 +08:00
 工作区：`.worktrees/mavis/`
-依赖任务：OFFICE-UI-26（加新 harness 的接口面）、pool-generic-adapter（声明式适配器）
+依赖任务：pool-generic-adapter（声明式适配器）
 真相源引用：`backend/app/adapter/harnesses/generic.py`（声明与模板）、
 `backend/app/api/routes.py`（`GET /harnesses`）、
 `office/server/formal-dispatch-gateway.mjs`（办公室本地网关的基座列表与登记）；
@@ -18,7 +18,7 @@ test_id：MVP-UI-043
 
 | 项 | 内容 |
 |---|---|
-| 依赖 | OFFICE-UI-26、pool-generic-adapter |
+| 依赖 | pool-generic-adapter |
 | test_id | `MVP-UI-043` |
 | 允许修改 | `backend/app/adapter/harnesses/generic.py`、`backend/app/api/routes.py`、`backend/tests/**`、`office/server/formal-dispatch-gateway.mjs`、`office/server/formal-gateway-admin.test.mjs`、`docs/claims/mavis--OFFICE-UI-28.md`、`docs/tasks/notes/OFFICE-UI-28.md`、`docs/traceability.md`、`TASKS.md` |
 | 禁止修改 | `docs/spec/**`、`backend/app/auth/**`（权限矩阵不动）、`backend/app/admin/worker.py`（codex 在途）、其他 Harness 的工作区与分支 |
