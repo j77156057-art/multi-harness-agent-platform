@@ -12,7 +12,7 @@
 `backend/app/pool/sources.py`（池子四小坑）、`backend/app/adapter/formal_worker.py`（接线）、
 `docs/tasks/notes/pool-generic-adapter.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`951d979`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：把已完成的 pool-generic-adapter 结掉）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADAPTER-004
