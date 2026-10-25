@@ -11,7 +11,7 @@
 `backend/app/api/routes.py`（新读面）、`backend/app/assistant/tools.py`（工具表）、
 `backend/app/assistant/prompts.py`（姿势与红线）、`docs/harness-onboarding.md`（流程手册）；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`3ae70cb`）
 commit：`6b8cbc5`（助手的适配体检 + 声明草案）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-045
