@@ -189,6 +189,34 @@ def build_registry(
             "verification": verification.get("verification"),
         }
 
+    def task_forensics(args: dict[str, Any]) -> dict[str, Any]:
+        """The deeper evidence: more of the CLI output, the stderr side, and where
+        every byte came from.  The platform masks credential-looking lines
+        before this point, so the raw value is not here -- the count of masked
+        lines is, and the answer has to say so.
+        """
+        task_id = _required_id(args, "task_id")
+        pack = client.get(f"/tasks/{task_id}/forensics")
+        forensics = pack.get("forensics") if isinstance(pack, dict) else None
+        if not forensics:
+            return {"task_id": task_id, "forensics": None, "note": "no attempt transcript"}
+        events = client.get(f"/tasks/{task_id}/events", limit=200)
+        rows = events.get("events") if isinstance(events, dict) else []
+        failure_events = [
+            {
+                key: event.get(key)
+                for key in ("seq", "event_name", "created_at", "actor_id", "payload")
+            }
+            for event in rows
+            if isinstance(event, dict)
+            and str(event.get("event_name") or "") in ("abandon", "release", "submit_result")
+        ]
+        return {
+            "task_id": task_id,
+            "forensics": forensics,
+            "failure_events": failure_events[-5:],
+        }
+
     def group_tasks(args: dict[str, Any]) -> dict[str, Any]:
         params: dict[str, Any] = {}
         status = str(args.get("status") or "").strip()
@@ -242,6 +270,13 @@ def build_registry(
             "失败诊断证据束：任务状态 + 失败事件（最新至多 3 条，原样） + "
             "CLI 输出尾巴 + 验证回执（一次取证；不编原因）",
             task_diagnose,
+        ),
+        Tool(
+            "task.forensics",
+            "read",
+            "深取证：更长的 CLI 输出、stderr 与出处（哪条任务/哪一轮/哪个日志文件/多大/何时）；"
+            "像凭据的行平台已遮挡",
+            task_forensics,
         ),
         Tool("group.tasks", "read", "本群任务表（可选 status 过滤）", group_tasks),
         Tool(

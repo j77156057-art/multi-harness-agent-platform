@@ -18,6 +18,7 @@ would need a transport instead of a file.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,43 @@ def log_paths(data_dir: Path | str, task_id: str, attempt_id: str) -> tuple[Path
         base.with_name(base.name + ".log"),
         base.with_name(base.name + ".err.log"),
     )
+
+
+#: The mask a line with a credential-looking value gets.
+REDACTED_LINE = "[这一行含疑似凭据，平台已遮挡]"
+
+#: Credentials in a log usually carry a prefix (``OPENAI_API_KEY=...``), and the
+#: outbound scan's word-boundary rule cannot see that shape: the ``_`` before
+#: ``API`` is a word character, so ``\bapi_key\b`` never matches inside
+#: ``OPENAI_API_KEY``.  Blocking a write and masking a log line are opposite
+#: trades -- the scan prefers a false negative (a report item) over a false
+#: positive (real work blocked), while masking one extra log line costs almost
+#: nothing next to leaking a credential.  So the log side is deliberately wider.
+_LOG_CREDENTIAL = re.compile(
+    r"(?i)\b[A-Za-z0-9_]*(?:api[_-]?key|secret|passwd|password|token)\b\s*[=:]\s*"
+    r"[\"']?([A-Za-z0-9_+/=.-]{20,})"
+)
+
+
+def redact(text: str) -> tuple[str, int]:
+    """Mask the lines that carry a credential-looking value.
+
+    The platform masks them **before** anybody reads the log: the assistant (and
+    every other reader) never sees the raw value.  The count of masked lines
+    goes with the text, so whoever quotes it can say how much was hidden
+    instead of passing it off as complete.
+    """
+    from app.security.scan import scan_text
+
+    kept: list[str] = []
+    masked = 0
+    for line in text.splitlines():
+        if scan_text(line, location="cli-output") or _LOG_CREDENTIAL.search(line):
+            masked += 1
+            kept.append(REDACTED_LINE)
+            continue
+        kept.append(line)
+    return "\n".join(kept), masked
 
 
 def read_tail(
