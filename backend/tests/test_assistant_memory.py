@@ -61,11 +61,24 @@ def test_the_memory_lines_say_who_said_what():
         _message(11, ASSISTANT, "第一答"),
     ]
 
-    lines = memory_context(thread_turns(messages), assistant_id=ASSISTANT)
+    lines = memory_context(
+        thread_turns(messages), assistant_id=ASSISTANT, asker_id="office-operator"
+    )
 
     assert len(lines) == 2
-    assert "对方" in lines[0] and "第一问" in lines[0]
-    assert "助手" in lines[1] and "第一答" in lines[1]
+    # The identity is what tells the model which line is **its own** old answer.
+    assert "用户上一轮问的" in lines[0] and "第一问" in lines[0]
+    assert "你上一轮答的" in lines[1] and "第一答" in lines[1]
+
+
+def test_a_third_party_line_is_not_guessed_to_be_the_user():
+    messages = [_message(10, "somebody-else", "第三方说的")]
+
+    lines = memory_context(
+        thread_turns(messages), assistant_id=ASSISTANT, asker_id="office-operator"
+    )
+
+    assert "另一方" in lines[0]
 
 
 def test_the_memory_is_bounded():
