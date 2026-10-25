@@ -13,7 +13,8 @@
 `backend/tests/test_git_quotepath.py`、`backend/tests/test_pool_user_keys.py`、
 `docs/claims/**`、`docs/incidents/**`、`docs/tasks/notes/**`；
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：doing
+当前状态：done
+commit：`1843d4c`（清掉仓库里写坏的中文：15 个文件的 166 个坏字节）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-042
 
@@ -61,6 +62,6 @@ test_id：MVP-UI-042
 
 | 门禁 | 结果 |
 |---|---|
-| 全仓扫描（受版本控制的文件） | 待回填 |
-| 后端全量 `pytest` | 待回填 |
-| `tools/docstate` / `tools/discipline` / `ruff` | 待回填 |
+| 全仓扫描（`git ls-files` 逐个读） | 受版本控制的文件里 U+FFFD 从 166 个降到 **2 个** —— 只剩 `backend/migrations/002_task_claims_nullable.sql` 第 11 行那两个，**故意不改**（已应用的迁移按 checksum 校验，`backend/app/db/migrations.py:67`：文件一变就 `MigrationError`，平台起不来） |
+| 后端全量 `pytest` | `PYTEST_EXIT=0`（这一卡只改注释与文档，不改行为） |
+| `tools/docstate` / `tools/discipline` / `ruff` | 98/98、44/44、ruff 全绿（`ruff check` 与 `ruff format --check` 两条） |
