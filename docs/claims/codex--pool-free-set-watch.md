@@ -29,3 +29,9 @@ outbound，故不挂 run_all_sweeps）。
   快照翻新（指纹 `f844659e…`）——哨按声明的被动原则只读目录 diff，
   这次告警就是它干活的证明。部署方式（--loop 挂哪个常驻进程/cron）
   待仓库主人拍板。
+
+## 2026-10-26：核实并真跑（OFFICE-UI-39，Mavis）
+
+实现与 7 条 scripted 已在 main 上并全绿；真跑两遍 `--once`（首跑建基线不喊人、
+同名单静默）。**部署时机待仓库主人定**，三个选项与代价见
+`docs/tasks/notes/pool-free-set-watch.md` 的「部署」段。
