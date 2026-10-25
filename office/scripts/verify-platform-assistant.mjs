@@ -1,6 +1,6 @@
-// 平台助手 = 巡检 + 上报，不是管理员：面板里不能出现任何写入动作（分派 / 处置 / 审核）。
+// 巡检与上报 = 列事实 + 报异常，不是管理员：面板里不能出现任何写入动作（分派 / 处置 / 审核）。
 // 断言：
-//   1. 按钮与标题都叫「平台助手」；
+//   1. 按钮与标题都叫「巡检与上报」（它与工作区域里那一行「平台助手」不是一回事）；
 //   2. 面板里没有任何分派 / 处置 / 审核按钮（分派、领取审核、续期重跑、重新打开、
 //      释放升级、取消、去重取消、打开正式分派）；
 //   3. 上报按钮在没有指定管理员 Harness 时是禁用的（不自动挑人顶替）。
@@ -24,8 +24,10 @@ await page.locator('#aoStartBtn').click();
 await page.waitForSelector('#openingDialog', { state: 'visible', timeout: 20000 });
 await page.locator('#openingCloseBtn').click();
 
+// 巡检与上报面板 = 列事实、报异常。它**不是**工作区域里那一行「平台助手」
+// （那个能读日志、调记录、回答问题）—— 两个入口不许同名。
 const button = await page.locator('#adminAgentBtn').textContent();
-if (button.trim() !== '平台助手') throw new Error(`button label is not 平台助手: ${button}`);
+if (button.trim() !== '巡检与上报') throw new Error(`button label is not 巡检与上报: ${button}`);
 
 // 按钮在 phone-only 阶段不在屏幕上：直接在页面里打开面板，只读巡检摘要。
 await page.evaluate(() => document.querySelector('#adminAgentBtn').click());

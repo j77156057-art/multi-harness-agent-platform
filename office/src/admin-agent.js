@@ -94,7 +94,9 @@ function saveStore(db) {
 export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap = true, adminHarness = null, project = null }) {
   const button = document.createElement('button');
   button.id = 'adminAgentBtn'; button.type = 'button'; button.className = 'primary admin-agent-launch';
-  button.textContent = '平台助手';
+  // 这一块是**巡检与上报**（列事实、报异常）；工作区域里那一行「平台助手」是
+  // 另一个东西（能读日志、调记录、回答问题）。两个入口同名会让人以为是一回事。
+  button.textContent = '巡检与上报';
   launchArea.append(button);
   const phoneButton = phoneArea ? button.cloneNode(true) : null;
   if (phoneButton) { phoneButton.id = 'adminAgentPhoneBtn'; phoneButton.className = 'phone-agent-launch admin-agent-launch'; phoneArea.append(phoneButton); }
@@ -104,13 +106,13 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
   const dialog = document.createElement('dialog');
   dialog.id = 'adminAgentDialog'; dialog.className = 'agent-dialog';
-  dialog.innerHTML = `<header class="agent-head"><div><h2>平台助手 · 盯着项目</h2>
+  dialog.innerHTML = `<header class="agent-head"><div><h2>巡检与上报 · 盯着项目</h2>
     <p>只看不改：它把平台上的事实列出来，不做规划、不分派、不改谁负责。超时或长时间没进展时，报给本项目的管理员。</p>
     <details class="agent-rules"><summary>职责边界（展开查看）</summary>
       <p>平台助手负责：定时巡检、进度记录、停滞判定、催促与上报。收件人是本项目的管理员窗口。</p>
       <p>不属于平台助手：拆解任务表、裁决竞争、重新分工、续期重开取消、领取与提交审核 —— 这些是管理员窗口与正式分派面板的事。求助/接单（split / request_help / accept_help / reject_help / release / abandon）始终是窗口侧权限，助手不代任何成员发起。</p>
     </details></div>
-    <button type="button" data-close aria-label="关闭平台助手">关闭</button></header>
+    <button type="button" data-close aria-label="关闭巡检与上报">关闭</button></header>
     <p data-connection role="status">正在检查连接…</p>
     <p data-action class="agent-action-result" role="status" hidden></p>
     <div class="agent-body" data-body hidden></div>`;
