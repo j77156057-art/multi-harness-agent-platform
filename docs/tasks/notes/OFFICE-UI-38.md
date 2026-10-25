@@ -11,7 +11,7 @@
 真相源引用：`backend/app/git/repo.py`（`has_object`）、`backend/app/tasks/service.py`
 （`diff_for_task`）、`docs/tasks/notes/diff-uninitialized-repo.md`（被收尾的那张卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
-当前状态：done
+当前状态：done（已合入 main：`26bb736`）
 commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 codex 的在途：把已完成的 diff-uninitialized-repo 结掉）
 验证结果：见文末「验证结果」表。
 test_id：MVP-UI-002
