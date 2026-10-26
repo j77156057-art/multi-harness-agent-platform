@@ -185,6 +185,7 @@
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-diagnose-pack | Codex | assistant-react-loop-p3 | done（`task.diagnose` 失败证据束、诊断姿势 prompt；scripted/全量 pytest/ruff/docstate/discipline 全绿，提交 `17914d5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| PUBLIC-CLEAN-01 | Mavis | — | doing（清理公开快照中的内部协作文档与本机路径；保留 Git 历史，不 force push） | `agent/workspace/mavis-public-clean` | `MVP-PROCESS-001` |
 | PUBLIC-RELEASE-01 | Mavis | — | done（README、依赖/启动入口和路径可移植性整理已完成；规范/纪律门禁与前端构建通过；后端依赖安装受当前机器 PyPI 网络超时阻塞，详见任务卡） | `agent/local/mavis/PUBLIC-RELEASE-01/a1` | `MVP-PROCESS-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
@@ -311,6 +312,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-40 → docs/claims/mavis--OFFICE-UI-40.md -->
 <!-- OFFICE-UI-42 → docs/claims/mavis--OFFICE-UI-42.md -->
 <!-- OFFICE-UI-43 → docs/claims/mavis--OFFICE-UI-43.md -->
+<!-- PUBLIC-CLEAN-01 → docs/claims/mavis--PUBLIC-CLEAN-01.md -->
 <!-- PUBLIC-RELEASE-01 → docs/claims/mavis--PUBLIC-RELEASE-01.md -->
 <!-- README-REVAMP-01 → docs/claims/mavis--README-REVAMP-01.md -->
 <!-- README-TONE-01 → docs/claims/mavis--README-TONE-01.md -->
@@ -391,6 +393,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-40 | [卡](docs/tasks/notes/OFFICE-UI-40.md) | | |
 | OFFICE-UI-42 | [卡](docs/tasks/notes/OFFICE-UI-42.md) | | |
 | OFFICE-UI-43 | [卡](docs/tasks/notes/OFFICE-UI-43.md) | | |
+| PUBLIC-CLEAN-01 | [卡](docs/tasks/notes/PUBLIC-CLEAN-01.md) | | |
 | PUBLIC-RELEASE-01 | [卡](docs/tasks/notes/PUBLIC-RELEASE-01.md) | | |
 | README-REVAMP-01 | [卡](docs/tasks/notes/README-REVAMP-01.md) | | |
 | README-TONE-01 | [卡](docs/tasks/notes/README-TONE-01.md) | | |
