@@ -387,6 +387,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-40 | [卡](docs/tasks/notes/OFFICE-UI-40.md) | | |
 | OFFICE-UI-42 | [卡](docs/tasks/notes/OFFICE-UI-42.md) | | |
 | OFFICE-UI-43 | [卡](docs/tasks/notes/OFFICE-UI-43.md) | | |
+| PUBLIC-RELEASE-01 | [卡](docs/tasks/notes/PUBLIC-RELEASE-01.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |
