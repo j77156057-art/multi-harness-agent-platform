@@ -14,7 +14,7 @@
 `docs/tasks/notes/FORMAL-MULTI-HARNESS-02.md`（被接手的卡）、
 `docs/dev-convention.md` H-4 / H-7 / H-8
 当前状态：done
-commit：`IMPLEMENT_COMMIT_PLACEHOLDER`（接手 FORMAL-MULTI-HARNESS-02：补两条缺失的冲突码测试 + 4 条完成标准逐条核实 + 真跑）
+commit：`0916c2e`（接手 FORMAL-MULTI-HARNESS-02：补两条缺失的冲突码测试 + 4 条完成标准逐条核实 + 真跑）
 验证结果：见文末「验证结果」表。
 test_id：MVP-ADMIN-REVIEW-001
 
