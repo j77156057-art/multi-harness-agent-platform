@@ -6,7 +6,7 @@
 | Harness | Mavis |
 | 认领时间 | 2026-10-26 11:32 +08:00 |
 | 分支 | `agent/local/mavis/README-REVAMP-01/a1` |
-| 状态 | doing |
+| 状态 | done |
 
 目标：重写仓库首页 README，让面试官快速理解项目解决的问题、核心工程机制、关键取舍、验证证据及跨平台运行方式。
 

@@ -8,7 +8,10 @@
 工作区：`.worktrees/readme`
 依赖任务：—
 真相源引用：`backend/app/`、`backend/tests/`、`office/`、`README.md`
-当前状态：doing
+当前状态：done
+完成时间：2026-10-26 11:48 +08:00
+commit：README 实现待提交；登记提交 `accef44`
+验证结果：docstate 98/98、discipline 44/44、README 路径扫描和 `git diff --check` 通过；前端 `npm ci` / `npm run build` 采用既有 PUBLIC-RELEASE-01 验证记录，未因本次文档改动复跑。
 交付分支：`agent/local/mavis/README-REVAMP-01/a1`
 
 test_id：`MVP-PROCESS-001`
