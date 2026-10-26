@@ -123,7 +123,8 @@
 | FORMAL-DISPATCH-REGISTER-01 | Codex | — | done（串行登记；非功能验收） | `agent/local/codex/FORMAL-DISPATCH-REGISTER-01/a1` | `MVP-PROCESS-001` |
 | FORMAL-DISPATCH-01 | Codex | FORMAL-DISPATCH-REGISTER-01 | done（本机 Codex 实跑与自检；业务产物待人审，不替代 ADMIN-01） | `agent/local/codex/FORMAL-DISPATCH-01/a1` | `MVP-API-001` `MVP-ADAPTER-001` `DOC-AUTH-001` |
 | FORMAL-MULTI-HARNESS-01 | Codex | FORMAL-DISPATCH-01 | done（Codex/OpenCode/Claude Code 均真实领取、提交并 verify 通过；Claude 由平台在 exclusive_paths 检查后代为提交，未启用 bypassPermissions） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-API-001` `MVP-ADAPTER-003` |
-| FORMAL-MULTI-HARNESS-02 | Codex | FORMAL-MULTI-HARNESS-01 | claimed（管理员 token 真实派发三 Harness、逐项审核闭环；待 Merge Gate） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-ADMIN-REVIEW-001` |
+| FORMAL-MULTI-HARNESS-02 | Codex | FORMAL-MULTI-HARNESS-01 | done（**管理员 token 真实派发三 Harness、逐项审核闭环**：三个 Harness 各自独立 token claim/publish/submit → Verify 通过 → 管理员 review claim + approve → 三个任务 approved（事件流里三条 approve 都是 human/administrator）；审核必须带 review lease 与 claimed commit（三个稳定冲突码）；2026-10-26 由 Mavis 接手补测并结卡） | `agent/local/codex/FORMAL-MULTI-HARNESS-01/a1` | `MVP-ADMIN-REVIEW-001` |
+| OFFICE-UI-43 | Mavis | OFFICE-UI-31 | →doing（**接手 FORMAL-MULTI-HARNESS-02**：补两条缺失的冲突码测试 + 4 条完成标准逐条核实 + 真跑 + 结卡） | `agent/local/mavis/OFFICE-UI-43/a1` | `MVP-ADMIN-REVIEW-001` |
 | FORMAL-PI-ADAPTER-01 | Codex（协调）；新增成员 Pi CLI + 本机 Ollama | FORMAL-MULTI-HARNESS-01 | doing（CLI 已安装；本机模型认证与适配器验证中；**适配器已移植到新 API**，Mavis 在 OFFICE-UI-01 的合并里一并带上） | `agent/local/pi/FORMAL-PI-ADAPTER-01/a1` | `MVP-ADAPTER-002` `MVP-ADAPTER-003` |
 | R10-fix-13 | OpenCode | auth-layer | doing（Stage A 规范登记 + Stage B 服务/状态机/路由/权限已完成并自测绿；Stage C 与 Claim 门禁强度待定） | `agent/local/opencode/R10-fix-13/a1` | `DOC-STATE-001` `DOC-MIRROR-001` |
 | codebuddy-cli-channel | OpenCode | FORMAL-MULTI-HARNESS-01 | doing（三处真缺陷已修 + 传输层测试 + 线上端到端闭环取证；待 Merge Gate） | `agent/local/opencode/codebuddy-cli-channel/a1` | `MVP-ADAPTER-003` |
@@ -306,6 +307,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- assistant-diagnose-pack → docs/claims/codex--assistant-diagnose-pack.md -->
 <!-- OFFICE-UI-40 → docs/claims/mavis--OFFICE-UI-40.md -->
 <!-- OFFICE-UI-42 → docs/claims/mavis--OFFICE-UI-42.md -->
+<!-- OFFICE-UI-43 → docs/claims/mavis--OFFICE-UI-43.md -->
 
 
 
@@ -382,6 +384,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | assistant-diagnose-pack | [卡](docs/tasks/notes/assistant-diagnose-pack.md) | | |
 | OFFICE-UI-40 | [卡](docs/tasks/notes/OFFICE-UI-40.md) | | |
 | OFFICE-UI-42 | [卡](docs/tasks/notes/OFFICE-UI-42.md) | | |
+| OFFICE-UI-43 | [卡](docs/tasks/notes/OFFICE-UI-43.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |

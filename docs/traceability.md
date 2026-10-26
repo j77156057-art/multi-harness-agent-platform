@@ -143,6 +143,7 @@ R10 §26 的检查 ID 体系在本项目的登记处。`dev-convention.md` H-4 �
 | `MVP-ARCH-001` | Paperclip/Buzz 借鉴边界：R10 为唯一业务真相源，两域借鉴点对照 + 事件名映射 | ⚠️ 仅声明 | `docs/adr/ADR-DEV-003-paperclip-buzz-adoption.md`（**决策文件即交付物**；内容不作机械断言——按本表图例属"仅声明"，约束力由后续借鉴类任务在 scope 声明中引用它承担）。**源码核实修订（2026-10-08，paperclip-buzz-source）**：`docs/reports/paperclip-buzz-source-review.md`（两仓 commit-定版快照逐文件证据；11 事件名三方对照；勘误 addendum 已写入 ADR 第三节） |
 | `MVP-RETRO-001` | 记录本项目已发生的流程偏差 | ⚠️ 仅声明 | 人工，见 `TASKS.md` 事故记录 |
 
+| `MVP-ADMIN-REVIEW-001` | **接手 `FORMAL-MULTI-HARNESS-02`（管理员审核闭环）** —— 管理员 token 派发三个独立任务 → 三个 Harness 各自用**独立 token** claim/工作树/publish/submit → Verify 生成通过 receipt → 管理员 review claim + approve → 三个任务 `approved`，事件流里三条 approve 的 `actor_type=human` / `actor_id=administrator`；审核**必须**带 review lease 与 claimed reviewed commit，缺 lease 或 commit 不一致返回**稳定冲突码**（`review.lease_required` / `review.commit_mismatch` / `review.lease_expired`）；Harness token 调审核接口 403 + `permission_denied` 审计事件 | 🟡 部分有断言 | `backend/tests/test_review_lease_guard.py`（新增：缺 lease / commit 不一致）+ `test_admin_multi_harness_review.py`（闭环真跑）；**前端检查不在本仓门禁内**（CI 里没有 node）|
 | `MVP-ADMIN-REVIEW-001` | 管理员派发三个独立 Harness 任务并逐项审核：三方提交均经 Verify，管理员 review lease + approve 后任务进入 `approved`；Harness 不能调用管理员审核面 | ✅ 有断言 | `backend/tests/test_admin_multi_harness_review.py`：隔离数据库、真实临时 Git worktree、Codex/OpenCode/Claude 三个注册 Harness 各自 claim/submit，管理员 human token 逐项 review claim/submit，断言三条 `approve` 事件为 `actor_type=human` 且 Harness 冒充返回 403；前端 API 契约由 `frontend/src/__tests__/api.test.ts` 覆盖 |
 
 ## 现状小结
