@@ -183,6 +183,7 @@
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-diagnose-pack | Codex | assistant-react-loop-p3 | done（`task.diagnose` 失败证据束、诊断姿势 prompt；scripted/全量 pytest/ruff/docstate/discipline 全绿，提交 `17914d5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
+| PUBLIC-RELEASE-01 | Mavis | — | doing（面向 GitHub/简历使用场景整理 README、依赖、启动入口与跨电脑运行验证） | `agent/local/mavis/PUBLIC-RELEASE-01/a1` | `MVP-PROCESS-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
@@ -308,6 +309,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-40 → docs/claims/mavis--OFFICE-UI-40.md -->
 <!-- OFFICE-UI-42 → docs/claims/mavis--OFFICE-UI-42.md -->
 <!-- OFFICE-UI-43 → docs/claims/mavis--OFFICE-UI-43.md -->
+<!-- PUBLIC-RELEASE-01 → docs/claims/mavis--PUBLIC-RELEASE-01.md -->
 
 
 
@@ -467,6 +469,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | `ADMIN-03-register` | 协调者串行登记 ADMIN-03 的本人回执及等待依赖；不合入 prep 或实现 | 已完成，待 Merge Gate 合入，见本任务卡 |
 | `FORMAL-DISPATCH-REGISTER-01` | 登记本机正式分派接通的 Codex 认领、路径和测试范围，保留 ADMIN-01/03 状态 | 本任务分支登记提交 |
 | `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 已实施，见 docs/reports/formal-dispatch/ |
+| `PUBLIC-RELEASE-01` | 登记面向 GitHub/简历发布的 README、依赖、启动入口与可移植性整理 | 进行中 |
 | `R10-fix-13` | 规范 §37.7（A 类别 + 计数 107）/§39（新章）/§8/§17/§29.3/§38.11；`tools/docstate` 增 A 与 `[allocation]` 组；`README.md`、`docs/dev-convention.md` 断言数 90 → 98 | 未提交，见任务卡与认领文件 |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
@@ -504,6 +507,31 @@ MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP
 | MVP-06 | verify profile 结构、baseline differential 用例、overlay 回收策略 | MVP-05 前 |
 | MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`，Qoder，已结卡）—— 已由 MVP-08 实际使用：`openapi.yaml` 的 §7/§21 路径对齐与 `error-codes.md` 的 code 直接落进 `backend/app/api/**`，其中 `payload_hash` 的规范化口径被 `claim/service.py` 的 `canonical_payload_hash` 沿用 |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
+
+### PUBLIC-RELEASE-01：GitHub 简历版发布与空白机可运行性整理
+
+~~~text
+任务编号：PUBLIC-RELEASE-01
+负责人 Harness：Mavis
+开始时间：2026-10-26 09:50 +08:00
+依赖任务：—
+真相源引用：`README.md`、`backend/requirements*.txt`、`office/package.json`、`start.bat`、`scripts.sh`、`docs/dev-convention.md` H-7/H-8
+允许修改目录：`README.md`、`backend/requirements*.txt`、`office/package.json`、`start.bat`、`start-office.bat`、`scripts.sh`、发布所需的新增检查脚本与配置示例
+禁止修改目录：`backend/app/**`、`backend/migrations/**`、`docs/spec/**`、其他 Harness 工作区与分支
+交付分支：agent/local/mavis/PUBLIC-RELEASE-01/a1
+完成标准：
+1. README 面向面试官说明项目价值、架构、前置条件、Windows/Linux/macOS 安装、启动、验证、目录和已知边界；不依赖本机绝对路径。
+2. 依赖文件覆盖后端运行/测试与前端构建，启动入口按仓库相对位置工作；提供一次命令化安装或清晰等价命令。
+3. 对受支持运行路径做路径硬编码扫描，并在空白环境中执行安装、后端健康检查、前端构建；失败项如实记录。
+4. 现有门禁不回归；发布前核对 GitHub 远端状态与提交树。
+test_id：MVP-PROCESS-001
+测试命令：`./scripts.sh check`；`npm ci && npm run build`；空白环境启动与 HTTP health 检查
+当前状态：doing
+完成时间：
+commit：
+验证结果：
+已知问题：联网安装可能受当前机器到 PyPI/npm 的网络连通性影响；真实 Harness CLI 不是项目零配置运行前置条件。
+~~~
 
 ## 统一任务卡
 
