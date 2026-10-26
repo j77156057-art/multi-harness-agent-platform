@@ -30,4 +30,6 @@ try {
     Pop-Location
 }
 
-Write-Host 'Setup complete. Run .\start.bat for the backend or .\start-office.bat for Agent Office.'
+Write-Host 'Setup complete.'
+Write-Host 'Local demo: .\start.bat and .\start-office.bat'
+Write-Host 'Formal Harness mode: set up registered token files, then run .\start-formal.ps1 and .\start-office.bat'

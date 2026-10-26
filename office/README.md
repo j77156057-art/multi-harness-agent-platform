@@ -179,6 +179,6 @@ server；`verify-harness-connections` 断言本机 ollama 有 `qwen3:4b`；
 OFFICE_FORMAL_UPSTREAM=http://127.0.0.1:8848
 OFFICE_FORMAL_TOKEN_FILE=<操作员令牌文件>
 OFFICE_FORMAL_ADMIN_TOKEN_FILE=<管理员令牌文件>
-OFFICE_FORMAL_PROJECT=112
-OFFICE_FORMAL_GROUP=office-formal-2
+OFFICE_FORMAL_PROJECT=111
+OFFICE_FORMAL_GROUP=office-formal
 ```

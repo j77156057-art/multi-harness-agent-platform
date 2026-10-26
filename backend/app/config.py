@@ -163,9 +163,8 @@ class Settings:
         self.human_reminder_minutes: int = int(os.environ.get("AP_HUMAN_REMINDER", "30"))
 
         # --- 认证（auth-layer；R10 §17 API 层矩阵执行）---
-        # off（默认）=零行为变化：既有套件/演练/前端都不动；enforce=主体令牌与
-        # 权限矩阵生效。推广 enforce 之前必须先完成前端 token 接线（卡内披露）。
-        # 未知值直接拒绝启动（fail-closed，防手滑拼错后静默退化成 off）。
+        # off（默认）保留本地基础演示兼容；真实 Harness worker 与 Agent Office
+        # 网关要求显式设置 AP_AUTH_MODE=enforce。未知值直接拒绝启动（fail-closed）。
         self.auth_mode: str = os.environ.get("AP_AUTH_MODE", "off").strip().lower()
         if self.auth_mode not in {"off", "enforce"}:
             raise ValueError(f"AP_AUTH_MODE must be 'off' or 'enforce', got {self.auth_mode!r}")

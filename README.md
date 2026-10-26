@@ -179,6 +179,21 @@ npm run verify
 .\start-office.bat
 ```
 
+### Windows 正式 Harness 模式
+
+本地基础演示默认使用 `AP_AUTH_MODE=off`，不需要令牌；真实 Harness worker 和正式 Office 网关必须使用强制认证。面试官如果要运行真实成员协作，需要先拥有平台已登记的 Harness 令牌文件，并放在本机 `data\*.key` 中。令牌内容不会写入仓库。
+
+在仓库根目录执行：
+
+```powershell
+.\setup.ps1
+.\start-formal.ps1
+```
+
+`start-formal.ps1` 会先启动后端并确认 `/health` 返回 `auth_mode=enforce`，然后启动六个成员 worker 和 `codex-window-admin` 管理员 worker。默认正式群组为 `office-formal`，默认地址为 `http://127.0.0.1:8848`。另开窗口运行 `start-office.bat` 后，按 `office/README.md` 配置正式 Office 环境变量。
+
+没有平台登记的令牌时，请使用上面的本地基础演示；不要把示例令牌或个人凭据提交到 GitHub。
+
 访问：
 
 ```text

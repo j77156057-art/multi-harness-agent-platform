@@ -5,7 +5,7 @@ rem use a browser.
 rem
 rem Override any of these before running:
 rem   AP_ADMIN_HARNESS_ID  default codex-window-admin
-rem   AP_ADMIN_GROUP       default office-formal-2
+rem   AP_ADMIN_GROUP       default office-formal
 rem   AP_ADMIN_TOKEN_FILE  default <data>\codex-window-admin.key
 rem   AP_DATA_DIR          default the checkout's data directory
 setlocal
@@ -37,7 +37,9 @@ if not exist "%PYBIN%" (
     exit /b 2
 )
 if not defined AP_ADMIN_HARNESS_ID set "AP_ADMIN_HARNESS_ID=codex-window-admin"
-if not defined AP_ADMIN_GROUP set "AP_ADMIN_GROUP=office-formal-2"
+if not defined AP_ADMIN_GROUP set "AP_ADMIN_GROUP=office-formal"
+if not defined AP_AUTH_MODE set "AP_AUTH_MODE=enforce"
+if not defined AP_ADMIN_SUBJECTS set "AP_ADMIN_SUBJECTS=%AP_ADMIN_HARNESS_ID%"
 if not defined AP_ADMIN_TOKEN_FILE set "AP_ADMIN_TOKEN_FILE=%DATA_DIR%\codex-window-admin.key"
 if not exist "%AP_ADMIN_TOKEN_FILE%" (
     echo [admin] token file not found: %AP_ADMIN_TOKEN_FILE%
