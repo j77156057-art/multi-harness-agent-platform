@@ -26,10 +26,9 @@ if /i "%~1"=="-h"     goto :usage
 if /i "%~1"=="--help" goto :usage
 
 if not exist "%PYBIN%" (
-    echo [start] no virtualenv at %ROOT%.venv - create it once:
-    echo           python -m venv .venv
-    echo           .venv\Scripts\python.exe -m pip install -r backend\requirements-dev.txt
-    exit /b 2
+    echo [start] Python environment is missing; running the repository setup script...
+    powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%setup.ps1"
+    if errorlevel 1 exit /b %errorlevel%
 )
 
 if /i "%~1"=="all"      goto :all

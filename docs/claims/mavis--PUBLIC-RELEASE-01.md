@@ -6,7 +6,7 @@
 | Harness | Mavis |
 | 认领时间 | 2026-10-26 09:50 +08:00 |
 | 分支 | `agent/local/mavis/PUBLIC-RELEASE-01/a1` |
-| 状态 | doing |
+| 状态 | done |
 
 目标：将项目整理成适合 GitHub 和简历展示的公开项目，并验证新电脑上的可运行路径。
 
