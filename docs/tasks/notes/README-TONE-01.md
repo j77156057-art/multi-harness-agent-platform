@@ -8,7 +8,10 @@
 工作区：`.worktrees/readme-tone`
 依赖任务：README-REVAMP-01
 真相源引用：`README.md`、`backend/app/`、`backend/tests/`
-当前状态：doing
+当前状态：done
+完成时间：2026-10-26 12:36 +08:00
+commit：README wording correction pending commit; registration commit `f51b26a`
+验证结果：README 元话术扫描无匹配；docstate 98/98、discipline 44/44 与 `git diff --check` 通过。
 交付分支：`agent/local/mavis/README-TONE-01/a1`
 
 test_id：`MVP-PROCESS-001`
