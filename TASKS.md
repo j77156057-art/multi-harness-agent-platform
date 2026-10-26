@@ -470,7 +470,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | `ADMIN-03-register` | 协调者串行登记 ADMIN-03 的本人回执及等待依赖；不合入 prep 或实现 | 已完成，待 Merge Gate 合入，见本任务卡 |
 | `FORMAL-DISPATCH-REGISTER-01` | 登记本机正式分派接通的 Codex 认领、路径和测试范围，保留 ADMIN-01/03 状态 | 本任务分支登记提交 |
 | `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 已实施，见 docs/reports/formal-dispatch/ |
-| `PUBLIC-RELEASE-01` | 登记面向 GitHub/简历发布的 README、依赖、启动入口与可移植性整理 | 进行中 |
+| `PUBLIC-RELEASE-01` | 登记面向 GitHub/简历发布的 README、依赖、启动入口与可移植性整理 | 已完成，后端安装/pytest 受 PyPI 网络阻塞，见任务卡 |
 | `R10-fix-13` | 规范 §37.7（A 类别 + 计数 107）/§39（新章）/§8/§17/§29.3/§38.11；`tools/docstate` 增 A 与 `[allocation]` 组；`README.md`、`docs/dev-convention.md` 断言数 90 → 98 | 未提交，见任务卡与认领文件 |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
