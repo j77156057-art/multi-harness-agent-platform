@@ -20,7 +20,7 @@
 
 | task_id | Harness | 依赖 | 状态 | 分支 | test_id |
 |---|---|---|---|---|---|
-| README-REVAMP-01 | Mavis | — | doing（重写面向面试官的项目说明，突出问题、设计决策、架构与可验证证据） | `agent/local/mavis/README-REVAMP-01/a1` | `MVP-PROCESS-001` |
+| README-REVAMP-01 | Mavis | — | done（README 已按问题、架构、关键机制、端到端链路和测试证据重写；文档/纪律门禁与路径扫描通过，详见任务卡） | `agent/local/mavis/README-REVAMP-01/a1` | `MVP-PROCESS-001` |
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
 | MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
 | MVP-02-amend | Claude Code | MVP-02 | ✅ done | `agent/local/claude/MVP-02-amend/a1` | `DOC-SCHEMA-001` `DOC-STATE-001` |
@@ -474,6 +474,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | `FORMAL-DISPATCH-REGISTER-01` | 登记本机正式分派接通的 Codex 认领、路径和测试范围，保留 ADMIN-01/03 状态 | 本任务分支登记提交 |
 | `FORMAL-DISPATCH-01` | 收口本任务 TASKS 状态与 traceability 注册 API 覆盖说明 | 已实施，见 docs/reports/formal-dispatch/ |
 | `PUBLIC-RELEASE-01` | 登记面向 GitHub/简历发布的 README、依赖、启动入口与可移植性整理 | 已完成，后端安装/pytest 受 PyPI 网络阻塞，见任务卡 |
+| `README-REVAMP-01` | 面向面试官重写 README，补充问题、架构、关键设计、验证证据和运行边界 | 已完成，README 门禁与路径扫描通过，详见任务卡 |
 | `R10-fix-13` | 规范 §37.7（A 类别 + 计数 107）/§39（新章）/§8/§17/§29.3/§38.11；`tools/docstate` 增 A 与 `[allocation]` 组；`README.md`、`docs/dev-convention.md` 断言数 90 → 98 | 未提交，见任务卡与认领文件 |
 | `MVP-01` | 建 `tools/docstate`（门禁本体）、`backend/app/spec.py`、`TASKS.md` 登记结构 | `810d88d` |
 | `R10-fix-10` | 改 `tools/docstate` 的 `schema-keys` 断言、扩 R10 §8 schema-keys 组 | `32f4e45` |
