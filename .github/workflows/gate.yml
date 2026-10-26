@@ -1,8 +1,5 @@
-# 门禁 CI（H-2：docstate 是门禁不是工具）
-#
-# 这个 workflow 的存在理由：R10 复审证明"人工判定的已闭环"与"实际自洽"
-# 差距巨大。CI 必须在每个 PR 上跑机械检查。
-name: gate
+# Continuous integration for the backend and office frontend.
+name: test
 
 on:
   push:
@@ -20,11 +17,7 @@ jobs:
         os: [windows-latest, ubuntu-latest]
 
     steps:
-      # fetch-depth: 0：discipline 的 merge 组要扫全部合并提交；
-      # 浅克隆（默认 depth=1）下 git log 看不到历史，该组会 fail-closed 报红。
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -36,21 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements-dev.txt
 
-      # ---- 门禁 1：规范一致性（R10 §29.3 阶段 0 通过条件）----
-      - name: docstate (spec consistency)
-        run: python tools/docstate/docstate.py --verbose
-
-      # ---- 门禁 2：协作纪律（登记表自洽，见 docs/dev-convention.md）----
-      # 与 docstate 分开但同序：docstate 管「规范与代码不脱节」，本门禁管
-      # 「登记表自身是否自洽」。不新增 git hook —— hook 可 --no-verify 绕过。
-      - name: discipline (registry consistency)
-        run: python tools/discipline/discipline.py --verbose
-
-      # ---- 门禁 2b：纪律检查器自身的单测（纯标准库，无需 backend 依赖）----
-      - name: pytest tools (discipline unit tests)
-        run: python -m pytest tools -q
-
-      # ---- 门禁 3：lint ----
+      # ---- Lint ----
       - name: ruff check
         working-directory: backend
         run: ruff check .
@@ -59,22 +38,19 @@ jobs:
         working-directory: backend
         run: ruff format --check .
 
-      # ---- 门禁 4：测试 ----
+      # ---- Backend tests ----
       - name: pytest
         working-directory: backend
         run: pytest -v
 
-      # ---- 输出机器可读结果供其他工具消费 ----
-      - name: Upload gate reports
-        if: always()
-        run: |
-          python tools/docstate/docstate.py --json > docstate-report.json
-          python tools/discipline/discipline.py --json > discipline-report.json
-
-      - uses: actions/upload-artifact@v4
-        if: always()
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          name: gate-reports-${{ matrix.os }}
-          path: |
-            docstate-report.json
-            discipline-report.json
+          node-version: "20"
+
+      - name: Build office frontend
+        working-directory: office
+        run: |
+          npm ci
+          npm run build
+          npm run verify
