@@ -2,7 +2,7 @@
 
 > 一个面向多 AI 编程窗口的任务协作与交付平台：让多个 Harness 并行工作时，任务领取、崩溃恢复、验证、人工审核和合并都可控、可追溯。
 
-这是一个适合作为简历项目展示的工程系统。它不是简单的“给模型发提示词”脚本，而是把 AI 编程协作中最容易失控的部分做成了有状态、有约束、可恢复的后端流程，并配套一个可观察的 Agent Office 界面。
+项目将 AI 编程协作中容易失控的部分实现为有状态、有约束、可恢复的后端流程，并配套一个可观察的 Agent Office 界面。
 
 ## 先看它解决什么问题
 
@@ -71,18 +71,18 @@ SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序�
 
 ## 具体展示了哪些工程能力
 
-| 能力 | 项目中的实现 | 面试时可以追问的点 |
+| 能力 | 项目中的实现 | 设计关注点 |
 |---|---|---|
-| 并发领取 | SQLite 事务、条件更新、请求幂等记录 | 两个真实数据库连接同时抢同一任务时，为什么只能有一个 winner |
-| 租约与接管 | lease token、平台时钟、过期扫描、epoch 递增 | 为什么不能只靠心跳字段，旧窗口如何被拒绝 |
-| 防止旧写入 | guarded write + fencing epoch + attempt 校验 | 接管发生在请求途中时，如何避免 stale writer 覆盖新 owner |
-| 结果验证 | verify profile、命令白名单、verification receipt | 为什么提交结果不能直接进入 review 或 merge |
-| 人工审核 | review lease、commit 一致性、权限矩阵 | Harness 为什么不能冒充管理员审核者 |
-| 受控合并 | canonical repo、隔离 worktree、merge worker | 如何保留可复现的合并边界和证据 |
-| 事件追踪 | append-only event store、全局 seq、replay | 当前投影损坏时如何从事件恢复 |
-| 多 Harness 适配 | 注册表、统一 adapter protocol、CLI 输出解析 | 不同 CLI 的差异如何收敛到适配器边界 |
-| 运行期巡检 | runtime driver、sweeper、liveness/budget 检查 | 为什么 worker 存在还不够，谁负责推进实际状态 |
-| 可观察界面 | Agent Office + 本地预览网关 | 如何查看任务、成员、事件、输出和额度，而不暴露内部凭据 |
+| 并发领取 | SQLite 事务、条件更新、请求幂等记录 | 两个真实数据库连接同时抢同一任务时，只创建一个 attempt |
+| 租约与接管 | lease token、平台时钟、过期扫描、epoch 递增 | 租约过期后允许恢复，旧执行窗口不再拥有写入权 |
+| 防止旧写入 | guarded write + fencing epoch + attempt 校验 | 接管发生在请求途中时，避免 stale writer 覆盖新 owner |
+| 结果验证 | verify profile、命令白名单、verification receipt | 未验证的提交不能直接进入 review 或 merge |
+| 人工审核 | review lease、commit 一致性、权限矩阵 | 审核身份和被审核 commit 都必须可确认 |
+| 受控合并 | canonical repo、隔离 worktree、merge worker | 合并边界和证据可以复现 |
+| 事件追踪 | append-only event store、全局 seq、replay | 当前投影损坏时可以从事件重建 |
+| 多 Harness 适配 | 注册表、统一 adapter protocol、CLI 输出解析 | 将不同 CLI 的差异限制在适配器边界 |
+| 运行期巡检 | runtime driver、sweeper、liveness/budget 检查 | 持续推进状态并发现卡住的执行 |
+| 可观察界面 | Agent Office + 本地预览网关 | 查看任务、成员、事件、输出和额度，不暴露内部凭据 |
 
 ## 一条完整的端到端路径
 
@@ -121,7 +121,7 @@ SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序�
 
 ### 为什么选择 FastAPI + SQLite
 
-这是一个本地优先、强调状态一致性和可验证流程的项目。SQLite 能在不依赖外部数据库的情况下提供事务、WAL、约束和单文件数据存储，适合面试官在新电脑上直接启动；FastAPI 则让 API、鉴权和集成测试保持清晰。
+这是一个本地优先、强调状态一致性和可验证流程的项目。SQLite 能在不依赖外部数据库的情况下提供事务、WAL、约束和单文件数据存储，便于快速启动和复现；FastAPI 则让 API、鉴权和集成测试保持清晰。
 
 这不是对生产部署的结论。多副本部署、远程数据库、密钥托管、队列和高可用需要额外的架构选择，当前版本明确把范围放在本地协作平台核心链路和可复现验证上。
 
@@ -268,18 +268,14 @@ verify-profiles.json  Verify / runtime 的检查策略
 
 这些集成不是本地零配置运行的前置条件。仓库不包含任何 token、API key、私钥或本机绝对路径。
 
-## 面试时可以从哪里深入
+## 设计要点
 
-这个项目适合从以下问题展开，而不是只展示一个页面：
-
-1. 两个执行者同时 claim 时，数据库事务和幂等记录如何保证只有一个 attempt？
-2. 为什么需要 lease token 和 fencing epoch 两层保护？
-3. 任务被接管后，旧进程的延迟请求如何失败？
-4. 为什么 verify、human review 和 merge 必须是三个独立阶段？
-5. 事件流和当前投影各自承担什么职责？如何重放？
-6. 不同 Harness 的差异放在哪里，怎样避免业务层出现大量 CLI 特判？
-7. 为什么本地版本选择 SQLite，生产化时哪些部分必须替换或扩展？
-8. 如何在不提交凭据和机器路径的前提下，让面试官在新电脑上运行？
+- 并发领取通过事务、条件更新和幂等记录共同约束，而非依赖客户端互斥。
+- 租约描述执行者的存活期限，fencing epoch 阻止过期执行者继续写入，两者解决不同问题。
+- 验证、人工审核和合并分阶段执行，后续阶段依赖前序阶段的结果与证据。
+- 事件流记录状态变化，当前投影服务查询；两者在同一事务中提交，以支持追踪和重放。
+- Harness 差异由注册信息和适配器协议承接，平台服务使用统一的任务协作接口。
+- SQLite 便于本地运行和测试；多副本部署等生产需求需要重新评估存储与协调组件。
 
 ## 当前边界
 
