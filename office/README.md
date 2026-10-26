@@ -15,14 +15,14 @@
 在顶上写「未连接正式平台」。要看到真的东西，**先把这几行环境变量设上**：
 
 ```powershell
-# 正式平台跑在 8848；办公室自己跑在 4174
-$env:OFFICE_FORMAL_UPSTREAM   = 'http://127.0.0.1:8848'
-# 令牌文件：路径，不是令牌本身（令牌别复制进仓库）
-$env:OFFICE_FORMAL_TOKEN_FILE     = 'D:/study/tools/agent/new agent/data/formal-operator.key'
-$env:OFFICE_FORMAL_ADMIN_TOKEN_FILE = 'D:/study/tools/agent/new agent/data/codex-window-admin.key'
-# 这个预览服务负责哪一段
-$env:OFFICE_FORMAL_PROJECT = '112'
-$env:OFFICE_FORMAL_GROUP   = 'office-formal-2'
+# Formal platform runs on 8848; Agent Office runs on 4174
+$env:OFFICE_FORMAL_UPSTREAM = 'http://127.0.0.1:8848'
+# Token files are local paths, never commit token contents.
+$env:OFFICE_FORMAL_TOKEN_FILE = (Join-Path (Get-Location) 'data\formal-operator.key')
+$env:OFFICE_FORMAL_ADMIN_TOKEN_FILE = (Join-Path (Get-Location) 'data\codex-window-admin.key')
+# Select the project and group served by this preview.
+$env:OFFICE_FORMAL_PROJECT = '<project-id>'
+$env:OFFICE_FORMAL_GROUP = '<group-id>'
 ```
 
 然后：
