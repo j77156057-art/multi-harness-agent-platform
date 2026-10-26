@@ -1496,7 +1496,14 @@ def run(repo_root="."):
     result = Result()
     tasks_path = os.path.join(repo_root, DEFAULT_TASKS)
     if not os.path.exists(tasks_path):
-        raise FileNotFoundError(tasks_path)
+        # Public snapshots intentionally omit internal collaboration records.
+        # Keep this visible in both human and JSON output, while preserving the
+        # fail-closed behavior for a normal development checkout below.
+        result.warn(
+            "公开快照未包含 TASKS.md，跳过仅面向内部协作的 discipline 检查",
+            "public-snapshot",
+        )
+        return result
 
     tasks_text = read(tasks_path)
     tasks, claims = check_registry(result, tasks_text, repo_root)

@@ -127,29 +127,30 @@ SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序�
 
 ## 可验证证据
 
-README 不把“有代码”当成“已验证”。仓库中已有针对关键风险的测试和门禁：
+README 不把“有代码”当成“已验证”。仓库中已有针对关键风险的测试：
 
 - `backend/tests/test_claim_concurrency.py`：使用两个真实 SQLite 连接同时抢同一任务，断言只能创建一个 attempt 和一条 claim 事件；相同请求重放只得到一个结果。
 - `backend/tests/test_adapter.py`：覆盖 claim → start → commit → publish → verify → review → merge 的完整链路，并覆盖 stale attempt 被接管后的旧 epoch 拒绝。
 - `backend/tests/test_database_events.py`：验证迁移幂等、WAL、事件序号、事件重放、追加写入约束和事务一致性。
 - `backend/tests/test_admin_multi_harness_review.py`：用三个独立 Harness 走管理员派发与逐项审核，验证 Harness 不能冒充管理员 review。
 - `backend/tests/test_runtime_driver.py`：用真实 Git 和隔离 worktree 驱动任务从 claim 到 publish/submit，而不是只手工拼数据库状态。
-- `tools/docstate/docstate.py`：检查权威规范与实现约束，目前 98 项通过。
-- `tools/discipline/discipline.py`：检查任务登记、认领文件、任务卡、依赖和合并纪律，目前 44 项通过。
 - `office/npm run build`：验证前端生产构建。
+- `git diff --check`：检查提交中的空白和补丁格式问题。
 
-在本仓库中运行统一门禁：
+运行后端测试：
 
 ```bash
-./scripts.sh check
+cd backend
+python -m pytest
 ```
 
-也可以单独运行：
+运行前端构建与冒烟脚本：
 
 ```bash
-python tools/docstate/docstate.py
-python tools/discipline/discipline.py
-cd office && npm ci && npm run build
+cd office
+npm ci
+npm run build
+npm run verify
 ```
 
 ## 五分钟本地演示
@@ -236,14 +237,11 @@ chmod +x setup.sh start-backend.sh
 
 ```text
 backend/app/          FastAPI 服务、领域服务、数据库、worker、适配器
-backend/tests/        单元、并发、集成、规范镜像和真实 Git 流程测试
+backend/tests/        单元、并发、集成和真实 Git 流程测试
 backend/migrations/   SQLite schema migrations
 office/               Agent Office 前端和本地预览网关
-tools/docstate/       R10 规范一致性检查器
-tools/discipline/     协作登记和任务纪律检查器
-docs/spec/            状态机、事件和 schema 的权威规范（只读）
+tools/                本地开发检查和合并辅助工具
 docs/adr/             架构决策记录
-verify-profiles.json  Verify / runtime 的检查策略
 ```
 
 ## 真实集成边界
@@ -280,5 +278,3 @@ verify-profiles.json  Verify / runtime 的检查策略
 ## 当前边界
 
 当前版本的重点是协作平台核心链路、状态一致性、可恢复执行和 Agent Office 观察面。后端依赖安装、pytest 和真实 HTTP health 检查仍受运行机器网络条件影响；真实生产部署、高可用、第三方模型费用和云端密钥管理不属于本地演示范围。
-
-权威状态、事件和数据约束见 [`docs/spec/0.3-R10.md`](docs/spec/0.3-R10.md)。实现偏离技术栈的原因见 [`docs/adr/ADR-DEV-001-stack-deviation.md`](docs/adr/ADR-DEV-001-stack-deviation.md)。
