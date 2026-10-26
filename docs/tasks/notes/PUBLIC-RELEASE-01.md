@@ -8,7 +8,10 @@
 工作区：`.worktrees/release`
 依赖任务：—
 真相源引用：`README.md`、`backend/requirements*.txt`、`office/package.json`、`start.bat`、`scripts.sh`、`docs/dev-convention.md` H-7/H-8
-当前状态：review
+当前状态：done
+完成时间：2026-10-26 10:20 +08:00
+实现 commit：`2acff1d`
+验证记录 commit：`071fef6`
 交付分支：`agent/local/mavis/PUBLIC-RELEASE-01/a1`
 
 ## 目标

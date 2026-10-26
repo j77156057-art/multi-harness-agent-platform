@@ -183,7 +183,7 @@
 | cli-roster-enumerate | Codex | pool-free-set-watch | done（CLI 槽声明式 enumerate：`opencode models` 零额度枚举 `-free` 家族，免费档 1→9 家；7 条 scripted＋全量 pytest 绿；哨上岗 5→13 入队 1 条告警） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | assistant-diagnose-pack | Codex | assistant-react-loop-p3 | done（`task.diagnose` 失败证据束、诊断姿势 prompt；scripted/全量 pytest/ruff/docstate/discipline 全绿，提交 `17914d5`） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
 | pool-self-provision | Codex | pool-free-set-watch | done（只读发现未覆盖 harness/缺 tier 槽位，`pool.provision_candidates` 告警；不执行未知 CLI、不猜 free、不自动写池配置） | `agent/local/codex/OFFICE-UI-01/a1` | `MVP-ADAPTER-003` |
-| PUBLIC-RELEASE-01 | Mavis | — | doing（面向 GitHub/简历使用场景整理 README、依赖、启动入口与跨电脑运行验证） | `agent/local/mavis/PUBLIC-RELEASE-01/a1` | `MVP-PROCESS-001` |
+| PUBLIC-RELEASE-01 | Mavis | — | done（README、依赖/启动入口和路径可移植性整理已完成；规范/纪律门禁与前端构建通过；后端依赖安装受当前机器 PyPI 网络超时阻塞，详见任务卡） | `agent/local/mavis/PUBLIC-RELEASE-01/a1` | `MVP-PROCESS-001` |
 
 以上 ADMIN 条目的检查 ID 当前只覆盖登记/规范追溯，不代表管理员功能已验收。
 ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定，见任务卡。
