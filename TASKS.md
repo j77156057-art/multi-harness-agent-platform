@@ -20,6 +20,7 @@
 
 | task_id | Harness | 依赖 | 状态 | 分支 | test_id |
 |---|---|---|---|---|---|
+| README-TONE-01 | Mavis | README-REVAMP-01 | doing（将 README 改为正常项目介绍，删除简历/面试官元话术） | `agent/local/mavis/README-TONE-01/a1` | `MVP-PROCESS-001` |
 | README-REVAMP-01 | Mavis | — | done（README 已按问题、架构、关键机制、端到端链路和测试证据重写；文档/纪律门禁与路径扫描通过，详见任务卡） | `agent/local/mavis/README-REVAMP-01/a1` | `MVP-PROCESS-001` |
 | MVP-01 | WorkBuddy | — | ✅ done | `main` ⚠️未走 Gate | `DOC-STATE-001` `DOC-TRACE-001` |
 | MVP-02 | Codex | MVP-01 | ✅ 已验收 | `agent/local/codex/MVP-02/a1` | `DOC-SCHEMA-001` `CORE-RECOVER-001` |
@@ -312,6 +313,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 <!-- OFFICE-UI-43 → docs/claims/mavis--OFFICE-UI-43.md -->
 <!-- PUBLIC-RELEASE-01 → docs/claims/mavis--PUBLIC-RELEASE-01.md -->
 <!-- README-REVAMP-01 → docs/claims/mavis--README-REVAMP-01.md -->
+<!-- README-TONE-01 → docs/claims/mavis--README-TONE-01.md -->
 
 
 
@@ -391,6 +393,7 @@ ADMIN-03 的拟议 ADM-RUN/ADM-AUTH 用例须在 ADMIN-01 冻结时正式绑定�
 | OFFICE-UI-43 | [卡](docs/tasks/notes/OFFICE-UI-43.md) | | |
 | PUBLIC-RELEASE-01 | [卡](docs/tasks/notes/PUBLIC-RELEASE-01.md) | | |
 | README-REVAMP-01 | [卡](docs/tasks/notes/README-REVAMP-01.md) | | |
+| README-TONE-01 | [卡](docs/tasks/notes/README-TONE-01.md) | | |
 | task_id | 卡片 | task_id | 卡片 |
 |---|---|---|---|
 | MVP-01 | [卡](docs/tasks/notes/MVP-01.md) | fix-flaky-init | [卡](docs/tasks/notes/fix-flaky-init.md) |
