@@ -509,31 +509,6 @@ MVP-01 → MVP-02 → MVP-03 → MVP-04 → MVP-05 → MVP-06 → MVP-07 → MVP
 | MVP-08 | **OpenAPI 契约草案、错误码表、幂等响应约定**（不依赖 schema，最该提前做） | ✅ 已过（`888afb6`，Qoder，已结卡）—— 已由 MVP-08 实际使用：`openapi.yaml` 的 §7/§21 路径对齐与 `error-codes.md` 的 code 直接落进 `backend/app/api/**`，其中 `payload_hash` 的规范化口径被 `claim/service.py` 的 `canonical_payload_hash` 沿用 |
 | MVP-10a | Fake Harness 的场景清单（成功/失败/超时/放弃/接手） | MVP-08 前 |
 
-### PUBLIC-RELEASE-01：GitHub 简历版发布与空白机可运行性整理
-
-~~~text
-任务编号：PUBLIC-RELEASE-01
-负责人 Harness：Mavis
-开始时间：2026-10-26 09:50 +08:00
-依赖任务：—
-真相源引用：`README.md`、`backend/requirements*.txt`、`office/package.json`、`start.bat`、`scripts.sh`、`docs/dev-convention.md` H-7/H-8
-允许修改目录：`README.md`、`backend/requirements*.txt`、`office/package.json`、`start.bat`、`start-office.bat`、`scripts.sh`、发布所需的新增检查脚本与配置示例
-禁止修改目录：`backend/app/**`、`backend/migrations/**`、`docs/spec/**`、其他 Harness 工作区与分支
-交付分支：agent/local/mavis/PUBLIC-RELEASE-01/a1
-完成标准：
-1. README 面向面试官说明项目价值、架构、前置条件、Windows/Linux/macOS 安装、启动、验证、目录和已知边界；不依赖本机绝对路径。
-2. 依赖文件覆盖后端运行/测试与前端构建，启动入口按仓库相对位置工作；提供一次命令化安装或清晰等价命令。
-3. 对受支持运行路径做路径硬编码扫描，并在空白环境中执行安装、后端健康检查、前端构建；失败项如实记录。
-4. 现有门禁不回归；发布前核对 GitHub 远端状态与提交树。
-test_id：MVP-PROCESS-001
-测试命令：`./scripts.sh check`；`npm ci && npm run build`；空白环境启动与 HTTP health 检查
-当前状态：doing
-完成时间：
-commit：
-验证结果：
-已知问题：联网安装可能受当前机器到 PyPI/npm 的网络连通性影响；真实 Harness CLI 不是项目零配置运行前置条件。
-~~~
-
 ## 统一任务卡
 
 分配任务时复制本模板填写。**"真相源引用"和"test_id"为空视为任务卡不完整。**
