@@ -34,6 +34,7 @@ from typing import Any
 
 import httpx
 
+from app.adapter.harnesses.cli import ProviderRoute
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
 from app.db.connection import Database
@@ -114,6 +115,10 @@ class WorkerState:
     #: open the round, freeze the candidates and decide -- that is this
     #: administrator's job, not the member's and not the platform's.
     pending_allocation: dict[str, Any] | None = None
+    #: A goal whose refinement **failed on the model channel** (not on the
+    #: content).  It stays here until the channel works again: the owner's
+    #: request must not disappear because one CLI call died.
+    goal_retry: dict[str, Any] | None = None
 
     @classmethod
     def load(cls, path: Path) -> WorkerState:
@@ -141,6 +146,7 @@ class WorkerState:
                 circulation_rounds_target=int(data.get("circulation_rounds_target") or 1),
                 circulation_rounds_done=int(data.get("circulation_rounds_done") or 0),
                 pending_allocation=data.get("pending_allocation"),
+                goal_retry=data.get("goal_retry"),
             )
         except (OSError, ValueError, TypeError):
             # A corrupt cursor must not replay every historical goal. Start
@@ -160,8 +166,10 @@ class PlatformClient:
     """Thin authenticated client for the routes the worker is allowed to use."""
 
     def __init__(self, base_url: str, token: str) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.token = token
         self.client = httpx.Client(
-            base_url=base_url.rstrip("/"),
+            base_url=self.base_url,
             headers={"Authorization": f"Bearer {token}"},
             timeout=60,
         )
@@ -342,6 +350,113 @@ class AdminWorker:
         # attempt key -> monotonic deadline; not persisted (a restart may retry
         # once, which is fine, but a hot loop must not invoke the model).
         self._review_cooldowns: dict[str, float] = {}
+        #: The members the owner named for this project.  They are the readers
+        #: of every circulation round (see ``_circulation_reviewers``).
+        self._requested_members: list[str] = []
+
+    def retry_failed_goal(self) -> None:
+        """Try again a goal whose refinement died on the model channel.
+
+        The owner asked for something; the administrator's CLI fell over.  That
+        is not an answer, so the goal stays in the queue and is retried once the
+        channel may be back.  A goal that keeps failing is not retried in a
+        tight loop: the backoff grows with every attempt.
+        """
+        retry = self.state.goal_retry
+        if not retry:
+            return
+        now = time.time()
+        if now < float(retry.get("retry_after") or 0.0):
+            return
+        attempts = int(retry.get("attempts") or 0) + 1
+        payload = {
+            key: value
+            for key, value in retry.items()
+            if key not in ("retry_after", "last_error")
+        }
+        payload["attempts"] = attempts
+        print(
+            json.dumps({"goal_retry": payload.get("goal_id"), "attempt": attempts}, ensure_ascii=False),
+            flush=True,
+        )
+        self.state.goal_retry = {
+            **payload,
+            "attempts": attempts,
+            "retry_after": now + min(self.GOAL_RETRY_SECONDS * attempts, 300.0),
+        }
+        self.state.save(self.state_path)
+        self.handle_goal(payload, force=True)
+
+    # --------------------------------------------------------------- 额度池
+
+    def pool_route(self, purpose: str) -> ProviderRoute | None:
+        """Where the administrator's own model calls should go.
+
+        The administrator is a harness like any other: when the human picked a
+        model from the platform's **quota pool** for this window, the admin's
+        CLI must talk to the pool.  Without this the administrator silently used
+        whatever provider the machine happened to have configured -- and when
+        that local provider was down, the whole collaboration stopped with a
+        stream error instead of using the quota the platform already had.
+
+        The platform decides (it knows what the human chose and what is alive);
+        this worker only carries the answer out.  A platform that cannot answer
+        -- or a channel that cannot be resolved -- is not a reason to stop: the
+        administrator falls back to its own CLI.
+        """
+        try:
+            plan = self.client.get(
+                "/pool/plan",
+                task_id=f"admin:{purpose}",
+                harness_id=self.admin_harness_id,
+                attempt_no=0,
+            )
+        except Exception as exc:  # pragma: no cover - network path
+            print(
+                json.dumps({"admin_pool_plan_failed": type(exc).__name__}, ensure_ascii=False),
+                flush=True,
+            )
+            return None
+        if not isinstance(plan, dict) or str(plan.get("mode") or "") != "pool":
+            return None
+        try:
+            # The protocol is the one the administrator's **own CLI** speaks, not
+            # the upstream's: the pool serves both shapes and translates.
+            protocol = self.admin.pool_protocol()
+            base_path = str(
+                plan.get("anthropic_path")
+                if protocol == "anthropic"
+                else plan.get("base_path") or ""
+            )
+            model = str(plan.get("model") or "")
+        except Exception as exc:  # pragma: no cover - unresolvable channel
+            print(
+                json.dumps({"admin_pool_route_failed": type(exc).__name__}, ensure_ascii=False),
+                flush=True,
+            )
+            return None
+        if not base_path or not model:
+            return None
+        route = ProviderRoute(
+            base_url=f"{self.client.base_url}{base_path}",
+            token=self.client.token,
+            model=model,
+            protocol=protocol,
+        )
+        print(
+            json.dumps(
+                {
+                    "admin_model_route": "pool",
+                    "model": model,
+                    "upstream": str(plan.get("upstream") or ""),
+                    "purpose": purpose,
+                    "reason": str(plan.get("reason") or ""),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        return route
 
     # --------------------------------------------------------------- messages
 
@@ -607,6 +722,12 @@ class AdminWorker:
             return
         # 记住这次的目标：成员后来提「目标要改」时，群主的回答要能据此重新细化。
         self.state.last_goal = dict(payload)
+        # 这个项目的成员名单 = 这一轮传阅的读者名单。
+        self._requested_members = [
+            str(item).strip()
+            for item in (payload.get("members") or [])
+            if str(item).strip()
+        ]
         if self.dry_run:
             print(
                 json.dumps(
@@ -640,13 +761,30 @@ class AdminWorker:
                 answers=payload.get("answers") or [],
                 members=payload.get("members") or None,
                 project_name=payload.get("project_name"),
+                route=self.pool_route("refine"),
             )
         except AdminHarnessError as exc:
-            # The administrator's own model failed. Do not create a task from
-            # a fallback spec; report the failure and leave the state unchanged.
-            self._post_admin_message(f"管理员 Harness 细化失败：{exc}；未分派任何任务。")
+            # The administrator's own model failed.  Do not create a task from
+            # a fallback spec; report the failure.
+            #
+            # And do **not** mark the goal as processed: a CLI that died, a
+            # provider that went away or a stream that broke is an
+            # infrastructure failure, not "this goal has been dealt with".
+            # Marking it processed made the owner's request disappear after one
+            # flaky call -- the platform said "failed" and then never tried
+            # again.  The goal waits here and is retried once the channel is
+            # back (with a backoff, so a broken channel is not hammered).
+            self._post_admin_message(
+                f"管理员 Harness 细化失败：{exc}；未分派任何任务。"
+                "这条目标仍然在队列里，通道恢复后会自动重试。"
+            )
             print(json.dumps({"goal_error": str(exc), "seq": seq}, ensure_ascii=False), flush=True)
-            self.state.processed_goal_seqs.append(seq)
+            self.state.goal_retry = {
+                **payload,
+                "attempts": int(payload.get("attempts") or 0),
+                "retry_after": time.time() + self.GOAL_RETRY_SECONDS,
+                "last_error": str(exc)[:400],
+            }
             self.state.save(self.state_path)
             return
         if result.get("status") == "needs_owner":
@@ -654,6 +792,7 @@ class AdminWorker:
                 **payload,
                 "questions": result.get("questions") or [],
             }
+            self.state.goal_retry = None
             self.state.processed_goal_seqs.append(seq)
             self.state.save(self.state_path)
             print(
@@ -668,6 +807,8 @@ class AdminWorker:
             )
             return
         self.state.pending_goal = None
+        # The goal is being worked on now: it is no longer waiting for a retry.
+        self.state.goal_retry = None
         specs = result.get("tasks") or []
         reviewers = self._circulation_reviewers(specs)
         if not reviewers:
@@ -691,6 +832,8 @@ class AdminWorker:
             "project_name": str(payload.get("project_name") or ""),
             "tasks": specs,
             "reviewers": reviewers,
+            # 成员名单要跟着状态走：worker 重启之后还得知道这一轮该给谁看。
+            "members": list(self._requested_members),
         }
         # 新方案从第 1 轮开始数（上一轮方案的轮数不能继承过来）。
         self.state.circulation_rounds_done = 0
@@ -709,6 +852,12 @@ class AdminWorker:
         pending = self.state.pending_refinement
         if not pending:
             return
+        # 成员名单随状态恢复：worker 重启之后，这一轮仍然要给**全部**成员看。
+        self._requested_members = [
+            str(item).strip()
+            for item in (pending.get("members") or [])
+            if str(item).strip()
+        ] or self._requested_members
         if self.dry_run:
             print(
                 json.dumps(
@@ -771,46 +920,45 @@ class AdminWorker:
     def _next_circulation_readers(self, previous: list[str]) -> list[str]:
         """Who reads the next round.
 
-        §39 lets the administrator change the list per round on purpose: the
-        second round should be a **different** reading, not the same people
-        again.  So: everyone who can take work, minus the ones who just read
-        it.  If that leaves nobody (a one-member project), keep the previous
-        list -- §39 lets one harness review every round.
+        **The same readers as the round before** -- and that is the point.
+        The owner defined the process: the plan goes down to the members, every
+        member reads it and writes their comments below, the comments are
+        collected and the administrator folds them into a complete plan; then
+        the administrator sends the **new** plan down again and every member
+        reads **that** one.  What changes between the rounds is the plan, not
+        the audience -- so the second round must not quietly drop anyone.
 
-        The size is **not** grown: the next round reads as many documents as
-        the last one did, no more.  A round's cost is one real CLI review per
-        reader, and a second round that suddenly involves every window is not
-        a second reading, it is a second project.
+        (An earlier version rotated the readers and capped the round size.
+        That produced rounds where one member read the plan and a different
+        member read the revision, which is not the process the owner asked
+        for: a member who did not see the first round cannot tell whether the
+        revision answered their own remarks.)
         """
-        candidates = [h for h in self.admin.assignable_harnesses() if h != self.admin_harness_id]
-        if not candidates:
-            return list(previous)
-        previous_set = {str(item) for item in previous}
-        others = [h for h in candidates if h not in previous_set]
-        if not others:
-            others = list(candidates)
-        size = max(1, len(previous)) if previous else 1
-        return others[:size]
+        return list(previous)
 
     def _circulation_reviewers(self, specs: list[dict[str, Any]]) -> list[str]:
         """Who reads the draft before anything is assigned.
 
-        The readers are the windows the plan is meant for -- the ones that would
-        do the work.  A window that cannot take work (no credential) cannot read
-        it either, and the administrator is not a reader of its own draft.
+        **Every member of the project**, not only the windows the plan happens
+        to name: the owner asked for the plan to be passed down and for every
+        member to review it and put their comments below.  A member that only
+        gets to look at the plan it will not execute has no standing to ask
+        for changes to it.
+
+        A window that cannot take work (no credential, offline, the
+        administrator itself) is not a reader: it would leave the round
+        waiting for an answer that never comes.
         """
-        targets: list[str] = []
-        for spec in specs:
-            harness = str(spec.get("harness_id") or "").strip()
-            if harness and harness not in targets:
-                targets.append(harness)
-        candidates = set(self.admin.assignable_harnesses())
-        readers = [harness for harness in targets if harness in candidates]
-        if readers:
-            return readers
-        # No target window can read it: let every window that can take work
-        # have a look, so the plan is not written for nobody.
-        return sorted(candidates)[:3]
+        assignable = list(self.admin.assignable_harnesses())
+        requested = self._requested_members
+        if requested:
+            members = [harness for harness in requested if harness in assignable]
+            if members:
+                return members
+        if assignable:
+            return assignable
+        # Nobody can read it: the plan is the only sensible next step.
+        return []
 
     # --------------------------------------------------------- circulation
 
@@ -857,6 +1005,7 @@ class AdminWorker:
                 goal=str(pending.get("goal") or ""),
                 tasks=list(pending.get("tasks") or []),
                 reviews=list(reviews),
+                route=self.pool_route("revise"),
             )
             self.client.post(
                 "/adapter/admin/plan_revise",
@@ -963,6 +1112,10 @@ class AdminWorker:
     #: 一个分配轮开着最久多久（秒）。到了就冻结候选集合往下走 —— 否则一个
     #: 没人申请的任务会把整轮卡住，成员永远领不到活。
     ALLOCATION_ROUND_GRACE_SECONDS = 180.0
+
+    #: 细化在**模型通道**上失败后，等多久重试这条目标。够长，不至于把一条坏掉的
+    #: 通道锤一遍；够短，群主不用等太久才看到自己的目标被处理。
+    GOAL_RETRY_SECONDS = 60.0
 
     #: 申请在本轮里的两种"还算数"的状态。轮次一关闭（``allocation.closed``），
     #: 所有还在候选集合里的申请会从 ``submitted`` 转成 ``frozen`` —— 冻结之后
@@ -1775,6 +1928,7 @@ class AdminWorker:
             diff=diff,
             verification=verification,
             project_name=_title_project(task),
+            route=self.pool_route("review"),
         )
         claim = self.client.post(
             "/review/claim",
@@ -1844,6 +1998,7 @@ class AdminWorker:
 
 def run_once(worker: AdminWorker) -> None:
     worker.poll_messages()
+    worker.retry_failed_goal()
     worker.start_circulation()
     worker.resume_dispatch()
     worker.collect_circulation()

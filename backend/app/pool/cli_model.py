@@ -21,6 +21,7 @@ the execution does not.
 from __future__ import annotations
 
 import json
+import locale
 import os
 import shutil
 import subprocess
@@ -129,6 +130,14 @@ class CliModelSource:
         binary = self.resolve_binary()
         args = [part.replace("{workdir}", str(workdir)) for part in self.args]
         base = [binary, *args, "--model", self.model]
+        if self.prompt_via_stdin:
+            # The question travels on **stdin** (the runner writes it there), so
+            # it must not also be a positional argument: cmd.exe truncates the
+            # command line at 8191 characters, so the CLI would see a cut-off
+            # copy of the question next to the complete one -- and the provider
+            # would bill the prompt twice.  The member adapters already do it
+            # this way; the pool slot now matches them.
+            return base
         one_line = " ".join(part.strip() for part in prompt.splitlines() if part.strip())
         if self.message_flag:
             # The question is a flag value, so it never becomes a positional
@@ -221,11 +230,8 @@ class CliModelSource:
                 completed = subprocess.run(
                     argv,
                     cwd=self.workdir or workdir,
-                    input=prompt if self.prompt_via_stdin else None,
+                    input=prompt.encode("utf-8") if self.prompt_via_stdin else None,
                     capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
                     timeout=self.timeout_seconds,
                 )
             except FileNotFoundError as exc:
@@ -234,12 +240,14 @@ class CliModelSource:
                 raise RuntimeError(
                     f"the CLI slot {self.name} ran out of time after {self.timeout_seconds}s"
                 ) from exc
+        stdout = _decode_output(completed.stdout)
+        stderr = _decode_output(completed.stderr)
         if completed.returncode != 0:
             raise RuntimeError(
                 f"the CLI slot {self.name} failed ({completed.returncode}): "
-                f"{(completed.stderr or completed.stdout or '')[-300:]}"
+                f"{(stderr or stdout or '')[-300:]}"
             )
-        report = extract_report(completed.stdout)
+        report = extract_report(stdout)
         self._derive_from_catalogue(report)
         if report.get("usage") is None and self.store and report.get("message_ids"):
             # The CLI did not put its usage on stdout; it kept it in its own
@@ -285,6 +293,28 @@ class CliModelSource:
         if self.store == "opencode":
             return opencode_message_usage(message_ids)
         return None
+
+
+def _decode_output(raw: bytes | str | None) -> str:
+    """Decode what a CLI printed, without turning its errors into noise.
+
+    A Windows CLI writes its diagnostics in the console's code page (GBK on
+    this machine), not in UTF-8.  Decoding those bytes as UTF-8 with
+    ``errors="replace"`` produced a message made of replacement characters --
+    the pool then reported "the CLI slot failed" with a reason nobody could
+    read.  So the bytes are tried as UTF-8, then as the console code page,
+    and only the last resort replaces characters.
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    for encoding in ("utf-8", locale.getpreferredencoding(False), "gbk"):
+        try:
+            return raw.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            continue
+    return raw.decode("utf-8", errors="replace")
 
 
 def extract_report(stdout: str) -> dict[str, Any]:

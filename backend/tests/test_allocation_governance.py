@@ -22,6 +22,7 @@ from app.admin.worker import AdminWorker, WorkerState
 from app.allocation.service import AllocationService
 from app.claim.service import ClaimRequest, ClaimService
 from app.config import settings
+from app.tasks.service import SchedulerService
 from tests.claim_support import make_database, seed_project
 
 GROUP = "G-1"
@@ -460,6 +461,82 @@ def test_the_accepted_allocation_authorises_the_claim_and_is_consumed(database, 
         (allocation["allocation_id"],),
     )[0]
     assert used["claimed_at"] is not None
+
+
+def test_an_attempt_that_produced_nothing_hands_the_authorization_back(database, monkeypatch):
+    """什么都没干就把活还回来，授权必须还能再用一次。
+
+    授权是在**开出 attempt** 的那一刻被标记用掉的。那次 attempt 如果立刻因为基础
+    设施原因死掉（没有空闲工作树、provider 挂了），活回到 ready，授权却已经"用过"
+    —— 于是门禁拒绝，而管理员也开不出第二轮（一个快照一轮就够），这条活就永远停
+    在那里。门禁要防的是"换一个窗口自选"，不是"同一份已经答应的分配在什么都没干
+    完之后作废"。
+    """
+    _register_harness(database, MEMBER)
+    _make_plan(database)
+    _complete_circulation(database)
+    service = AllocationService(database)
+    round_info = service.open_allocation_round(
+        group_id=GROUP, plan_snapshot_id="snap-1", opened_by=ADMIN
+    )
+    application = service.submit_application(
+        round_id=round_info["round_id"], harness_id=MEMBER, task_ids=["T-1"], reason="我来"
+    )
+    service.close_allocation_round(round_id=round_info["round_id"], closed_by=ADMIN)
+    service.decide(
+        round_id=round_info["round_id"],
+        task_id="T-1",
+        application_id=application["application_id"],
+        decided_by=ADMIN,
+        expected_revision=int(
+            database.read(
+                "SELECT revision FROM allocation_rounds WHERE round_id = ?",
+                (round_info["round_id"],),
+            )[0]["revision"]
+        ),
+        reason="按方案指派",
+    )
+    allocation = database.read(
+        "SELECT allocation_id FROM allocations WHERE round_id = ?", (round_info["round_id"],)
+    )[0]
+    service.accept_assignment(allocation_id=allocation["allocation_id"], harness_id=MEMBER)
+    monkeypatch.setattr(settings, "allocation_required_groups", frozenset({GROUP}))
+
+    claim = ClaimService(database).claim(
+        ClaimRequest(
+            claim_request_id="cr-1",
+            harness_id=MEMBER,
+            task_ids=("T-1",),
+            partial_allowed=False,
+        )
+    )
+    assert claim.outcome == "claimed"
+    attempt_id = claim.items[0].attempt_id
+
+    # 基础设施原因死掉：什么都没产出，活还回来了。
+    SchedulerService(database).release(
+        task_id="T-1",
+        attempt_id=attempt_id,
+        fencing_epoch=1,
+        reason="retryable failure (WorktreeCapacityExceeded)",
+    )
+    returned = service.return_authorization(
+        attempt_id=attempt_id, reason="retryable failure (WorktreeCapacityExceeded)"
+    )
+    assert returned is not None
+    assert returned["task_id"] == "T-1"
+
+    # 授权回来了：同一条活可以被再领一次（第二次领取用的是新的 claim id）。
+    again = ClaimService(database).claim(
+        ClaimRequest(
+            claim_request_id="cr-2",
+            harness_id=MEMBER,
+            task_ids=("T-1",),
+            partial_allowed=False,
+        )
+    )
+    assert again.outcome == "claimed"
+    assert again.items[0].attempt_id == "T-1.a2"
 
 
 def test_an_invited_allocation_still_does_not_authorise_the_claim(database, monkeypatch):

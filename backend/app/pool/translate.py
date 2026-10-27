@@ -391,6 +391,87 @@ def chat_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iter
     )
 
 
+def responses_message_item(text: str = "", *, status: str = "") -> dict[str, Any]:
+    """The assistant message item of a Responses stream."""
+    item: dict[str, Any] = {
+        "id": "msg_pool",
+        "type": "message",
+        "role": "assistant",
+        "status": status or ("completed" if text else "in_progress"),
+        "content": [{"type": "output_text", "text": text}] if text else [],
+    }
+    return item
+
+
+def responses_stream_events(text: str, *, model: str) -> Iterator[str]:
+    """One finished text -> the full OpenAI Responses event sequence.
+
+    A Responses client does not read a single completion event: it tracks an
+    **active output item**.  The Codex CLI logs "OutputTextDelta without active
+    item" and renders an empty turn when the delta arrives without the item
+    being opened first -- so the answer is silently lost.  The sequence is
+    therefore: ``response.created`` -> ``response.output_item.added`` -> the
+    text as ``response.output_text.delta`` -> ``...done`` -> ``response.completed``.
+    """
+    import json as _json
+
+    def event(kind: str, **fields: Any) -> str:
+        payload = {"type": kind, "sequence_number": 0, **fields}
+        return f"event: {kind}\ndata: {_json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    yield event(
+        "response.created",
+        response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model},
+    )
+    yield event(
+        "response.output_item.added",
+        output_index=0,
+        item=responses_message_item(),
+    )
+    if text:
+        yield event(
+            "response.output_text.delta",
+            delta=text,
+            item_id="msg_pool",
+            output_index=0,
+            content_index=0,
+        )
+        yield event(
+            "response.output_text.done",
+            text=text,
+            item_id="msg_pool",
+            output_index=0,
+            content_index=0,
+        )
+    yield event(
+        "response.output_item.done",
+        output_index=0,
+        item=responses_message_item(text),
+    )
+    yield event(
+        "response.completed",
+        response={
+            "id": "resp_pool",
+            "object": "response",
+            "status": "completed",
+            "model": model,
+            "output": [responses_message_item(text)],
+        },
+    )
+
+
+def text_to_responses_stream(text: str, *, model: str) -> Iterator[str]:
+    """One finished text -> the OpenAI Responses SSE shape a client expects.
+
+    A CLI slot answers with the whole text at once (the CLI prints one final
+    message), but the Responses protocol is a **sequence**: a client that only
+    sees ``response.completed`` may render an empty turn -- which is what the
+    Codex CLI did, and the answer was simply lost.  So the same parts the chat
+    upstream path emits are produced here.
+    """
+    yield from responses_stream_events(text, model=model)
+
+
 def anthropic_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iterator[str]:
     """Anthropic messages SSE -> OpenAI Responses SSE."""
     import json as _json

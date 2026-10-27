@@ -1119,6 +1119,50 @@ class AllocationService:
 
     # ------------------------------------------------------------ Claim 授权
 
+    def return_authorization(self, *, attempt_id: str, reason: str) -> dict[str, Any] | None:
+        """把一份"被用掉"的授权还回来：它开的那次尝试什么也没产出。
+
+        为什么要有这条边：授权是在**开出 attempt** 的那一刻被标记用掉的（§39 硬规则
+        2 的"只能用一次"）。但那次 attempt 可能立刻因为基础设施原因死掉——没有空闲
+        工作树、provider 挂了——活回到 ready，授权却已经"用过"。于是谁也领不动这条
+        活：门禁拒绝，而管理员也开不出第二轮（一个快照一轮就够），活就永远停在那里。
+
+        门禁要防的是"换一个窗口自选"，不是"同一份已经答应的分配在什么都没干完之后
+        作废"。所以：**没有产出**的尝试（release，语义是"我什么都没做，交回去"）
+        把授权还回去；干过活的（提交过结果、进了审阅）不还——那条路是返工，本来就
+        允许继续用同一份授权（CLAIM_FOR_REVISION 不走这道门）。
+        """
+        with self.database.transaction() as conn:
+            claim = conn.execute(
+                "SELECT claim_id FROM task_claims WHERE attempt_id = ?"
+                " ORDER BY claimed_at DESC LIMIT 1",
+                (attempt_id,),
+            ).fetchone()
+            if claim is None:
+                return None
+            allocation = conn.execute(
+                "SELECT * FROM allocations WHERE claim_id = ?",
+                (str(claim["claim_id"]),),
+            ).fetchone()
+            if allocation is None or allocation["claimed_at"] is None:
+                return None
+            conn.execute(
+                "UPDATE allocations SET claimed_at = NULL, claim_id = NULL"
+                " WHERE allocation_id = ?",
+                (str(allocation["allocation_id"]),),
+            )
+            # No new event: ``AllocationEvent`` mirrors the specification item by
+            # item and may not grow here.  The audit trail is already there --
+            # the ``task_claims`` row keeps ``released_at`` and the reason the
+            # attempt gave the work back, and the allocation row now shows an
+            # authorization that is available again.
+            return {
+                "allocation_id": str(allocation["allocation_id"]),
+                "task_id": str(allocation["task_id"]),
+                "harness_id": str(allocation["harness_id"]),
+                "returned": True,
+            }
+
     def claim_authorization(
         self,
         *,

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>多 Harness 协作平台 · 作品说明</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; line-height: 1.9; margin: 0; padding: 2.2em; color: #1f2933; background: #f7f9fb; }
+  .wrap { max-width: 860px; margin: 0 auto; background: #ffffff; padding: 2.4em 2.6em; border-radius: 10px; box-shadow: 0 2px 14px rgba(0,0,0,0.06); }
+  h1 { font-size: 1.7em; border-bottom: 3px solid #2f6fed; padding-bottom: 0.4em; color: #1b3a6b; }
+  h2 { font-size: 1.28em; margin-top: 2em; padding-left: 0.6em; border-left: 6px solid #2f6fed; color: #244; }
+  p { margin: 0.9em 0; text-align: justify; }
+  .ev { background: #eef4ff; border: 1px solid #cfdcff; border-radius: 6px; padding: 0.8em 1em; font-family: Consolas, "Courier New", monospace; font-size: 0.92em; word-break: break-all; }
+  .lead { color: #465; }
+  footer { margin-top: 2.4em; border-top: 1px dashed #cbd5e1; padding-top: 1em; font-size: 0.9em; color: #64748b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>多 Harness 协作平台</h1>
+
+<p class="lead">在多人、多机器、多代理同时参与同一批任务的场景下，真正的难点从来不是“把活干完”，而是“不重复干、不互相踩、不把旧结果当成新结果”。多 Harness 协作平台正是为了解决这一类并发与信任问题而存在的：它让若干彼此独立、互不可信的成员代理在同一套规则下协作，既允许它们并行领取与推进任务，又通过领取去重、租约接管、fencing 防护、验证与人工审核分离、事件流可重放、分配治理与合并互斥等机制，保证最终结果的一致性与可追责性。下面分八节讲清每类机制在解决什么问题，并给出可机械核对的证据来源。</p>
+
+<h2>并发领取去重</h2>
+<p>当多个成员几乎同时盯上同一项任务时，最危险的情况是两个人都认为自己领到了它，然后各自推进、各自写出结果，最后产生两份互相冲突的交付。并发领取去重机制要解决的，正是“同一份工作只允许一个赢家”以及“同一请求即使被重放也不应产生第二份结果”这两个问题。平台在领取入口处做了幂等约束：一次领取请求带有唯一请求标识，重复或竞态的领取会被收敛到同一个结果上。</p>
+<p>这类行为在测试中得到直接验证：backend/tests/test_claim_concurrency.py 覆盖了两条关键用例，分别是 test_only_one_of_two_racing_claims_wins 与 test_two_racers_with_the_same_request_id_both_replay_one_result。前者确认两个同时竞速的领取请求只有一个胜出，后者确认使用同一请求标识的两个竞速者会重放并拿到同一份结果，而不是各自生成一份。</p>
+<p class="ev">backend/tests/test_claim_concurrency.py
+test_only_one_of_two_racing_claims_wins
+test_two_racers_with_the_same_request_id_both_replay_one_result</p>
+
+<h2>租约与接管</h2>
+<p>领取到任务只是第一步，真正的麻烦在于“持有者失联之后怎么办”。如果一个成员领走了任务却中途崩溃、卡死或掉线，而平台永远把它当作当前持有者，那么这份工作就会被无限期冻结，谁也无法接管。租约与接管机制把“持有权”变成一种带有效期的租约：租约过期后，系统会把原持有者的状态置为失效，并释放其占用的全部资源，使其他成员能够安全地接管，从而避免单点失联造成的死锁。</p>
+<p>这一行为由 backend/tests/test_lease.py 中的 test_expiry_moves_an_owner_state_to_stale_and_frees_everything 所验证：当租约到期时，原本的持有者状态会被移动到失效状态，并且其占用的全部资源都会被释放，从而为空闲成员接管让出空间。</p>
+<p class="ev">backend/tests/test_lease.py
+test_expiry_moves_an_owner_state_to_stale_and_frees_everything</p>
+
+<h2>fencing 防旧写入</h2>
+<p>租约过期后还有一个更隐蔽的隐患：那个“已经失联的旧持有者”可能并没有真的死，它只是在网络分区里延迟了一会儿，等它恢复时仍会拿着过期的身份试图写入。如果不加防护，旧持有者的迟到写入会覆盖新接管者的合法结果，造成数据回退。fencing 防旧写入机制给每一次写入附上“ fencing 世代”概念：携带过期世代的写入会被直接拒绝，无论是续租请求，还是绕过租约路径的受保护写入，都无法用旧身份污染新状态。</p>
+<p>backend/tests/test_lease.py 同时覆盖了两条 fencing 用例：test_renew_with_a_stale_fencing_epoch_is_refused 验证携带过期 fencing 世代的续租会被拒绝；test_guarded_write_refuses_a_stale_epoch_outside_the_lease_path 验证即使在租约路径之外，受保护的写入也会拒绝过期的世代。两条用例共同保证旧持有者无法借尸还魂。</p>
+<p class="ev">backend/tests/test_lease.py
+test_renew_with_a_stale_fencing_epoch_is_refused
+test_guarded_write_refuses_a_stale_epoch_outside_the_lease_path</p>
+
+<h2>验证与人工审核分离</h2>
+<p>自动化的推进并不能替代人的判断。一个问题如果交给我们自动放行，那么一旦头部任务验证通过就直接进入审核，与验证失败则根本到不了审核，这两件事必须被清晰隔开。验证与人工审核分离机制的含义是：验证环节只负责产出“可进入审核”还是“不能进入审核”的结论，审核环节只由人在验证通过之后进行；两者职责互不替代，既不能让未通过验证的任务溜进审核，也不能让通过验证的结果在未经人确认前就被当作终态。</p>
+<p>这一分离由 backend/tests/test_verify.py 的两条用例支撑：test_passing_head_moves_the_task_to_awaiting_review 确认验证通过的头部任务会被移动到等待审核状态；test_failing_head_cannot_reach_review 确认验证失败的头部任务无法抵达审核。与审核相关的发现本身则记录在 backend/tests/test_review_findings.py 中，该文件只引路径，不展开其内部用例名。</p>
+<p class="ev">backend/tests/test_verify.py
+test_passing_head_moves_the_task_to_awaiting_review
+test_failing_head_cannot_reach_review
+backend/tests/test_review_findings.py</p>
+
+<h2>事件流可重放</h2>
+<p>当系统需要重建状态、排查问题或在不同节点间同步时，最可靠的做法不是去猜测“现在应该是什么样”，而是把所有发生过的事情按原顺序重新播放一遍。事件流可重放机制把系统的变化记录成一个只追加、不可篡改的事件序列，任何投影视图都可由这些事件重新推导出来；即便某个投影被丢弃或损坏，只要事件还在，就能在重新打开数据库后把它完整重建。</p>
+<p>backend/tests/test_database_events.py 验证了两条关键性质：test_event_store_is_append_only_and_replayable 确认事件存储是只追加且可被重放的；test_discarded_projection_can_be_rebuilt_after_reopening_database 确认一个被丢弃的投影能够在重新打开数据库之后被重建。两者合在一起，保证了状态可从事件源头完整恢复。</p>
+<p class="ev">backend/tests/test_database_events.py
+test_event_store_is_append_only_and_replayable
+test_discarded_projection_can_be_rebuilt_after_reopening_database</p>
+
+<h2>分配治理</h2>
+<p>不是谁想领就能领。如果一个分组在没有获得任何“已接受分配”的情况下就被允许领取任务，那么平台就失去了基本的配额与权限边界，很容易被某一侧无节制地占据资源。分配治理机制要求：领取动作必须建立在一个已经接受的分配之上；没有分配，领取就被拒；一旦分配被接受，它既授权了对应的领取，也被视为已被消耗，从而避免重复或越界领取。</p>
+<p>backend/tests/test_claim_allocation_gate.py 给出两条门禁用例：test_a_gated_group_refuses_a_claim_without_any_allocation 确认一个没有分配的分组会拒绝领取；test_an_accepted_allocation_authorizes_the_claim_and_is_consumed 确认一个被接受的分配会授权领取并随之被消耗。与分配治理相关的另外两份实现与流转测试分别位于 backend/tests/test_allocation_governance.py 与 backend/tests/test_allocation_circulation.py，这两处只引路径，不展开其内部用例名。</p>
+<p class="ev">backend/tests/test_claim_allocation_gate.py
+test_a_gated_group_refuses_a_claim_without_any_allocation
+test_an_accepted_allocation_authorizes_the_claim_and_is_consumed
+backend/tests/test_allocation_governance.py
+backend/tests/test_allocation_circulation.py</p>
+
+<h2>合并互斥</h2>
+<p>当多个参与者同时尝试合并或抢占同一关键资源时，最常见的灾难是“大家都以为自己成功了”，结果把不兼容的状态揉在一起。合并互斥机制要解决的，就是在并发的合并竞争中保证“只有一个赢家”，其余尝试要么失败、要么被收敛，绝不允许出现两个都认为自己拿到了合并权的情况。它是平台在写关键汇合点时的最后一道互斥闸。</p>
+<p>这一性质由 backend/tests/test_merge_guard.py 中的 test_concurrent_acquire_has_exactly_one_winner 验证：在并发的获取竞争中，胜出者恰好只有一个。该用例直接刻画了合并互斥的核心不变量。</p>
+<p class="ev">backend/tests/test_merge_guard.py
+test_concurrent_acquire_has_exactly_one_winner</p>
+
+<h2>启动命令</h2>
+<p>要让上述机制真正跑起来，需要按固定顺序启动三件东西。第一步是 setup.ps1，它负责把运行所需的各类依赖安装到位，是后续启动的前置条件；缺少这一步，后端与各类 worker 将无从拉起。第二步是 start-formal.ps1，它以正式的认证方式把后端与若干 worker 拉起；第三步是 start-office.bat，它负责启动面向办公场景的交互界面，使人工审核等操作可以在界面上完成。</p>
+<p>在启动后端时由 start-formal.ps1 负责：它以 enforce 作为认证方式拉起后端服务，并一次性拉起 6 个成员 worker 与 1 个管理员 worker，enforce、6 个成员 worker、1 个管理员 worker 三者均属于同一次启动流程，由该脚本统一驱动。这里不另行写出由上述数字推导出的进程总数，只如实记录成员与管理员两类 worker 的数量。</p>
+<p>整体启动顺序可以概括为：先运行 setup.ps1 装好依赖，再运行 start-formal.ps1 以 enforce 认证拉起后端与六名成员 worker、一名管理员 worker，最后运行 start-office.bat 启动办公界面。三者各司其职，缺一则平台无法进入可协作状态。</p>
+<p class="ev">setup.ps1
+start-formal.ps1
+start-office.bat</p>
+
+<footer>本页为自包含单页说明，所有样式内联，无任何外部请求；可在离线状态下以 file 方式直接用浏览器打开阅读。</footer>
+</div>
+</body>
+</html>

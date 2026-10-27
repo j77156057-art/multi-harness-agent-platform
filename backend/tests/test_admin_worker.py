@@ -51,13 +51,17 @@ class FakeAdmin:
             "tasks": self.tasks,
         }
 
+    def pool_protocol(self) -> str:
+        """The protocol this administrator's CLI speaks to a model provider."""
+        return "openai"
+
     def answer(self, **kwargs):
         self.answer_calls.append(kwargs)
         if self.error:
             raise self.error
         return {"answer": "答", "asker": kwargs.get("asker")}
 
-    def revise_with_reviews(self, *, plan_id, goal, tasks, reviews):
+    def revise_with_reviews(self, *, plan_id, goal, tasks, reviews, route=None):
         self.revise_calls.append(
             {"plan_id": plan_id, "goal": goal, "tasks": tasks, "reviews": reviews}
         )
@@ -301,6 +305,56 @@ def test_goal_for_another_admin_is_not_dispatched(tmp_path, monkeypatch):
     )
     assert admin.refine_calls == []
     assert client.dispatches == []
+
+
+def test_every_member_reads_every_round(tmp_path, monkeypatch):
+    """每一轮传阅，**每个**成员都要审一遍；两轮之间变的是方案，不是人。
+
+    群主定的流程是：方案传下去，所有成员各审一遍并把意见写在下面，意见汇总给
+    管理员整理成完整方案；管理员再把**新的**方案传下去，所有成员再各审一遍。
+    所以第二轮的读者名单必须和第一轮一样 —— 少一个人，就等于有人没机会回应自己
+    上一轮提的意见。
+    """
+    admin = FakeAdmin(
+        tasks=[
+            {
+                "title": "DEMO · 写作品页",
+                "goal": "写一张作品页",
+                "exclusive_paths": ["portfolio/index.html"],
+                "acceptance": "x",
+                "harness_id": "member-a",
+            }
+        ]
+    )
+    admin.assignable = ["member-a", "member-b", "member-c"]
+    client = FakeClient()
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker.handle_goal(
+        {
+            "goal_id": "g-1",
+            "goal": "写一张作品页",
+            "project_name": "DEMO",
+            "members": ["member-a", "member-b", "member-c"],
+            "max_tasks": 1,
+            "answers": [],
+            "admin": "admin-window",
+            "seq": 21,
+        },
+        force=True,
+    )
+
+    # 草案开出来时，读者是**全部**成员 —— 不只是方案点名的那个执行窗口。
+    drafted = list(client.plan_drafts)
+    assert drafted, "the administrator did not draft a plan"
+    assert drafted[0]["reviewer_harness_ids"] == ["member-a", "member-b", "member-c"]
+
+    # 第二轮：同一批人再审一遍（变的是方案）。
+    assert worker._next_circulation_readers(["member-a", "member-b", "member-c"]) == [
+        "member-a",
+        "member-b",
+        "member-c",
+    ]
 
 
 def test_a_cancel_notice_makes_the_administrator_refine_that_part(tmp_path, monkeypatch):

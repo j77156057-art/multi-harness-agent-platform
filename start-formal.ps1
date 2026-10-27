@@ -65,8 +65,9 @@ function Get-FormalWorkerPids([string]$marker) {
 
 $existing = Get-FormalWorkerPids 'app.adapter.formal_worker'
 $existingAdmin = Get-FormalWorkerPids 'app.admin.worker'
-if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0) {
-    $ids = @($existing) + @($existingAdmin) | Where-Object { $_ } | Sort-Object -Unique
+$existingRuntime = Get-FormalWorkerPids 'app.runtime'
+if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0 -or $existingRuntime.Count -gt 0) {
+    $ids = @($existing) + @($existingAdmin) + @($existingRuntime) | Where-Object { $_ } | Sort-Object -Unique
     throw ("Formal workers are already running (pid: $($ids -join ', '))." +
         " Stop them first, otherwise two instances compete for the same tasks.")
 }
@@ -114,6 +115,12 @@ foreach ($member in $members) {
 }
 $adminToken = Join-Path $PSScriptRoot 'data\codex-window-admin.key'
 Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group', $Group, '--admin-harness-id', $AdminHarnessId, '--token-file', $adminToken, '--review-rounds', $ReviewRounds)
+
+# The verify/merge runtime: after a review approves an attempt, it merges the
+# deliverable into the canonical repository's integration branch.  Without it
+# the task stops at "approved" -- the work is done and reviewed, but it never
+# reaches the repository.
+Start-Python 'runtime' @('-m', 'app.runtime', '--loop', '--interval', '15')
 
 Write-Host "Formal platform is ready at $Url"
 Write-Host "Group: $Group; administrator: $AdminHarnessId"

@@ -280,6 +280,25 @@ CIRCULATION_REVIEW_PROMPT = """你是 {harness}。下面是一版方案草案（
 """
 
 
+def _platform_base_url(client) -> str:
+    """The platform's own base URL (the pool lives on the same server)."""
+    base = getattr(client, "base_url", "") or ""
+    return str(base).rstrip("/")
+
+
+def _platform_token(client) -> str:
+    """This worker's platform token, taken from the client's own header."""
+    headers = getattr(client, "headers", None) or {}
+    try:
+        value = headers.get("Authorization") or headers.get("authorization") or ""
+    except Exception:  # pragma: no cover - exotic header containers
+        value = ""
+    text = str(value)
+    if text.lower().startswith("bearer "):
+        return text[7:].strip()
+    return text.strip()
+
+
 def submit_circulation_review(
     client,
     adapter,
@@ -331,6 +350,35 @@ def submit_circulation_review(
         scratch = settings.data_dir / "circulation-scratch" / harness_id
         scratch.mkdir(parents=True, exist_ok=True)
         prompt = CIRCULATION_REVIEW_PROMPT.format(harness=harness_id, document=document[:20000])
+        # 额度池：评审也是这个窗口的活，人给窗口指定的模型对评审同样算数。
+        # 之前只有"执行"走了池子，于是一个自带 provider 不可用的窗口（模型有地域
+        # 限制、CLI 挂掉）永远交不出意见 —— 那一轮就永远等不到收齐。
+        route_env: dict[str, str] = {}
+        platform_base = _platform_base_url(client)
+        worker_token = _platform_token(client)
+        plan = ask_pool_plan(
+            client,
+            task_id=f"review:{plan_id}",
+            harness_id=harness_id,
+            attempt_no=0,
+            platform_url=platform_base,
+            token=worker_token,
+        )
+        if plan.get("mode") == "pool":
+            protocol = getattr(adapter, "pool_protocol", "openai")
+            base_path = str(
+                plan.get("anthropic_path")
+                if protocol == "anthropic"
+                else plan.get("base_path") or ""
+            )
+            route = ProviderRoute(
+                base_url=f"{platform_base}{base_path}",
+                token=worker_token,
+                model=str(plan.get("model") or ""),
+                protocol=protocol,
+            )
+            adapter.provider_route = route
+            route_env = dict(adapter.route_environment())
         try:
             # The work order must travel through the adapter's own transport:
             # some CLIs (and the Windows cmd wrapper) lose everything after the
@@ -339,6 +387,12 @@ def submit_circulation_review(
             # at things, it may not change them.
             work_order = adapter.prepare_work_order(prompt, scratch)
             argv = adapter.review_command(work_order, scratch)
+            # The adapter's own environment (Pi's isolated agent directory,
+            # for one) belongs to the review as much as it belongs to a task:
+            # without it the CLI reads the operator's **global** config and
+            # does not find the provider the route points at.
+            child_env = dict(adapter.process_environment() or {})
+            child_env.update(route_env)
             run = (runner or SubprocessRunner()).run(
                 argv,
                 cwd=scratch,
@@ -346,6 +400,7 @@ def submit_circulation_review(
                 on_tick=None,
                 tick_interval_seconds=None,
                 stdin_text=prompt if getattr(adapter, "prompt_via_stdin", False) else None,
+                env=child_env or None,
             )
         except Exception as exc:
             import traceback
@@ -364,9 +419,39 @@ def submit_circulation_review(
         finally:
             adapter.cleanup_work_order()
         if run.returncode != 0:
-            print(json.dumps({"circulation_review_failed": "cli_exit"}), flush=True)
+            # 说清楚为什么失败：只报 "cli_exit" 的话，成员既不知道自己哪里错了，
+            # 平台上也没人查得到（模型有地域限制、模型没装、CLI 退出码非零，
+            # 看起来一模一样）。
+            detail = " ".join(
+                part
+                for part in (getattr(run, "stderr", "") or "", getattr(run, "stdout", "") or "")
+                if part
+            )
+            print(
+                json.dumps(
+                    {
+                        "circulation_review_failed": "cli_exit",
+                        "returncode": run.returncode,
+                        "detail": detail[-400:],
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             return False
-        body = _last_text(run.stdout) or "(没有给出文字意见)"
+        # The adapter knows its own CLI's output format; the generic reader
+        # only understands JSON event lines.  Pi prints **plain text**, so
+        # asking the generic reader first lost its answer and the platform
+        # recorded "(没有给出文字意见)" for a window that had answered.
+        body = ""
+        try:
+            parsed = adapter.parse_output(run.stdout) or {}
+            body = str(parsed.get("final_message") or "").strip()
+        except Exception:  # pragma: no cover - a parser must not break the review
+            body = ""
+        if not body:
+            body = (_last_text(run.stdout) or "").strip()
+        body = body or "(没有给出文字意见)"
         try:
             client.post(
                 "/api/v1/allocation/circulation/review",

@@ -55,6 +55,7 @@ from app.pool.translate import (
     openai_to_anthropic,
     responses_stream_to_openai_stream,
     responses_to_chat,
+    text_to_responses_stream,
 )
 from app.usage.cli_reported import read_reported_records
 
@@ -675,6 +676,25 @@ class PoolService:
                 )
                 + "\n\n"
             )
+            # The stream has to **end** the way an OpenAI-compatible client
+            # expects: a last chunk carrying ``finish_reason`` before ``[DONE]``.
+            # Without it the client sees the stream stop mid-answer and calls
+            # it a broken response -- the OpenCode CLI did exactly that and
+            # retried the same request for ever.
+            yield (
+                "data: "
+                + json.dumps(
+                    {
+                        "id": "chatcmpl-pool",
+                        "object": "chat.completion.chunk",
+                        "created": 0,
+                        "model": route.model,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
             yield "data: [DONE]\n\n"
             return
         url, body, headers = self._stream_setup(route, payload, target="chat")
@@ -717,23 +737,10 @@ class PoolService:
         if upstream.protocol == CLI:
             answer = self._cli_chat(route, payload, consumer=consumer)
             text = str((answer["choices"][0]["message"] or {}).get("content") or "")
-            event = {
-                "type": "response.completed",
-                "response": {
-                    "id": "resp_pool",
-                    "object": "response",
-                    "status": "completed",
-                    "model": route.model,
-                    "output": [
-                        {
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [{"type": "output_text", "text": text}],
-                        }
-                    ],
-                },
-            }
-            yield f"event: response.completed\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            # The Responses protocol is a sequence, not a single completion
+            # event: a client that only receives `response.completed` renders
+            # an empty turn (the Codex CLI did, and the answer was lost).
+            yield from text_to_responses_stream(text, model=route.model)
             return
         url, body, headers = self._stream_setup(route, payload, target="responses")
         started = time.monotonic()

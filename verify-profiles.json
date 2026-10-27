@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "仓库侧人类维护的 verify 命令 allowlist（R10 §16）。",
+    "",
+    "'command_roots' 是允许作为命令根的程序名。profile 的 command[0] 必须出现在这里，",
+    "否则加载策略时直接失败 —— 这条就是 §16「verify 命令根必须来自仓库侧人类维护的",
+    "policy allowlist，Planner 只能填写允许的参数和测试路径」的执行点。",
+    "",
+    "命令用 argv 数组而不是 shell 字符串：shell 字符串会让 allowlist 变成建议。",
+    "",
+    "路径写**相对仓库根**的相对路径，不写某台机器的绝对路径：换一台电脑 clone 下来",
+    "就能跑。仓库里的命令按被测仓库的检出目录解析。",
+    "",
+    "被测仓库**自己**带 verify-profiles.json 时，它自己的 profile 与 integration_profile",
+    "优先（见 app/runtime/driver.py 的 load_runtime_policy）：policy 跟着被测仓库走，",
+    "而不是假定每个项目都是这个平台自己的 Python 后端。",
+    "",
+    "本平台的成员 worker 按任务**逐条**构造验证命令（见 app/adapter/formal_worker.py：",
+    "命令里带上该任务的 exclusive_paths），所以这里的 profile 是兜底与 allowlist，",
+    "不是每条任务验证的唯一来源。"
+  ],
+  "version": "1",
+  "command_roots": [
+    "python",
+    "python3",
+    "pytest",
+    "npm",
+    "node",
+    "make"
+  ],
+  "profiles": {
+    "docs-check": {
+      "command": ["python", "backend/app/verify/docs_profile.py"],
+      "timeout_seconds": 300,
+      "max_verify_attempts": 1,
+      "allow_network": false,
+      "allowed_secrets": [],
+      "lockfile_mutating": false
+    }
+  }
+}

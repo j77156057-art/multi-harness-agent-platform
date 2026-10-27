@@ -84,6 +84,7 @@ class OpenCodeAdapter(CliHarness):
         self.platform = platform if platform is not None else os.name
         self.bash_path = shutil.which("bash") if bash_path is None else (bash_path or None)
         self._work_order_bundle: Path | None = None
+        self._pool_config_root: Path | None = None
 
     def _needs_cmd_transport_file(self) -> bool:
         return (
@@ -104,9 +105,17 @@ class OpenCodeAdapter(CliHarness):
             return work_order
         bundle = Path(tempfile.mkdtemp(prefix="agent-platform-opencode-"))
         (bundle / "work-order.txt").write_text(work_order, encoding="utf-8", newline="\n")
+        # The script has to carry the **model** as well: when this window runs
+        # on the platform's quota pool, the model decides which upstream answers
+        # -- and a script without it quietly used the CLI's own default, which
+        # on this machine is a model the provider refuses by region.
+        model_flag = ""
+        route = self.provider_route
+        if route is not None:
+            model_flag = f"--model pool/{route.model} "
         (bundle / "run.cmd").write_text(
             "@echo off\r\n"
-            'opencode run --standalone --format json --auto --file "%~dp0work-order.txt" '
+            f'opencode run --standalone --format json --auto {model_flag}--file "%~dp0work-order.txt" '
             '"Read and follow the attached work order exactly."\r\n'
             "exit /b %errorlevel%\r\n",
             encoding="utf-8",
@@ -119,6 +128,9 @@ class OpenCodeAdapter(CliHarness):
         bundle, self._work_order_bundle = self._work_order_bundle, None
         if bundle is not None:
             shutil.rmtree(bundle, ignore_errors=True)
+        root, self._pool_config_root = self._pool_config_root, None
+        if root is not None:
+            shutil.rmtree(root, ignore_errors=True)
 
     def use_shell_shim(self) -> bool:
         """Effective launcher: the setting, or the platform default (drill F4)."""
@@ -144,11 +156,10 @@ class OpenCodeAdapter(CliHarness):
         argv = ["opencode", "run", "--standalone", "--format", "json", "--auto"]
         route = self.provider_route
         if route is not None:
-            # The platform's quota pool.  The built-in ``openai`` provider
-            # follows OPENAI_BASE_URL / OPENAI_API_KEY, so no configuration
-            # file has to be touched: the model comes from the pool, the work
-            # still happens here.
-            argv += ["--model", f"openai/{route.model}"]
+            # The platform's quota pool: the model comes from the pool, the
+            # work still happens here.  The provider name matches the isolated
+            # config written by ``route_environment``.
+            argv += ["--model", f"pool/{route.model}"]
         argv.append(work_order)
         if self.use_shell_shim():
             # The WindowsApps ``bash.exe`` alias is a WSL launcher that drops
@@ -185,10 +196,40 @@ class OpenCodeAdapter(CliHarness):
         return [*argv[:1], "--agent", agent, *argv[1:]]
 
     def route_environment(self) -> dict[str, str]:
+        """The pool route for this window: an **isolated** CLI config.
+
+        The OpenCode CLI takes its providers from its own config file, and the
+        built-in ``openai`` provider only knows OpenAI's own model names -- so
+        pointing ``OPENAI_BASE_URL`` at the pool is not enough: the CLI answers
+        "Model unavailable" before it ever calls the pool.  (This machine's
+        own config also points its ``openai`` provider at a local chain that
+        was not running, which made the window look broken.)
+
+        So the window gets a config of its own -- the user's own config is
+        never touched -- with a ``pool`` provider that speaks to the platform,
+        and the model comes from there.
+        """
         route = self.provider_route
         if route is None:
             return {}
-        return {"OPENAI_BASE_URL": route.base_url, "OPENAI_API_KEY": route.token}
+        root = Path(tempfile.mkdtemp(prefix="agent-platform-opencode-"))
+        config = {
+            "provider": {
+                "pool": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "name": "platform pool",
+                    "options": {"baseURL": route.base_url, "apiKey": route.token},
+                    "models": {route.model: {"name": route.model}},
+                }
+            }
+        }
+        (root / "opencode").mkdir(parents=True, exist_ok=True)
+        (root / "opencode" / "opencode.json").write_text(
+            json.dumps(config, indent=2), encoding="utf-8"
+        )
+        (root / "opencode" / "auth.json").write_text("{}", encoding="utf-8")
+        self._pool_config_root = root
+        return {"XDG_CONFIG_HOME": str(root)}
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}

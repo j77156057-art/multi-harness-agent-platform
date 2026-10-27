@@ -23,6 +23,7 @@ from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
     HarnessTimeout,
+    ProviderRoute,
     SubprocessRunner,
 )
 from app.config import settings
@@ -193,6 +194,7 @@ class AdminService:
         goal: str,
         tasks: list[dict[str, Any]],
         reviews: list[dict[str, Any]],
+        route: ProviderRoute | None = None,
     ) -> list[dict[str, Any]]:
         """Fold the circulation comments into the plan.
 
@@ -222,7 +224,7 @@ class AdminService:
             f"收到的意见：\n{comments}\n\n"
             "只输出那个 JSON 对象，不要别的文字。"
         )
-        payload, model = self._invoke_model(prompt)
+        payload, model = self._invoke_model(prompt, route=route)
         if isinstance(payload, list):
             payload = {"tasks": payload}
         revised = payload.get("tasks") if isinstance(payload, dict) else None
@@ -360,6 +362,7 @@ class AdminService:
         answers: list[str] | None = None,
         members: list[str] | None = None,
         project_name: str | None = None,
+        route: ProviderRoute | None = None,
     ) -> dict[str, Any]:
         """One model call: requirement -> validated task specs, or owner questions.
 
@@ -414,7 +417,7 @@ class AdminService:
         # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
         # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
         # "看起来能用"的默认通道 —— 那会让回执里的 `model.adapter` 说谎。
-        payload, model = self._invoke_model(prompt)
+        payload, model = self._invoke_model(prompt, route=route)
         questions = _questions(payload)
         result: dict[str, Any] = {
             "harness_id": self.harness_id,
@@ -453,6 +456,7 @@ class AdminService:
         question: str,
         group_id: str,
         asker: str,
+        route: ProviderRoute | None = None,
     ) -> dict[str, Any]:
         """Answer one private question, and send the answer back privately.
 
@@ -477,7 +481,7 @@ class AdminService:
             # never sees and that still claims to be an answer.
             raise AdminHarnessError("refusing to answer the administrator's own message")
         prompt = self._answer_prompt(text, group_id=group_id, asker=recipient)
-        payload, model = self._invoke_model(prompt)
+        payload, model = self._invoke_model(prompt, route=route)
         answer = str(payload.get("answer") or "").strip()
         if not answer:
             raise AdminHarnessError("the administrator model returned no answer text")
@@ -501,13 +505,15 @@ class AdminService:
 
     # --------------------------------------------------------------- internals
 
-    def invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def invoke_model(
+        self, prompt: str, route: ProviderRoute | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """跑一次管理员自己的模型通道（平台上的"翻译"用这一层）。
 
         公开它是因为：翻译要用的是**管理员那台 CLI** —— 方案是它写的，它的话
         最贴切；换个模型通道就换了说话的人，那不是翻译，是换人。
         """
-        return self._invoke_model(prompt)
+        return self._invoke_model(prompt, route=route)
 
     def _model_channel(self) -> tuple[Any, str]:
         """Which CLI answers the refinement -- decided by the admin's identity.
@@ -544,31 +550,60 @@ class AdminService:
             ) from exc
         return adapter, base
 
-    def _invoke_model(self, prompt: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def pool_protocol(self) -> str:
+        """The protocol the administrator's own CLI speaks to a model provider.
+
+        The pool serves both shapes ("openai" for the Codex-style CLIs,
+        "anthropic" for the Claude-style ones).  Which one the administrator
+        needs is decided by **its own CLI**, not by the upstream the pool
+        happens to pick -- the upstream's protocol is the pool's business.
+        """
+        adapter, _ = self._model_channel()
+        return str(getattr(adapter, "pool_protocol", "openai") or "openai")
+
+    def _invoke_model(
+        self, prompt: str, route: ProviderRoute | None = None
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Run the administrator's own model channel once and parse its JSON.
 
         Both planning and review go through this path so the receipt's
         ``model.adapter`` names the executable that actually answered. The
         caller must treat every exception as a hard failure; there is no
         fallback model and no invented empty result.
+
+        ``route`` is the platform's **quota pool** route: when the human picked
+        a pool model for this window, the administrator's CLI must talk to the
+        pool instead of its own provider -- exactly like a member window does.
+        Without it the administrator silently depended on whatever provider the
+        machine happened to have configured, which is how "the admin refined
+        nothing" happened when that local provider was down.
         """
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
         adapter, base = self._model_channel()
+        if route is not None:
+            adapter.provider_route = route
         work_order = adapter.prepare_work_order(prompt, self.scratch_dir)
         argv = adapter.command(work_order, self.scratch_dir)
         # CodeBuddy-like CLIs keep only the first positional line; long prompts
         # must travel through stdin (same rule as the member worker).
         via_stdin = bool(getattr(adapter, "prompt_via_stdin", False))
+        # The CLI's own environment plus what the route needs (the pool's key).
+        env = dict(adapter.process_environment() or {})
+        env.update(adapter.route_environment() or {})
         started = time.monotonic()
+        run_kwargs: dict[str, Any] = {
+            "cwd": self.scratch_dir,
+            "timeout_seconds": float(self.timeout_seconds),
+            "on_tick": None,
+            "tick_interval_seconds": None,
+            "stdin_text": prompt if via_stdin else None,
+        }
+        if env:
+            # Only when there is something to add: a runner that takes no
+            # ``env`` keeps working unchanged.
+            run_kwargs["env"] = env
         try:
-            run = self.runner.run(
-                argv,
-                cwd=self.scratch_dir,
-                timeout_seconds=float(self.timeout_seconds),
-                on_tick=None,
-                tick_interval_seconds=None,
-                stdin_text=prompt if via_stdin else None,
-            )
+            run = self.runner.run(argv, **run_kwargs)
         except CliUnavailable as exc:
             raise AdminHarnessError(f"admin harness CLI unavailable: {exc}") from exc
         except HarnessTimeout as exc:
@@ -601,6 +636,7 @@ class AdminService:
         diff: dict[str, Any],
         verification: dict[str, Any] | None,
         project_name: str | None = None,
+        route: ProviderRoute | None = None,
     ) -> dict[str, Any]:
         """The administrator's own verdict on one submitted attempt.
 
@@ -616,7 +652,7 @@ class AdminService:
             verification=verification or {},
             project_name=project_name,
         )
-        payload, model = self._invoke_model(prompt)
+        payload, model = self._invoke_model(prompt, route=route)
         verdict = str(payload.get("verdict") or "").strip()
         if verdict not in {"approve", "request_changes"}:
             raise AdminHarnessError("review output verdict must be 'approve' or 'request_changes'")
@@ -625,17 +661,27 @@ class AdminService:
             raise AdminHarnessError("review output findings must be a list")
         findings: list[dict[str, Any]] = []
         for index, item in enumerate(raw_findings, start=1):
+            contract_id = ""
             if isinstance(item, str):
                 message = item.strip()
                 severity = "note"
             elif isinstance(item, dict):
                 message = str(item.get("message") or "").strip()
                 severity = str(item.get("severity") or "note").strip()
+                # The acceptance contract a finding addresses: the platform
+                # checks that an approve verdict covers **every** contract, and
+                # it can only check that if the finding still carries the id.
+                # Dropping it here made every approve come back as
+                # "approve must address every acceptance contract".
+                contract_id = str(item.get("contract_id") or "").strip()
             else:
                 raise AdminHarnessError(f"review finding {index} is not text or an object")
             if not message:
                 raise AdminHarnessError(f"review finding {index} has no message")
-            findings.append({"severity": severity, "message": message})
+            finding: dict[str, Any] = {"severity": severity, "message": message}
+            if contract_id:
+                finding["contract_id"] = contract_id
+            findings.append(finding)
         if verdict == "request_changes" and not findings:
             raise AdminHarnessError("request_changes requires at least one finding")
         return {
@@ -665,6 +711,27 @@ class AdminService:
         # it needs 2 MB of minified output.
         if len(patch) > 60000:
             patch = patch[:60000] + "\n…(patch truncated at 60000 characters)"
+        # The acceptance contracts the verdict has to address.  The platform
+        # refuses an approve that leaves one of them unmentioned, so the
+        # reviewer is told about them **and** asked to name the one each
+        # finding answers.
+        contracts: list[str] = []
+        raw_acceptance = spec.get("acceptance")
+        if isinstance(raw_acceptance, list):
+            for item in raw_acceptance:
+                if isinstance(item, dict):
+                    contract_id = str(item.get("id") or "").strip()
+                    if contract_id:
+                        contracts.append(contract_id)
+        contract_rule = (
+            f"Every finding must carry \"contract_id\": the acceptance contract it "
+            f"addresses ({', '.join(contracts)}). An approve verdict must address "
+            f"**every** contract above -- one finding per contract, saying in the "
+            f"message whether it is met. A contract you did not mention counts as "
+            f"unaddressed."
+            if contracts
+            else 'Every finding must carry "contract_id" when the specification names one.'
+        )
         return "\n".join(
             [
                 "You are the ADMINISTRATOR harness reviewing a member's submitted attempt.",
@@ -686,13 +753,15 @@ class AdminService:
                 "Rules:",
                 "1. Answer with ONE JSON object and nothing else.",
                 '2. Shape: {"verdict":"approve"|"request_changes","findings":['
-                '{"severity":"note|minor|major|critical","message":"..."}]}',
+                '{"severity":"note|minor|major|critical","message":"...",'
+                '"contract_id":"..."}]}',
                 "3. approve only when the diff satisfies the acceptance and stays",
                 "   inside exclusive_paths. Otherwise request_changes.",
                 "4. request_changes must name every concrete defect a reworking member",
                 "   can act on; do not write a general complaint.",
                 "5. If the diff is missing or unreadable, request_changes and say so.",
                 "6. Never claim to have run tests or read files you were not given.",
+                f"7. {contract_rule}",
             ]
         )
 

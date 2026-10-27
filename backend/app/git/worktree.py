@@ -192,10 +192,31 @@ class WorktreeManager:
 
     @staticmethod
     def _active_count(conn: sqlite3.Connection) -> int:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM workspaces WHERE status = 'active'"
-        ).fetchone()
-        return int(row["n"]) if row is not None else 0
+        """How many worktrees are really in use.
+
+        A row left behind by a run that died still says ``active`` -- but the
+        directory it points at is gone, so it holds no resource and must not
+        take a slot.  Counting those rows made a machine that had run the
+        platform before unable to start **any** new attempt: the concurrent
+        cap was reached by rows of tasks cancelled weeks earlier, and every
+        claim came back as "no free worktree slot right now".  So the count
+        follows the disk, and a vanished worktree is archived on the way.
+        """
+        rows = conn.execute(
+            "SELECT workspace_id, path FROM workspaces WHERE status = 'active'"
+        ).fetchall()
+        live = 0
+        for row in rows:
+            path = Path(str(row["path"]))
+            gitdir = path.parent / f"{path.name}.git"
+            if path.exists() or gitdir.exists():
+                live += 1
+                continue
+            conn.execute(
+                "UPDATE workspaces SET status = 'archived' WHERE workspace_id = ?",
+                (str(row["workspace_id"]),),
+            )
+        return live
 
     @staticmethod
     def _find_active(conn: sqlite3.Connection, *, attempt_id: str) -> Worktree | None:

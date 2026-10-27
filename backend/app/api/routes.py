@@ -1105,12 +1105,24 @@ def release(
     bind_task_owner(
         principal, task_id=body.task_id, key="task:release", database=database, request=request
     )
-    return service.release(
+    outcome = service.release(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
         fencing_epoch=body.fencing_epoch,
         reason=body.reason,
     )
+    # The attempt gave the work back without producing anything (R10 §10
+    # ``release``).  The §39 authorization was marked used when that attempt
+    # was opened, so it has to be handed back: otherwise the task is ready
+    # again but **nobody** may claim it -- the gate refuses it and the
+    # administrator has no second round to give.
+    returned = _allocation(database).return_authorization(
+        attempt_id=body.attempt_id,
+        reason=body.reason,
+    )
+    if returned is not None:
+        outcome = {**outcome, "authorization_returned": returned}
+    return outcome
 
 
 @adapter.post("/abandon")
