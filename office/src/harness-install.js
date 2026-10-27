@@ -54,14 +54,27 @@ export function groupByStatus(rows) {
 }
 
 /**
+ * 这份清单是不是「只有官方安装方式、还没探测这台机器」。
+ *
+ * 平台的字段名是 `guidance_only`（snake_case，和它其余字段一致）。之前这里读的是
+ * `guidanceOnly`，永远读到 undefined，于是「还没探测」被说成「0 个已找到」——
+ * 那是在替这台机器断言一件没查过的事。两种写法都认，但平台的写法优先。
+ */
+export function guidanceOnly(payload) {
+  if (!payload) return false;
+  if (typeof payload.guidance_only === 'boolean') return payload.guidance_only;
+  return Boolean(payload.guidanceOnly);
+}
+
+/**
  * 一句话概括：几个能用、几个缺。
  *
- * `guidanceOnly` 时不这么说 —— 那是「还没探测」，说成「全都缺」就是骗人。
+ * 还没探测时不这么说 —— 那是「还没探测」，说成「全都缺」或「0 个已找到」都是骗人。
  */
 export function summaryLine(payload) {
   const rows = (payload && payload.installers) || [];
   if (!rows.length) return '平台没有登记任何可安装的 Harness CLI。';
-  if (payload && payload.guidanceOnly) {
+  if (guidanceOnly(payload)) {
     return `下面是 ${rows.length} 个 Harness CLI 的官方安装方式；这台机器还没探测。`;
   }
   const counts = (payload && payload.summary) || {};

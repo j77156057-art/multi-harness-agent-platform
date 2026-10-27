@@ -50,9 +50,18 @@ assert.deepEqual(groupByStatus([row({ harness_id: 'z', status: 'ready' }), row({
   .rows.map((r) => r.harness_id), ['a', 'z']);
 
 // 3. 「还没探测」不能说成「全都缺」—— 那是替这台机器撒谎。
-const guidance = summaryLine({ guidanceOnly: true, installers: [row({}), row({})] });
+// 平台的字段名是 `guidance_only`（snake_case）：这里必须用**平台真的发的那个名字**
+// 来断言，否则测试自己写了个平台不发的字段名，线上照样把「还没探测」说成「0 个已找到」。
+const guidance = summaryLine({ guidance_only: true, installers: [row({}), row({})] });
 assert(guidance.includes('还没探测'), guidance);
 assert(!guidance.includes('未安装'), guidance);
+assert(!guidance.includes('0 个已找到'), guidance);
+// 兼容旧写法（早先的夹具用驼峰），但平台的写法优先。
+assert(summaryLine({ guidanceOnly: true, installers: [row({})] }).includes('还没探测'));
+assert(
+  !summaryLine({ guidance_only: false, guidanceOnly: true, installers: [row({})] }).includes('还没探测'),
+  '平台的字段名优先：guidance_only=false 时不能被旧的驼峰字段盖过去',
+);
 // 探测过才给数，且数出来的字要和摘要一致。
 assert(summaryLine({ summary: { ready: 5, missing: 1 }, installers: [row({})] }).includes('5 个已找到'));
 assert(summaryLine({ summary: { ready: 0, missing: 2, unsupported: 1 }, installers: [row({})] }).includes('2 个未安装'));
