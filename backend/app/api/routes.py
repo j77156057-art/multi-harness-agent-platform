@@ -310,10 +310,17 @@ def admin_plan_revise(
         specs.append(item)
     snapshot = _plan_snapshot(title, body.goal, specs)
     outcome = SchedulerService(database).revise_plan(plan_id=body.plan_id, snapshot=snapshot)
+    # 改版产生新快照后，**在途**的传阅轮必须跟着换绑（§39 硬规则 5 + 硬规则 1）：
+    # 下一轮读草案的成员读的就是这一版；而"已完成的那轮传阅"要能证明最终被批准的
+    # 那一版被传阅过。不换绑的话，硬门禁永远过不了 —— 传阅与派单会一起锁死。
+    rebound = _allocation(database).rebind_open_circulation(
+        plan_id=body.plan_id, snapshot_id=outcome.snapshot_id
+    )
     return {
         "plan_id": body.plan_id,
         "snapshot_id": outcome.snapshot_id,
         "plan_hash": outcome.plan_hash,
+        "rebound_circulations": rebound,
     }
 
 
@@ -1833,6 +1840,27 @@ def list_allocation_candidates(
     admin already published, and the decision itself still needs ``allocation:decide``.
     """
     return {"candidates": _allocation(database).list_candidates(round_id=round_id, task_id=task_id)}
+
+
+@read.get("/allocation/rounds")
+def list_allocation_rounds(
+    database: DatabaseDep,
+    group_id: Annotated[str | None, Query()] = None,
+    state: Annotated[str | None, Query()] = None,
+) -> dict[str, Any]:
+    """The allocation rounds of a group: which tasks, who applied, who was assigned.
+
+    The write side existed from the start; this read side did not, so the two
+    people who need it could not see it:
+
+    * a **member** has to know "there is a round waiting for my application"
+      before it can apply at all;
+    * the **administrator** has to know "who applied for this task" before it
+      can decide.
+
+    Read-only: it reports what the platform already holds and grants nothing.
+    """
+    return {"rounds": _allocation(database).list_rounds(group_id=group_id, state=state)}
 
 
 # --------------------------------------------------------------- admin harness

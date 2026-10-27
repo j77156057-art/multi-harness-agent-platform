@@ -2,7 +2,8 @@
 
 import json
 
-from app.claim.service import ClaimService
+from app.allocation.service import authorization_row as allocation_row
+from app.claim.service import ClaimService, allocation_gate_applies
 from app.spec import EventKind, TaskStatus
 from app.tasks.service import Conflict, InvalidInput, SchedulerService, _canonical, _hash
 
@@ -156,14 +157,30 @@ def dispatch(
 
 
 def eligible_tasks(database, *, harness_id: str, group_id: str | None, limit: int) -> list[dict]:
+    """列出这个 harness 还能领的活。
+
+    开了 §39 分配门禁的群里，"能领"还要求**自己名下有一份已 accepted 的分配**。
+    这里必须和 Claim 用同一个读口径（`authorization_row`），否则成员会拿到一串
+    永远领不动的活，反复 Claim 被拒、把日志刷成噪声 —— 上一轮 `WorkRefused`
+    的重复实例就是这么来的。
+    """
     with database.connect() as conn:
         rows = conn.execute(
             "SELECT * FROM tasks WHERE status IN (?, ?) ORDER BY task_id",
             (TaskStatus.READY.value, TaskStatus.CHANGES_REQUESTED.value),
         ).fetchall()
-        return [
-            dict(row)
-            for row in rows
-            if (not group_id or row["group_id"] == group_id)
-            and not ClaimService.eligibility(conn, row, harness_id)[0]
-        ][:limit]
+        eligible = []
+        for row in rows:
+            if group_id and row["group_id"] != group_id:
+                continue
+            if ClaimService.eligibility(conn, row, harness_id)[0]:
+                continue
+            if allocation_gate_applies(row) and not allocation_row(
+                conn,
+                task_id=row["task_id"],
+                harness_id=harness_id,
+                plan_snapshot_id=row["plan_snapshot_id"],
+            ):
+                continue
+            eligible.append(dict(row))
+        return eligible[:limit]

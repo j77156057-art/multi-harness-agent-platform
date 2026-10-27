@@ -3,7 +3,8 @@ param(
     [string]$Group = 'office-formal',
     [string]$AdminHarnessId = 'codex-window-admin',
     [string]$CanonicalRepo = '',
-    [string]$WorktreeRoot = ''
+    [string]$WorktreeRoot = '',
+    [int]$ReviewRounds = 2
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +44,33 @@ $env:AP_CANONICAL_REPO = $CanonicalRepo
 $env:AP_WORKTREE_ROOT = $WorktreeRoot
 
 function Quote-Arg([string]$value) { return '"' + $value.Replace('"', '\"') + '"' }
+
+# Do not start a second worker for the same group: two stacks on one group
+# compete for the same tasks, and each of them half-believes the other one
+# is doing the work.
+#
+# Note on counting processes: on Windows the venv's python.exe is a launcher
+# that re-executes the real interpreter as a **child**, so one worker shows up
+# as two python processes (launcher + interpreter). That pair is one worker,
+# not two -- do not "fix" it by killing the child.
+function Get-FormalWorkerPids([string]$marker) {
+    $found = @()
+    foreach ($proc in Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue) {
+        if ($proc.CommandLine -and $proc.CommandLine -like "*$marker*") {
+            $found += [int]$proc.ProcessId
+        }
+    }
+    return $found
+}
+
+$existing = Get-FormalWorkerPids 'app.adapter.formal_worker'
+$existingAdmin = Get-FormalWorkerPids 'app.admin.worker'
+if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0) {
+    $ids = @($existing) + @($existingAdmin) | Where-Object { $_ } | Sort-Object -Unique
+    throw ("Formal workers are already running (pid: $($ids -join ', '))." +
+        " Stop them first, otherwise two instances compete for the same tasks.")
+}
+
 function Start-Python([string]$title, [string[]]$arguments) {
     $argumentLine = ($arguments | ForEach-Object {
         if ($_ -match '[\s"]') { Quote-Arg $_ } else { $_ }
@@ -85,8 +113,9 @@ foreach ($member in $members) {
     Start-Python "member $($member.Id)" (@('-m', 'app.adapter.formal_worker') + $common + @('--harness-id', $member.Id, '--token-file', $token))
 }
 $adminToken = Join-Path $PSScriptRoot 'data\codex-window-admin.key'
-Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group', $Group, '--admin-harness-id', $AdminHarnessId, '--token-file', $adminToken)
+Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group', $Group, '--admin-harness-id', $AdminHarnessId, '--token-file', $adminToken, '--review-rounds', $ReviewRounds)
 
 Write-Host "Formal platform is ready at $Url"
 Write-Host "Group: $Group; administrator: $AdminHarnessId"
+Write-Host "Circulation rounds per plan: $ReviewRounds"
 Write-Host 'Keep the opened worker windows running while submitting work through Agent Office.'

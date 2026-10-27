@@ -27,7 +27,11 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from app.allocation.machine import InvalidAllocationTransition, default_allocation_table
+from app.allocation.machine import (
+    CirculationState,
+    InvalidAllocationTransition,
+    default_allocation_table,
+)
 from app.db.connection import Database
 from app.events.store import EventStore
 from app.spec import AllocationEvent
@@ -361,6 +365,191 @@ class AllocationService:
             " ORDER BY round_no DESC LIMIT 1",
             (plan_snapshot_id, COMPLETED),
         ).fetchone()
+
+    def rebind_open_circulation(self, *, plan_id: str, snapshot_id: str) -> list[str]:
+        """方案改版后，把**在途**的传阅轮绑到新快照上（§39 硬规则 5）。
+
+        为什么必须做这一步：§39 硬规则 1 要求"分配轮绑定的快照已完成 ≥1 轮传阅"，
+        而 `circulation.revised` 按规范会**产生新的方案版本**。如果轮还在传阅中、
+        却仍然绑在旧快照上，那么新快照永远没有已完成的传阅轮 —— 分配轮开不出来，
+        任务永远领不动：**传阅与派单会一起锁死**。
+
+        绑新快照不是"改口供"：下一轮读草案的成员读的是**当前**方案文档（最新快照），
+        所以这轮本来讲的就是这一版方案；而"已完成的那轮传阅"要能证明的，正是
+        **最终被批准的那一版**被传阅过。
+
+        只动**在途**的轮（`circulating` / `revising`）：已经 `completed` 的轮是历史事实，
+        它的快照不能被改写。
+        """
+        with self.database.transaction() as conn:
+            rows = conn.execute(
+                "SELECT circulation_id FROM circulation_rounds WHERE plan_id = ?"
+                " AND state IN (?, ?) AND plan_snapshot_id <> ?",
+                (
+                    plan_id,
+                    CirculationState.CIRCULATING.value,
+                    CirculationState.REVISING.value,
+                    snapshot_id,
+                ),
+            ).fetchall()
+            if not rows:
+                return []
+            conn.execute(
+                "UPDATE circulation_rounds SET plan_snapshot_id = ?"
+                " WHERE plan_id = ? AND state IN (?, ?)",
+                (
+                    snapshot_id,
+                    plan_id,
+                    CirculationState.CIRCULATING.value,
+                    CirculationState.REVISING.value,
+                ),
+            )
+            return [str(row["circulation_id"]) for row in rows]
+
+    def list_rounds(
+        self,
+        *,
+        group_id: str | None = None,
+        state: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """分配轮的读取面：这一轮有哪些任务、谁申请了、谁被分到了。
+
+        写侧一直有（`/allocation/round/open` 之后是申请、裁决、接受），但**没有读面**：
+        成员不知道"有一轮在等我申请"，管理员不知道"这条任务有谁申请"。
+        没有读面，§39 的分配治理就只能在人手工调 API 时才发生。
+
+        只读：它报告平台上已有的事实，不决定谁来做。
+        """
+        clauses: list[str] = []
+        params: list[object] = []
+        if group_id:
+            clauses.append("r.group_id = ?")
+            params.append(group_id)
+        if state:
+            clauses.append("r.state = ?")
+            params.append(state)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self.database.transaction() as conn:
+            rounds = conn.execute(
+                "SELECT r.* FROM allocation_rounds r" + where + " ORDER BY r.opened_at",
+                params,
+            ).fetchall()
+            out: list[dict[str, Any]] = []
+            for row in rounds:
+                round_id = str(row["round_id"])
+                applications = conn.execute(
+                    "SELECT application_id, harness_id, state, revision, reason, submitted_at"
+                    " FROM applications WHERE round_id = ? ORDER BY submitted_at",
+                    (round_id,),
+                ).fetchall()
+                application_tasks = conn.execute(
+                    "SELECT t.application_id, t.task_id, a.harness_id FROM application_tasks t"
+                    " JOIN applications a ON a.application_id = t.application_id"
+                    " WHERE a.round_id = ?",
+                    (round_id,),
+                ).fetchall()
+                assignments = conn.execute(
+                    "SELECT allocation_id, task_id, harness_id, state, revision, accepted_at,"
+                    " declined_at, revoked_at, claimed_at FROM allocations WHERE round_id = ?"
+                    " ORDER BY task_id",
+                    (round_id,),
+                ).fetchall()
+                tasks_by_application: dict[str, list[str]] = {}
+                for link in application_tasks:
+                    tasks_by_application.setdefault(
+                        str(link["application_id"]), []
+                    ).append(str(link["task_id"]))
+                # 这一轮**要分配的是哪些活**：分配轮绑的是方案快照，快照里带着
+                # 任务和它指定的执行窗口。没有这一面，成员不知道"这一轮有我的
+                # 活吗"，管理员也不知道"这条活本来是给谁的"——申请与改派邀请
+                # 都无从谈起。
+                plan_tasks = self._snapshot_tasks(conn, str(row["plan_snapshot_id"]))
+                out.append(
+                    {
+                        "round_id": round_id,
+                        "group_id": str(row["group_id"]),
+                        "plan_snapshot_id": str(row["plan_snapshot_id"]),
+                        "state": str(row["state"]),
+                        "revision": int(row["revision"]),
+                        "opened_by": str(row["opened_by"]),
+                        "opened_at": str(row["opened_at"]),
+                        "deadline_at": row["deadline_at"],
+                        "closed_at": row["closed_at"],
+                        "tasks": plan_tasks,
+                        "applications": [
+                            {
+                                "application_id": str(item["application_id"]),
+                                "harness_id": str(item["harness_id"]),
+                                "state": str(item["state"]),
+                                "revision": int(item["revision"]),
+                                "reason": str(item["reason"] or ""),
+                                "task_ids": sorted(
+                                    tasks_by_application.get(str(item["application_id"]), [])
+                                ),
+                            }
+                            for item in applications
+                        ],
+                        "assignments": [
+                            {
+                                "allocation_id": str(item["allocation_id"]),
+                                "task_id": str(item["task_id"]),
+                                "harness_id": str(item["harness_id"]),
+                                "state": str(item["state"]),
+                                "revision": int(item["revision"]),
+                                "accepted_at": item["accepted_at"],
+                                "declined_at": item["declined_at"],
+                                "revoked_at": item["revoked_at"],
+                                "claimed_at": item["claimed_at"],
+                            }
+                            for item in assignments
+                        ],
+                    }
+                )
+            return out
+
+    def _snapshot_tasks(self, conn: sqlite3.Connection, plan_snapshot_id: str) -> list[dict[str, Any]]:
+        """The tasks a plan snapshot holds, with the window each one names.
+
+        The allocation round is bound to a **plan snapshot**, and the snapshot is
+        where "which window was supposed to do this" lives.  Without this the
+        round says "these task ids" and nothing else -- a member cannot tell
+        whether one of them is for it, and the administrator cannot tell a
+        missing application from a task nobody was ever going to apply for.
+        """
+        rows = conn.execute(
+            "SELECT content_json FROM plan_snapshots WHERE snapshot_id = ?",
+            (plan_snapshot_id,),
+        ).fetchall()
+        if not rows:
+            return []
+        try:
+            raw = json.loads(str(rows[0]["content_json"] or "{}"))
+        except ValueError:
+            return []
+        items = raw.get("tasks")
+        if not isinstance(items, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            task_id = str(item.get("id") or "").strip()
+            if not task_id:
+                continue
+            out.append(
+                {
+                    "task_id": task_id,
+                    "title": str(item.get("title") or task_id),
+                    "goal": str(item.get("goal") or ""),
+                    "assigned_harness_ids": [
+                        str(x) for x in (item.get("assigned_harness_ids") or []) if str(x).strip()
+                    ],
+                    "exclusive_paths": [
+                        str(x) for x in (item.get("exclusive_paths") or []) if str(x).strip()
+                    ],
+                }
+            )
+        return out
 
     def open_allocation_round(
         self,

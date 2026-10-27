@@ -101,6 +101,19 @@ class WorkerState:
     #: The member messages about the goal already handled (one message, one
     #: answer -- messages are replayed on every poll).
     handled_goal_change_seqs: list[int] = field(default_factory=list)
+    #: How many circulation rounds this plan must go through (the office's
+    #: opening wizard asks for a round count; 1 means "review once").
+    circulation_rounds_target: int = 1
+    #: How many rounds are already finished.  The plan is only finalised when
+    #: this reaches the target -- §39 says "已完成轮数达到配置轮数" is what
+    #: freezes the snapshot.
+    circulation_rounds_done: int = 0
+    #: The allocation round this administrator opened (round_id + plan id), and
+    #: the tasks it has already decided.  §39 hard rule 2: a member may only
+    #: claim a task it holds an *accepted* allocation for, so somebody has to
+    #: open the round, freeze the candidates and decide -- that is this
+    #: administrator's job, not the member's and not the platform's.
+    pending_allocation: dict[str, Any] | None = None
 
     @classmethod
     def load(cls, path: Path) -> WorkerState:
@@ -125,6 +138,9 @@ class WorkerState:
                 handled_goal_change_seqs=[
                     int(x) for x in data.get("handled_goal_change_seqs") or []
                 ],
+                circulation_rounds_target=int(data.get("circulation_rounds_target") or 1),
+                circulation_rounds_done=int(data.get("circulation_rounds_done") or 0),
+                pending_allocation=data.get("pending_allocation"),
             )
         except (OSError, ValueError, TypeError):
             # A corrupt cursor must not replay every historical goal. Start
@@ -309,14 +325,19 @@ class AdminWorker:
         state_path: Path,
         dry_run: bool = False,
         replay_latest: bool = False,
+        review_rounds: int = 1,
     ) -> None:
         self.client = client
         self.group_id = group_id
         self.admin_harness_id = admin_harness_id
+        self.database = database
         self.state = state
         self.state_path = state_path
         self.dry_run = dry_run
         self.replay_latest = replay_latest
+        #: How many circulation rounds a plan must go through before it is
+        #: finalised (§39: "已完成轮数达到配置轮数" is what freezes the snapshot).
+        self.review_rounds = max(1, int(review_rounds))
         self.admin = AdminService(database, harness_id=admin_harness_id)
         # attempt key -> monotonic deadline; not persisted (a restart may retry
         # once, which is fine, but a hot loop must not invoke the model).
@@ -671,6 +692,9 @@ class AdminWorker:
             "tasks": specs,
             "reviewers": reviewers,
         }
+        # 新方案从第 1 轮开始数（上一轮方案的轮数不能继承过来）。
+        self.state.circulation_rounds_done = 0
+        self.state.circulation_rounds_target = max(1, int(self.review_rounds))
         self.state.processed_goal_seqs.append(seq)
         self.state.save(self.state_path)
         self.start_circulation()
@@ -743,6 +767,30 @@ class AdminWorker:
             ),
             flush=True,
         )
+
+    def _next_circulation_readers(self, previous: list[str]) -> list[str]:
+        """Who reads the next round.
+
+        §39 lets the administrator change the list per round on purpose: the
+        second round should be a **different** reading, not the same people
+        again.  So: everyone who can take work, minus the ones who just read
+        it.  If that leaves nobody (a one-member project), keep the previous
+        list -- §39 lets one harness review every round.
+
+        The size is **not** grown: the next round reads as many documents as
+        the last one did, no more.  A round's cost is one real CLI review per
+        reader, and a second round that suddenly involves every window is not
+        a second reading, it is a second project.
+        """
+        candidates = [h for h in self.admin.assignable_harnesses() if h != self.admin_harness_id]
+        if not candidates:
+            return list(previous)
+        previous_set = {str(item) for item in previous}
+        others = [h for h in candidates if h not in previous_set]
+        if not others:
+            others = list(candidates)
+        size = max(1, len(previous)) if previous else 1
+        return others[:size]
 
     def _circulation_reviewers(self, specs: list[dict[str, Any]]) -> list[str]:
         """Who reads the draft before anything is assigned.
@@ -828,6 +876,49 @@ class AdminWorker:
                     "harness_id": self.admin_harness_id,
                 },
             )
+            rounds_done = int(self.state.circulation_rounds_done) + 1
+            target = max(1, int(self.state.circulation_rounds_target))
+            if rounds_done < target:
+                # 还没到轮数：**再开一轮**，让方案被另一批人看一遍。
+                #
+                # §39 的 `revising -> circulating` 就是"修订产生新方案版本，并进入
+                # 下一轮"：轮号前进、名单可以换。下一轮读的是**刚改过的**方案
+                # （方案改版会让在途的传阅轮跟着换绑），所以第二轮的意见是对着
+                # 修订稿说的，不是重复第一轮。
+                next_readers = self._next_circulation_readers(pending.get("reviewers") or [])
+                self.client.post(
+                    "/allocation/circulation/revise",
+                    {
+                        "circulation_id": pending["circulation_id"],
+                        "harness_id": self.admin_harness_id,
+                        "reviewer_harness_ids": next_readers,
+                    },
+                )
+                self.state.circulation_rounds_done = rounds_done
+                self.state.pending_circulation = {
+                    **pending,
+                    "reviewers": next_readers,
+                    "tasks": revised,
+                }
+                self.state.save(self.state_path)
+                self._post_admin_message(
+                    f"第 {rounds_done} 轮传阅意见已并入方案（{pending['plan_id']}），"
+                    f"第 {rounds_done + 1} 轮传阅已开：{'、'.join(next_readers)}。"
+                    f"本轮共 {target} 轮，定稿后才会交人最终审核。"
+                )
+                print(
+                    json.dumps(
+                        {
+                            "circulation_next_round": rounds_done + 1,
+                            "circulation_rounds_target": target,
+                            "reviewers": next_readers,
+                            "plan_id": pending["plan_id"],
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                return
             self.client.post(
                 "/allocation/circulation/complete",
                 {
@@ -835,6 +926,7 @@ class AdminWorker:
                     "harness_id": self.admin_harness_id,
                 },
             )
+            self.state.circulation_rounds_done = rounds_done
             document = self.client.get(f"/plans/{pending['plan_id']}/document")
         except httpx.HTTPStatusError as exc:
             print(
@@ -865,6 +957,332 @@ class AdminWorker:
         )
 
     # --------------------------------------------------------------- dispatch
+
+    # ------------------------------------------------------ 分配治理（§39 硬规则 2）
+
+    #: 一个分配轮开着最久多久（秒）。到了就冻结候选集合往下走 —— 否则一个
+    #: 没人申请的任务会把整轮卡住，成员永远领不到活。
+    ALLOCATION_ROUND_GRACE_SECONDS = 180.0
+
+    #: 申请在本轮里的两种"还算数"的状态。轮次一关闭（``allocation.closed``），
+    #: 所有还在候选集合里的申请会从 ``submitted`` 转成 ``frozen`` —— 冻结之后
+    #: 仍然可以被裁决，只是本人不能再改、也不能撤回。所以裁决时**两种都要认**：
+    #: 只认 ``submitted`` 会让"已经申请、但轮次已冻结"的候选凭空消失。
+    APPLICABLE_APPLICATION_STATES = frozenset({"submitted", "frozen"})
+
+    def _plan_snapshot(self, plan_id: str) -> tuple[str, list[dict[str, Any]]]:
+        """The plan's newest snapshot and the tasks it holds."""
+        rows = self.database.read(
+            "SELECT snapshot_id, content_json FROM plan_snapshots WHERE plan_id = ?"
+            " ORDER BY created_at DESC LIMIT 1",
+            (plan_id,),
+        )
+        if not rows:
+            return "", []
+        try:
+            raw = json.loads(str(rows[0]["content_json"] or "{}"))
+        except ValueError:
+            return str(rows[0]["snapshot_id"]), []
+        tasks = raw.get("tasks")
+        items = [item for item in tasks if isinstance(item, dict)] if isinstance(tasks, list) else []
+        return str(rows[0]["snapshot_id"]), items
+
+    def _approved_plan_without_round(self) -> tuple[str, str, list[dict[str, Any]]] | None:
+        """The approved plan of this group that has no allocation round yet.
+
+        Only an **approved** plan may get one: §39 says the round is opened on
+        "方案快照已批准、已完成至少 1 轮传阅" -- a draft has no tasks to assign.
+
+        Two filters keep the old history from hijacking the live one:
+
+        * the **newest** approved plan wins (the human's last approval is the
+          live work; this group has dozens of approved plans from earlier runs);
+        * the snapshot must still hold a task in ``ready`` -- a plan whose tasks
+          are all cancelled, merged or already awaiting a review is not waiting
+          for an assignment.
+        """
+        rows = self.database.read(
+            "SELECT plan_id FROM plans WHERE group_id = ? AND status = ? ORDER BY created_at DESC",
+            (self.group_id, "approved"),
+        )
+        existing = {
+            str(row["plan_snapshot_id"])
+            for row in self.database.read(
+                "SELECT plan_snapshot_id FROM allocation_rounds WHERE group_id = ?",
+                (self.group_id,),
+            )
+        }
+        for row in rows:
+            plan_id = str(row["plan_id"])
+            snapshot_id, tasks = self._plan_snapshot(plan_id)
+            if not snapshot_id or snapshot_id in existing or not tasks:
+                continue
+            pending = []
+            for item in tasks:
+                task_id = str(item.get("id") or "")
+                if not task_id:
+                    continue
+                status_rows = self.database.read(
+                    "SELECT status FROM tasks WHERE task_id = ? AND plan_snapshot_id = ?",
+                    (task_id, snapshot_id),
+                )
+                if status_rows and str(status_rows[0]["status"]) == "ready":
+                    pending.append(task_id)
+            if pending:
+                return plan_id, snapshot_id, tasks
+        return None
+
+    def _current_round(self, round_id: str) -> dict[str, Any] | None:
+        """One allocation round as the platform currently holds it.
+
+        Read fresh every time: the round's **revision** moves on every
+        application and on every decision, and the decision carries an
+        optimistic lock (``expected_revision``).  A revision read once at the
+        top of a poll is stale by the time it is used -- the platform would
+        refuse the decision, and the task would sit unassigned for ever.
+        """
+        rounds = self.client.get("/allocation/rounds", group_id=self.group_id).get("rounds") or []
+        for item in rounds:
+            if str(item.get("round_id")) == round_id:
+                return item
+        return None
+
+    def open_allocation_and_decide(self) -> None:
+        """Open the allocation round, freeze the candidates, decide per task.
+
+        §39 hard rule 2: only an **accepted** allocation authorises a Claim.
+        So somebody has to open the round, let the members apply, freeze the
+        candidate set and pick -- and that somebody is the administrator
+        harness, not the member (a member may not decide who competes with it)
+        and not the platform (the platform would be inventing the assignment).
+        """
+        if self.dry_run:
+            return
+        pending = self.state.pending_allocation
+        if not pending:
+            if self.database is None:
+                # 没有平台库就认不出"哪个已批准的方案还没开分配轮"。这不是错误：
+                # 只是这个 worker 不参与分配治理（只用到假客户端的单元测试会走到这里）。
+                return
+            found = self._approved_plan_without_round()
+            if not found:
+                return
+            plan_id, snapshot_id, tasks = found
+            try:
+                opened = self.client.post(
+                    "/allocation/round/open",
+                    {
+                        "group_id": self.group_id,
+                        "plan_snapshot_id": snapshot_id,
+                        "opened_by": self.admin_harness_id,
+                    },
+                )
+            except httpx.HTTPStatusError as exc:
+                print(
+                    json.dumps({"allocation_open_error": str(exc), "plan_id": plan_id}),
+                    flush=True,
+                )
+                return
+            self.state.pending_allocation = {
+                "plan_id": plan_id,
+                "plan_snapshot_id": snapshot_id,
+                "round_id": str(opened.get("round_id") or ""),
+                "opened_at": time.time(),
+                "decided": [],
+                # 这一轮要分配的是哪些活。**必须存下来**：没有它就不知道"谁该
+                # 申请"，宽限期一过就会把一条都没人申请的活也判给某人。
+                "tasks": [
+                    {
+                        "id": str(item.get("id") or ""),
+                        "title": str(item.get("title") or ""),
+                        "assigned_harness_ids": [
+                            str(x) for x in (item.get("assigned_harness_ids") or []) if str(x)
+                        ],
+                    }
+                    for item in tasks
+                    if isinstance(item, dict) and str(item.get("id") or "").strip()
+                ],
+            }
+            self.state.save(self.state_path)
+            self._post_admin_message(
+                f"已为方案（{plan_id}）开分配轮：成员可以申请自己适合的任务，"
+                f"我会逐条裁决；裁决后由被选中的人自己确认接单，"
+                f"**确认之前谁都领不动这条活**（§39 硬规则 2）。"
+            )
+            print(
+                json.dumps(
+                    {"allocation_opened": opened.get("round_id"), "plan_id": plan_id},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+
+        round_id = str(pending.get("round_id") or "")
+        if not round_id:
+            self.state.pending_allocation = None
+            self.state.save(self.state_path)
+            return
+        rounds = self.client.get("/allocation/rounds", group_id=self.group_id).get("rounds") or []
+        current = next((item for item in rounds if str(item.get("round_id")) == round_id), None)
+        if current is None:
+            return
+        state = str(current.get("state") or "")
+        if state == "opened":
+            self._close_allocation_if_ready(current, pending)
+            return
+        if state not in ("closed", "decided"):
+            # cancelled: the plan was voided. Nothing left to decide.
+            self.state.pending_allocation = None
+            self.state.save(self.state_path)
+            return
+        self._decide_allocation_tasks(round_id, pending)
+
+    def _close_allocation_if_ready(self, current: dict[str, Any], pending: dict[str, Any]) -> None:
+        """Freeze the candidate set once the members had their chance."""
+        tasks = [item for item in (pending.get("tasks") or []) if isinstance(item, dict)]
+        wanted = {str(item.get("id")) for item in tasks if item.get("id")}
+        applied: set[str] = set()
+        for application in current.get("applications") or []:
+            if str(application.get("state")) == "withdrawn":
+                continue
+            for task_id in application.get("task_ids") or []:
+                applied.add(str(task_id))
+        missing = sorted(wanted - applied)
+        opened_at = float(pending.get("opened_at") or 0.0)
+        waited = time.time() - opened_at if opened_at else 0.0
+        if missing and waited < self.ALLOCATION_ROUND_GRACE_SECONDS:
+            return
+        try:
+            self.client.post(
+                "/allocation/round/close",
+                {
+                    "round_id": str(current.get("round_id") or ""),
+                    "harness_id": self.admin_harness_id,
+                    "reason": (
+                        "所有任务都有人申请" if not missing else
+                        f"等待超过 {int(self.ALLOCATION_ROUND_GRACE_SECONDS)} 秒，"
+                        f"仍无人申请的任务：{'、'.join(missing)}"
+                    ),
+                },
+            )
+        except httpx.HTTPStatusError as exc:
+            print(json.dumps({"allocation_close_error": str(exc)}), flush=True)
+            return
+        print(
+            json.dumps(
+                {"allocation_closed": current.get("round_id"), "unapplied": missing},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _decide_allocation_tasks(self, round_id: str, pending: dict[str, Any]) -> None:
+        """Pick one candidate per task (or invite the window the plan named).
+
+        Three rules decide who gets the work, and they are the platform's, not
+        the administrator's invention:
+
+        * the plan says which window a task is **for** (``assigned_harness_ids``);
+          that window's application wins if there is one;
+        * a task nobody applied for is **invited** to the window the plan named
+          (§39 ``assignment.invited``) -- the window still has to accept;
+        * a task with no named window goes to whoever applied.
+
+        In every case the chosen window must still **accept** before the
+        allocation authorises a Claim (§39 hard rule 2).
+        """
+        decided = {str(item) for item in (pending.get("decided") or [])}
+        tasks = [item for item in (pending.get("tasks") or []) if isinstance(item, dict)]
+        for task in tasks:
+            task_id = str(task.get("id") or "")
+            if not task_id or task_id in decided:
+                continue
+            assigned = [str(x) for x in (task.get("assigned_harness_ids") or []) if str(x)]
+            # Read the round fresh: the revision moved (an application arrived
+            # since the last poll) and the decision carries an optimistic lock.
+            current = self._current_round(round_id)
+            if current is None:
+                return
+            if str(current.get("state") or "") not in ("closed", "decided"):
+                return
+            already = [
+                str(item.get("task_id"))
+                for item in (current.get("assignments") or [])
+                if str(item.get("task_id")) == task_id
+            ]
+            if already:
+                # This task already has an assignment in this round (a previous
+                # decision, or an invitation). The platform refuses a second
+                # decision for the same task, and it should: one task, one
+                # assignment.
+                decided.add(task_id)
+                self.state.pending_allocation = {**pending, "decided": sorted(decided)}
+                self.state.save(self.state_path)
+                continue
+            candidates = self.client.get(
+                "/allocation/candidates", round_id=round_id, task_id=task_id
+            ).get("candidates") or []
+            usable = [
+                item
+                for item in candidates
+                if str(item.get("state")) in self.APPLICABLE_APPLICATION_STATES
+            ]
+            named = [item for item in usable if str(item.get("harness_id")) in assigned]
+            chosen = named[0] if named else (usable[0] if not assigned and usable else None)
+            revision = int(current.get("revision") or 1)
+            try:
+                if chosen is not None:
+                    self.client.post(
+                        "/allocation/decision",
+                        {
+                            "round_id": round_id,
+                            "task_id": task_id,
+                            "application_id": str(chosen.get("application_id") or ""),
+                            "decided_by": self.admin_harness_id,
+                            "expected_revision": revision,
+                            "reason": (
+                                "按方案指定的执行窗口裁决；该窗口已申请。"
+                                if named
+                                else "本轮申请者中裁决。"
+                            ),
+                            "compared_harness_ids": sorted(
+                                {str(item.get("harness_id")) for item in candidates}
+                            ),
+                        },
+                    )
+                elif assigned:
+                    # 方案点了名、但它没申请：改派邀请（§39 的 assignment.invited）。
+                    # 邀请之后**仍然要它自己接受**，管理员不能替它答应。
+                    self.client.post(
+                        "/allocation/invite",
+                        {
+                            "round_id": round_id,
+                            "task_id": task_id,
+                            "harness_id": assigned[0],
+                            "invited_by": self.admin_harness_id,
+                            "reason": "方案指定该窗口执行，但本轮没有申请：发出改派邀请。",
+                        },
+                    )
+            except httpx.HTTPStatusError as exc:
+                print(
+                    json.dumps(
+                        {"allocation_decision_error": str(exc), "task_id": task_id},
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                return
+            decided.add(task_id)
+            self.state.pending_allocation = {**pending, "decided": sorted(decided)}
+            self.state.save(self.state_path)
+            print(
+                json.dumps(
+                    {"allocation_decided": task_id, "round_id": round_id},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
 
     def resume_dispatch(self) -> None:
         pending = self.state.pending_dispatch
@@ -1429,6 +1847,9 @@ def run_once(worker: AdminWorker) -> None:
     worker.start_circulation()
     worker.resume_dispatch()
     worker.collect_circulation()
+    # 分配治理（§39 硬规则 2）：人批准之后才开轮、开轮之后才裁决。
+    # 放在 collect_circulation 之后：传阅没走完就没有可分配的快照。
+    worker.open_allocation_and_decide()
     worker.reassign_dead_tasks()
     worker.review_awaiting()
 
@@ -1455,6 +1876,16 @@ def main() -> None:
         help="one-shot: cancel this task as the administrator harness, then exit",
     )
     parser.add_argument("--reason", default="", help="reason recorded with --cancel-task")
+    parser.add_argument(
+        "--review-rounds",
+        type=int,
+        default=1,
+        help=(
+            "how many circulation rounds a plan must go through before it is"
+            " finalised (§39: '已完成轮数达到配置轮数' is what freezes the snapshot);"
+            " 2 means a second round read by a different list of members"
+        ),
+    )
     parser.add_argument(
         "--reassign-task",
         metavar="TASK_ID",
@@ -1521,6 +1952,7 @@ def main() -> None:
         state_path=state_path,
         dry_run=args.dry_run,
         replay_latest=args.replay_latest,
+        review_rounds=args.review_rounds,
     )
     try:
         while True:

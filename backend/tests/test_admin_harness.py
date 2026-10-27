@@ -874,6 +874,99 @@ def test_review_normalizes_string_findings(tmp_path):
     assert result["findings"] == [{"severity": "note", "message": "没有写到指定文件"}]
 
 
+def _revise_service(tmp_path, payload):
+    """The administrator's folding step: same service, a scripted model answer."""
+    runner = ScriptedRunner(stdout=_envelope(payload))
+    service = AdminService(
+        None,  # revise_with_reviews does not read the database.
+        harness_id=ADMIN_WINDOW,
+        runner=runner,
+        scratch_dir=tmp_path / "admin-scratch",
+        timeout_seconds=30,
+    )
+    return service, runner
+
+
+def test_a_revision_may_not_turn_a_relative_path_into_an_absolute_one(tmp_path):
+    """并入意见这一步不能把交付路径改成绝对路径。
+
+    审阅意见里如果提到了某个绝对路径，模型会顺手把它抄进 ``exclusive_paths``；
+    那样交付物会落在工作区之外，领取时会被范围检查直接拒掉 —— 而当时看不出
+    是谁把路径改坏的。修订只允许**在原有范围内**改写，路径非法就保留原来的。
+    """
+    service, runner = _revise_service(
+        tmp_path,
+        {
+            "tasks": [
+                {
+                    "title": "补一份作品页",
+                    "goal": "写 portfolio/index.html",
+                    "exclusive_paths": ["D:\\study\\tools\\agent\\new agent\\portfolio\\index.html"],
+                    "acceptance": "portfolio/index.html 存在",
+                    "harness_id": MEMBER,
+                }
+            ]
+        },
+    )
+    original = [
+        {
+            "id": "FD-1",
+            "title": "补一份作品页",
+            "goal": "写 portfolio/index.html",
+            "exclusive_paths": ["portfolio/index.html"],
+            "acceptance": "portfolio/index.html 存在",
+            "harness_id": MEMBER,
+        }
+    ]
+    revised = service.revise_with_reviews(
+        plan_id="plan-1",
+        goal="写一张作品页",
+        tasks=original,
+        reviews=[{"harness_id": "reader-1", "body": "仓库根是 D:\\study\\tools\\agent\\new agent"}],
+    )
+    assert revised[0]["exclusive_paths"] == ["portfolio/index.html"]
+    # The rule is also in the prompt, so the model is told before it answers.
+    prompt = " ".join(str(part) for part in runner.calls[0]["argv"]) + str(
+        runner.calls[0]["stdin"] or ""
+    )
+    assert "相对路径" in prompt
+
+
+def test_a_revision_keeps_a_valid_narrower_path(tmp_path):
+    """合法的修订照旧生效 —— 这条守卫只挡绝对路径，不是把修订变成摆设。"""
+    service, _ = _revise_service(
+        tmp_path,
+        {
+            "tasks": [
+                {
+                    "title": "补一份作品页",
+                    "goal": "写 portfolio/index.html",
+                    "exclusive_paths": ["portfolio/index.html", "portfolio/assets"],
+                    "acceptance": "portfolio/index.html 存在",
+                    "harness_id": MEMBER,
+                }
+            ]
+        },
+    )
+    original = [
+        {
+            "id": "FD-1",
+            "title": "补一份作品页",
+            "goal": "写 portfolio/index.html",
+            "exclusive_paths": ["portfolio/index.html"],
+            "acceptance": "portfolio/index.html 存在",
+            "harness_id": MEMBER,
+        }
+    ]
+    revised = service.revise_with_reviews(
+        plan_id="plan-1",
+        goal="写一张作品页",
+        tasks=original,
+        reviews=[{"harness_id": "reader-1", "body": "补一个资源目录"}],
+    )
+    assert revised[0]["exclusive_paths"] == ["portfolio/index.html", "portfolio/assets"]
+
+
 def test_review_refuses_an_unknown_verdict(tmp_path):
     service, _ = _review_service(tmp_path, {"verdict": "lgtm", "findings": []})
     task, spec, diff, verification = _review_inputs()

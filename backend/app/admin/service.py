@@ -213,6 +213,10 @@ class AdminService:
             '{"tasks": [{"title": …, "goal": …, "exclusive_paths": [...], '
             '"acceptance": …, "harness_id": …}]}。'
             "意见没有要求改动的任务原样保留。\n\n"
+            "硬规则：exclusive_paths 必须是**仓库相对路径**（POSIX 写法，如 portfolio/index.html）。"
+            "不得出现绝对路径、盘符、反斜杠、前导 '.' 或 '..'；执行窗口拿到的是仓库的检出目录，"
+            "写绝对路径会让交付物落在工作区之外。审阅意见里提到的绝对路径只当作说明，"
+            "不要抄进 exclusive_paths。\n\n"
             f"方案目标：{goal}\n\n"
             f"当前任务：{json.dumps(tasks, ensure_ascii=False)}\n\n"
             f"收到的意见：\n{comments}\n\n"
@@ -237,7 +241,25 @@ class AdminService:
         for original, item in zip(tasks, items, strict=False):
             changed = {k: v for k, v in item.items() if k not in ("id", "task_id")}
             merged.append({**original, **changed})
-        return merged
+        # A revision may **not** break the scope contract.  The refine prompt
+        # forbids absolute paths, but the revision prompt used to omit that
+        # rule, and a reviewer that mentioned an absolute path in its comment
+        # was enough to get one written into the plan -- the deliverable then
+        # landed outside the checkout and the attempt was refused on scope.
+        # The refined paths are kept only when they are all valid; otherwise
+        # the task keeps the paths it already had.
+        safe: list[dict[str, Any]] = []
+        for original, item in zip(tasks, merged, strict=False):
+            paths = item.get("exclusive_paths")
+            if (
+                isinstance(paths, list)
+                and paths
+                and all(isinstance(p, str) and _valid_exclusive_path(p) for p in paths)
+            ):
+                safe.append(item)
+                continue
+            safe.append({**item, "exclusive_paths": list(original.get("exclusive_paths") or [])})
+        return safe
 
     # ------------------------------------------------------------------ refine
 

@@ -390,6 +390,175 @@ def submit_circulation_review(
     return False
 
 
+ALLOCATION_APPLICATION_REASON = (
+    "本窗口申请执行这条任务：方案里指派的执行窗口就是它，"
+    "范围与验收标准已在方案快照中写明。"
+)
+
+
+def _allocation_rounds(client, *, group: str) -> list[dict[str, object]]:
+    """The allocation rounds of this group (read-only).
+
+    §39 hard rule 2 makes three steps, each with its own actor: the member
+    **applies**, the administrator **decides**, the selected window
+    **accepts**.  The member needs the read side to take its own step -- there
+    is no way to apply for work you cannot see.
+    """
+    try:
+        response = client.get("/api/v1/allocation/rounds", params={"group_id": group})
+    except Exception:
+        return []
+    rounds = response.json().get("rounds")
+    return [item for item in (rounds or []) if isinstance(item, dict)]
+
+
+def _my_tasks_in_round(round_info: dict[str, object], harness_id: str) -> list[str]:
+    """The task ids of this round that name this window.
+
+    A task the plan assigned to somebody else is not this window's to apply
+    for: the administrator decides among the candidates, and the plan already
+    said who the work is for.  A task with no named window is open to anyone
+    who wants it -- that is the "no designated window" case, and the
+    administrator picks among whoever applied.
+    """
+    out: list[str] = []
+    for task in round_info.get("tasks") or []:
+        if not isinstance(task, dict):
+            continue
+        task_id = str(task.get("task_id") or "").strip()
+        if not task_id:
+            continue
+        assigned = [str(x) for x in (task.get("assigned_harness_ids") or []) if str(x)]
+        if assigned and harness_id not in assigned:
+            continue
+        out.append(task_id)
+    return out
+
+
+def submit_allocation_applications(client, *, harness_id: str, group: str) -> bool:
+    """Apply for the tasks of an open round that name this window.
+
+    Applying is **not** claiming (§39 hard rule 2): it puts this window in the
+    candidate set and nothing else -- no owner, no attempt, no lease, no
+    worktree.  Only an *accepted* allocation authorises a Claim, and that
+    acceptance is this window's own decision, made in `accept_allocation`.
+    """
+    applied = False
+    for round_info in _allocation_rounds(client, group=group):
+        if str(round_info.get("state") or "") != "opened":
+            continue
+        round_id = str(round_info.get("round_id") or "")
+        if not round_id:
+            continue
+        # One application per harness per round (§39): a second one is refused
+        # by the platform, and updating the first one is the only way to change
+        # one's mind.
+        already = any(
+            str(item.get("harness_id") or "") == harness_id
+            and str(item.get("state") or "") != "withdrawn"
+            for item in (round_info.get("applications") or [])
+            if isinstance(item, dict)
+        )
+        if already:
+            continue
+        task_ids = _my_tasks_in_round(round_info, harness_id)
+        if not task_ids:
+            continue
+        try:
+            client.post(
+                "/api/v1/allocation/application",
+                json={
+                    "round_id": round_id,
+                    "harness_id": harness_id,
+                    "task_ids": task_ids,
+                    "reason": ALLOCATION_APPLICATION_REASON,
+                    "body": (
+                        "本窗口按方案快照的指派申请执行：" + "、".join(task_ids)
+                    ),
+                },
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "allocation_application_failed": type(exc).__name__,
+                        "round_id": round_id,
+                        "harness_id": harness_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            continue
+        applied = True
+        print(
+            json.dumps(
+                {
+                    "allocation_application": round_id,
+                    "harness_id": harness_id,
+                    "task_ids": task_ids,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+    return applied
+
+
+def accept_allocation(client, *, harness_id: str, group: str) -> bool:
+    """Accept the assignment the administrator made to this window.
+
+    This is the step that turns an *invited* allocation into an *accepted*
+    one, and only an accepted allocation authorises a Claim (§39 hard rule 2).
+    The platform never accepts on the window's behalf: the window that takes
+    the work is the one that says yes.
+    """
+    accepted = False
+    for round_info in _allocation_rounds(client, group=group):
+        for assignment in round_info.get("assignments") or []:
+            if not isinstance(assignment, dict):
+                continue
+            if str(assignment.get("harness_id") or "") != harness_id:
+                continue
+            if str(assignment.get("state") or "") != "invited":
+                continue
+            allocation_id = str(assignment.get("allocation_id") or "")
+            task_id = str(assignment.get("task_id") or "")
+            if not allocation_id:
+                continue
+            try:
+                client.post(
+                    "/api/v1/allocation/accept",
+                    json={"allocation_id": allocation_id, "harness_id": harness_id},
+                )
+            except Exception as exc:
+                print(
+                    json.dumps(
+                        {
+                            "allocation_accept_failed": type(exc).__name__,
+                            "allocation_id": allocation_id,
+                            "harness_id": harness_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
+            accepted = True
+            print(
+                json.dumps(
+                    {
+                        "allocation_accepted": allocation_id,
+                        "task_id": task_id,
+                        "harness_id": harness_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    return accepted
+
+
 def _last_text(stdout: str) -> str:
     """The last text the CLI printed (its own words, not our guess)."""
     answer = ""
@@ -969,6 +1138,10 @@ def main():
     # 传阅审阅：不用跑得那么勤（有草案时它会等），但也别睡太久。
     review_every_seconds = 30.0
     last_review_at = 0.0
+    # 分配治理（§39 硬规则 2）：成员要**申请**，被选中后自己**接受**。
+    # 这两步都要及时：管理员开轮后会等申请，宽限期一过就冻结候选集合。
+    allocation_every_seconds = 10.0
+    last_allocation_at = 0.0
     worker_token = args.token_file.read_text().strip()
     with httpx.Client(
         base_url=args.url,
@@ -1001,6 +1174,18 @@ def main():
                     # only refreshes what the window can do.
                     with contextlib.suppress(Exception):
                         adapter_for_harness(client, args.harness_id).probe()
+                if now - last_allocation_at >= allocation_every_seconds:
+                    last_allocation_at = now
+                    # 分配治理的两步都是**本人的**动作：先申请（把自己放进候选
+                    # 集合），被选中后自己接受（这才构成 Claim 的授权）。
+                    with contextlib.suppress(Exception):
+                        submit_allocation_applications(
+                            client, harness_id=args.harness_id, group=args.group
+                        )
+                    with contextlib.suppress(Exception):
+                        accept_allocation(
+                            client, harness_id=args.harness_id, group=args.group
+                        )
                 completed = run_one(
                     client,
                     database,
