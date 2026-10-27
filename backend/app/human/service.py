@@ -323,6 +323,83 @@ class HumanOpsService:
             "max_attempts": int(task["max_attempts"]),
         }
 
+    def grant_review_same_provider(
+        self,
+        *,
+        task_id: str,
+        decided_by: str,
+        reason: str = "",
+    ) -> dict[str, object]:
+        """Open the same-provider review channel for **one** task.
+
+        ``review_policy`` stays ``cross_provider``. What is authorized here is
+        narrower than a policy change: for this task, a reviewer whose provider
+        equals the owner's may claim and submit the review -- and the review row
+        records who opened the channel (``provider_confirmed_by``) together with
+        the decision it points at (``provider_override_decision_id``), so a
+        same-provider approve can never be read as a cross-provider one.
+
+        Why the human and not the reviewer: a reviewer able to waive its own
+        provider check turns ``cross_provider`` into a suggestion (R10 §6 --
+        self-report is not authorization). The platform does not grant it to
+        itself either, and neither does the administrator harness.
+
+        Only while a review is actually pending (``awaiting_review``): handing
+        the waiver out earlier would let a task be pre-authorized before anyone
+        knows which windows are available, and the default would stop meaning
+        anything. Like the attempt-budget override this creates **no new event
+        name** -- the decision row is the audit trail, anchored on the task's
+        last event seq, and the review itself records the reference.
+        """
+        with self.database.transaction() as conn:
+            task = self._task(conn, task_id)
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.AWAITING_REVIEW:
+                raise Conflict(
+                    f"{task_id} is {status.value}; the same-provider review channel"
+                    " only applies while a review is pending",
+                    code="review.same_provider_not_pending",
+                )
+            already = conn.execute(
+                "SELECT decision_id, actor FROM task_decisions"
+                " WHERE task_id = ? AND scope = 'review_same_provider'"
+                "   AND superseded_by IS NULL ORDER BY rowid DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            if already is not None:
+                raise Conflict(
+                    f"{task_id} already has the same-provider review channel open"
+                    f" (opened by {already['actor']}, decision {already['decision_id']})",
+                    code="review.same_provider_already_open",
+                )
+            anchor = conn.execute(
+                "SELECT COALESCE(MAX(seq), 0) AS seq FROM task_events WHERE aggregate_id = ?",
+                (task_id,),
+            ).fetchone()
+            decision_id = f"dec-{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO task_decisions(decision_id, task_id, attempt_id, actor, question,"
+                " options_json, answer, scope, expires_at, decided_seq, superseded_by)"
+                " VALUES (?, ?, ?, ?, ?, '[]', ?, 'review_same_provider', NULL, ?, NULL)",
+                (
+                    decision_id,
+                    task_id,
+                    task["current_attempt_id"],
+                    decided_by,
+                    "same-provider review channel",
+                    reason or "approved",
+                    int(anchor["seq"] or 0),
+                ),
+            )
+        return {
+            "task_id": task_id,
+            "same_provider_review": True,
+            "decision_id": decision_id,
+            "confirmed_by": decided_by,
+            "review_policy": str(task["review_policy"]),
+            "attempt_id": task["current_attempt_id"],
+        }
+
     def release(
         self,
         *,

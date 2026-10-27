@@ -1062,8 +1062,14 @@ class SchedulerService:
     # ---------------------------------------------------------------- review
 
     def _assert_review_policy(
-        self, *, task: sqlite3.Row, owner: str, reviewer: str, reviewer_kind: str
-    ) -> None:
+        self,
+        conn: sqlite3.Connection,
+        *,
+        task: sqlite3.Row,
+        owner: str,
+        reviewer: str,
+        reviewer_kind: str,
+    ) -> dict[str, object]:
         """R10 §21 review_policy enforcement (rules-tighten, drill F5).
 
         ``cross_provider`` is the only policy v1 produces; anything else is
@@ -1073,6 +1079,14 @@ class SchedulerService:
         cross-provider, and self-report is not authorization (R10 §6, the same
         stance as probe's degraded path). Self-review is checked before this,
         so its specific code keeps winning.
+
+        Same provider is refused **unless a human opened the channel for this
+        task** (``task_decisions`` scope ``review_same_provider``). That is not
+        a policy change: ``review_policy`` stays ``cross_provider``, the grant
+        covers one task, and it is one person's recorded decision rather than a
+        reviewer excusing itself. The returned relation is stamped on the review
+        row (``provider_confirmed_by`` / ``provider_override_decision_id``) so a
+        same-provider verdict can never read as a cross-provider one.
         """
         policy = str(task["review_policy"])
         if policy != "cross_provider":
@@ -1080,8 +1094,13 @@ class SchedulerService:
                 f"review policy {policy!r} is not implemented",
                 code="review.policy_unknown",
             )
+        relation: dict[str, object] = {
+            "cross_provider": None,
+            "decision_id": None,
+            "confirmed_by": None,
+        }
         if reviewer_kind == "human":
-            return
+            return relation
         if reviewer_kind != "harness":
             raise Conflict("unknown reviewer kind", code="review.reviewer_unknown")
         registry = HarnessRegistry(self.database)
@@ -1094,12 +1113,25 @@ class SchedulerService:
                 " cross-provider review needs both providers known",
                 code="review.provider_unknown",
             )
-        if str(owner_row["provider"]) == str(reviewer_row["provider"]):
+        if str(owner_row["provider"]) != str(reviewer_row["provider"]):
+            return dict(relation, cross_provider=True)
+        waiver = conn.execute(
+            "SELECT decision_id, actor FROM task_decisions"
+            " WHERE task_id = ? AND scope = 'review_same_provider'"
+            "   AND superseded_by IS NULL ORDER BY rowid DESC LIMIT 1",
+            (str(task["task_id"]),),
+        ).fetchone()
+        if waiver is None:
             raise Conflict(
                 f"reviewer provider {reviewer_row['provider']!r} equals the owner's;"
                 " cross_provider review is required",
                 code="review.cross_provider_required",
             )
+        return {
+            "cross_provider": False,
+            "decision_id": str(waiver["decision_id"]),
+            "confirmed_by": str(waiver["actor"]),
+        }
 
     @staticmethod
     def _acceptance_contract_ids(
@@ -1208,7 +1240,8 @@ class SchedulerService:
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
-            self._assert_review_policy(
+            relation = self._assert_review_policy(
+                conn,
                 task=task,
                 owner=owner,
                 reviewer=reviewer_harness_id,
@@ -1269,12 +1302,15 @@ class SchedulerService:
                 conn.execute(
                     "UPDATE reviews SET status = 'claimed', lease_until = ?,"
                     " reviewed_commit = ?, fencing_epoch = ?, verdict = NULL,"
-                    " findings_hash = NULL, findings_json = NULL, completed_seq = NULL"
+                    " findings_hash = NULL, findings_json = NULL, completed_seq = NULL,"
+                    " provider_confirmed_by = ?, provider_override_decision_id = ?"
                     " WHERE review_id = ?",
                     (
                         lease_until,
                         reviewed_commit,
                         int(task["current_epoch"]),
+                        relation["confirmed_by"],
+                        relation["decision_id"],
                         str(prior["review_id"]),
                     ),
                 )
@@ -1289,8 +1325,9 @@ class SchedulerService:
             conn.execute(
                 "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                 " reviewer_provider, status, lease_until, fencing_epoch, reviewed_commit,"
-                " verdict, findings_hash, review_revision, created_seq)"
-                " VALUES (?, ?, ?, ?, ?, 'claimed', ?, ?, ?, NULL, NULL, 1, NULL)",
+                " verdict, findings_hash, review_revision, created_seq,"
+                " provider_confirmed_by, provider_override_decision_id)"
+                " VALUES (?, ?, ?, ?, ?, 'claimed', ?, ?, ?, NULL, NULL, 1, NULL, ?, ?)",
                 (
                     new_id,
                     task_id,
@@ -1304,6 +1341,8 @@ class SchedulerService:
                     lease_until,
                     int(task["current_epoch"]),
                     reviewed_commit,
+                    relation["confirmed_by"],
+                    relation["decision_id"],
                 ),
             )
             return {
@@ -1385,7 +1424,8 @@ class SchedulerService:
                     "a reviewer must not review its own attempt",
                     code="review.self_review_forbidden",
                 )
-            self._assert_review_policy(
+            relation = self._assert_review_policy(
+                conn,
                 task=task,
                 owner=str(attempt["owner"]),
                 reviewer=reviewer_harness_id,
@@ -1444,7 +1484,8 @@ class SchedulerService:
                 review_id = str(existing["review_id"])
                 conn.execute(
                     "UPDATE reviews SET status = 'completed', verdict = ?, findings_hash = ?,"
-                    " findings_json = ?, reviewed_commit = ?, fencing_epoch = ?"
+                    " findings_json = ?, reviewed_commit = ?, fencing_epoch = ?,"
+                    " provider_confirmed_by = ?, provider_override_decision_id = ?"
                     " WHERE review_id = ?",
                     (
                         verdict,
@@ -1452,6 +1493,8 @@ class SchedulerService:
                         _findings_json(findings),
                         reviewed_commit,
                         int(task["current_epoch"]),
+                        relation["confirmed_by"],
+                        relation["decision_id"],
                         review_id,
                     ),
                 )
@@ -1460,8 +1503,9 @@ class SchedulerService:
                 conn.execute(
                     "INSERT INTO reviews(review_id, task_id, attempt_id, reviewer_harness_id,"
                     " reviewer_provider, status, fencing_epoch, reviewed_commit, verdict,"
-                    " findings_hash, findings_json, review_revision, created_seq)"
-                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, NULL)",
+                    " findings_hash, findings_json, review_revision, created_seq,"
+                    " provider_confirmed_by, provider_override_decision_id)"
+                    " VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
                     (
                         review_id,
                         task_id,
@@ -1478,6 +1522,8 @@ class SchedulerService:
                         _hash(findings),
                         _findings_json(findings),
                         review_revision,
+                        relation["confirmed_by"],
+                        relation["decision_id"],
                     ),
                 )
             event = EventKind.APPROVE if verdict == "approve" else EventKind.REQUEST_CHANGES
@@ -1503,6 +1549,10 @@ class SchedulerService:
                     "reviewed_commit": reviewed_commit,
                     "review_revision": review_revision,
                     "findings_hash": _hash(findings),
+                    # 同厂商审阅只在人开过通道时成立；把"谁开的"写进事件，
+                    # 否则事后从事件流里看不出这次与跨厂商审阅的差别。
+                    "provider_confirmed_by": relation["confirmed_by"],
+                    "provider_override_decision_id": relation["decision_id"],
                 },
                 connection=conn,
             )

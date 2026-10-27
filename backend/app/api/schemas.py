@@ -238,6 +238,19 @@ class HumanAttemptBudgetOverrideRequest(BaseModel):
     reason: str = ""
 
 
+class HumanReviewSameProviderRequest(BaseModel):
+    """A human opens the same-provider review channel for one task.
+
+    ``review_policy`` is untouched: this is a per-task authorization, and the
+    review row records who gave it (``provider_confirmed_by``) together with the
+    decision it points at (``provider_override_decision_id``).
+    """
+
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    reason: str = ""
+
+
 class HumanReleaseRequest(BaseModel):
     task_id: str
     decided_by: str = Field(min_length=1)

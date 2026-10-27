@@ -8,6 +8,8 @@ failure must never produce a submitted review verdict.
 
 from __future__ import annotations
 
+import httpx
+
 from app.admin.service import AdminHarnessError
 from app.admin.worker import (
     AdminWorker,
@@ -640,6 +642,55 @@ def test_model_failure_never_submits_a_review(tmp_path, monkeypatch):
     assert client.claims == []
     assert client.submissions == []
     assert any("未提交审核结论" in message["body"] for message in client.messages)
+
+
+def test_a_same_provider_refusal_is_reported_to_the_owner_once(tmp_path, monkeypatch):
+    """同厂商拒收不是可重试的错误：要么人开通道，要么一直停在待审。
+
+    重试循环会一直撞同一堵墙 —— 群里反复刷同一句没有信息量，而群主始终不知道
+    要去开通道。所以按任务只报一次，并写明要调哪个接口。
+    """
+
+    class SameProviderRefusal(FakeClient):
+        def post(self, path, body):
+            if path.endswith("/review/claim"):
+                request = httpx.Request("POST", "http://127.0.0.1" + path)
+                response = httpx.Response(
+                    409,
+                    request=request,
+                    json={
+                        "error": {
+                            "code": "review.cross_provider_required",
+                            "message": "reviewer provider 'openai' equals the owner's",
+                        }
+                    },
+                )
+                raise httpx.HTTPStatusError("409", request=request, response=response)
+            return super().post(path, body)
+
+    admin = FakeAdmin(verdict={"verdict": "approve", "findings": []})
+    client = SameProviderRefusal(
+        tasks=[
+            {
+                "task_id": "FD-1",
+                "current_attempt_id": "FD-1.a1",
+                "title": "DEMO · 补一条说明",
+                "status": "awaiting_review",
+                "assigned_harness_ids": ["member-1"],
+            }
+        ],
+        context={"task": {"task_id": "FD-1"}, "spec": {"id": "FD-1"}},
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    run_once(worker)
+    worker._review_cooldowns.clear()  # 冷却期不是这条断言要测的东西
+    run_once(worker)
+
+    told = [m["body"] for m in client.messages if "review_same_provider" in m["body"]]
+    assert len(told) == 1
+    assert "FD-1" in told[0]
+    assert client.submissions == []
 
 
 def test_admin_never_reviews_its_own_task_even_with_the_raw_json_column(tmp_path, monkeypatch):

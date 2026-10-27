@@ -1204,6 +1204,38 @@ def human_attempt_budget_override(
     )
 
 
+@human.post("/review_same_provider")
+def human_review_same_provider(
+    body: schemas.HumanReviewSameProviderRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("review:same_provider"),
+) -> dict[str, Any]:
+    """Open the same-provider review channel for one task.
+
+    ``review_policy`` stays ``cross_provider``; this is a per-task authorization
+    by a human, only while the task is awaiting review. The review record then
+    carries ``provider_confirmed_by`` and ``provider_override_decision_id``, so
+    the audit trail keeps the difference from a cross-provider review.
+
+    Without it, a task whose owner provider has no cross-provider reviewer on
+    the platform is stuck: the administrator keeps being refused
+    (``review.cross_provider_required``) and nothing tells the owner why.
+    """
+    bind_declared(
+        principal,
+        body.decided_by,
+        key="review:same_provider",
+        database=database,
+        request=request,
+    )
+    return _human(database).grant_review_same_provider(
+        task_id=body.task_id,
+        decided_by=body.decided_by,
+        reason=body.reason,
+    )
+
+
 @human.post("/release")
 def human_release(
     body: schemas.HumanReleaseRequest,
@@ -2024,7 +2056,8 @@ def task_reviews(task_id: str, service: SchedulerDep, database: DatabaseDep):
     service.get_task(task_id)  # 404 for an unknown task, same as its neighbours
     rows = database.read(
         "SELECT review_id, reviewer_harness_id, reviewer_provider, verdict, status,"
-        " findings_json, reviewed_commit, review_revision, created_seq, completed_seq"
+        " findings_json, reviewed_commit, review_revision, created_seq, completed_seq,"
+        " provider_confirmed_by, provider_override_decision_id"
         " FROM reviews WHERE task_id = ? ORDER BY rowid DESC LIMIT 10",
         (task_id,),
     )
@@ -2051,6 +2084,11 @@ def task_reviews(task_id: str, service: SchedulerDep, database: DatabaseDep):
                 "review_revision": int(row["review_revision"] or 1),
                 "created_seq": row["created_seq"],
                 "completed_seq": row["completed_seq"],
+                # 同厂商审阅：谁开的通道、依据哪条决定。两条都为空 = 这次审阅是
+                # 跨厂商的（或由人自己审的），不需要任何人豁免。
+                "provider_confirmed_by": row["provider_confirmed_by"],
+                "provider_override_decision_id": row["provider_override_decision_id"],
+                "same_provider": row["provider_confirmed_by"] is not None,
             }
         )
     return {

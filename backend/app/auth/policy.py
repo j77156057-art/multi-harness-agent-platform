@@ -63,6 +63,14 @@ POLICY: dict[str, frozenset[str]] = {
     # R10 §17 also permits the human administrator/owner to submit reviews.
     "review:human_claim": frozenset({HUMAN}),
     "review:human_submit": frozenset({HUMAN}),
+    # 同厂商审阅通道：为**一条**任务开一次口子，让厂商与持有者相同的窗口也能审。
+    #
+    # 这不是改 `review_policy`（默认仍是 cross_provider），也不提前放开：只有在
+    # 该任务真的处于 awaiting_review 时才能开，开给谁由人决定、开的事由写进决策行，
+    # 审阅记录上带 `provider_confirmed_by` / `provider_override_decision_id`。
+    # 只给人：审阅人若能自己豁免自己的厂商检查，cross_provider 就成了建议
+    # （R10 §6 自述不是授权）；平台也不给自己开，管理员窗口同样不行。
+    "review:same_provider": frozenset({HUMAN}),
     # --- R10 §17 human face (人类管理员/负责人; Planner folded in) ---
     "plan:submit": frozenset({HUMAN}),
     "plan:approve": frozenset({HUMAN}),

@@ -80,6 +80,11 @@ class WorkerState:
     pending_goal: dict[str, Any] | None = None
     pending_dispatch: dict[str, Any] | None = None
     reviewed_attempts: list[str] = field(default_factory=list)
+    #: Tasks whose review is blocked because the only reviewer that can judge
+    #: them shares the owner's provider. That refusal is not retryable -- the
+    #: worker would cool down and hit the same wall forever -- so the owner is
+    #: told **once** per task instead of on every retry.
+    same_provider_review_asked: list[str] = field(default_factory=list)
     #: How many times this administrator re-pointed each task. The dispatch is
     #: idempotent on its request id, so a second re-point of the same task needs
     #: a *new* request id -- otherwise it replays the first one and nothing
@@ -133,6 +138,9 @@ class WorkerState:
                 pending_goal=data.get("pending_goal"),
                 pending_dispatch=data.get("pending_dispatch"),
                 reviewed_attempts=[str(x) for x in data.get("reviewed_attempts") or []],
+                same_provider_review_asked=[
+                    str(x) for x in data.get("same_provider_review_asked") or []
+                ],
                 reassign_counts={
                     str(k): int(v) for k, v in (data.get("reassign_counts") or {}).items()
                 },
@@ -1838,6 +1846,32 @@ class AdminWorker:
         except (OSError, ValueError):
             return None
 
+    def _report_same_provider_wall(
+        self, task_id: str, exc: httpx.HTTPStatusError
+    ) -> None:
+        """Say it out loud when only a human can unblock this review.
+
+        A same-provider refusal is not a transient error: cooling down and
+        retrying hits the same wall until someone opens the channel, and the
+        owner never learns why the work sits in ``awaiting_review``. Reported
+        once per task (the retry loop would otherwise bury the group chat), and
+        it names the exact call to make -- "需要人工" alone leaves them guessing.
+        """
+        response = getattr(exc, "response", None)
+        body = "" if response is None else str(getattr(response, "text", "") or "")
+        if "cross_provider_required" not in body:
+            return
+        if task_id in self.state.same_provider_review_asked:
+            return
+        self.state.same_provider_review_asked.append(task_id)
+        self._post_admin_message(
+            f"{task_id} 待审，但能审它的窗口与它的持有者同厂商，平台默认不放行"
+            f"（review_policy=cross_provider）。要让我审这一条，请群主开一次同厂商通道："
+            f"POST /api/v1/human/review_same_provider "
+            f'{{"task_id": "{task_id}", "decided_by": "<群主>", "reason": "<理由>"}}。'
+            " 开了以后我会再审一遍；在开之前它会一直停在待审。"
+        )
+
     def reassign_task(self, task_id: str, target: str) -> dict[str, Any]:
         """Explicitly re-point one task to a window that can claim it.
 
@@ -1885,6 +1919,7 @@ class AdminWorker:
                 # A cross-provider refusal or a competing lease is a platform
                 # rule, not something the worker may override.
                 self._review_cooldowns[key] = time.monotonic() + REVIEW_RETRY_SECONDS
+                self._report_same_provider_wall(task_id, exc)
                 print(
                     json.dumps(
                         {"review_skipped": task_id, "error": str(exc)},

@@ -392,7 +392,9 @@ def build_registry(
             "task.reviews",
             "read",
             "任务的审阅记录：谁审的、结论（approve / request_changes）、意见正文、"
-            "审的是哪个提交。没有记录时如实返回空清单（不等于审阅通过）",
+            "审的是哪个提交。没有记录时如实返回空清单（不等于审阅通过）；"
+            "same_provider=true 表示这次审阅由人与审阅人同厂商，"
+            "provider_confirmed_by 记着是谁开的通道，不是异常",
             task_reviews,
         ),
         Tool(

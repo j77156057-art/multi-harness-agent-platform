@@ -171,6 +171,21 @@ def test_harness_token_cannot_touch_the_human_face(env):
     assert audit[0]["permission"] == "task:resume"
 
 
+def test_harness_token_cannot_open_the_same_provider_review_channel(env):
+    """同厂商审阅通道只给人：否则审阅人就能豁免自己的厂商检查。"""
+    response = env.client.post(
+        "/api/v1/human/review_same_provider",
+        json={"task_id": "T-1", "decided_by": "h-A", "reason": "让我自己审"},
+        headers=bearer(env.token_a),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "auth.permission_denied"
+    audit = denials(env.database)
+    assert audit[0]["reason"] == "role_not_allowed"
+    assert audit[0]["permission"] == "review:same_provider"
+
+
 def test_human_token_cannot_touch_the_adapter_face(env):
     response = env.client.post(
         "/api/v1/adapter/claim",
