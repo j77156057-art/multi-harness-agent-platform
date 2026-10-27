@@ -1,5 +1,6 @@
 """Regression tests for the real multi-Harness worker path."""
 
+import json
 import multiprocessing
 import os
 import subprocess
@@ -70,13 +71,50 @@ def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
     command = adapter.command(prepared, tmp_path)
     environment = adapter.process_environment()
     assert Path(command[0]).stem.lower() == "pi"
-    assert command[1:4] == ["--approve", "--model", "ollama/qwen3:8b"]
+    # The model is **resolved**: an explicitly configured one wins, and when
+    # there is none the window uses a model this machine actually has (the
+    # default tag is often not installed, and the CLI then dies with a bare
+    # "Model not found").
+    assert command[1:4] == ["--approve", "--model", adapter.resolve_model()]
+    assert adapter.resolve_model().startswith("ollama/")
     assert "--tools" in command and command[command.index("--tools") + 1] == "read,edit,write"
     assert any(item.startswith("@") for item in command)
     assert environment["PI_CODING_AGENT_DIR"] == str(tmp_path / "pi-config")
     assert (tmp_path / "pi-config" / "models.json").exists()
     assert environment["PI_CODING_AGENT_DIR"] != str(Path.home() / ".pi" / "agent")
     adapter.cleanup_work_order()
+
+
+def test_pi_adapter_keeps_an_explicitly_configured_model(tmp_path):
+    """人点名要的模型就是那个模型：装没装都照用，不悄悄换一个。"""
+    adapter = PiAdapter(SimpleNamespace(), config_root=tmp_path / "pi-config", model="ollama/chosen:1b")
+    assert adapter.resolve_model() == "ollama/chosen:1b"
+
+
+def test_pi_adapter_asks_the_pool_through_its_own_config(tmp_path):
+    """走额度池时，Pi 的 provider 指向池子，模型是池子里的那个。
+
+    Pi 的模型 id 里带斜杠（provider/model），而 Pi 自己按 "provider/id" 拆
+    模型 —— 所以这里必须把 provider 与 model 分开给：拆错了就找不到模型。
+    """
+    from app.adapter.harnesses.cli import ProviderRoute
+
+    adapter = PiAdapter(SimpleNamespace(), config_root=tmp_path / "pi-config")
+    adapter.provider_route = ProviderRoute(
+        base_url="http://127.0.0.1:8848/api/v1/pool/v1",
+        token="harness-token",
+        model="codebuddy/minimax-m3.1-flash",
+        protocol="openai",
+    )
+    prepared = adapter.prepare_work_order("make the file", tmp_path)
+    command = adapter.command(prepared, tmp_path)
+    assert command[1:5] == ["--approve", "--provider", "pool", "--model"]
+    assert command[5] == "codebuddy/minimax-m3.1-flash"
+    config = json.loads((tmp_path / "pi-config" / "models.json").read_text(encoding="utf-8"))
+    provider = config["providers"]["pool"]
+    assert provider["baseUrl"] == "http://127.0.0.1:8848/api/v1/pool/v1"
+    assert provider["apiKey"] == "harness-token"
+    assert provider["models"][0]["id"] == "codebuddy/minimax-m3.1-flash"
 
 
 def test_claude_adapter_allows_only_the_attempt_gitdir(tmp_path):

@@ -702,7 +702,7 @@ def test_codex_gets_per_attempt_overrides_and_the_key_in_the_environment(tmp_pat
     assert adapter.route_environment() == {"OPENAI_API_KEY": "harness-token"}
 
 
-def test_opencode_asks_the_pool_through_its_builtin_openai_provider(tmp_path):
+def test_opencode_asks_the_pool_through_its_own_isolated_config(tmp_path):
     from app.adapter.harnesses.cli import ProviderRoute
     from app.adapter.harnesses.opencode import OpenCodeAdapter
 
@@ -717,11 +717,21 @@ def test_opencode_asks_the_pool_through_its_builtin_openai_provider(tmp_path):
     # On Windows the command is wrapped for cmd.exe; the model flag has to be
     # in there either way.
     joined = " ".join(argv)
-    assert "--model openai/minimax-m3.1-flash-free" in joined
-    assert adapter.route_environment() == {
-        "OPENAI_BASE_URL": "http://127.0.0.1:8848/api/v1/pool/v1",
-        "OPENAI_API_KEY": "harness-token",
-    }
+    assert "--model pool/minimax-m3.1-flash-free" in joined
+    # The OpenCode CLI takes its providers from **its own config file**, and the
+    # built-in ``openai`` provider only knows OpenAI's own model names -- so
+    # pointing OPENAI_BASE_URL at the pool is not enough: the CLI answers
+    # "Model unavailable" before it ever calls the pool.  The window therefore
+    # gets a config of its own (the user's config is never touched) with a
+    # ``pool`` provider that speaks to the platform.
+    environment = adapter.route_environment()
+    config_home = Path(environment["XDG_CONFIG_HOME"])
+    assert config_home != Path.home() / ".config"
+    config = json.loads((config_home / "opencode" / "opencode.json").read_text(encoding="utf-8"))
+    provider = config["provider"]["pool"]
+    assert provider["options"]["baseURL"] == "http://127.0.0.1:8848/api/v1/pool/v1"
+    assert provider["options"]["apiKey"] == "harness-token"
+    assert "minimax-m3.1-flash-free" in provider["models"]
 
 
 # --------------------------------------------------------------------------- #
