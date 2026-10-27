@@ -126,6 +126,7 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
         "task.get",
         "task.diff",
         "task.verification",
+        "task.reviews",
         "task.review_pack",
         "task.diagnose",
         "task.forensics",

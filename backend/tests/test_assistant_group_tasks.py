@@ -85,6 +85,48 @@ def test_the_observation_is_a_summary_not_the_whole_table():
     assert "翻页" in result["note"]
 
 
+def test_the_window_is_ordered_newest_first():
+    """问「刚才那单」时，最新的那单必须落在窗口里。
+
+    平台按 `task_id`（字母序）给清单，而 task_id 是哈希 —— 一小时前建的活可能排在
+    第 62 位，落在默认窗口之外。真跑时就是这样：助理只看到一条标题含
+    portfolio 的（还是被取消的那条），于是对着**错的那一单**如实作答。
+    `state_changed_seq` 是平台自己的状态变更计数器，倒序即"最近动过"。
+    """
+    # 平台的顺序（字母序）把最新那条放在最后。
+    old = [_task(index) for index in range(1, 25)]
+    newest = _task(99, status="merged")
+    newest["state_changed_seq"] = 1202
+    for index, task in enumerate(old, start=1):
+        task["state_changed_seq"] = index
+    client = Client(old + [newest], total=25)
+
+    registry = build_registry(client, group_id=GROUP, author_id="office-assistant")
+    result = registry["group.tasks"].call({})
+
+    shown = result["claimed"]["items"] + result["unclaimed"]["items"]
+    assert shown[0]["task_id"] == newest["task_id"]
+    assert shown[0]["status"] == "merged"
+    assert "最近变动" in result["note"]
+    # 窗口尺寸没有变：还是 20 条，剩下的仍然照实说没列。
+    assert len(shown) == 20
+    assert result["omitted"] == 5
+
+
+def test_an_explicit_page_keeps_the_platforms_order():
+    """显式翻页时不动顺序：翻页是模型自己的请求，它要的是那一页，不是重排。"""
+    tasks = [_task(index) for index in range(1, 6)]
+    for index, task in enumerate(tasks, start=1):
+        task["state_changed_seq"] = index
+    client = Client(tasks)
+
+    registry = build_registry(client, group_id=GROUP, author_id="office-assistant")
+    result = registry["group.tasks"].call({"limit": 2, "offset": 0})
+
+    shown = result["claimed"]["items"] + result["unclaimed"]["items"]
+    assert [row["task_id"] for row in shown] == ["FD-0000000000000001", "FD-0000000000000002"]
+
+
 def test_the_summary_says_who_holds_what():
     client = Client([_task(1, owner="opencode", status="in_progress"), _task(2)])
 

@@ -53,6 +53,57 @@ def _context(chain):
     return response.json()
 
 
+def test_the_reviews_read_face_names_the_reviewer_and_the_verdict(tmp_path):
+    """「谁审的、结论是什么」必须能从只读面上读到。
+
+    这一单是最自然的问题（交付物是谁审的），而任务行里只有 `last_review_id`
+    一个指针：平台记着审阅记录，助理却只能答"未记上"。补的是读的口子，不是
+    新的判定 —— 结论仍是审阅人写的，这里只负责如实转述。
+    """
+    chain = build_chain(tmp_path)
+    review_id = _request_changes(chain, FINDINGS)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+
+    response = client.get(f"/api/v1/tasks/{chain.task_id}/reviews")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["task_id"] == chain.task_id
+    (row,) = payload["reviews"]
+    assert row["review_id"] == review_id
+    assert row["reviewer_harness_id"] == REVIEWER
+    assert row["reviewer_provider"] == "anthropic"
+    assert row["verdict"] == "request_changes"
+    assert row["status"] == "completed"
+    # 意见正文要原样带出来（返工的人读的就是它），不是只给一个哈希。
+    assert [item["message"] for item in row["findings"]] == [
+        "docs/lane.md 缺少验收命令的实际输出",
+        "自审记录未写明已知限制",
+    ]
+    assert row["reviewed_commit"] == chain.head_commit
+
+
+def test_a_task_with_no_review_answers_an_empty_list_not_a_guess(tmp_path):
+    """没有审阅记录时说"没有"，不能说成"审阅通过"。"""
+    chain = build_chain(tmp_path)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+
+    payload = client.get(f"/api/v1/tasks/{chain.task_id}/reviews").json()
+
+    assert payload["reviews"] == []
+    assert "不等于审阅通过" in payload["note"]
+
+
+def test_reading_reviews_of_an_unknown_task_is_a_404(tmp_path):
+    """与邻居端点同一口径：不认识的任务就是 404，不返回空清单。"""
+    chain = build_chain(tmp_path)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+
+    response = client.get("/api/v1/tasks/FD-not-a-task/reviews")
+
+    assert response.status_code == 404
+
+
 def test_the_review_records_the_reviewers_registry_provider(tmp_path):
     """The audit trail must not say "unknown" when the registry knows (§6).
 

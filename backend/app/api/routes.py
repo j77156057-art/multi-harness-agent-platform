@@ -2006,6 +2006,65 @@ def get_task(task_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.get_task(task_id)
 
 
+@read.get("/tasks/{task_id}/reviews")
+def task_reviews(task_id: str, service: SchedulerDep, database: DatabaseDep):
+    """Who reviewed this task's attempts, and what they concluded.
+
+    The review is a **platform record** (``reviews`` + ``task_events``), not a
+    private opinion: "who reviewed it, what did they say" is one of the first
+    questions asked about delivered work, and until now only the review *id*
+    was readable from the task row.  The assistant could therefore only answer
+    "未记上" about a verdict the platform had recorded all along.
+
+    Read-only, and it keeps the same honesty shape as ``/verification``: an
+    absent record answers ``reviews: []`` with the reason, never a guess.
+    """
+    import json
+
+    service.get_task(task_id)  # 404 for an unknown task, same as its neighbours
+    rows = database.read(
+        "SELECT review_id, reviewer_harness_id, reviewer_provider, verdict, status,"
+        " findings_json, reviewed_commit, review_revision, created_seq, completed_seq"
+        " FROM reviews WHERE task_id = ? ORDER BY rowid DESC LIMIT 10",
+        (task_id,),
+    )
+    reviews = []
+    for row in rows:
+        raw_findings = row["findings_json"]
+        findings: list[Any] = []
+        if isinstance(raw_findings, str) and raw_findings.strip():
+            try:
+                parsed = json.loads(raw_findings)
+            except ValueError:
+                parsed = []
+            if isinstance(parsed, list):
+                findings = parsed
+        reviews.append(
+            {
+                "review_id": str(row["review_id"]),
+                "reviewer_harness_id": str(row["reviewer_harness_id"] or ""),
+                "reviewer_provider": str(row["reviewer_provider"] or ""),
+                "verdict": row["verdict"],
+                "status": str(row["status"] or ""),
+                "findings": findings,
+                "reviewed_commit": str(row["reviewed_commit"] or ""),
+                "review_revision": int(row["review_revision"] or 1),
+                "created_seq": row["created_seq"],
+                "completed_seq": row["completed_seq"],
+            }
+        )
+    return {
+        "task_id": task_id,
+        "reviews": reviews,
+        "note": (
+            ""
+            if reviews
+            else "这条任务还没有审阅记录（未记上）。审阅是平台记录：没有记录不等于审阅通过。"
+        ),
+    }
+
+
+
 @read.get("/tasks/{task_id}/verification")
 def task_verification(task_id: str, service: SchedulerDep, database: DatabaseDep):
     task = service.get_task(task_id)

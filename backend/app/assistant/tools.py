@@ -111,6 +111,16 @@ def build_registry(
     def task_verification(args: dict[str, Any]) -> dict[str, Any]:
         return client.get(f"/tasks/{_required_id(args, 'task_id')}/verification")
 
+    def task_reviews(args: dict[str, Any]) -> dict[str, Any]:
+        """Who reviewed this task, and what they concluded.
+
+        "谁审的、结论是什么" is one of the first questions asked about delivered
+        work, and it was unanswerable: the task row carries only the review
+        *id*, so the assistant had to say "未记上" about a verdict the platform
+        had recorded all along.  Read-only; the verdict stays the reviewer's.
+        """
+        return client.get(f"/tasks/{_required_id(args, 'task_id')}/reviews")
+
     def task_review_pack(args: dict[str, Any]) -> dict[str, Any]:
         """One read that lays the review-assist evidence side by side.
 
@@ -271,6 +281,23 @@ def build_registry(
         tasks = [row for row in (data.get("tasks") or []) if isinstance(row, dict)]
         total = int(data.get("total") or len(tasks))
         if not paged:
+            # **Newest first.**  The platform hands the list over ordered by
+            # task_id, which is alphabetical: a task created an hour ago sorts
+            # by its hash, so "刚才那单" was at position 62 of 64 -- outside the
+            # window this tool returns.  The assistant then picked the only
+            # portfolio-looking task it could see, which was a *cancelled* one,
+            # and answered honestly about the wrong task.
+            #
+            # ``state_changed_seq`` is the platform's own monotonic counter of
+            # state changes, so ordering by it descending puts the most recently
+            # touched work first -- exactly what a question about "刚才" means.
+            tasks.sort(
+                key=lambda row: (
+                    int(row.get("state_changed_seq") or 0),
+                    str(row.get("updated_at") or ""),
+                ),
+                reverse=True,
+            )
             tasks = tasks[:limit]
 
         by_status: dict[str, int] = {}
@@ -317,11 +344,16 @@ def build_registry(
             "claimed": {"count": len(claimed), "items": claimed},
             "window": {"offset": offset, "limit": limit, "shown": shown},
             "omitted": omitted,
+            "order": "按最近变动排序（最新在前：state_changed_seq 倒序）",
             "note": (
                 f"共 {total} 条，本窗口（offset={offset}）给出 {shown} 条"
                 + (f"，还有 {omitted} 条没列（要全量请用 offset/limit 翻页）" if omitted else "")
-                + "。本工具给的是摘要：总数、状态分布、没被领的与已有人领的清单；"
+                + "。**本清单按最近变动排序，最新的在前**——问「刚才那单」时先看这里的前几条。"
+                "本工具给的是摘要：总数、状态分布、没被领的与已有人领的清单；"
                 "要看某一条的细节，用 task.get 或 task.forensics。"
+                "若提问只用一句话指代某一单、而窗口里有不止一条看着像（标题相近/状态不同），"
+                "不要替提问人挑一条就往下答：先把候选列出来（task_id + 标题 + 状态）问清是哪一单，"
+                "或明确说明「我只看到这些，可能还有别的」。"
             ),
         }
 
@@ -356,6 +388,13 @@ def build_registry(
             task_diff,
         ),
         Tool("task.verification", "read", "任务的验证读数", task_verification),
+        Tool(
+            "task.reviews",
+            "read",
+            "任务的审阅记录：谁审的、结论（approve / request_changes）、意见正文、"
+            "审的是哪个提交。没有记录时如实返回空清单（不等于审阅通过）",
+            task_reviews,
+        ),
         Tool(
             "task.review_pack",
             "read",

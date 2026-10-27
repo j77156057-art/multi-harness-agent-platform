@@ -66,8 +66,9 @@ function Get-FormalWorkerPids([string]$marker) {
 $existing = Get-FormalWorkerPids 'app.adapter.formal_worker'
 $existingAdmin = Get-FormalWorkerPids 'app.admin.worker'
 $existingRuntime = Get-FormalWorkerPids 'app.runtime'
-if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0 -or $existingRuntime.Count -gt 0) {
-    $ids = @($existing) + @($existingAdmin) + @($existingRuntime) | Where-Object { $_ } | Sort-Object -Unique
+$existingAssistant = Get-FormalWorkerPids 'app.assistant.worker'
+if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0 -or $existingRuntime.Count -gt 0 -or $existingAssistant.Count -gt 0) {
+    $ids = @($existing) + @($existingAdmin) + @($existingRuntime) + @($existingAssistant) | Where-Object { $_ } | Sort-Object -Unique
     throw ("Formal workers are already running (pid: $($ids -join ', '))." +
         " Stop them first, otherwise two instances compete for the same tasks.")
 }
@@ -121,6 +122,21 @@ Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group
 # the task stops at "approved" -- the work is done and reviewed, but it never
 # reaches the repository.
 Start-Python 'runtime' @('-m', 'app.runtime', '--loop', '--interval', '15')
+
+# The platform assistant (office-assistant): it answers the owner's private
+# questions -- "why did this fail", "does this diff meet the acceptance",
+# "what is missing to attach this new CLI".  It has a model and a voice, but no
+# execution seat: the only write it owns is one private message, and every
+# claim it makes must cite the step it read it from.
+#
+# Without this worker the office's "ask anytime" panel is a dead button: the
+# platform shows the window as registered and online, and nobody answers.
+$assistantToken = Join-Path $PSScriptRoot 'data\office-assistant.key'
+if (Test-Path $assistantToken) {
+    Start-Python 'assistant' @('-m', 'app.assistant.worker', '--url', $Url, '--group', $Group, '--assistant-id', 'office-assistant', '--token-file', $assistantToken)
+} else {
+    Write-Host '[assistant] skipped: data\office-assistant.key is missing'
+}
 
 Write-Host "Formal platform is ready at $Url"
 Write-Host "Group: $Group; administrator: $AdminHarnessId"
