@@ -28,6 +28,14 @@ import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state
 import { humanize, summarize, translated } from './wording.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
+import {
+  groupByStatus,
+  hostLine,
+  leftoverHint,
+  rowsView,
+  statusOf,
+  summaryLine,
+} from './harness-install.js';
 
 const escape = escapeHtml;
 
@@ -218,6 +226,11 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 选择会被重画抹掉 —— 人挑好模型，过一会儿就没了。
     modelPicks: {},
     pool: null,
+    // 这台机器上装了哪些 Harness CLI、官方从哪装（平台只读探测的结果）。
+    // 初次进页面不主动探（六个版本命令要几秒），人点「探测」才去问。
+    installs: null,
+    installsChecking: false,
+    installsError: null,
     // 池子状态是什么时候读到的：定时刷新早发起、晚落地，**旧**的不能盖掉新的
     // （否则刚定档的清单会被下一轮刷新抹掉）。
     poolAt: 0,
@@ -3450,6 +3463,113 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
+   * 这台机器上装了哪些 Harness CLI。
+   *
+   * 平台那一侧只做两件事：给出官方安装方式（纯数据，很快），以及在人对它说
+   * 「探一下」之后跑每条 CLI 的 `--version`（六个子进程，几秒）。所以：
+   *
+   *   · 进页面时只取**安装方式**（`probe_local=false`），界面立刻有内容；
+   *   · 状态默认是「还没探测」—— 不探测就说「缺」，等于替这台机器撒谎；
+   *   · 只有人点了按钮才真的去跑版本命令。
+   */
+  async function loadInstalls({ probe = false } = {}) {
+    if (probe) {
+      state.installsChecking = true;
+      state.installsError = null;
+      render();
+    }
+    try {
+      const data = await api(`/installers${probe ? '' : '?probe_local=false'}`);
+      if (data && Array.isArray(data.installers)) {
+        state.installs = data;
+        state.installsError = null;
+      }
+    } catch (error) {
+      // 读不到就说读不到（可能是旧后端没有这条路），不假装成"没装"。
+      state.installsError = String(error.message || error);
+    } finally {
+      state.installsChecking = false;
+    }
+    render();
+  }
+
+  /**
+   * 「装 CLI」这张卡：**谁缺、官方从哪装**。
+   *
+   * 放在右栏靠前的位置，因为它是新电脑上的第一步 —— 没有 CLI，
+   * 后面的窗口、任务、传阅都无从谈起。
+   */
+  function installCard() {
+    const payload = state.installs;
+    if (!payload && !state.installsError) {
+      return `<section class="flat-card"><h3>Harness CLI</h3><p class="flat-empty">正在读取各 CLI 的官方安装方式…</p></section>`;
+    }
+    if (state.installsError) {
+      return `<section class="flat-card"><h3>Harness CLI</h3>
+        <p class="flat-empty">读不到安装清单：${escape(state.installsError)}</p>
+        <p class="flat-note">这条路要平台后端一起更新；本地样例模式没有安装清单。</p></section>`;
+    }
+    const rows = rowsView(payload);
+    const groups = groupByStatus(rows);
+    const open = state.openFolds.has('installs');
+    const missing = Number((payload.summary && payload.summary.missing) || 0);
+    return `<section class="flat-card flat-card-fold">
+      <details data-fold="installs"${open ? ' open' : ''}>
+        <summary>Harness CLI · ${escape(summaryLine(payload))}</summary>
+        <p class="flat-note">${escape(hostLine(payload))}${
+          payload.guidanceOnly ? '' : ' 安装后需要重开终端，PATH 才会生效。'
+        }</p>
+        <p class="flat-note">安装命令给人在自己的终端里执行；平台不会替你下载或运行安装脚本。</p>
+        ${groups
+          .map(
+            (group) => `<details class="flat-pool-item">
+              <summary><b>${escape(statusOf({ status: group.status }).label)}</b><span>${group.rows.length} 个</span></summary>
+              <ul class="flat-list">${group.rows.map(installRow).join('')}</ul>
+            </details>`,
+          )
+          .join('')}
+        <p class="flat-inline-actions">
+          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${
+            state.installsChecking ? '正在探测…' : '探测这台机器'
+          }</button>
+        </p>
+        ${
+          missing
+            ? `<p class="flat-note">还有 ${missing} 个没装：装完再点一次「探测这台机器」，状态会跟着变。</p>`
+            : ''
+        }
+      </details>
+    </section>`;
+  }
+
+  /** 一条 CLI 的展开内容：官方地址、安装命令、验证命令、装完还差什么。 */
+  function installRow(view) {
+    const bits = [];
+    if (view.version) bits.push(`版本 ${view.version}`);
+    if (view.foundCommand) bits.push(`命令 ${view.foundCommand}`);
+    if (view.path) bits.push(shortenPath(view.path));
+    const hint = leftoverHint(view);
+    return `<li>
+      <b>${escape(view.name)}</b>
+      <span>${escape(bits.join(' · ') || view.provider || '')}</span>
+      ${view.detail ? `<span class="flat-note">${escape(view.detail)}</span>` : ''}
+      ${
+        view.officialUrl
+          ? `<a href="${escape(view.officialUrl)}" target="_blank" rel="noreferrer noopener">官方文档</a>`
+          : '<span class="flat-note">官方地址未核实，平台不猜。</span>'
+      }
+      ${
+        view.installCommand
+          ? `<code class="flat-cmd">${escape(view.installCommand)}</code>`
+          : '<span class="flat-note">这个系统没有官方安装命令。</span>'
+      }
+      ${view.verifyCommand ? `<span class="flat-note">装完自检：${escape(view.verifyCommand)}</span>` : ''}
+      ${hint ? `<span class="flat-note">${escape(hint)}</span>` : ''}
+      ${view.notes.length ? `<span class="flat-note">${escape(view.notes.join(' '))}</span>` : ''}
+    </li>`;
+  }
+
+  /**
    * 额度池：名字只是轮廓；**明细**（有哪些模型、什么档位、谁花了多少）点开才是真的。
    * 额度池是"谁的钱"的问题，所以明细里必须有消费者，而不只是源名。
    */
@@ -3874,6 +3994,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
              <button type="button" data-act="open-direct-window">开私聊窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
+      ${installCard()}
       ${poolCard()}
       <section class="flat-card flat-card-fold">
         <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
@@ -4354,6 +4475,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
       return;
     }
+    if (button.dataset.act === 'installs-probe') {
+      // 人的动作：现在去问这台机器上有没有这些命令。
+      void loadInstalls({ probe: true });
+      return;
+    }
     if (button.dataset.act === 'events-all') {
       state.allEvents = !state.allEvents;
       render();
@@ -4718,6 +4844,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 一起拖住 —— 名单空着、状态栏没数。
       const availability = await api('/availability').catch(() => ({ availability: [] }));
       state.availability = availability.availability || [];
+      // 安装清单**自己一段、自己重绘**：它不该等额度池那几秒（那边一问就是二十几个
+      // 上游）才跟着出现。没读到就让它自己说没读到，别一直挂着「正在读取」。
+      // 读到的安装方式不会每 15 秒变，所以只取一次；失败时等人点「探测」再重试。
+      if (!state.installs && !state.installsError) void loadInstalls();
       state.loaded = true;
       // 顶栏的状态：平台连不连得上、几个窗口在线（平台上的事实，不猜）。
       const online = state.availability.filter((item) => item.status === 'online').length;

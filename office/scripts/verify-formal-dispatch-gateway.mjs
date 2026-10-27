@@ -22,6 +22,10 @@ const upstream=http.createServer((req,res)=>{
   if(req.url==='/api/v1/groups?project_id=P')data={groups:[{project_id:'P',group_id:'G'}]};
   if(req.url==='/api/v1/harnesses')data={harnesses:[{harness_id:'codex',registration_version:'reg-1',capabilities_json:'["coding"]'}]};
   if(req.url==='/api/v1/adapter/availability')data={availability:[{harness_id:'codex',model:'gpt-6.1-sol',usable:true,reasons:[]}]};
+  // 「装 CLI」那一面：安装方式是纯数据；探测才是子进程。这条桩只证明网关转发，
+  // 不证明版本命令能跑（那是后端自己的测试）。查询串必须原样带过去 ——
+  // probe_local=false 是「只看安装方式、别跑子进程」，丢了它就会白跑六个进程。
+  if(req.url.startsWith('/api/v1/harnesses/installers'))data={probed:false,guidance_only:true,platform:{os:'windows',arch:'x86_64'},installers:[{harness_id:'codex',display_name:'Codex CLI',provider:'OpenAI',command:'codex',official_url:'https://developers.openai.com/codex/cli/',install_command:'npm install -g @openai/codex',verify_command:'codex --version',status:'unknown',supported:true}],summary:{unknown:1}};
   if(req.url==='/api/v1/groups/G/tasks')data={tasks:[]};
   if(req.url==='/api/v1/tasks/FD-0123456789abcdef')data={task_id:'FD-0123456789abcdef',group_id:'G'};
   if(req.url==='/api/v1/tasks/FD-0123456789abcdef/diff?include_patch=true')data={available:true,patch:'verified patch'};
@@ -49,6 +53,12 @@ try{
   const extra=await fetch(base+'/api/formal/dispatch',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1'},body:JSON.stringify({request_id:'x',title:'x',goal:'x',harness_id:'codex',exclusive_paths:['docs/x'],acceptance:'x',decided_by:'fake'})});assert.equal(extra.status,404);assert(!calls.some(c=>c.path.includes('/dispatch')));
   // 「谁现在能用」是只读的观察面：网关透传平台的可用性，不做任何写动作。
   const availability=await fetch(base+'/api/formal/availability');assert.equal(availability.status,200);assert(Array.isArray((await availability.json()).availability));
+  // 安装清单：查询串必须转发（probe_local=false 表示「别跑版本命令」）。
+  const installers=await fetch(base+'/api/formal/installers?probe_local=false');assert.equal(installers.status,200);
+  const installersBody=await installers.json();assert.equal(installersBody.probed,false);assert.equal(installersBody.installers.length,1);
+  assert(calls.some(c=>c.path==='/api/v1/harnesses/installers?probe_local=false'));
+  // 不认识的查询串不放行：这条面只有「探不探」一个开关，多塞参数说明调用方搞错了。
+  const bogusQuery=await fetch(base+'/api/formal/installers?token=leak');assert.equal(bogusQuery.status,400);
   const detail=await fetch(base+'/api/formal/tasks/FD-0123456789abcdef');assert.equal(detail.status,200);assert.equal((await detail.json()).diff.patch,'verified patch');
   const reviewClaim=await fetch(base+'/api/formal/review/claim',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({task_id:'FD-0123456789abcdef',attempt_id:'FD-0123456789abcdef.a1'})});assert.equal(reviewClaim.status,200);assert.equal((await reviewClaim.json()).review_id,'rv-1');
   // 管理员动作必须用管理员自己的凭据：人的 token 不能借到 harness 的权限。
@@ -58,6 +68,6 @@ try{
   await close(upstream);
   const offline=await fetch(base+'/api/formal/status');assert.equal(offline.status,503);
   assert.throws(()=>createFormalGateway({upstream:'http://external.example',tokenFile:'x',project:'P',group:'G'}));
-  const result={checks:14,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
+  const result={checks:18,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
   await fs.mkdir('handoff/codex-formal-dispatch-2026-10-14',{recursive:true});await fs.writeFile('handoff/codex-formal-dispatch-2026-10-14/gateway-check-final.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await close(server);if(upstream.listening)await close(upstream);await fs.rm(tmp,{recursive:true,force:true});}

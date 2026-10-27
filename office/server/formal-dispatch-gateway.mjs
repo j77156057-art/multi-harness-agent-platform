@@ -280,7 +280,9 @@ export function createFormalGateway(config={}){
    // `attempt_id`: "the real log of *this* failure" is the failed attempt, not
    // whatever attempt happens to be running now.
    const outputRoute=/^\/tasks\/FD-[a-f0-9]{16}\/output$/.test(route);
-   if(url.search&&!['/messages','/tasks','/events'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
+   // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
+   // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
+   if(url.search&&!['/messages','/tasks','/events','/installers'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
    if(outputRoute&&url.search){
      for(const key of url.searchParams.keys())if(key!=='attempt_id')throw fail(400,'unexpected_query');
      const attemptParam=url.searchParams.get('attempt_id')||'';
@@ -566,6 +568,24 @@ export function createFormalGateway(config={}){
         // 谁现在能用、用的哪个模型、最近有没有失败（平台侧的事实）。
         const availability=await call('/adapter/availability');
         json(res,200,availability);return true;
+      }
+      if(req.method==='GET'&&route==='/installers'){
+        // 「这台电脑上还缺哪个 CLI、官方的安装地址是什么」。
+        //
+        // 平台是对着**跑后端的那台机器**探测的（问 PATH 与已知安装目录、
+        // 读一行版本号）。人在办公室点「重新探测」时，探的就是这台机器 ——
+        // 所以界面必须说清是哪台，不能让人以为探的是自己面前的笔记本。
+        for(const key of url.searchParams.keys()){
+          if(key!=='probe_local'&&key!=='platform')throw fail(400,'unexpected_query');
+        }
+        const params=new URLSearchParams();
+        const probeLocal=url.searchParams.get('probe_local');
+        if(probeLocal!==null)params.set('probe_local',probeLocal==='true'||probeLocal==='1'?'true':'false');
+        const platformParam=url.searchParams.get('platform');
+        if(platformParam)params.set('platform',platformParam);
+        const query=params.toString();
+        const installers=await call('/harnesses/installers'+(query?'?'+query:''),undefined,undefined,undefined,60000);
+        json(res,200,installers);return true;
       }
       if(req.method==='POST'&&route==='/model-selection'){
         // 人给某个窗口指定「用自带模型 / 用额度池的哪个模型」。平台照办：

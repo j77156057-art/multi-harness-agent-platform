@@ -2212,6 +2212,65 @@ def harness_bases() -> dict[str, Any]:
     }
 
 
+@read.get("/harnesses/installers")
+def harness_installers(
+    principal: _guard("harness:register"),
+    platform: Annotated[str | None, Query()] = None,
+    probe_local: Annotated[bool, Query()] = True,
+) -> dict[str, Any]:
+    """Where each Harness CLI officially comes from, and whether it is here yet.
+
+    Two questions a person on a new computer asks, answered by one read:
+
+    * **where do I get it** -- the vendor's own page, the install command for a
+      named OS, and the command that verifies it.  The platform shows the
+      command; it never runs an installer and never downloads anything.
+    * **is it installed** -- ``command --version`` on this machine only.  The
+      probe reads one line and never touches credentials, config files or the
+      environment.
+
+    ``status`` is what the probe could establish, not what we hope:
+
+    * ``ready`` -- command found and it printed a version;
+    * ``missing`` -- no such command on PATH (install it, then reopen the
+      terminal so PATH is picked up);
+    * ``version_failed`` -- the command exists but the version could not be
+      read, so it is not usable yet;
+    * ``unsupported`` -- the vendor does not ship this OS/arch;
+    * ``unknown`` -- the caller asked about a different platform than this
+      host, so nothing could be probed and nothing is claimed.
+
+    **Installed is not the same as logged in.**  A CLI that prints a version
+    can still be unable to run; ``login_note`` says what is left for a human,
+    because the platform cannot verify a login without touching credentials.
+    """
+    from app.adapter import installers
+
+    if platform is not None and platform not in installers.PLATFORMS:
+        raise ApiError("request.invalid", 400, f"platform must be one of {installers.PLATFORMS}")
+
+    wanted = platform or installers.host_os()
+    on_host = wanted == installers.host_os()
+    rows = (
+        installers.probe(target_os=wanted)
+        if probe_local and on_host
+        else installers.catalog(target_os=wanted)
+    )
+    probed = bool(probe_local and on_host)
+    return {
+        "platform": {
+            "os": wanted,
+            "arch": installers.host_arch() if on_host else None,
+            "host_os": installers.host_os(),
+        },
+        "installers": rows,
+        "summary": installers.summarize(rows),
+        "probed": probed,
+        "probe_timeout_seconds": installers.PROBE_TIMEOUT_SECONDS,
+        "guidance_only": not probed,
+    }
+
+
 #: How much of a transcript the forensics face hands out.  Deeper than the
 #: office's live tail (32KB / 200 lines) and still bounded -- a 5 MB transcript
 #: does not belong in a model context.
