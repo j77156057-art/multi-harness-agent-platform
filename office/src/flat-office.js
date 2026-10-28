@@ -317,7 +317,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   // 重画会把这些栏整个换掉，滚动位置也就没了：用户滚到额度池看额度，下一次
   // 刷新就"啪"地回到顶上 —— 跟刚才那个"正在填的表单被抹掉"是同一类毛病。
   const scrollState = new Map();
-  const SCROLLING_PANES = ['.flat-rail', '.flat-tasks', '.flat-detail', '.flat-chat-list'];
+  const SCROLLING_PANES = ['.flat-convs', '.flat-rail', '.flat-tasks', '.flat-detail', '.flat-chat-list'];
 
   function captureScroll() {
     for (const selector of SCROLLING_PANES) {
@@ -2593,6 +2593,153 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return box;
   }
 
+  /**
+   * 它的平台凭据：这个窗口手上有几条、哪条在用、哪些可以收回。
+   *
+   * 为什么要有这一块：平台只存凭据的哈希（`auth_tokens.token_hash`），所以凭据
+   * 一旦签发出去，**唯一还能指认它的东西就是指纹**。而一个窗口每被重新签发一次
+   * 就多一条仍然有效的凭据 —— 以前没有任何界面能说出哪条是哪条，也就无从收回。
+   *
+   * 三条边界：① 显示的只有指纹，凭据原文只在本机那个 key 文件里；② 哪条在用是
+   * 按窗口自己的 key 文件认出来的，不是猜的；③ **正在用的那条不给按钮** ——
+   * 吊销它会让这个窗口的下一次请求被平台拒绝，而重签是"开窗口"那一步的事，
+   * 办公室不在这里替它换。
+   */
+  function windowCredentialsPanel(harnessId) {
+    const box = document.createElement('section');
+    box.className = 'flat-spec flat-credentials';
+    let lastNote = '';
+
+    const stamp = (value) => {
+      // 平台存的是 UTC；这里换成这台机器的时间，否则"我刚签发的凭据"会显示成八小时前。
+      const date = new Date(String(value || ''));
+      if (Number.isNaN(date.getTime())) return String(value || '').slice(5, 16).replace('T', ' ');
+      const pad = (number) => String(number).padStart(2, '0');
+      return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+        date.getMinutes(),
+      )}`;
+    };
+
+    const rowOf = (row) => {
+      const status =
+        row.status === 'in_use' ? '在用' : row.status === 'revoked' ? '已吊销' : '仍有效';
+      const when = stamp(row.created_at);
+      const dead =
+        row.status === 'revoked'
+          ? `；${stamp(row.revoked_at)} 吊销${row.revoked_reason ? `：${row.revoked_reason}` : ''}`
+          : '';
+      const element = document.createElement('div');
+      element.className =
+        'flat-cred' +
+        (row.status === 'in_use' ? ' flat-cred-live' : '') +
+        (row.status === 'revoked' ? ' flat-cred-dead' : '');
+      element.dataset.fingerprint = String(row.fingerprint || '');
+      element.innerHTML = `
+        <div class="flat-cred-main">
+          <b>${escape(status)} · ${escape(when)} 签发${escape(dead)}</b>
+          <span>指纹 ${escape(String(row.fingerprint || ''))}${
+            row.label ? ` · 标签：${escape(String(row.label))}` : ''
+          }${row.key_file ? ` · 文件 ${escape(String(row.key_file))}` : ' · 本机没有它的文件'}</span>
+        </div>
+        ${row.status === 'valid' ? '<button type="button" data-revoke="1">吊销</button>' : ''}`;
+      return element;
+    };
+
+    const paint = (data) => {
+      const rows = (data && data.credentials) || [];
+      const keyFiles = (data && data.key_files) || [];
+      box.innerHTML = '<h3>它的平台凭据</h3>';
+
+      const explain = document.createElement('p');
+      explain.className = 'flat-note';
+      explain.textContent =
+        '平台只保存凭据的哈希，这里显示的是指纹；凭据原文只在本机那几个 key 文件里。这个窗口每被重新签发一次就多一条，旧的仍然能开工，所以要收回来。';
+      box.append(explain);
+
+      if (!rows.length) {
+        const empty = document.createElement('p');
+        empty.className = 'flat-empty';
+        empty.textContent = (data && data.note) || '这个窗口还没有平台凭据。';
+        box.append(empty);
+      } else {
+        const list = document.createElement('div');
+        list.className = 'flat-creds';
+        for (const row of rows) list.append(rowOf(row));
+        box.append(list);
+
+        const live = rows.filter((row) => row.status === 'in_use').length;
+        const keeper = document.createElement('p');
+        keeper.className = 'flat-note';
+        keeper.textContent = live
+          ? '正在使用的那一条没有按钮：吊销它会让这个窗口的下一次请求被平台拒绝，而换一份凭据是开窗口那一步的事。'
+          : '没有一条在用：这台机器上找不到这个窗口能用的凭据文件，它现在开不了工。';
+        box.append(keeper);
+
+        if (keyFiles.length) {
+          const where = document.createElement('p');
+          where.className = 'flat-note';
+          where.textContent = `它的凭据文件：${keyFiles.join('、')}。`;
+          box.append(where);
+        }
+      }
+
+      if (lastNote) {
+        const row = document.createElement('p');
+        row.className = 'flat-note-row';
+        row.textContent = lastNote;
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.textContent = '知道了';
+        clear.addEventListener('click', () => {
+          lastNote = '';
+          row.remove();
+        });
+        row.append(clear);
+        box.append(row);
+      }
+    };
+
+    const load = () =>
+      api(`/harnesses/${encodeURIComponent(harnessId)}/credentials`)
+        .then(paint)
+        .catch((error) => {
+          box.innerHTML = '<h3>它的平台凭据</h3>';
+          const empty = document.createElement('p');
+          empty.className = 'flat-empty';
+          empty.textContent = `暂时读不到它的凭据（${String((error && error.message) || '').trim() || '平台没有回应'}）。`;
+          box.append(empty);
+        });
+
+    // 吊销是这一块唯一的写动作：只提交**指纹**，不提交凭据，也不自称是谁在操作
+    // （平台按人自己的 token 认身份）。
+    box.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-revoke]');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const item = button.closest('.flat-cred');
+      const fingerprint = item && item.dataset.fingerprint;
+      if (!fingerprint) return;
+      button.disabled = true;
+      button.textContent = '正在吊销…';
+      api(`/harnesses/${encodeURIComponent(harnessId)}/credentials/revoke`, {
+        fingerprint,
+        reason: '在办公室收回不再使用的凭据',
+      })
+        .then((result) => {
+          lastNote = (result && result.note) || '已吊销。';
+        })
+        .catch((error) => {
+          lastNote = `没能吊销：${String((error && error.message) || '').trim() || '平台拒绝了这次请求'}`;
+        })
+        .then(() => load());
+    });
+
+    box.innerHTML = '<h3>它的平台凭据</h3><p class="flat-note">正在读它的凭据…</p>';
+    void load();
+    return box;
+  }
+
   /** 一次 CLI 运行：它说了什么、它做了什么。 */
   function cliSessionCard(run, harnessId) {
     const card = document.createElement('details');
@@ -2848,6 +2995,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     // 该窗口使用的模型：自带，还是额度池里的某个模型。选了就照办。
     panel.append(modelChoiceBlock(harnessId));
+
+    // 它的平台凭据：几条、哪条在用、哪些能收回。放在模型之后、动作记录之前 ——
+    // 它回答的是"这个窗口凭什么能开工"，与"它做过什么"是前后两步。
+    panel.append(windowCredentialsPanel(harnessId));
 
     // 它的轨迹：平台事件里 actor 是它的那几条。
     const trace = (state.events || [])

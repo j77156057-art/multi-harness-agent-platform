@@ -34,7 +34,13 @@ from app.api.auth_deps import (
     require_for,
 )
 from app.api.errors import ApiError
-from app.auth.tokens import TokenInvalid, TokenService
+from app.auth.tokens import (
+    AmbiguousFingerprint,
+    AuthTokenError,
+    TokenInvalid,
+    TokenService,
+    hash_token,
+)
 from app.claim.service import ClaimRequest, ClaimService
 from app.config import settings
 from app.db.connection import Database
@@ -2622,6 +2628,170 @@ def _conversation_run_label(kind: str, key: str) -> str:
     if kind == "admin":
         return f"管理员 · {key}"
     return f"{kind} · {key}"
+
+
+# ------------------------------------------------------- 窗口的凭据（看得到、收得回）
+#
+# 平台只存 `auth_tokens.token_hash`，凭据明文只在本机的 `.key` 文件里，且明文只在
+# 签发那一刻打印一次。所以"这个窗口手上到底有几条凭据"以前没人能回答：每重签一次
+# 就多一条仍然有效的凭据，旧的那条既没有界面能指出，也没有界面能收回。下面这两面
+# 补的就是这一对动作 —— 列出（给**指纹**，不是凭据）与吊销一条。
+
+
+#: 本机凭据文件的形状：`apt_` + 64 位十六进制。文件名不参与判断 ——
+#: `start-formal.ps1` 里 pi 这个窗口用的是 `data/game-pi.key`，名字与 id 不同。
+_KEY_FILE_BYTES = 200
+
+
+def _credential_files() -> dict[str, str]:
+    """本机每个 ``.key`` 文件里的凭据指纹 -> 文件名。
+
+    为什么不按 ``data/<窗口>.key`` 直接取：文件名是前人留下的约定，不是事实。
+    `pi` 的凭据就在 `data/game-pi.key` 里，只认 ``<id>.key`` 会认不出来 —— 于是
+    界面上"哪条在用"全部落空，正在用的那条也被摆上吊销按钮，一点就把窗口弄下线。
+    所以这里读的是**这台机器上还有什么凭据**，再按哈希与窗口的凭据行对上。
+    """
+    found: dict[str, str] = {}
+    try:
+        candidates = sorted(settings.data_dir.glob("*.key"))
+    except OSError:
+        return found
+    for path in candidates:
+        try:
+            if path.stat().st_size > _KEY_FILE_BYTES:
+                continue
+            text = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if re.fullmatch(r"apt_[a-f0-9]{64}", text):
+            found[hash_token(text)[:19]] = path.name
+    return found
+
+
+@management.get("/harnesses/{harness_id}/credentials")
+def harness_credentials(
+    harness_id: str,
+    database: DatabaseDep,
+    principal: _guard("harness:credential"),
+) -> dict[str, Any]:
+    """This window's platform credentials: which one is live, which one it uses.
+
+    Two facts make this worth a face of its own.  The platform stores only a
+    hash, so the *only* handle on a token after issuance is its fingerprint --
+    and a window that is re-issued accumulates tokens, every one of them still
+    valid, with nothing on any screen able to say which is which.  The one the
+    window is actually presenting is read off the ``.key`` files on this machine,
+    so "revoke the stale ones" stops being a guess.
+
+    No secrets leave this answer: ``fingerprint`` is the first 12 hex characters
+    of the stored hash.
+    """
+    # The id ends up in a file name below, so its shape is checked first.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", harness_id):
+        raise ApiError("harness.not_found", 404, "unknown harness")
+    rows = TokenService(database).list_tokens(subject_type="harness", subject_id=harness_id)
+    on_disk = _credential_files()
+    credentials: list[dict[str, Any]] = []
+    live = 0
+    for row in rows:
+        fingerprint = str(row["fingerprint"])
+        revoked = row["revoked_at"] is not None
+        using = (not revoked) and fingerprint in on_disk
+        if not revoked:
+            live += 1
+        credentials.append(
+            {
+                "fingerprint": fingerprint,
+                "label": str(row["label"]),
+                "created_at": str(row["created_at"]),
+                "revoked_at": row["revoked_at"],
+                "revoked_reason": row["revoked_reason"],
+                "in_use": using,
+                "status": "revoked" if revoked else ("in_use" if using else "valid"),
+                # 这条凭据落在这台机器的哪个文件里（只是名字，没有内容）。
+                "key_file": on_disk.get(fingerprint),
+            }
+        )
+    own = {str(row["fingerprint"]) for row in rows}
+    return {
+        "harness_id": harness_id,
+        "credentials": credentials,
+        "live": live,
+        # 这个窗口的凭据在本机可能落在不止一个文件里（历史遗留的命名，比如 pi 的
+        # `game-pi.key`），所以给的是一张表，不是猜一个文件名。
+        "key_files": sorted(name for fingerprint, name in on_disk.items() if fingerprint in own),
+        "note": (
+            ""
+            if credentials
+            else "这个窗口还没有平台凭据；给它开窗口时会当场签发一份。"
+        ),
+    }
+
+
+@management.post("/harnesses/{harness_id}/credentials/revoke")
+def revoke_harness_credential(
+    harness_id: str,
+    body: schemas.HarnessCredentialRevokeRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("harness:credential"),
+) -> dict[str, Any]:
+    """Revoke exactly one of this window's credentials, by fingerprint.
+
+    The row marked "in use" is the token the window presents right now, so
+    revoking it takes the window offline at its next request: that needs
+    ``force``.  Everything else is revoked quietly -- the point of this face is
+    retiring the tokens left behind by earlier re-issuances.
+    """
+    bind_declared(
+        principal, body.decided_by, key="harness:credential", database=database, request=request
+    )
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", harness_id):
+        raise ApiError("harness.not_found", 404, "unknown harness")
+    fingerprint = body.fingerprint.strip()
+    # "在不在用"以这台机器上真有的凭据文件为准（文件名不一定是 <窗口>.key）。
+    # 只在"这条真是这个窗口的、而且它就在某个 key 文件里"时才算在用。
+    service = TokenService(database)
+    own = {
+        str(row["fingerprint"])
+        for row in service.list_tokens(subject_type="harness", subject_id=harness_id)
+    }
+    was_in_use = fingerprint in own and fingerprint in _credential_files()
+    if was_in_use and not body.force:
+        raise ApiError(
+            "credential.in_use",
+            409,
+            "这条是窗口此刻正在用的凭据；吊销它会让它的下一次请求被平台拒绝。"
+            "要让这个窗口停下来就带 force 再来一次，随后重新签发一份凭据并重启它的 worker。",
+            details={"fingerprint": fingerprint},
+        )
+    try:
+        revoked = service.revoke_fingerprint(
+            fingerprint=fingerprint,
+            reason=body.reason.strip() or f"吊销于办公室（{body.decided_by}）",
+            subject_type="harness",
+            subject_id=harness_id,
+        )
+    except AmbiguousFingerprint as exc:
+        raise ApiError("credential.ambiguous", 409, str(exc)) from exc
+    except AuthTokenError as exc:
+        raise ApiError("credential.invalid_fingerprint", 400, str(exc)) from exc
+    if not revoked:
+        raise ApiError(
+            "credential.not_found", 404, "这个窗口没有这条还生效的凭据（可能已经吊销过了）"
+        )
+    return {
+        "harness_id": harness_id,
+        "fingerprint": fingerprint,
+        "revoked": True,
+        "was_in_use": was_in_use,
+        "note": (
+            "这条正是它在用的凭据：它的 worker 下一次请求会被平台拒。要它继续干活，"
+            "需要重新签发一份凭据并重启这个窗口的 worker。"
+            if was_in_use
+            else "已吊销，其它凭据不受影响。"
+        ),
+    }
 
 
 @read.get("/assistant/runs")

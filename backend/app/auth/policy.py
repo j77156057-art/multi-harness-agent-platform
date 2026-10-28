@@ -76,6 +76,16 @@ POLICY: dict[str, frozenset[str]] = {
     "plan:approve": frozenset({HUMAN}),
     "plan:reject": frozenset({HUMAN}),
     "harness:register": frozenset({HUMAN}),
+    # 窗口的凭据：谁能看「这个窗口有几条、哪条在用」、谁能吊销其中一条。
+    #
+    # 只给人。发凭据本身是 CLI 的活（`python -m app.auth issue`），这里补的是它
+    # 一直没有的那半：**看得到、收得回**。平台只存 `token_hash`，同一个窗口每重签
+    # 一次就多一条有效凭据，而旧的那条没有任何界面能指出、也没有界面能吊销 ——
+    # 让 harness 主体自己去吊销同类的凭据，等于让它去猜别人的密码。
+    #
+    # 吊销不删行（`revoked_at` / `revoked_reason` 留在原地），所以这一面**不改
+    # 历史**，只把一条还生效的凭据变成不生效。
+    "harness:credential": frozenset({HUMAN}),
     "project:create": frozenset({HUMAN}),
     "group:create": frozenset({HUMAN}),
     "task:resume": frozenset({HUMAN}),

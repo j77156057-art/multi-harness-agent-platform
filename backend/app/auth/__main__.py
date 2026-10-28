@@ -33,8 +33,14 @@ def main(argv: list[str] | None = None) -> int:
     issue.add_argument("--id", required=True, dest="subject_id")
     issue.add_argument("--label", default="")
 
-    revoke = commands.add_parser("revoke", help="revoke a token by its plaintext")
-    revoke.add_argument("--token", required=True)
+    revoke = commands.add_parser(
+        "revoke", help="revoke a token by its plaintext or by the fingerprint `list` prints"
+    )
+    target = revoke.add_mutually_exclusive_group(required=True)
+    target.add_argument("--token", help="the plaintext, if it is still at hand")
+    target.add_argument("--fingerprint", help="sha256:<hex> prefix, as `list` prints it")
+    revoke.add_argument("--type", choices=["harness", "human"], default=None)
+    revoke.add_argument("--id", dest="subject_id", default=None)
     revoke.add_argument("--reason", default="")
 
     listing = commands.add_parser("list", help="list tokens (no secrets)")
@@ -75,7 +81,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "revoke":
-        revoked = service.revoke(raw=args.token, reason=args.reason)
+        if args.fingerprint:
+            # 凭据丢了（或换过 key 文件）也能收回：指纹是哈希前缀，`list` 印的就是它。
+            try:
+                revoked = service.revoke_fingerprint(
+                    fingerprint=args.fingerprint,
+                    reason=args.reason,
+                    subject_type=args.type,
+                    subject_id=args.subject_id,
+                )
+            except AuthTokenError as exc:
+                _emit({"refused": str(exc)})
+                return 2
+        else:
+            revoked = service.revoke(raw=args.token, reason=args.reason)
         _emit({"revoked": revoked, "reason": args.reason})
         return 0 if revoked else 1
 

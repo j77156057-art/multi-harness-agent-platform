@@ -274,6 +274,21 @@ class HumanCancelRequest(BaseModel):
     reason: str = ""
 
 
+class HarnessCredentialRevokeRequest(BaseModel):
+    """A human revokes one of a window's platform credentials.
+
+    ``fingerprint`` is the short hash the credentials list prints -- never the
+    token itself.  ``force`` exists because the row marked "in use" is the one
+    the window is presenting right now: revoking it takes that window offline
+    until it is given a new credential, so it must be asked for explicitly.
+    """
+
+    fingerprint: str = Field(min_length=7)
+    decided_by: str = Field(min_length=1)
+    reason: str = ""
+    force: bool = False
+
+
 class AdminCancelRequest(BaseModel):
     """Path-addressed cancel for the administrator harness.
 

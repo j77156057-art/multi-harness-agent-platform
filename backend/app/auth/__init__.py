@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.auth.policy import POLICY, Decision, decide
 from app.auth.tokens import (
     TOKEN_PREFIX,
+    AmbiguousFingerprint,
     AuthTokenError,
     Principal,
     TokenInvalid,
@@ -22,6 +23,7 @@ from app.auth.tokens import (
 __all__ = [
     "POLICY",
     "TOKEN_PREFIX",
+    "AmbiguousFingerprint",
     "AuthTokenError",
     "Decision",
     "Principal",

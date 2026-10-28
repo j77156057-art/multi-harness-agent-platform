@@ -597,6 +597,34 @@ export function createFormalGateway(config={}){
         const runs=await call('/harnesses/'+harnessId+'/runs');
         json(res,200,runs);return true;
       }
+      if(req.method==='GET'&&/^\/harnesses\/[A-Za-z0-9_.-]{1,100}\/credentials$/.test(route)){
+        // 这个窗口手上有**几条**平台凭据、**哪条在用**。
+        //
+        // 平台只存哈希，回的是指纹（哈希前 12 位）；凭据明文只在本机
+        // data/<窗口>.key 里。用人的凭据读：凭据归人管，窗口自己拿不到这一面。
+        const harnessId=route.split('/')[2];
+        const list=await call('/harnesses/'+encodeURIComponent(harnessId)+'/credentials');
+        json(res,200,list);return true;
+      }
+      if(req.method==='POST'&&/^\/harnesses\/[A-Za-z0-9_.-]{1,100}\/credentials\/revoke$/.test(route)){
+        // 人指定吊销**一条**：浏览器只给指纹。谁在操作由平台按 token 认
+        // （decided_by 由服务端填），不让浏览器自称身份。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body!=='object')throw fail(400,'invalid_revoke_request');
+        if(Object.keys(body).some(k=>!['fingerprint','reason','force'].includes(k)))
+          throw fail(400,'invalid_revoke_request');
+        if(typeof body.fingerprint!=='string'||!/^sha256:[0-9a-f]{6,64}$/.test(body.fingerprint.trim()))
+          throw fail(400,'invalid_revoke_request');
+        if(body.reason!==undefined&&(typeof body.reason!=='string'||body.reason.length>300))
+          throw fail(400,'invalid_revoke_request');
+        if(body.force!==undefined&&typeof body.force!=='boolean')throw fail(400,'invalid_revoke_request');
+        const harnessId=route.split('/')[2];
+        const result=await call('/harnesses/'+encodeURIComponent(harnessId)+'/credentials/revoke',
+          {fingerprint:body.fingerprint.trim(),decided_by:await scope(),
+            reason:body.reason||'',force:body.force===true});
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/installers'){
         // 「这台电脑上还缺哪个 CLI、官方的安装地址是什么」。
         //

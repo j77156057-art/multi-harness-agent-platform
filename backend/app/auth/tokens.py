@@ -12,6 +12,7 @@ subjects have no registry to check against in v1.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -31,6 +32,10 @@ class AuthTokenError(ValueError):
 
 class UnknownHarness(AuthTokenError):
     """The harness is not in the human-maintained registry."""
+
+
+class AmbiguousFingerprint(AuthTokenError):
+    """A fingerprint matched more than one token, so nothing was revoked."""
 
 
 class TokenInvalid(LookupError):
@@ -114,6 +119,53 @@ class TokenService:
                 "UPDATE auth_tokens SET revoked_at = ?, revoked_reason = ?"
                 " WHERE token_hash = ? AND revoked_at IS NULL",
                 (_now(), reason, hash_token(raw.strip())),
+            )
+        return cursor.rowcount == 1
+
+    def revoke_fingerprint(
+        self,
+        *,
+        fingerprint: str,
+        reason: str = "",
+        subject_type: str | None = None,
+        subject_id: str | None = None,
+    ) -> bool:
+        """Revoke one token by the fingerprint :meth:`list_tokens` prints.
+
+        Revoking by plaintext only works for somebody who still holds the
+        plaintext; when a ``data/<窗口>.key`` file is replaced the old token
+        stays valid and there is nothing left to present.  The fingerprint is
+        the only handle that survives that, so it is what the operator UI
+        offers.
+
+        The fingerprint is a *prefix* of the stored hash.  One that matches two
+        rows is refused (``AmbiguousFingerprint``) rather than guessed --
+        revoking the wrong credential takes a working window offline, and
+        running windows accumulate a token per re-issuance.
+        """
+        prefix = fingerprint.strip()
+        if not re.fullmatch(r"sha256:[0-9a-f]{6,64}", prefix):
+            raise AuthTokenError("fingerprint must look like sha256:<hex> (6 to 64 hex chars)")
+        sql = "SELECT token_hash FROM auth_tokens WHERE revoked_at IS NULL AND token_hash LIKE ?"
+        params: list[object] = [prefix + "%"]
+        if subject_type is not None:
+            sql += " AND subject_type = ?"
+            params.append(subject_type)
+        if subject_id is not None:
+            sql += " AND subject_id = ?"
+            params.append(subject_id)
+        rows = self.database.read(sql, tuple(params))
+        if not rows:
+            return False
+        if len(rows) > 1:
+            raise AmbiguousFingerprint(
+                f"{len(rows)} tokens start with {prefix}; give more characters of the fingerprint"
+            )
+        with self.database.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE auth_tokens SET revoked_at = ?, revoked_reason = ?"
+                " WHERE token_hash = ? AND revoked_at IS NULL",
+                (_now(), reason, str(rows[0]["token_hash"])),
             )
         return cursor.rowcount == 1
 
