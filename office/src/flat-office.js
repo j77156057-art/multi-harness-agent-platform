@@ -1391,10 +1391,24 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       addRow('window', adminId, `管理员 · ${harnessName(adminId)}`, windowStatusText(adminId));
     }
     for (const item of roster) {
-      if (item.harness_id === adminId) continue;
-      // 管理员窗口（office-admin）不是「平台助手」：它按注册表里的本名列出来。
-      // 它仍然不干活 —— 成员名单与「可执行成员」那边照样把它排除。
-      addRow('window', item.harness_id, harnessName(item.harness_id), windowStatusText(item.harness_id));
+      const id = String(item.harness_id || '');
+      if (!id || id === adminId) continue;
+      // 平台助手已经有自己那一行（上面那个常驻的「平台助手」）。名单里再列一遍，
+      // 左栏就会出现两个平台助手 —— 同一个东西被当成两个对象。
+      if (id === ASSISTANT_ID) continue;
+      // `office-admin` 是平台助手的**模型身份**，不是窗口：没有任何 CLI 响应这个
+      // id，列出来只会让人以为项目里还有第三个管理员（见 harness-roles.js）。
+      if (isPlatformAssistantHarness(item)) continue;
+      // 别的管理员的窗口（以前某轮配置留下的）确实在平台上，但它**不是本项目的**
+      // 管理员。不说明这一点，左栏就看起来像有三个管理员。
+      const otherAdmin = /-admin$/i.test(id);
+      const status = windowStatusText(id);
+      addRow(
+        'window',
+        id,
+        harnessName(id),
+        otherAdmin ? `不是本项目的管理员 · ${status}` : status,
+      );
     }
     return list;
   }

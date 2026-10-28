@@ -95,6 +95,8 @@ const responses = {
       { harness_id: ADMIN, name: 'Codex · 管理员', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 1, capabilities: ['coding'], running_tasks: 1 },
       { harness_id: MEMBER, name: 'Codex CLI', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 1, capabilities: ['coding'], running_tasks: 1 },
       { harness_id: 'office-admin', name: '平台助手', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 1, capabilities: ['coding'], running_tasks: 0 },
+      { harness_id: 'office-assistant', name: '平台助手 office-assistant', status: 'online', registration_version: 'reg-001', provider: 'pool', credential_count: 1, capabilities: ['coding'], running_tasks: 0 },
+      { harness_id: 'other-window-admin', name: 'Qoder · 管理员', status: 'online', registration_version: 'reg-001', provider: 'qoder', credential_count: 1, capabilities: ['coding'], running_tasks: 0 },
       { harness_id: 'no-credential', name: '没有凭据的窗口', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 0, capabilities: ['coding'], running_tasks: 0 },
     ],
     base_adapters: [],
@@ -127,6 +129,8 @@ const responses = {
       { harness_id: ADMIN, provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 1, model: 'gpt-5', model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: TASK, last_attempt_status: 'in_progress', recovered: false, usable: true, reasons: [] },
       { harness_id: MEMBER, provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 1, model: 'gpt-5', model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: TASK, last_attempt_status: 'in_progress', recovered: false, usable: true, reasons: [] },
       { harness_id: 'office-admin', provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 1, model: 'gpt-5', model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: true, reasons: [] },
+      { harness_id: 'office-assistant', provider: 'pool', adapter: 'assistant', status: 'online', registration_version: 'reg-001', credential_count: 1, model: null, model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: false, reasons: [] },
+      { harness_id: 'other-window-admin', provider: 'qoder', adapter: 'qoderclicn-print', status: 'online', registration_version: 'reg-001', credential_count: 1, model: 'qwen', model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: true, reasons: [] },
       { harness_id: 'no-credential', provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 0, model: null, model_alias: null, model_source: 'not-readable', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: false, reasons: [{ code: 'no_credential', detail: 'no platform credential' }] },
     ],
   },
@@ -274,6 +278,23 @@ try {
   assert.ok(
     rows.find((r) => r.name === 'Codex CLI').status.includes('执行中'),
     '在跑的窗口说「正在做」',
+  );
+
+  // 一个东西只占一行：平台助手有自己那一行，名单里那一份不能再列一遍。
+  assert.equal(
+    names.filter((n) => n === '平台助手').length,
+    1,
+    `平台助手只能有一行，实际：${names.filter((n) => n.includes('平台助手')).join('、')}`,
+  );
+  // `office-admin` 是平台助手的模型身份，不是窗口：列出来会像第三个管理员。
+  assert.ok(!names.some((n) => n.includes('office-assistant')), '窗口名单里不该再出现平台助手');
+  assert.ok(!names.includes('管理员 harness'), 'office-admin 不是窗口，不该占一行');
+  // 旧配置留下的管理员窗口确实在平台上，但它不是本项目的管理员 —— 要说明。
+  const otherAdmin = rows.find((r) => r.name === 'Qoder · 管理员');
+  assert.ok(otherAdmin, '平台上其他管理员窗口仍在列（它同样是个对象）');
+  assert.ok(
+    otherAdmin.status.includes('不是本项目的管理员'),
+    `别的管理员窗口要说清不是本项目的：${otherAdmin.status}`,
   );
 
   // 2. 点一个窗口 → 中间那栏是它的状态页
