@@ -2624,10 +2624,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const status =
         row.status === 'in_use' ? '在用' : row.status === 'revoked' ? '已吊销' : '仍有效';
       const when = stamp(row.created_at);
-      const dead =
+      // 加粗行只说"现在是什么状态、什么时候"，理由另起一行淡化：
+      // 三个时间加一句话挤在一行里，会让已经作废的那条比在用的那条更响。
+      const headline =
         row.status === 'revoked'
-          ? `；${stamp(row.revoked_at)} 吊销${row.revoked_reason ? `：${row.revoked_reason}` : ''}`
-          : '';
+          ? `${status} · ${stamp(row.revoked_at)} 吊销 · ${when} 签发`
+          : `${status} · ${when} 签发`;
       const element = document.createElement('div');
       element.className =
         'flat-cred' +
@@ -2636,10 +2638,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       element.dataset.fingerprint = String(row.fingerprint || '');
       element.innerHTML = `
         <div class="flat-cred-main">
-          <b>${escape(status)} · ${escape(when)} 签发${escape(dead)}</b>
+          <b>${escape(headline)}</b>
           <span>指纹 ${escape(String(row.fingerprint || ''))}${
             row.label ? ` · 标签：${escape(String(row.label))}` : ''
-          }${row.key_file ? ` · 文件 ${escape(String(row.key_file))}` : ' · 本机没有它的文件'}</span>
+          }${row.key_file ? ` · 文件 ${escape(String(row.key_file))}` : ' · 本机没有它的 key 文件'}</span>
+          ${
+            row.status === 'revoked' && row.revoked_reason
+              ? `<span>原因：${escape(String(row.revoked_reason))}</span>`
+              : ''
+          }
         </div>
         ${row.status === 'valid' ? '<button type="button" data-revoke="1">吊销</button>' : ''}`;
       return element;
@@ -2647,13 +2654,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     const paint = (data) => {
       const rows = (data && data.credentials) || [];
-      const keyFiles = (data && data.key_files) || [];
       box.innerHTML = '<h3>它的平台凭据</h3>';
 
       const explain = document.createElement('p');
       explain.className = 'flat-note';
       explain.textContent =
-        '平台只保存凭据的哈希，这里显示的是指纹；凭据原文只在本机那几个 key 文件里。这个窗口每被重新签发一次就多一条，旧的仍然能开工，所以要收回来。';
+        '平台只保存凭据的哈希，这里显示的是指纹；凭据原文只在本机 key 文件里。重签一次就多一条，旧的仍能开工。';
       box.append(explain);
 
       if (!rows.length) {
@@ -2662,25 +2668,26 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         empty.textContent = (data && data.note) || '这个窗口还没有平台凭据。';
         box.append(empty);
       } else {
+        // 人打开这一块，先想知道"它现在用哪条"，所以按状态排：在用 → 仍有效 →
+        // 已吊销；同一档里新的在前。收回去的那些留在最下面，看得见但不抢眼。
+        const rank = (row) => (row.status === 'in_use' ? 0 : row.status === 'valid' ? 1 : 2);
+        const ordered = [...rows].sort((left, right) => {
+          const byRank = rank(left) - rank(right);
+          if (byRank !== 0) return byRank;
+          return String(right.created_at || '').localeCompare(String(left.created_at || ''));
+        });
         const list = document.createElement('div');
         list.className = 'flat-creds';
-        for (const row of rows) list.append(rowOf(row));
+        for (const row of ordered) list.append(rowOf(row));
         box.append(list);
 
         const live = rows.filter((row) => row.status === 'in_use').length;
         const keeper = document.createElement('p');
         keeper.className = 'flat-note';
         keeper.textContent = live
-          ? '正在使用的那一条没有按钮：吊销它会让这个窗口的下一次请求被平台拒绝，而换一份凭据是开窗口那一步的事。'
+          ? '正在使用的那一条没有按钮：吊销它，它的下一次请求就会被平台拒绝。要换一份凭据，得重新开这个窗口。'
           : '没有一条在用：这台机器上找不到这个窗口能用的凭据文件，它现在开不了工。';
         box.append(keeper);
-
-        if (keyFiles.length) {
-          const where = document.createElement('p');
-          where.className = 'flat-note';
-          where.textContent = `它的凭据文件：${keyFiles.join('、')}。`;
-          box.append(where);
-        }
       }
 
       if (lastNote) {
@@ -2724,7 +2731,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       button.textContent = '正在吊销…';
       api(`/harnesses/${encodeURIComponent(harnessId)}/credentials/revoke`, {
         fingerprint,
-        reason: '在办公室收回不再使用的凭据',
+        // 不编理由：平台自己会记下"谁在什么时候收的"。界面再写一句就是自说自话。
       })
         .then((result) => {
           lastNote = (result && result.note) || '已吊销。';
