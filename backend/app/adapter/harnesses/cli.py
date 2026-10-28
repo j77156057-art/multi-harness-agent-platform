@@ -22,6 +22,7 @@ stopped.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import os
 import signal
@@ -178,6 +179,20 @@ class CliRunner(Protocol):
         err_log_path: Path | None = None,
         env: dict[str, str] | None = None,
     ) -> CliRunResult: ...
+
+
+def runner_accepts(runner: Any, name: str) -> bool:
+    """Whether this runner can take the given keyword argument.
+
+    The production runner writes the child's output to the given log paths. A
+    scripted runner (in a unit test) may not know them, and a runner that
+    cannot be introspected is given the keyword anyway -- it would raise, which
+    is louder than quietly losing the transcript.
+    """
+    try:
+        return name in inspect.signature(runner.run).parameters
+    except (TypeError, ValueError):  # pragma: no cover - exotic callables
+        return True
 
 
 @dataclass(frozen=True, slots=True)

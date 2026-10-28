@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from app.adapter import cli_output
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.cli import (
     CliFailed,
@@ -20,6 +21,7 @@ from app.adapter.harnesses.cli import (
     HarnessTimeout,
     ProviderRoute,
     SubprocessRunner,
+    runner_accepts,
 )
 from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
@@ -331,6 +333,8 @@ def submit_circulation_review(
         ):
             continue
         plan_id = str(round_info.get("plan_id") or "")
+        circulation_id = str(round_info.get("circulation_id") or "")
+        round_no = int(round_info.get("round_no") or 1)
         try:
             document = client.get(f"/api/v1/plans/{plan_id}/document").json().get("markdown") or ""
         except Exception as exc:
@@ -393,15 +397,30 @@ def submit_circulation_review(
             # does not find the provider the route points at.
             child_env = dict(adapter.process_environment() or {})
             child_env.update(route_env)
-            run = (runner or SubprocessRunner()).run(
-                argv,
-                cwd=scratch,
-                timeout_seconds=900,
-                on_tick=None,
-                tick_interval_seconds=None,
-                stdin_text=prompt if getattr(adapter, "prompt_via_stdin", False) else None,
-                env=child_env or None,
+            # 这次审阅也是**真的跑了一次 CLI**：它说的话、它的思考、它调过的
+            # 工具，都该像干活时那样留下 transcript —— 否则这个窗口的对话里
+            # 只有平台自己的记录，看不到它自己的会话。
+            stdout_log, stderr_log = cli_output.conversation_paths(
+                settings.data_dir,
+                kind="review",
+                key=f"{circulation_id}-r{round_no}-{harness_id}",
+                harness_id=harness_id,
             )
+            runner = runner or SubprocessRunner()
+            run_kwargs: dict[str, object] = {
+                "cwd": scratch,
+                "timeout_seconds": 900,
+                "on_tick": None,
+                "tick_interval_seconds": None,
+                "stdin_text": prompt if getattr(adapter, "prompt_via_stdin", False) else None,
+                "env": child_env or None,
+            }
+            # 写日志是**锦上添花**：脚本化的 runner 不认这两个参数，就安静跳过
+            # （不能因为"想留个 transcript"就让这次审阅整个失败）。
+            if runner_accepts(runner, "log_path"):
+                run_kwargs["log_path"] = stdout_log
+                run_kwargs["err_log_path"] = stderr_log
+            run = runner.run(argv, **run_kwargs)
         except Exception as exc:
             import traceback
 

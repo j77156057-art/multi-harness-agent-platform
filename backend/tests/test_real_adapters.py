@@ -1278,6 +1278,52 @@ def test_codex_reads_the_nested_agent_message_not_thread_started():
     assert parsed["session_id"] == "cx-1"
 
 
+def test_opencode_reads_the_nested_part_text_not_the_whole_event_stream():
+    """Real opencode puts the words in a nested ``part.text``.
+
+    Reading only top-level string fields found nothing, and the fallback then
+    handed the **whole event stream** back as the answer -- so a member's
+    opinion was recorded as raw JSON and the group chat showed a wall of
+    ``{"type":"step_start"...}`` instead of what the member said.
+
+    The stdout below is the real thing, captured from this machine's opencode
+    during the two-round circulation (2026-10-27).
+    """
+    stdout = "\n".join(
+        [
+            '{"type":"step_start","timestamp":1793101758289,"sessionID":"ses_e82cf02dcffejubCm4zZ",'
+            '"part":{"id":"prt_17d317f51001VHuBL8kH6ad9Mr","type":"step-start",'
+            '"snapshot":"040fc8aeaa4f104a959c325bad8060dd923f2e7e"}}',
+            '{"type":"text","timestamp":1793101758301,"sessionID":"ses_e82cf02dcffejubCm4zZ",'
+            '"part":{"id":"prt_17d317f560015Qgz3zF6DdjGLZ","type":"text",'
+            '"text":"【不清楚】三个测试文件只给了路径、没给用例名。","time":{"start":1,"end":2}}}',
+        ]
+    )
+    adapter = OpenCodeAdapter(client=None)
+
+    parsed = adapter.parse_output(stdout)
+
+    assert parsed["final_message"] == "【不清楚】三个测试文件只给了路径、没给用例名。"
+    assert parsed.get("session_id") == "ses_e82cf02dcffejubCm4zZ"
+
+
+def test_opencode_does_not_call_the_raw_event_stream_the_answer():
+    """认不出正文时，答案要空着 —— 不能拿整段原始输出冒充。
+
+    "没有回答"和"回答就是这一大段"必须分得开：前者该让平台知道出问题了，
+    后者会把事件流当成成员的意见记进档案、贴进群聊。
+    """
+    stdout = (
+        '{"type":"step_start","timestamp":1793101758289,"sessionID":"ses-1",'
+        '"part":{"id":"prt-1","type":"step-start","snapshot":"abc"}}'
+    )
+    adapter = OpenCodeAdapter(client=None)
+
+    parsed = adapter.parse_output(stdout)
+
+    assert "final_message" not in parsed
+
+
 def test_the_subprocess_runner_pipes_the_whole_multi_line_prompt(tmp_path):
     """Regression for FD-8438d596ff9225e6 at the transport layer.
 

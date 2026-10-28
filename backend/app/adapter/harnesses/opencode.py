@@ -232,8 +232,25 @@ class OpenCodeAdapter(CliHarness):
         return {"XDG_CONFIG_HOME": str(root)}
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
+        """The answer the CLI actually gave.
+
+        Real opencode (the version this platform runs) prints **one event per
+        line** and puts the words in a nested ``part.text``::
+
+            {"type":"text", "part": {"type":"text", "text":"<the answer>"}}
+
+        Reading only top-level string fields found nothing there, and the
+        fallback then handed the **whole event stream** back as if it were the
+        answer: the member's opinion was recorded as raw JSON, and the group
+        chat showed a wall of ``{"type":"step_start"...}``.
+
+        So: read the nested part, and when the output really is an event
+        stream, do not fall back to the raw text -- "no answer" must stay
+        distinguishable from "the answer is everything the CLI printed".
+        """
         parsed: dict[str, Any] = {}
         final_message: str | None = None
+        saw_event = False
         for line in stdout.splitlines():
             line = line.strip()
             if not line.startswith("{"):
@@ -244,15 +261,37 @@ class OpenCodeAdapter(CliHarness):
                 continue
             if not isinstance(event, dict):
                 continue
+            saw_event = True
             for key in ("session_id", "sessionID"):
                 if isinstance(event.get(key), str) and event[key]:
                     parsed.setdefault("session_id", event[key])
-            for key in ("text", "message", "content", "part"):
+            for key in ("text", "message", "content"):
                 value = event.get(key)
                 if isinstance(value, str) and value.strip():
                     final_message = value
+            part = event.get("part")
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str) and text.strip():
+                    final_message = text
+            message = event.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    final_message = content
+                elif isinstance(content, list):
+                    blocks = [
+                        block.get("text")
+                        for block in content
+                        if isinstance(block, dict)
+                        and isinstance(block.get("text"), str)
+                        and block["text"].strip()
+                    ]
+                    if blocks:
+                        final_message = "\n".join(blocks)
         if final_message is not None:
             parsed["final_message"] = final_message
-        elif stdout.strip():
+        elif stdout.strip() and not saw_event:
+            # 只有整段输出根本不是事件流时，原文才当答案（纯文本输出的 CLI）。
             parsed["final_message"] = stdout.strip()
         return parsed

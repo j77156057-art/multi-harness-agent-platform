@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.adapter import cli_output
 from app.adapter.formal_worker import base_harness_id, build_adapter, known_bases
 from app.adapter.harnesses.cli import (
     CliRunner,
@@ -25,6 +26,7 @@ from app.adapter.harnesses.cli import (
     HarnessTimeout,
     ProviderRoute,
     SubprocessRunner,
+    runner_accepts,
 )
 from app.config import settings
 from app.db.connection import Database
@@ -224,7 +226,9 @@ class AdminService:
             f"收到的意见：\n{comments}\n\n"
             "只输出那个 JSON 对象，不要别的文字。"
         )
-        payload, model = self._invoke_model(prompt, route=route)
+        payload, model = self._invoke_model(
+            prompt, route=route, log_key=f"revise-{plan_id}"
+        )
         if isinstance(payload, list):
             payload = {"tasks": payload}
         revised = payload.get("tasks") if isinstance(payload, dict) else None
@@ -417,7 +421,9 @@ class AdminService:
         # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
         # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
         # "看起来能用"的默认通道 —— 那会让回执里的 `model.adapter` 说谎。
-        payload, model = self._invoke_model(prompt, route=route)
+        payload, model = self._invoke_model(
+            prompt, route=route, log_key=f"refine-{group_id}"
+        )
         questions = _questions(payload)
         result: dict[str, Any] = {
             "harness_id": self.harness_id,
@@ -481,7 +487,9 @@ class AdminService:
             # never sees and that still claims to be an answer.
             raise AdminHarnessError("refusing to answer the administrator's own message")
         prompt = self._answer_prompt(text, group_id=group_id, asker=recipient)
-        payload, model = self._invoke_model(prompt, route=route)
+        payload, model = self._invoke_model(
+            prompt, route=route, log_key=f"answer-{recipient}"
+        )
         answer = str(payload.get("answer") or "").strip()
         if not answer:
             raise AdminHarnessError("the administrator model returned no answer text")
@@ -562,7 +570,7 @@ class AdminService:
         return str(getattr(adapter, "pool_protocol", "openai") or "openai")
 
     def _invoke_model(
-        self, prompt: str, route: ProviderRoute | None = None
+        self, prompt: str, route: ProviderRoute | None = None, log_key: str = ""
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Run the administrator's own model channel once and parse its JSON.
 
@@ -577,6 +585,11 @@ class AdminService:
         Without it the administrator silently depended on whatever provider the
         machine happened to have configured, which is how "the admin refined
         nothing" happened when that local provider was down.
+
+        ``log_key`` names the conversation this call belongs to. The call runs
+        a real CLI, so its words are worth keeping: without this the
+        administrator's window showed only the platform's own records, and its
+        own session was invisible.
         """
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
         adapter, base = self._model_channel()
@@ -602,6 +615,16 @@ class AdminService:
             # Only when there is something to add: a runner that takes no
             # ``env`` keeps working unchanged.
             run_kwargs["env"] = env
+        if log_key:
+            stdout_log, stderr_log = cli_output.conversation_paths(
+                settings.data_dir,
+                kind="admin",
+                key=log_key,
+                harness_id=self.harness_id,
+            )
+            if runner_accepts(self.runner, "log_path"):
+                run_kwargs["log_path"] = stdout_log
+                run_kwargs["err_log_path"] = stderr_log
         try:
             run = self.runner.run(argv, **run_kwargs)
         except CliUnavailable as exc:
@@ -652,7 +675,9 @@ class AdminService:
             verification=verification or {},
             project_name=project_name,
         )
-        payload, model = self._invoke_model(prompt, route=route)
+        payload, model = self._invoke_model(
+            prompt, route=route, log_key=f"review-{task.get('task_id') or 'unknown'}"
+        )
         verdict = str(payload.get("verdict") or "").strip()
         if verdict not in {"approve", "request_changes"}:
             raise AdminHarnessError("review output verdict must be 'approve' or 'request_changes'")

@@ -8,6 +8,7 @@ the projections; the event stream is the incremental cursor.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2510,6 +2511,117 @@ def task_forensics(
             },
         }
     }
+
+
+@read.get("/harnesses/{harness_id}/runs")
+def harness_cli_runs(
+    harness_id: str,
+    database: DatabaseDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict[str, Any]:
+    """This window's own CLI sessions -- what it actually ran and said.
+
+    Every harness on this platform is a real CLI (Claude Code, Codex, OpenCode,
+    Pi, Qoder, CodeBuddy).  When one of them works on a task, the child's
+    output is kept and the office shows it ("查看成员输出").  But the
+    **conversations** -- reviewing a plan, refining a requirement, answering a
+    question -- run the same CLI and left *nothing* behind, so the window's
+    conversation showed only the platform's own records and its own session
+    was invisible.
+
+    This face lists both kinds for one window: the task attempts it owned and
+    the conversation runs it took part in.  Read-only; the log tails are
+    redacted the same way the forensics face redacts them, and a run with no
+    output says so instead of showing an empty box.
+    """
+    # The id ends up in a file-name glob, so its shape is checked here: a
+    # wildcard would match somebody else's transcript.
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", harness_id):
+        raise ApiError("harness.not_found", 404, "unknown harness")
+    rows = database.read(
+        "SELECT a.task_id, a.attempt_id, a.attempt_no, a.status, a.owner"
+        " FROM task_attempts a WHERE a.owner = ? ORDER BY a.rowid DESC LIMIT ?",
+        (harness_id, int(limit)),
+    )
+    runs: list[dict[str, Any]] = []
+    for row in rows:
+        stdout_path, stderr_path = cli_output.log_paths(
+            settings.data_dir, str(row["task_id"]), str(row["attempt_id"])
+        )
+        stdout = cli_output.read_tail(stdout_path)
+        stderr = cli_output.read_tail(stderr_path)
+        if not stdout["bytes"] and not stderr["bytes"]:
+            continue
+        stdout_text, stdout_masked = cli_output.redact(stdout["text"])
+        stderr_text, stderr_masked = cli_output.redact(stderr["text"])
+        runs.append(
+            {
+                "kind": "task",
+                "key": str(row["task_id"]),
+                "label": f"任务 {row['task_id']}（第 {row['attempt_no']} 次尝试）",
+                "task_id": str(row["task_id"]),
+                "attempt_id": str(row["attempt_id"]),
+                "status": str(row["status"] or ""),
+                "at": stdout["updated_at"] or stderr["updated_at"],
+                "stdout": stdout_text,
+                "stderr": stderr_text,
+                "stdout_bytes": stdout["bytes"],
+                "redacted_lines": stdout_masked + stderr_masked,
+            }
+        )
+
+    # The conversation runs live next to the task logs, named
+    # ``<kind>__<key>__<harness>.log``; the separator is what tells the two
+    # shapes apart.
+    run_dir = cli_output.run_dir(settings.data_dir)
+    if run_dir.is_dir():
+        for path in sorted(run_dir.glob(f"*__{harness_id}.log"), key=lambda p: p.stat().st_mtime):
+            if path.name.endswith(".err.log"):
+                continue
+            parsed = cli_output.parse_conversation_name(path.name)
+            if parsed is None or parsed["harness_id"] != harness_id:
+                continue
+            stdout = cli_output.read_tail(path)
+            stderr_path = path.with_name(path.name[: -len(".log")] + ".err.log")
+            stderr = cli_output.read_tail(stderr_path)
+            stdout_text, stdout_masked = cli_output.redact(stdout["text"])
+            stderr_text, stderr_masked = cli_output.redact(stderr["text"])
+            runs.append(
+                {
+                    "kind": parsed["kind"],
+                    "key": parsed["key"],
+                    "label": _conversation_run_label(parsed["kind"], parsed["key"]),
+                    "task_id": None,
+                    "attempt_id": None,
+                    "status": "",
+                    "at": stdout["updated_at"] or stderr["updated_at"],
+                    "stdout": stdout_text,
+                    "stderr": stderr_text,
+                    "stdout_bytes": stdout["bytes"],
+                    "redacted_lines": stdout_masked + stderr_masked,
+                }
+            )
+
+    runs.sort(key=lambda item: str(item.get("at") or ""), reverse=True)
+    return {
+        "harness_id": harness_id,
+        "runs": runs[: int(limit)],
+        "note": (
+            ""
+            if runs
+            else "这个窗口还没有留下 CLI 运行记录（干活与对话都会留；"
+            "平台刚接上这个窗口时它可能还没跑过）。"
+        ),
+    }
+
+
+def _conversation_run_label(kind: str, key: str) -> str:
+    """A readable name for a CLI run that owns no task."""
+    if kind == "review":
+        return f"传阅审阅 · {key}"
+    if kind == "admin":
+        return f"管理员 · {key}"
+    return f"{kind} · {key}"
 
 
 @read.get("/assistant/runs")

@@ -49,6 +49,60 @@ def log_paths(data_dir: Path | str, task_id: str, attempt_id: str) -> tuple[Path
     )
 
 
+#: A run that has no task and no attempt (a review of a plan, the
+#: administrator's own refinement) still ran a real CLI, and its words are
+#: worth keeping. These names are what makes such a run findable later:
+#: ``<kind>__<key>__<harness>.log``.
+CONVERSATION_SEP = "__"
+
+
+def conversation_paths(
+    data_dir: Path | str, *, kind: str, key: str, harness_id: str
+) -> tuple[Path, Path]:
+    """The (stdout, stderr) log paths for a CLI run that owns no task.
+
+    A member reviewing a plan runs its CLI exactly like it runs a task, but
+    there is no attempt to hang the transcript on -- so the run used to leave
+    **no trace at all**: the window's conversation showed only the platform's
+    own records, and the CLI's session was invisible.
+
+    The name carries the three things needed to find it again: what kind of
+    run it was, which conversation it belongs to, and which window ran it.
+    """
+    parts = [kind, key, harness_id]
+    safe = CONVERSATION_SEP.join(_safe_name(part) for part in parts)
+    base = run_dir(data_dir) / safe
+    return (
+        base.with_name(base.name + ".log"),
+        base.with_name(base.name + ".err.log"),
+    )
+
+
+def _safe_name(value: str) -> str:
+    """A name that is safe on disk and still readable in a file listing."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "")).strip("-")
+    return cleaned or "unknown"
+
+
+def parse_conversation_name(name: str) -> dict[str, str] | None:
+    """Read back what ``conversation_paths`` wrote, or None if it is not ours.
+
+    The task-attempt logs live in the same directory under a different shape
+    (``<task>.<attempt>.log``), so the separator is what tells them apart.
+    """
+    stem = name
+    for suffix in (".err.log", ".log"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    else:
+        return None
+    parts = stem.split(CONVERSATION_SEP)
+    if len(parts) != 3 or not all(parts):
+        return None
+    return {"kind": parts[0], "key": parts[1], "harness_id": parts[2]}
+
+
 #: The mask a line with a credential-looking value gets.
 REDACTED_LINE = "[这一行含疑似凭据，平台已遮挡]"
 

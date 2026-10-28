@@ -65,9 +65,15 @@ try{
   const adminCall=calls.find(c=>c.path==='/api/v1/review/claim');assert(adminCall&&adminCall.authorization==='Bearer '+ADMIN_TOKEN);
   const reviewSubmit=await fetch(base+'/api/formal/review/submit',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({task_id:'FD-0123456789abcdef',attempt_id:'FD-0123456789abcdef.a1',review_id:'rv-1',verdict:'approve',reviewed_commit:'a'.repeat(40),review_revision:1,findings:[]})});assert.equal(reviewSubmit.status,200);assert.equal((await reviewSubmit.json()).status,'approved');
   const foreign=await fetch(base+'/api/formal/tasks/FD-ffffffffffffffff');assert.equal(foreign.status,404);assert(!calls.some(c=>c.path.includes('FD-ffffffffffffffff/diff')));
+  // 窗口自己跑过的 CLI 会话：只读，透传平台。id 不认识形状的（带斜杠/点）
+  // 不放行 —— 它会被拼进上游路径，拼坏了就是把路径当查询串用。
+  const runs=await fetch(base+'/api/formal/harnesses/claude-code/runs');assert.equal(runs.status,200);
+  assert(calls.some(c=>c.path==='/api/v1/harnesses/claude-code/runs'));
+  const badRuns=await fetch(base+'/api/formal/harnesses/..%2Fetc/runs');assert(badRuns.status===404||badRuns.status===400);
+  assert(!calls.some(c=>c.path.includes('..%2Fetc')));
   await close(upstream);
   const offline=await fetch(base+'/api/formal/status');assert.equal(offline.status,503);
   assert.throws(()=>createFormalGateway({upstream:'http://external.example',tokenFile:'x',project:'P',group:'G'}));
-  const result={checks:18,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
+  const result={checks:21,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
   await fs.mkdir('handoff/codex-formal-dispatch-2026-10-14',{recursive:true});await fs.writeFile('handoff/codex-formal-dispatch-2026-10-14/gateway-check-final.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await close(server);if(upstream.listening)await close(upstream);await fs.rm(tmp,{recursive:true,force:true});}

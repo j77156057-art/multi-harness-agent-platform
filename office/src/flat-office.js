@@ -1338,6 +1338,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       button.type = 'button';
       const on = state.view.kind === kind && (state.view.id || null) === (id || null);
       button.className = 'flat-conv' + (on ? ' is-on' : '');
+      // 窗口行带上自己的身份：名单的顺序会变（谁在线、谁先被读到），
+      // 按位置找窗口就会找错人；按身份找才是那一个窗口。
+      if (id) button.dataset.harness = id;
       button.innerHTML = `<b>${escape(name)}</b><span>${escape(status)}</span>`;
       button.addEventListener('click', onClick || (() => {
         state.view = { kind, id: id || null };
@@ -2254,6 +2257,116 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return card;
   }
 
+  /**
+   * 这个窗口自己的 CLI 会话。
+   *
+   * 干活时的输出已经能看到（任务详情里的「成员输出」）。这里补的是**对话**
+   * 那一半：它审阅方案、细化需求、回答问题时也真的跑着自己的 CLI，那些会话
+   * 现在同样留下了 transcript，按「它说了什么 / 它做了什么」呈现 —— 与它在
+   * 终端里自己显示的那份是同一段输出。
+   *
+   * 读不到就说读不到，不拿平台自己的记录冒充它的会话。
+   */
+  function cliSessionsPanel(harnessId) {
+    const box = document.createElement('section');
+    box.className = 'flat-spec flat-cli-sessions';
+    box.innerHTML = '<h3>它自己的 CLI 会话</h3><p class="flat-note">正在读它跑过的 CLI…</p>';
+    api(`/harnesses/${encodeURIComponent(harnessId)}/runs`).then((data) => {
+      const runs = (data && data.runs) || [];
+      box.innerHTML = '<h3>它自己的 CLI 会话</h3>';
+      if (!runs.length) {
+        const empty = document.createElement('p');
+        empty.className = 'flat-empty';
+        empty.textContent = (data && data.note) || '这个窗口还没有留下 CLI 运行记录。';
+        box.append(empty);
+        return;
+      }
+      const note = document.createElement('p');
+      note.className = 'flat-note';
+      note.textContent = `共 ${runs.length} 次运行（干活与对话都在内）—— 这是它自己的 CLI 打印的。`;
+      box.append(note);
+      const list = document.createElement('div');
+      list.className = 'flat-wtasks';
+      for (const run of runs) list.append(cliSessionCard(run, harnessId));
+      box.append(list);
+    }).catch(() => {
+      box.innerHTML = '<h3>它自己的 CLI 会话</h3>';
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '（暂时读不到它的 CLI 运行记录）';
+      box.append(empty);
+    });
+    return box;
+  }
+
+  /** 一次 CLI 运行：它说了什么、它做了什么。 */
+  function cliSessionCard(run, harnessId) {
+    const card = document.createElement('details');
+    card.className = 'flat-wtask flat-cli-session';
+    // 折叠状态要记住：办公室每 15 秒重画一次，用户刚展开想读这段会话，
+    // 下一轮就被"啪"地合上 —— 正在看的东西从手里跑掉。
+    const foldKey = `cli-session:${harnessId}:${(run && run.kind) || ''}:${(run && run.key) || ''}`;
+    card.dataset.fold = foldKey;
+    const stdout = String((run && run.stdout) || '');
+    const transcript = parseTranscript(stdout);
+    const tools = foldRepeats(transcript.tools.slice(-6).reverse(), (tool) => tool.label);
+    const headline = transcript.isJson ? readableText(headlineText(transcript)) : '';
+    const steps = transcript.isJson ? [] : recentSteps(stdout, 6);
+    const at = String((run && run.at) || '').replace('T', ' ').slice(5, 16);
+    const kb = run && run.stdout_bytes ? ` · ${Math.max(1, Math.round(Number(run.stdout_bytes) / 1024))} KB` : '';
+    const rawKey = `${foldKey}:raw`;
+    card.innerHTML = `
+      <summary>
+        <b>${escape(String((run && run.label) || '一次运行'))}</b>
+        <span class="flat-note">${escape(at)}${escape(kb)}</span>
+      </summary>
+      <div class="flat-wtask-body">
+        ${
+          headline
+            ? `<p class="flat-note">它最后说了</p><pre class="flat-output">${escape(headline)}</pre>`
+            : steps.length
+              ? `<p class="flat-note">它刚做的（最近 ${steps.length} 步）</p><ul class="flat-list flat-live-steps">${[
+                  ...steps,
+                ]
+                .reverse()
+                .map(
+                  (step) =>
+                    `<li><span>${escape(clip(step.text, 140))}${
+                      step.count > 1 ? ` <em>×${step.count}</em>` : ''
+                    }</span></li>`,
+                )
+                .join('')}</ul>`
+              : '<p class="flat-empty">（这一段没有可读的文字）</p>'
+        }
+        ${
+          tools.length
+            ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools
+                .map(
+                  (tool) =>
+                    `<li><span>${escape(tool.text)}${tool.count > 1 ? ` <em>×${tool.count}</em>` : ''}</span></li>`,
+                )
+                .join('')}</ul>`
+            : ''
+        }
+        ${
+          run && run.redacted_lines
+            ? `<p class="flat-note">其中 ${Number(run.redacted_lines)} 行含疑似凭据，平台已遮挡。</p>`
+            : ''
+        }
+        ${
+          stdout
+            ? `<details class="outputs-more-block" data-fold="${escape(rawKey)}"${
+                state.openFolds.has(rawKey) ? ' open' : ''
+              }><summary>查看原始记录</summary><pre class="outputs-raw">${escape(
+                shortenPath(stdout.slice(-4000)),
+              )}</pre></details>`
+            : ''
+        }
+      </div>`;
+    if (state.openFolds.has(foldKey)) card.open = true;
+    return card;
+  }
+
   function windowPane(harnessId) {
     const panel = document.createElement('section');
     panel.className = 'flat-detail flat-window';
@@ -2361,6 +2474,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       section.append(list);
       panel.append(section);
     }
+
+    // 它自己的 CLI 会话：干活有（上面的「当前正在执行」），**对话也要有**。
+    //
+    // 这个窗口就是一台真的 CLI（Claude Code / Codex / OpenCode / Pi / Qoder
+    // / CodeBuddy）。它审阅方案时同样在跑自己的 CLI，同样说了话、调了工具 ——
+    // 但那些输出以前不留，于是这个面板只剩平台的记录，看不到它自己的会话。
+    panel.append(cliSessionsPanel(harnessId));
 
     // token 度量：**两笔账**，各管各的。
     //   · 额度池记的 —— 走额度池的调用，平台自己记的（consumer = `harness/<id>`）。

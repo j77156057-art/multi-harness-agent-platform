@@ -33,7 +33,9 @@ from app.allocation.machine import (
     default_allocation_table,
 )
 from app.db.connection import Database
+from app.db.sequence import next_global_seq
 from app.events.store import EventStore
+from app.security.scan import MESSAGE_CODE, SecretScanBlocked, scan_for_block
 from app.spec import AllocationEvent
 
 #: 传阅轮的终态与在途态的区分，供门禁查询复用。
@@ -235,9 +237,38 @@ class AllocationService:
         body: str,
         material_hash: str | None = None,
     ) -> dict[str, Any]:
-        """名单内成员提交本轮意见。名单外的人被拒（§39 硬规则：只在本轮名单内）。"""
+        """名单内成员提交本轮意见。名单外的人被拒（§39 硬规则：只在本轮名单内）。
+
+        意见会同时**落到项目群聊**（见 ``_post_review_to_group``）：这份意见是
+        成员自己写的，群里就该看得见是谁说了什么 —— 只有管理员一个人在群里
+        转述，成员就等于没开口。群聊那条与这份记录在同一个事务里写入，
+        所以不会出现"记录里有、群里没有"的半截状态。
+        """
         if not body.strip():
             raise AllocationError("a circulation review must not be empty")
+        # 这段文字马上要进群聊（人能看到的地方），所以按消息面扫一次：
+        # 命中的意见不写进记录，也不进群聊，只留一条扫描事件。
+        blocked = scan_for_block(body, surface="message")
+        if blocked is not None:
+            scan_id, findings = blocked
+            seq = self.store.append(
+                event_name="secret_scan_blocked",
+                aggregate_type="circulation_round",
+                aggregate_id=circulation_id,
+                actor_type="harness",
+                actor_id=harness_id,
+                payload={
+                    "scan_id": scan_id,
+                    "surface": "message",
+                    "findings": [finding.as_json() for finding in findings],
+                },
+            ).seq
+            raise SecretScanBlocked(
+                code=MESSAGE_CODE,
+                scan_id=scan_id,
+                rule_name=findings[0].rule_name,
+                event_seq=seq,
+            )
         with self.database.transaction() as conn:
             row = self._round(conn, circulation_id)
             next_state = self._next(str(row["state"]), AllocationEvent.CIRCULATION_REVIEW_SUBMITTED)
@@ -290,7 +321,67 @@ class AllocationService:
                 " WHERE circulation_id = ?",
                 (next_state, circulation_id),
             )
+            self._post_review_to_group(
+                conn,
+                group_id=str(row["group_id"]),
+                plan_id=str(row["plan_id"]),
+                round_no=int(row["round_no"]),
+                harness_id=harness_id,
+                body=body,
+                circulation_id=circulation_id,
+                review_id=review_id,
+            )
             return {"review_id": review_id, "state": next_state}
+
+    def _post_review_to_group(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        group_id: str,
+        plan_id: str,
+        round_no: int,
+        harness_id: str,
+        body: str,
+        circulation_id: str,
+        review_id: str,
+        note: str = "",
+    ) -> None:
+        """把这一份成员意见写进项目群聊。
+
+        写在**同一个事务**里：意见要么两处都在，要么两处都没有 —— 不会出现
+        "记录里有、群里没有"的半截状态（那一半读起来最像丢件）。
+
+        作者是成员自己（他用自己的凭据提交了这份意见，平台只是把它带进群里），
+        不写成管理员转述：群里要看见的是"谁说的"，不是"谁复述的"。
+
+        ``note`` 是标题下面的一行说明。补记已经发生的意见时用它写明"这份意见
+        当时已提交、这里补进群聊"，免得时间轴上今天的发言被当成刚才说的。
+        """
+        message_id = _new_id("msg")
+        seq = next_global_seq(conn)
+        head = f"第 {round_no} 轮传阅意见（方案 {plan_id}）"
+        text = f"{head}\n\n{body}" if not note else f"{head}\n{note}\n\n{body}"
+        conn.execute(
+            "INSERT INTO task_messages(message_id, group_id, task_id, sender_type,"
+            " sender_id, body, created_seq, created_at, refs)"
+            " VALUES (?, ?, NULL, 'harness', ?, ?, ?, ?, ?)",
+            (
+                message_id,
+                group_id,
+                harness_id,
+                text,
+                seq,
+                _now(),
+                json.dumps(
+                    [
+                        "circulation-review",
+                        f"circulation:{circulation_id}",
+                        f"review:{review_id}",
+                    ],
+                    ensure_ascii=False,
+                ),
+            ),
+        )
 
     def close_circulation_round(self, *, circulation_id: str, closed_by: str) -> dict[str, Any]:
         """本轮收齐（或截止）→ 进入修订态。"""

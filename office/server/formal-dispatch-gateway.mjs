@@ -569,6 +569,13 @@ export function createFormalGateway(config={}){
         const availability=await call('/adapter/availability');
         json(res,200,availability);return true;
       }
+      if(req.method==='GET'&&/^\/harnesses\/[A-Za-z0-9_-]{1,100}\/runs$/.test(route)){
+        // 这个窗口**自己**跑过的 CLI 会话：干活的那一半 + 对话的那一半（审阅方案、
+        // 细化需求、回答问题）。只读，透传平台 —— 办公室不自己造一份。
+        const harnessId=route.split('/')[2];
+        const runs=await call('/harnesses/'+harnessId+'/runs');
+        json(res,200,runs);return true;
+      }
       if(req.method==='GET'&&route==='/installers'){
         // 「这台电脑上还缺哪个 CLI、官方的安装地址是什么」。
         //
