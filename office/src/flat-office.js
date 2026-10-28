@@ -241,6 +241,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 列表的看法：'person' = 按窗口归堆（谁忙谁闲），'time' = 平铺按时间排。
     groupBy: 'person',
     error: null,
+    // 上一件「成功了但还没说完」的事（比如刚给某个窗口开好新成员）。
+    // 与 error 分开：成功和失败摆同一个框里，人会以为是失败。
+    memberNote: '',
     messages: [],
     userKeys: [],
     userKeyPending: null,
@@ -1283,6 +1286,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           ? `<div class="flat-error">
               <b>刚才那一下没成：</b>${escape(state.error)}
               <button type="button" data-act="dismiss-error">知道了</button>
+            </div>`
+          : ''
+      }
+      ${
+        state.memberNote
+          ? `<div class="flat-note-row">
+              ${escape(state.memberNote)}
+              <button type="button" data-act="dismiss-member-note">知道了</button>
             </div>`
           : ''
       }`;
@@ -2978,6 +2989,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     // 注册成功：加进这个项目（与「加入这个项目」同一个动作）。
     addMemberToProject(instanceId);
+    // 再让它**真能干活**：没凭据就签发、没 worker 就起一个它自己的。
+    // 这一步失败不能说成成功——人以为新窗口能用了，实际领不到活。
+    try {
+      const started = await api('/harnesses/provision', { harness_id: instanceId });
+      state.memberNote = started && started.started
+        ? `${name} 已经能接活了：${String(started.note || '')}`
+        : `${name} 已加进项目；${String((started && started.reason) || '它本来就在跑')}。`;
+    } catch (error) {
+      state.memberNote = `${name} 已加进项目，但还没能开始干活：${String(
+        (error && error.message) || error,
+      )}（凭据或 worker 没起来，它现在领不到活）`;
+    }
     state.error = null;
     state.memberAdded = instanceId;
     await refresh();
@@ -4975,6 +4998,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return;
     }
     if (button.dataset.act === 'dismiss-error') {
+      // 按钮写着「知道了」，按了就得真的消失。以前只 render() 不清 state，
+      // 于是提示一直挂着 —— 人点了没反应，只能以为没点上。
+      state.error = null;
+      render();
+      return;
+    }
+    if (button.dataset.act === 'dismiss-member-note') {
+      state.memberNote = '';
       render();
       return;
     }

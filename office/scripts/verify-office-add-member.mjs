@@ -98,8 +98,18 @@ try {
     const json = (body, code = 200) =>
       route.fulfill({ status: code, contentType: 'application/json', body: JSON.stringify(body) });
     if (route.request().method() === 'POST') {
-      posts.push({ name, body: route.request().postDataJSON() });
-      return json({ instance_id: route.request().postDataJSON().instance_id, registered: true });
+      const body = route.request().postDataJSON();
+      posts.push({ name, body });
+      if (name === '/harnesses/provision') {
+        return json({
+          harness_id: body.harness_id,
+          started: true,
+          pid: 4242,
+          credential: 'issued',
+          note: '已签发平台凭据；已启动 worker（pid 4242）。它接到活时平台会给它开自己的工作树。',
+        });
+      }
+      return json({ instance_id: body.instance_id, registered: true });
     }
     if (name === '/status') return json(status);
     if (name === '/availability') return json({ availability: AVAILABILITY });
@@ -168,6 +178,16 @@ try {
   assert.ok(
     (stored[0]?.members || []).includes('qoder-member-3'),
     `新窗口要进本项目成员：${JSON.stringify(stored[0]?.members)}`,
+  );
+
+  // 4. 注册完还要让它**真能干活**：调 provision，并把结果说出来
+  const provision = posts.find((item) => item.name === '/harnesses/provision');
+  assert.ok(provision, `要调 /harnesses/provision，实际：${JSON.stringify(posts.map((p) => p.name))}`);
+  assert.equal(provision.body.harness_id, 'qoder-member-3');
+  const note = await page.locator('.flat-note-row').first().innerText().catch(() => '');
+  assert.ok(
+    note.includes('能接活') || note.includes('worker'),
+    `要把"已经能接活"说出来，实际：${note}`,
   );
 
   // 4. 不在窗口行上右键 → 不弹

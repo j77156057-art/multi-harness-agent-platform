@@ -1,4 +1,8 @@
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import { createWindowProvisioner } from './window-provisioner.mjs';
 
 import { parseTranscript } from '../src/cli-transcript.js';
 
@@ -564,8 +568,25 @@ export function createFormalGateway(config={}){
         const events=(page.events||[]).filter(e=>taskIds.has(e.aggregate_id));
         json(res,200,{events,next_seq:page.next_seq,has_more:page.has_more});return true;
       }
-      if(req.method==='GET'&&route==='/availability'){
-        // 谁现在能用、用的哪个模型、最近有没有失败（平台侧的事实）。
+      if(req.method==='POST'&&route==='/harnesses/provision'){
+        // 让人在办公室点一下就把新窗口变成**能干活**：发凭据、写 key、起 worker。
+        // 人只给一个 harness_id；要跑什么命令全由服务端拼（见 window-provisioner）。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string')
+          throw fail(400,'invalid_provision_request');
+        return await provisionRoute(body.harness_id,res);
+      }
+      if(req.method==='POST'&&route==='/harnesses/stop'){
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string')
+          throw fail(400,'invalid_stop_request');
+        try{ json(res,200,provisioner.stop(body.harness_id)); }
+        catch(error){ throw fail(error.status||503, error.message||'window_stop_failed'); }
+        return true;
+      }
+      if(req.method==='GET'&&route==='/availability'){        // 谁现在能用、用的哪个模型、最近有没有失败（平台侧的事实）。
         const availability=await call('/adapter/availability');
         json(res,200,availability);return true;
       }
@@ -811,6 +832,30 @@ export function createFormalGateway(config={}){
       // 面已经撤掉：现在只有管理员能派单，而且派的是**细化之后**的子任务。
       throw fail(404,'formal_route_not_allowed');
     }catch(error){json(res,error.status||503,{error:error.status?error.message:error.code||'formal_gateway_unavailable',...(error.status?{}:{detail:String(error.message||error)})});return true;}
+  }
+  // 「让这个窗口能干活」：发凭据 + 起它自己的 worker。
+  //
+  // 只给**平台上已经注册**的窗口开：先问注册表，注册表里没有就是 404 —— 浏览器
+  // 给什么 id 都不能让本机去跑一个没登记的东西。
+  const provisioner=createWindowProvisioner({
+    repoRoot:path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..'),
+    python:config.pythonPath,
+    canonicalRepo:config.canonicalRepo,
+    worktreeRoot:config.worktreeRoot,
+    group:config.group,
+    upstream:config.upstream,
+    tokenFile:config.tokenFile,
+  });
+  async function provisionRoute(harnessId,res){
+    const registered=await call('/harnesses');
+    const listed=(registered.harnesses||[]).map(item=>String(item.harness_id||''));
+    if(!listed.includes(harnessId))throw fail(404,'harness_not_registered');
+    try{
+      const result=await provisioner.provision(harnessId);
+      json(res,200,result);return true;
+    }catch(error){
+      throw fail(error.status||503,error.message||'window_provision_failed');
+    }
   }
   return {handle};
 }

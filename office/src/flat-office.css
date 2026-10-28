@@ -2242,3 +2242,29 @@
   background: #f1f5f9;
   outline: none;
 }
+/* 「成功了但还没说完」那一行：与错误框分开，颜色不能一样。 */
+.flat-note-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border-left: 3px solid #2f8f5b;
+  border-radius: 4px;
+  background: #f3faf6;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1f4d35;
+}
+
+.flat-note-row button {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid #b7d9c6;
+  border-radius: 5px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
