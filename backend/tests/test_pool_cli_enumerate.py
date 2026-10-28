@@ -99,6 +99,81 @@ def test_the_roster_listing_is_cached_on_a_ttl(tmp_path, monkeypatch):
     assert len(calls) == 2, "TTL 过期即重列"
 
 
+def test_one_failed_spawn_is_retried_right_away(tmp_path, monkeypatch):
+    """一次 spawn 失败不等于「这个 CLI 没有模型」。
+
+    这台机器上同时跑着 opencode 窗口，`opencode models` 偶发失败一次就把 41 个
+    模型从选择器里抹掉（界面只剩已定档的那几个）。所以空答案要先问第二次。
+    """
+    monkeypatch.setattr(sources, "time", type("Clock", (), {"monotonic": staticmethod(lambda: 0.0), "sleep": staticmethod(lambda _seconds: None)}))
+    calls = {"count": 0}
+
+    def fails_once(binary: str, args: list[str]) -> list[str]:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("the CLI was busy this time")
+        return ROSTER
+
+    sources._ENUM_ROSTER.clear()
+    family = _free_family(
+        sources.discover_cli_slots(
+            config_path=tmp_path / "missing.json", home=tmp_path, listing_runner=fails_once
+        )
+    )
+    assert "opencode-cli:opencode/beam-free" in family, "失败一次要立刻重问"
+    assert calls["count"] == 2
+
+
+def test_an_empty_listing_is_retried_sooner_than_a_good_one(tmp_path, monkeypatch):
+    """一次失败的名册读取不能把整份清单藏十分钟。
+
+    `opencode --list-models` 失败一次时，缓存里会留下一个**空名册**并按长 TTL
+    生效：界面于是只看到 19 个模型，另外 42 个凭空消失 —— 而那份清单正是人挑
+    模型的唯一入口。空的结果只信半分钟，好的仍然信十分钟（不再多 spawn 进程）。
+    """
+
+    class Clock:
+        now = 1000.0
+
+        @classmethod
+        def monotonic(cls) -> float:
+            return cls.now
+
+        @staticmethod
+        def sleep(_seconds: float) -> None:
+            return None
+
+    calls = {"count": 0}
+
+    def always_empty(binary: str, args: list[str]) -> list[str]:
+        calls["count"] += 1
+        return []
+
+    monkeypatch.setattr(sources, "time", Clock)
+    args = (tmp_path / "missing.json", tmp_path)
+    sources._ENUM_ROSTER.clear()
+
+    assert _free_family(sources.discover_cli_slots(*args, listing_runner=always_empty)) == [
+        "opencode-cli:opencode/minimax-m3.1-flash-free"
+    ], "清单空了就只剩声明过的那一个"
+    # 空答案连续两次才算数（立刻重试过一次），之后按短 TTL 缓存。
+    assert calls["count"] == 2
+
+    def good(binary: str, args: list[str]) -> list[str]:
+        calls["count"] += 1
+        return ROSTER
+
+    Clock.now += sources.EMPTY_ROSTER_TTL_SECONDS + 1
+    family = _free_family(sources.discover_cli_slots(*args, listing_runner=good))
+    assert "opencode-cli:opencode/beam-free" in family, "空名册半分钟后就该重试"
+
+    # 读到了就按长 TTL 缓存：再多等一会儿仍然不再 spawn。
+    before = calls["count"]
+    Clock.now += 60.0
+    sources.discover_cli_slots(*args, listing_runner=good)
+    assert calls["count"] == before, "好名册不该被当成空的重列"
+
+
 def test_a_slot_without_an_enumerate_rule_is_left_alone(tmp_path):
     upstreams = _discover(tmp_path)
     codebuddy = sorted(u.name for u in upstreams if u.name.startswith("codebuddy:"))
@@ -160,6 +235,31 @@ def test_a_model_the_cli_lists_can_be_given_a_tier(tmp_path):
     written = json.loads(config.read_text(encoding="utf-8"))
     declared = {entry["model"]: entry for entry in written["cli_slots"]}
     assert declared["hy3-x"]["tier"] == "free"
+
+
+def test_a_namespaced_roster_name_can_be_declared(tmp_path):
+    """名册里的名字带命名空间（`opencode/beam-free`），模型 id 用短名。
+
+    两边口径不同时，拿全名去比名册的短名永远对不上：opencode 那 42 个模型因此
+    一次都没定档成功过（codebuddy 的名册不带斜杠，所以它一直正常）。定档要把人
+    给的名字归一成 **CLI 自己列的那一个** —— argv 直接拿它去跑。
+    """
+    from app.pool.sources import declare_cli_model
+
+    roster = ["opencode/beam-free", "opencode/big-pickle"]
+    config = tmp_path / "config.json"
+
+    # 界面传的是名册里的原样写法
+    namespaced = declare_cli_model(
+        "opencode-cli", "opencode/big-pickle", "free", config_path=config, roster=roster
+    )
+    assert namespaced["model"] == "opencode/big-pickle"
+
+    # 人也可能只说短名：一样认，但仍然存成 CLI 那份写法
+    bare = declare_cli_model(
+        "opencode-cli", "beam-free", "metered", config_path=config, roster=roster
+    )
+    assert bare["model"] == "opencode/beam-free"
 
 
 def test_a_model_the_cli_does_not_list_is_refused(tmp_path):

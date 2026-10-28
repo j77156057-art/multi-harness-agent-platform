@@ -2027,10 +2027,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const head = owner.split(':')[0] || owner;
     const prefixed = head && id.toLowerCase().startsWith(`${head.toLowerCase()}/`);
     const model = prefixed ? id.slice(head.length + 1) : id;
+    // 「谁家的 · 哪个模型」：属主与模型之间用间隔号，不写成"X 的 Y"——
+    // 中文里"claude-provider 的 xxx"读起来像半句没说完的话。
     if (String((entry && entry.tier) || '') === 'user') {
-      return { harness: '自有 Key', model, label: `自有 Key 的 ${model}` };
+      return {harness: '自有 Key', model, label: `自有 Key · ${model}`};
     }
-    return { harness: head, model, label: head ? `${head} 的 ${model}` : model };
+    return {harness: head, model, label: head ? `${head} · ${model}` : model};
   }
 
   // 额度池的档位，按人看的顺序：先不花钱的，再花钱的，最后是兜底与自己掏钱的。
@@ -2115,25 +2117,29 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
               modelId === String(item.id) ? 'checked' : ''
             }>
-              <span>${escape(label.label)}</span><em class="flat-model-mark is-${escape(tier)}">${escape(
+              <span>${escape(label.model)}</span><em class="flat-model-mark is-${escape(tier)}">${escape(
                 mark ? mark.mark : '未知',
               )}</em></label>`,
           );
         }
         for (const entry of group.undeclared) {
-          // CLI 自己说它能用，但**没人说它免费还是收费** —— 平台不猜，所以不能选；
-          // 但人可以一句话定档（免费还是收费由人说了算）。
+          // CLI 自己说它能用，但**没人说它免费还是收费** —— 平台不猜。
+          //
+          // 以前这里只有「标成免费 / 标成收费」两个按钮：定完档，这个模型仍然
+          // 不在本窗口的选项里，得再回来点一次单选、再按一次保存。于是五十多个
+          // 模型"看得见、选不了"。现在两个按钮就是人的那句话本身：按免费/按收费
+          // **用它** —— 定档、选中、保存一次做完。
           rows.push(
             `<p class="flat-model-row is-undeclared"><span>${escape(entry.name)}</span>
               <em class="flat-model-mark is-unknown">没定档</em>
-              <button type="button" data-act="declare-model" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="free">标成免费</button>
-              <button type="button" data-act="declare-model" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="metered">标成收费</button>
+              <button type="button" data-act="use-undeclared" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="free">按免费用它</button>
+              <button type="button" data-act="use-undeclared" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(entry.name)}" data-tier="metered">按收费用它</button>
             </p>`,
           );
         }
         const label = group.key === 'user' ? '自有 Key' : group.key;
         const summary = `${label}（${group.models.length} 个可用${
-          group.undeclared.length ? ` · ${group.undeclared.length} 个它还能用但没定档` : ''
+          group.undeclared.length ? ` · ${group.undeclared.length} 个没定档，定一下就能用` : ''
         }）`;
         return `<details class="flat-model-owner" data-fold="model-${escape(group.key)}"${
           state.openFolds.has(`model-${group.key}`) ? ' open' : ''
@@ -2182,6 +2188,24 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 保存失败要说清楚是哪一步没成 —— 人以为已经换了模型，下一轮却在用旧的，
    * 那比报错更糟。
    */
+  /** 把「这个窗口用哪个模型」发到平台，并把可用性读回来。 */
+  async function applyModelChoice({harnessId, mode, modelId, paidConsent}) {
+    await api('/model-selection', {
+      harness_id: harnessId,
+      model_mode: mode,
+      model_id: modelId,
+      paid_consent: Boolean(paidConsent),
+    });
+    const availability = await api('/availability').catch(() => null);
+    if (availability && Array.isArray(availability.availability)) {
+      state.availability = availability.availability;
+    }
+    // 存上了：接下来显示的是平台登记里的那个，不再是「刚刚挑的」。
+    delete state.modelPicks[harnessId];
+    state.error = null;
+    render();
+  }
+
   async function saveModelChoice(button) {
     const harnessId = String(button.dataset.harness || '');
     const pane = button.closest('.flat-model');
@@ -2199,23 +2223,52 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     button.disabled = true;
     try {
-      await api('/model-selection', {
-        harness_id: harnessId,
-        model_mode: mode,
-        model_id: modelId,
-        paid_consent: tier === 'metered',
-      });
-      const availability = await api('/availability').catch(() => null);
-      if (availability && Array.isArray(availability.availability)) {
-        state.availability = availability.availability;
-      }
-      // 存上了：接下来显示的是平台登记里的那个，不再是「刚刚挑的」。
-      delete state.modelPicks[harnessId];
-      state.error = null;
-      render();
+      await applyModelChoice({harnessId, mode, modelId, paidConsent: tier === 'metered'});
     } catch (error) {
       button.disabled = false;
       state.error = `模型选择未能保存：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
+  /**
+   * 用一个**还没定档**的模型：先按人点的那个按钮定档，再当成本窗口的选择存下去。
+   *
+   * 为什么合成一步：模型不在池子的可路由清单里时，选了也不会真走池子 —— 平台会
+   * 直接退回窗口自带的模型，人却以为换成了。以前"定档"和"选用"是两个不相干的
+   * 按钮，五十多个模型因此看得见、选不了。现在点「按免费用它 / 按收费用它」就是
+   * 人对档位的那一句话：定档、选中、保存一起完成。
+   */
+  async function useUndeclaredModel(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const cli = String(button.dataset.cli || '');
+    const model = String(button.dataset.model || '');
+    const tier = String(button.dataset.tier || '');
+    if (!harnessId || !cli || !model || !tier) return;
+    const modelId = `${cli}/${String(model).split('/').pop()}`;
+    const label = tier === 'metered' ? '按收费用它' : '按免费用它';
+    button.disabled = true;
+    button.textContent = '正在设置…';
+    try {
+      const declared = await api('/pool/declaration', {cli, model, tier});
+      if (!declared || !declared.pool) throw new Error('平台没有回新的额度池清单');
+      state.pool = declared.pool;
+      state.poolAt = Date.now();
+      state.poolProbe = comparePool(declared.pool);
+      savePoolSnapshot(declared.pool);
+      const entry = (state.pool.models || []).find((item) => String(item.id) === modelId);
+      if (!entry) throw new Error(`定档之后额度池里仍然没有 ${modelId}`);
+      // 人已经按了"按收费用它"——那一句就是收费的点头；免费的不必再问。
+      await applyModelChoice({
+        harnessId,
+        mode: 'pool',
+        modelId,
+        paidConsent: String(entry.tier || '') === 'metered',
+      });
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = label;
+      state.error = `这个模型没能用上：${String((error && error.message) || error)}`;
       render();
     }
   }
@@ -5149,6 +5202,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'declare-model') {
       void declareModel(button);
+      return;
+    }
+    if (button.dataset.act === 'use-undeclared') {
+      void useUndeclaredModel(button);
       return;
     }
     if (button.dataset.act === 'add-member') {

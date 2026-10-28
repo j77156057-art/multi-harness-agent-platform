@@ -520,10 +520,25 @@ def _slot_key(slot: dict[str, Any]) -> tuple[str, str]:
 #: quota, but it is a process spawn; ten minutes is far under the drift the
 #: free family has shown and far above the discovery TTL that would ask.
 ENUM_TTL_SECONDS = 600.0
+#: How long an **empty** listing is believed.
+#:
+#: A listing that came back empty is either "this CLI really has nothing" or
+#: "the spawn failed this time" -- and the two look the same from here.  Caching
+#: it for the full ten minutes made one bad spawn hide a whole catalogue: the
+#: office showed 19 models instead of 61, with 42 of them silently gone because
+#: `opencode --list-models` had failed once.  The model list is the thing a
+#: person picks from, so a hiccup costs half a minute, not ten.
+EMPTY_ROSTER_TTL_SECONDS = 30.0
 _ENUM_ROSTER: dict[tuple[str, str], tuple[float, list[str]]] = {}
 
 #: The runner that reads one CLI's roster (injectable for tests).
 ListingRunner = Callable[[str, list[str]], list[str]]
+
+
+def _roster_is_stale(cached: tuple[float, list[str]], now: float) -> bool:
+    """An empty listing expires fast; a real one keeps the long TTL."""
+    at, roster = cached
+    return now - at > (ENUM_TTL_SECONDS if roster else EMPTY_ROSTER_TTL_SECONDS)
 
 
 def _run_listing(binary: str, args: list[str]) -> list[str]:
@@ -542,6 +557,29 @@ def _run_listing(binary: str, args: list[str]) -> list[str]:
             f" {(completed.stderr or completed.stdout or '')[-200:]}"
         )
     return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _listing_attempt(binary: str, args: list[str], runner: ListingRunner | None) -> list[str]:
+    """Read one listing, retrying once before believing it is empty.
+
+    A single failed spawn used to look exactly like "this CLI has no models":
+    `opencode models` failing once hid 41 models from the picker (the office
+    showed the four declared ones and nothing else), because the empty answer
+    was cached.  This machine runs opencode windows of its own, so one failed
+    spawn is a normal event, not a broken CLI -- ask once more before writing
+    down "nothing".
+    """
+    ask = runner or _run_listing
+    for attempt in range(2):
+        try:
+            names = ask(binary, args)
+        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
+            names = []
+        if names:
+            return names
+        if attempt == 0:
+            time.sleep(0.3)
+    return []
 
 
 def _enumerate_roster(
@@ -564,12 +602,8 @@ def _enumerate_roster(
     key = (binary, " ".join(args))
     now = time.monotonic()
     cached = _ENUM_ROSTER.get(key)
-    if cached is None or now - cached[0] > ENUM_TTL_SECONDS:
-        try:
-            roster = (runner or _run_listing)(binary, args)
-        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
-            roster = []
-        _ENUM_ROSTER[key] = (now, roster)
+    if cached is None or _roster_is_stale(cached, now):
+        _ENUM_ROSTER[key] = (now, _listing_attempt(binary, args, runner))
     pattern_text = str(spec.get("pattern") or "")
     try:
         pattern = re.compile(pattern_text)
@@ -592,12 +626,8 @@ def _listing_lines(
     key = (binary, " ".join(args))
     now = time.monotonic()
     cached = _ENUM_ROSTER.get(key)
-    if cached is None or now - cached[0] > ENUM_TTL_SECONDS:
-        try:
-            roster = (runner or _run_listing)(binary, args)
-        except Exception:  # noqa: BLE001 - a silent CLI is silence, not a guess
-            roster = []
-        _ENUM_ROSTER[key] = (now, roster)
+    if cached is None or _roster_is_stale(cached, now):
+        _ENUM_ROSTER[key] = (now, _listing_attempt(binary, args, runner))
     return list(_ENUM_ROSTER.get(key, (now, []))[1])
 
 
@@ -747,12 +777,19 @@ def declare_cli_model(
     if not siblings:
         raise PoolDeclarationError(f"the pool has no slot for {name}")
     if roster is not None:
-        known = {str(entry).split("/")[-1] for entry in roster}
-        if model_name not in known:
+        # 名册里的名字是 CLI 自己的写法（`opencode/beam-free`），模型 id 用的是它的
+        # 短名（`beam-free`）。两边必须按同一种口径比：以前拿**全名**去比名册的
+        # **短名**，于是 opencode 那 42 个模型一次都没定档成功过（codebuddy 的名册
+        # 不带斜杠，所以它一直正常）。这里先把人给的名字归一成 CLI 自己列的那一个。
+        bare = model_name.split("/")[-1]
+        matched = next((entry for entry in roster if str(entry).split("/")[-1] == bare), None)
+        if matched is None:
             raise PoolDeclarationError(
                 f"{name} does not list {model_name} itself -- the pool does not "
                 "offer models the CLI cannot run"
             )
+        # 存 CLI 那份写法：argv 直接拿它去跑，短名会让 CLI 找不到模型。
+        model_name = str(matched)
     contract = {key: siblings[0][key] for key in _SLOT_CONTRACT_FIELDS if key in siblings[0]}
     slot: dict[str, Any] = {"name": name, "model": model_name, "tier": tier_name}
     slot.update(contract)
