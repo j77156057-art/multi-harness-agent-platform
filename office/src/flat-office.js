@@ -18,7 +18,7 @@
  */
 
 import './flat-office.css';
-import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, CANCEL_STATES, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
@@ -1348,6 +1348,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 按位置找窗口就会找错人；按身份找才是那一个窗口。
       if (id) button.dataset.harness = id;
       button.innerHTML = `<b>${escape(name)}</b><span>${escape(status)}</span>`;
+      // 右键这一行 = 「给这一家再开一个窗口」。只在窗口行上有（项目任务/群聊
+      // 那两行不是 Harness，右键没意义）。
+      if (kind === 'window' && id) {
+        button.dataset.addMemberFrom = id;
+        button.title = '右键可以给这一家再开一个窗口';
+      }
       button.addEventListener('click', onClick || (() => {
         state.view = { kind, id: id || null };
         render();
@@ -2856,6 +2862,125 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     panel.append(traceBox);
 
     return panel;
+  }
+
+  /**
+   * 左栏窗口行右键：给这一家 Harness 再开一个窗口。
+   *
+   * 为什么在这里做：开屏那个清单只报"几家 Harness、各几个窗口"—— 那一步是
+   * 决定"这个项目用谁"；具体再开几个窗口，是进了项目、看着这个项目的情况才
+   * 决定的事。所以新增入口放在这里，右键那一家就行。
+   *
+   * 名字按人说的来：`<Harness 名> · 新增1`、`新增2`。
+   */
+  function addMemberMenu() {
+    const menu = document.createElement('div');
+    menu.className = 'flat-ctxmenu';
+    menu.hidden = true;
+    menu.setAttribute('role', 'menu');
+    document.body.append(menu);
+    let target = '';
+    const close = () => {
+      menu.hidden = true;
+      target = '';
+    };
+    // 用 pointerdown 关，不用 click：右键之后浏览器还会补一个事件，
+    // 用 click 会把**刚打开**的菜单立刻关掉（菜单弹不出来就是这么来的）。
+    // pointerdown 时菜单还没建出来，所以这一下不会误关。
+    document.addEventListener('pointerdown', (event) => {
+      if (menu.hidden) return;
+      if (menu.contains(event.target)) return;
+      close();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') close();
+    });
+    window.addEventListener('resize', close);
+    root.addEventListener('scroll', close, true);
+    menu.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-ctx-add]');
+      if (!button) return;
+      const harnessId = target;
+      close();
+      if (harnessId) void addMemberWindow(harnessId);
+    });
+    return {
+      open(harnessId, x, y) {
+        target = harnessId;
+        const brand = baseHarnessOf(harnessId);
+        menu.innerHTML = `<button type="button" data-ctx-add>给「${escape(
+          brandLabelOf(brand, harnessId),
+        )}」再开一个窗口</button>`;
+        menu.hidden = false;
+        // 贴边时往里收一点，别让菜单跑到屏幕外。
+        const rect = menu.getBoundingClientRect();
+        const left = Math.min(x, window.innerWidth - rect.width - 8);
+        const top = Math.min(y, window.innerHeight - rect.height - 8);
+        menu.style.left = `${Math.max(8, left)}px`;
+        menu.style.top = `${Math.max(8, top)}px`;
+        const first = menu.querySelector('button');
+        if (first) first.focus();
+      },
+      close,
+    };
+  }
+
+  const memberMenu = addMemberMenu();
+
+  /** 这一家 Harness 叫什么（名册里的登记名优先，否则退回来实例名去掉后缀）。 */
+  function brandLabelOf(brand, sampleId) {
+    // 品牌自己那条登记（`qoder` → 「Qoder CLI CN」）在平台的注册表里；
+    // 窗口名单（availability）里只有实例，没有品牌这一条。
+    const registered = (state.status && state.status.harnesses) || [];
+    const own = registered.find((item) => String(item.harness_id || '') === brand);
+    if (own && own.name) return own.name;
+    const roster = (state.availability || []);
+    const sample = roster.find((item) => String(item.harness_id || '') === sampleId);
+    const name = String((sample && sample.name) || '');
+    if (name) return name.split('·')[0].trim() || brand;
+    return brand;
+  }
+
+  /**
+   * 给这一家再开一个窗口：写进平台注册表，然后加进这个项目。
+   *
+   * 说清楚两件做不到的事（不假装）：新窗口**还没有凭据**、也**还没有 worker**
+   * 在跑 —— 平台从浏览器里签不了凭据，也不会替人起进程。所以它注册完会显示
+   * 「暂时无法领取任务」，要人按现有流程给它配凭据、起 worker。
+   */
+  async function addMemberWindow(harnessId) {
+    const brand = baseHarnessOf(harnessId);
+    const label = brandLabelOf(brand, harnessId);
+    const roster = state.availability || [];
+    // 同品牌已有的窗口：取一个没被占的号，再数一下已经叫「新增」的有几个。
+    const used = new Set(
+      roster
+        .map((item) => String(item.harness_id || ''))
+        .filter((id) => baseHarnessOf(id) === brand),
+    );
+    let slot = 1;
+    while (used.has(`${brand}-member-${slot}`)) slot += 1;
+    const instanceId = `${brand}-member-${slot}`;
+    const created = roster.filter((item) =>
+      String((item && item.name) || '').includes('新增'),
+    ).length;
+    const name = `${label} · 新增${created + 1}`;
+    try {
+      await api('/harnesses', {
+        source_harness_id: brand,
+        instance_id: instanceId,
+        name,
+      });
+    } catch (error) {
+      state.error = `没能给「${label}」开新窗口：${String((error && error.message) || error)}`;
+      render();
+      return;
+    }
+    // 注册成功：加进这个项目（与「加入这个项目」同一个动作）。
+    addMemberToProject(instanceId);
+    state.error = null;
+    state.memberAdded = instanceId;
+    await refresh();
   }
 
   function body(filtered, pager) {
@@ -4733,6 +4858,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
     }
   }
+
+  // 左栏窗口行右键：给这一家 Harness 再开一个窗口。
+  // 只认带 `data-add-member-from` 的行（窗口行）；别的地方右键照旧。
+  //
+  // 两个事件都接：`contextmenu` 是标准那一个；有的内嵌浏览器只发
+  // `mousedown(button=2)` 不发 `contextmenu`，只接一个就会出现"右键没反应"。
+  const openMemberMenuAt = (event) => {
+    const row = event.target.closest?.('[data-add-member-from]');
+    if (!row) return;
+    // 行本身是个 <button>：不拦掉的话右键可能顺带触发它的点击（切换视图）。
+    event.preventDefault();
+    event.stopPropagation();
+    memberMenu.open(String(row.dataset.addMemberFrom || ''), event.clientX, event.clientY);
+  };
+  root.addEventListener('contextmenu', openMemberMenuAt);
+  root.addEventListener('mousedown', (event) => {
+    if (event.button !== 2) return;
+    openMemberMenuAt(event);
+  });
 
   // 记住哪些折叠卡片是开着的（右栏每 15 秒重画一次，不记住就会"啪"地合上）。
   root.addEventListener('toggle', (event) => {

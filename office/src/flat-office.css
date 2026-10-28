@@ -2208,3 +2208,37 @@
   max-width: 560px;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
 }
+/* 左栏窗口行的右键菜单：一个动作，贴着鼠标出现。 */
+.flat-ctxmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--ao-line, #e3e6ea);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.16);
+}
+
+.flat-ctxmenu[hidden] {
+  display: none;
+}
+
+.flat-ctxmenu button {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flat-ctxmenu button:hover,
+.flat-ctxmenu button:focus-visible {
+  background: #f1f5f9;
+  outline: none;
+}

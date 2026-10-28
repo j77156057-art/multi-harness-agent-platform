@@ -1,5 +1,5 @@
 import './project-workspace.css';
-import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 
 const clone = value => structuredClone(value);
 
@@ -309,6 +309,22 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
    * 所以平台上已经有能干活的人时，这句话直接说明白，让人跳过它；
    * 真的一个都没有时，才提醒他可能得先登记。
    */
+  /**
+   * 一家 Harness 叫什么。
+   *
+   * 优先用**这一家自己的登记名**（名册里品牌 id 那条，例如 `qoder` →
+   * 「Qoder CLI CN」）；名册里没有（这一家只有实例、没有基座那条）就退回
+   * 实例名去掉窗口后缀 —— 「Qoder · 成员1」→「Qoder」。
+   */
+  function brandLabel(brand, sample) {
+    const roster = formalState?.harnesses || [];
+    const own = roster.find((item) => String(item.harness_id || item.id || '') === brand);
+    if (own && own.name) return own.name;
+    const name = String(sample?.name || '');
+    if (name) return name.split('·')[0].trim() || brand;
+    return brand;
+  }
+
   function renderWorkerHint() {
     const hint = root.querySelector('[data-worker-hint]');
     if (!hint) return;
@@ -322,14 +338,22 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         Number(item.credential_count ?? 1) > 0,
     );
     if (workers.length) {
-      // 名单不要全铺出来 —— 一屏七个名字读起来像日志。写"有几个"，
-      // 名字让「连接工作窗口」那扇门自己去列。
-      const names = workers
-        .map((item) => item.name || item.harness_id)
-        .slice(0, 3)
-        .join('、');
-      const more = workers.length > 3 ? ` 等 ${workers.length} 个` : '';
-      hint.textContent = `已经有 ${workers.length} 个窗口可执行任务了（${names}${more}）。要加新的，点「连接工作窗口」。`;
+      // 按**品牌**报数量，不按窗口报：同一家开出来的 `qoder-member-1`、
+      // `qoder-member-2` 是一家的两个窗口，摆成两个名字看起来像"有两个 Qoder"。
+      // 要加窗口就进项目里右键那一家 —— 那里才是决定"这个项目用谁"的地方。
+      const brands = new Map();
+      for (const item of workers) {
+        const id = String(item.harness_id || '');
+        const brand = baseHarnessOf(id);
+        if (!brands.has(brand)) brands.set(brand, { label: brandLabel(brand, item), count: 0 });
+        brands.get(brand).count += 1;
+      }
+      const parts = [...brands.values()].map((entry) =>
+        entry.count > 1 ? `${entry.label} ×${entry.count}` : entry.label,
+      );
+      const shown = parts.slice(0, 3).join('、');
+      const more = parts.length > 3 ? ` 等 ${parts.length} 家` : '';
+      hint.textContent = `${brands.size} 家 Harness 共 ${workers.length} 个窗口可执行任务（${shown}${more}）。要加窗口，进项目后右键左侧那一家。`;
     } else if (roster.length) {
       hint.textContent = '本机已登记窗口，但当前均无法执行任务（未登录、无凭据或已掉线）。点「连接工作窗口」查看。';
     } else {

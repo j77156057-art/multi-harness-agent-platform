@@ -15,3 +15,19 @@ export function isAdministratorHarness(item, adminIdentity = null) {
 export function isPlatformAssistantHarness(item) {
   return String(item?.harness_id || item?.id || '') === PLATFORM_ASSISTANT_HARNESS_ID;
 }
+
+// 一个窗口属于哪一家 Harness（品牌）。
+//
+// 平台把"同一程序开出来的多个窗口"命名成 `<brand>-member-<n>` /
+// `<brand>-window-<n>`，品牌本身也能直接当窗口用（这台机器上的 `codex`、
+// `opencode` 就是这样）。所以品牌 = 去掉那个窗口后缀之后的名字；
+// 没有后缀，它自己就是品牌。
+//
+// 为什么需要它：开屏的名单要按**品牌**报数量（「Qoder CLI CN ×2」），
+// 而不是把 `qoder-member-1`、`qoder-member-2` 当成两个不同的东西摆出来 ——
+// 那看起来像"有两个 Qoder"，其实是一家的两个窗口。
+export function baseHarnessOf(id) {
+  const value = String(id || '');
+  const match = /^(.+?)-(?:member|window)-[A-Za-z0-9][A-Za-z0-9_-]*$/.exec(value);
+  return match ? match[1] : value;
+}
