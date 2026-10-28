@@ -693,7 +693,16 @@ class AdminWorker:
         if self.dry_run:
             return
         try:
-            self.admin.answer(question=body, group_id=self.group_id, asker=sender)
+            self.admin.answer(
+                question=body,
+                group_id=self.group_id,
+                asker=sender,
+                # 与细化/修订/审阅同一个规矩：人给这个窗口选了池子里的模型，
+                # 回答也必须走池子。少了这一句，别的三件事走池子、回答却仍旧
+                # 撞窗口自己的 provider —— 那个 provider 挂了的时候，管理员
+                # 就"能细化不能回答问题"，看起来像时好时坏。
+                route=self.pool_route("answer"),
+            )
         except Exception as exc:  # noqa: BLE001 - the owner must hear about the failure
             # Never silence the owner. A failure is reported as a failure,
             # privately and in plain words -- a canned "收到" would claim work

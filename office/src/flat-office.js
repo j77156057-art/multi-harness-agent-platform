@@ -1147,6 +1147,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     root.dataset.flatState = 'ready';
     if (adminDialog.open) syncAdminDialog();
     syncBriefDialog();
+    // 模型用不了：有新的一件事就弹出来让人挑模型。处理过的（或明确说先不管的）
+    // 不再打扰；人正在里面挑的时候不重画，免得把他选到一半的抹掉。
+    if (!modelTroubleDialog.open && openModelTroubles().length) {
+      syncModelTroubleDialog();
+      modelTroubleDialog.show();
+    }
   }
 
   /**
@@ -2184,11 +2190,268 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
 /**
-   * 一个窗口的状态页：现在在做什么、手上有几件活、进度、上一次干了什么。
+   * 「模型用不了」的迹象。
    *
-   * 数据都是现成的：availability（在线/模型/能不能接活/上一轮）、tasks（手上的活）、
-   * events（它的轨迹），以及正在跑的那条活的实时日志（与任务详情同一个端点）。
+   * 限流、额度用尽、通道连不上、认证被拒、服务端 5xx、超时 —— 这几类换个模型
+   * 就能继续。产物不合规、输出不是 JSON 那类**不在此列**：换模型也不解决，
+   * 混进来只会让人以后无视这个弹窗。
    */
+  const MODEL_TROUBLE = /rate[\s_-]?limit|too many requests|\b429\b|quota|insufficient|额度用尽|额度用完|余额不足|connection[\s_-]?refused|connection[\s_-]?reset|econnrefused|stream disconnected|failed to connect|no route to host|error sending request|provider\.transport|unauthorized|invalid[\s_-]?api[\s_-]?key|\b401\b|\b50[0234]\b|service unavailable|timed?[\s_-]?out|模型用不了|ChannelUnavailable/i;
+
+  /** 记下"这个窗口这次的这件事我处理过了"，免得弹窗一直弹。 */
+  const TROUBLE_DISMISSED_KEY = 'agent-office.model-trouble-dismissed.v1';
+
+  function dismissedTroubles() {
+    try {
+      const raw = localStorage.getItem(TROUBLE_DISMISSED_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      return new Set(Array.isArray(list) ? list.map(String) : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  function rememberTroubleDismissed(signature) {
+    if (!signature) return;
+    const set = dismissedTroubles();
+    set.add(signature);
+    try {
+      localStorage.setItem(TROUBLE_DISMISSED_KEY, JSON.stringify([...set].slice(-80)));
+    } catch {
+      // 存不下就只是会再弹一次，不影响正事。
+    }
+  }
+
+  /**
+   * 哪些窗口的模型现在用不了了。
+   *
+   * 两个来源，都是平台上**已经记着**的事实：
+   *   · 成员：它那条活被放回队列时写下的失败原因（平台自己补了一句"模型用不了：
+   *     …"，带的是 CLI 说的那一句）；
+   *   · 管理员与平台助手：它们在群里报的失败（原文里就有限流/连接的说法）。
+   *
+   * 成员的传阅意见之类的正文**不参与**判断：那里也常出现 429 这类字眼，那是
+   * 在讨论，不是它自己的模型坏了。
+   */
+  function modelTroubleWindows() {
+    const found = new Map();
+    const adminId = adminIdentity();
+    const note = (harnessId, why, when) => {
+      const id = String(harnessId || '');
+      if (!id) return;
+      const existing = found.get(id);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      found.set(id, { harnessId: id, why: String(why || ''), when: String(when || ''), count: 1 });
+    };
+    for (const task of state.tasks || []) {
+      const raw = String(task.last_failure?.reason || '');
+      if (!MODEL_TROUBLE.test(raw)) continue;
+      // 模型坏掉的时候，这条活记在**最后持有它**的窗口上（合入后平台会清 owner）。
+      const holders = holderIds(task);
+      note(holders.now || holders.before, reasonText(raw), task.last_failure?.at || '');
+    }
+    // 管理员与助手在群里报的失败：只看最近一小段，且只认它们自己发的。
+    // 成员的消息不参与：传阅意见里讨论到「429」是在讨论额度，不是它自己的
+    // 模型坏了 —— 成员那条由它自己的任务失败来说。
+    const recent = (state.messages || []).slice(-40);
+    for (const message of recent) {
+      if (String(message.sender_type || '') !== 'harness') continue;
+      const sender = String(message.sender_id || '');
+      if (!sender) continue;
+      // 只认管理员与平台助手：它们报的失败会带原始原因。
+      const isAdminSender = Boolean(adminId) && sender === adminId;
+      const isAssistantSender = sender === ASSISTANT_ID || /assistant/i.test(sender);
+      if (!isAdminSender && !isAssistantSender) continue;
+      // 判据读**原文**：`readableMessageBody` 默认只取第一行，而失败原因往往
+      // 写在第二行之后（"这一条没有答上来。\n原因：… stream disconnected …"）——
+      // 拿那句摘要去判，永远判不出模型坏了。展示才用人话。
+      const body = String(message.body || '');
+      if (!MODEL_TROUBLE.test(body)) continue;
+      note(sender, oneLine(readableMessageBody(message) || body), message.created_at);
+    }
+    return [...found.values()];
+  }
+
+  /** 这次这件事的指纹：换一次失败就是新的一件事，处理过的不再打扰。 */
+  function troubleSignature(entry) {
+    return `${entry.harnessId}|${String(entry.why || '').slice(0, 60)}|${entry.when || ''}`;
+  }
+
+  /** 一个窗口的"换成哪个模型"：按额度属主分组，每条标出档位。 */
+  function troublePicker(harnessId) {
+    const models = (state.pool && state.pool.models) || [];
+    const groups = new Map();
+    for (const item of models) {
+      const owner = String(item.upstream || item.owned_by || '');
+      const key = owner.split(':')[0] || owner;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(item);
+    }
+    const options = [...groups.entries()]
+      .map(([owner, items]) => {
+        const rows = items
+          .map((item) => {
+            const label = poolModelLabel(item).label;
+            const tier = String(item.tier || '');
+            const mark = POOL_TIER_GROUPS.find((entry) => entry.tier === tier);
+            return `<option value="${escape(item.id)}">${escape(label)} · ${escape(
+              mark ? mark.mark : '未知档位',
+            )}</option>`;
+          })
+          .join('');
+        return `<optgroup label="${escape(owner === 'user' ? '你自己的 Key' : owner)}">${rows}</optgroup>`;
+      })
+      .join('');
+    if (!options) {
+      return '<p class="flat-empty">额度池里现在没有可选的模型（点「重新探一遍」看看）。</p>';
+    }
+    return `<select data-trouble-select="${escape(harnessId)}" aria-label="换成哪个模型">
+        <option value="">选一个额度池里的模型…</option>${options}
+      </select>`;
+  }
+
+  /** 模型用不了的那个弹窗。挂在 body 上：办公室每次重画都会把它收走。 */
+  function buildModelTroubleDialog() {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'flat-dialog flat-model-trouble';
+    dialog.id = 'flatModelTrouble';
+    dialog.setAttribute('aria-label', '有窗口的模型用不了了');
+    // **非模态**：它是一件事，不是一道闸。人可以先接着看别的、先处理更急的，
+    // 回头再来挑模型 —— 模态会把整个办公室按住，而这里要的是"告诉你，你去处理"。
+    dialog.setAttribute('aria-modal', 'false');
+    dialog.innerHTML = `
+      <header class="flat-dialog-head">
+        <div>
+          <h2>有窗口的模型用不了了</h2>
+          <p class="flat-note">限流、额度用尽、通道连不上都会这样。换成额度池里的模型就能继续 ——
+          你选完，下一轮这个窗口就按它跑，活不用重做。</p>
+        </div>
+        <button type="button" class="flat-dialog-close" data-act="close-model-trouble" aria-label="关闭">×</button>
+      </header>
+      <div class="flat-dialog-list" id="flatModelTroubleList"></div>
+      <footer class="flat-dialog-actions">
+        <button type="button" data-act="close-model-trouble">先不管</button>
+      </footer>`;
+    document.body.append(dialog);
+    // 这个对话框挂在 body 上（不跟着办公室重画），办公室的点击委托听不到它 ——
+    // 所以它自己的按钮必须自己处理，否则「就用这个模型」点了没反应。
+    dialog.addEventListener('click', (event) => {
+      if (event.target.closest('[data-act="close-model-trouble"]')) {
+        dialog.close();
+        return;
+      }
+      const apply = event.target.closest('[data-act="apply-trouble-model"]');
+      if (apply) {
+        void applyTroubleModel(apply);
+        return;
+      }
+      if (event.target === dialog) dialog.close();
+    });
+    return dialog;
+  }
+
+  const modelTroubleDialog = buildModelTroubleDialog();
+
+  /** 把当前这些"模型用不了"的窗口铺进弹窗。 */
+  function syncModelTroubleDialog() {
+    const list = modelTroubleDialog.querySelector('#flatModelTroubleList');
+    if (!list) return;
+    const entries = openModelTroubles();
+    if (!entries.length) {
+      list.innerHTML = '<p class="flat-empty">现在没有窗口因为模型用不了而卡住。</p>';
+      return;
+    }
+    list.innerHTML = entries
+      .map((entry) => {
+        const name = harnessName(entry.harnessId) || entry.harnessId;
+        const extra = entry.count > 1 ? `（${entry.count} 条活都卡在这）` : '';
+        return `<section class="flat-trouble" data-harness="${escape(entry.harnessId)}">
+          <h3>${escape(name)}</h3>
+          <p class="flat-note">它的模型用不了了${escape(extra)}。${escape(entry.why)}</p>
+          <div class="flat-trouble-pick">
+            <label>换成 ${troublePicker(entry.harnessId)}</label>
+            <button type="button" data-act="apply-trouble-model" data-harness="${escape(
+              entry.harnessId,
+            )}">就用这个模型</button>
+          </div>
+          <p class="flat-trouble-error" data-trouble-error="${escape(entry.harnessId)}"></p>
+        </section>`;
+      })
+      .join('');
+  }
+
+  /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
+  async function applyTroubleModel(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const block = button.closest('.flat-trouble');
+    const select = block ? block.querySelector('[data-trouble-select]') : null;
+    const modelId = select ? String(select.value || '') : '';
+    const note = block ? block.querySelector(`[data-trouble-error="${harnessId}"]`) : null;
+    if (!modelId) {
+      if (note) note.textContent = '先选一个模型。';
+      return;
+    }
+    const entry = ((state.pool && state.pool.models) || []).find((item) => String(item.id) === modelId);
+    const tier = entry ? String(entry.tier || '') : '';
+    if (tier === 'metered') {
+      const yes = await askPaidConsent(poolModelLabel(entry).label);
+      if (!yes) return;
+    }
+    button.disabled = true;
+    try {
+      await api('/model-selection', {
+        harness_id: harnessId,
+        model_mode: 'pool',
+        model_id: modelId,
+        paid_consent: tier === 'metered',
+      });
+      // 这件事处理过了：同一个失败不再弹（下次是新的失败就还会弹）。
+      // 一个窗口可能同时有几件事记着（一条活 + 它自己在群里报的失败），
+      // 全都得记上 —— 只记一条，回来还会弹。
+      for (const item of modelTroubleWindows()) {
+        if (item.harnessId === harnessId) rememberTroubleDismissed(troubleSignature(item));
+      }
+      if (block) block.remove();
+      if (note) note.textContent = '';
+      const availability = await api('/availability').catch(() => null);
+      if (availability && Array.isArray(availability.availability)) {
+        state.availability = availability.availability;
+      }
+      if (!openModelTroubles().length) modelTroubleDialog.close();
+      render();
+    } catch (error) {
+      button.disabled = false;
+      if (note) note.textContent = `没能存上：${String((error && error.message) || error)}`;
+    }
+  }
+
+  /** 还没处理过的那些：处理过的不再占着右栏，也不再弹。 */
+  function openModelTroubles() {
+    const dismissed = dismissedTroubles();
+    return modelTroubleWindows().filter((entry) => !dismissed.has(troubleSignature(entry)));
+  }
+
+  /** 右栏那张卡：有窗口等模型时才出现。 */
+  function modelTroubleCard() {
+    const entries = openModelTroubles();
+    if (!entries.length) return '';
+    const names = entries
+      .slice(0, 4)
+      .map((entry) => harnessName(entry.harnessId) || entry.harnessId)
+      .join('、');
+    return `<section class="flat-card flat-card-trouble">
+      <h3>模型用不了</h3>
+      <p>${entries.length} 个窗口的模型用不了了：${escape(names)}${
+        entries.length > 4 ? '…' : ''
+      }</p>
+      <p class="flat-note">换成额度池里的模型就能继续，活不用重做。</p>
+      <button type="button" data-act="open-model-trouble">选一个模型</button>
+    </section>`;
+  }
+
   /**
    * 一条活的**任务书**：目标原文、验收标准、只允许改的路径。
    *
@@ -4083,6 +4346,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     wrap.innerHTML = `
       ${askCard()}
+      ${modelTroubleCard()}
       ${waitingCard()}
       <section class="flat-card flat-card-brief">
         <h3>${cardIcon('brief')}待办事项</h3>
@@ -4695,6 +4959,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'open-admin-chat') {
       if (!adminDialog.open) adminDialog.showModal();
       syncAdminDialog();
+      return;
+    }
+    if (button.dataset.act === 'open-model-trouble') {
+      syncModelTroubleDialog();
+      if (!modelTroubleDialog.open) modelTroubleDialog.show();
+      return;
+    }
+    if (button.dataset.act === 'apply-trouble-model') {
+      void applyTroubleModel(button);
       return;
     }
     if (button.dataset.act === 'close-admin-chat') {

@@ -752,6 +752,61 @@ def build_goal(
     return goal
 
 
+#: 「模型用不了」的迹象。命中它就不是普通失败 —— 换一份额度/换一个模型还能继续，
+#: 所以失败原因里要说出来，办公室据此弹窗让人挑一个池子里的模型。
+#:
+#: 只认高置信的几种（限流、额度用尽、连不上、认证被拒、服务端 5xx、超时）：
+#: 产物不合规、输出不是 JSON 这类换个模型也不解决，混进来只会让人以后无视弹窗。
+_PROVIDER_TROUBLE = re.compile(
+    r"rate[\s_-]?limit|too many requests|\b429\b|"
+    r"quota|insufficient|balance|用量上限|额度用尽|"
+    r"connection[\s_-]?refused|connection[\s_-]?reset|econnrefused|"
+    r"stream disconnected|failed to connect|no route to host|"
+    r"error sending request|provider\.transport|"
+    r"unauthorized|invalid[\s_-]?api[\s_-]?key|\b401\b|"
+    r"\b50[0234]\b|service unavailable|"
+    r"timed?[\s_-]?out",
+    re.IGNORECASE,
+)
+
+#: 这些**不是**模型用不了：模型答了，只是答得不好（不是 JSON）、或者平台拒收、
+#: 或者平台腾不出工位。换个模型也不解决问题 —— 摆进弹窗只会让人以后无视它。
+#: 先判这一条，再判上面那一条（原文里常同时带着 5xx / timeout 之类的词）。
+_NOT_MODEL_TROUBLE = re.compile(
+    r"no balanced JSON|not a valid JSON|Refused:|out of scope|"
+    r"WorktreeCapacityExceeded|no free worktree|"
+    r"attempt budget is spent",
+    re.IGNORECASE,
+)
+
+
+def _provider_outage_hint(exc: BaseException) -> str:
+    """模型用不了时给失败原因补一句 —— 不含则返回空串。
+
+    带的是 CLI 自己说的那一句（stderr 里最有用的一行），不是转述：人看到
+    "stream disconnected ... 127.0.0.1:8402" 就知道是那个本地通道没开，
+    看到 429 就知道是限流。截断到一行，免得把整段日志塞进事件里。
+    """
+    text = ""
+    if isinstance(exc, CliFailed):
+        text = str(exc.result.stderr or "")
+    if not text:
+        text = str(exc)
+    if _NOT_MODEL_TROUBLE.search(text):
+        return ""
+    if not _PROVIDER_TROUBLE.search(text):
+        return ""
+    line = ""
+    for candidate in text.splitlines():
+        stripped = candidate.strip()
+        if stripped and _PROVIDER_TROUBLE.search(stripped) and not _NOT_MODEL_TROUBLE.search(stripped):
+            line = stripped
+            break
+    if not line:
+        line = text.strip().replace("\n", " ")
+    return f"（模型用不了：{line[:160]}）"
+
+
 def _classify_failure(
     exc: BaseException,
     *,
@@ -1059,7 +1114,10 @@ def run_one(
                 try:
                     adapter.release(
                         task_id=task["task_id"],
-                        reason=f"retryable failure ({type(exc).__name__}): {reason}",
+                        reason=(
+                            f"retryable failure ({type(exc).__name__}): {reason}"
+                            f"{_provider_outage_hint(exc)}"
+                        ),
                     )
                     recycled = {"status": "preserved_for_handoff"}
                 except Exception as release_error:

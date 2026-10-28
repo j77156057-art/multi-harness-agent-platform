@@ -97,6 +97,7 @@ class PoolModelChannel:
         path: str = "/pool/v1/chat/completions",
         chain_ttl: float = CHAIN_TTL_SECONDS,
         cooldown: float = COOLDOWN_SECONDS,
+        pin: Any = None,
     ) -> None:
         if not fallback:
             raise ValueError("fallback chain must not be empty")
@@ -105,6 +106,11 @@ class PoolModelChannel:
         self.path = path
         self.chain_ttl = chain_ttl
         self.cooldown = cooldown
+        # ``pin`` 是"人给这个助手指定了哪个模型"（可调用对象，每次问它一下：
+        # 人可能随时改）。有它就用它开头 —— 免费额度用完时，人从额度池里挑的
+        # 那个模型必须真的被用上，否则那个选择是句空话。它失手了仍旧退回实况
+        # 链：一个人挑的模型死了，不等于助手就该停摆。
+        self.pin = pin
         now = time.monotonic()
         self._chain: tuple[str, ...] | None = None
         self._chain_at = now - self.chain_ttl  # resolve on first use
@@ -115,6 +121,14 @@ class PoolModelChannel:
         self.last_chain_source: str | None = None
 
     # ------------------------------------------------------------- chain
+
+    def _pinned(self) -> str:
+        if self.pin is None:
+            return ""
+        try:
+            return str(self.pin() or "")
+        except Exception:  # noqa: BLE001 - 问不出来就按没指定处理
+            return ""
 
     def _chain_now(self) -> tuple[str, ...]:
         now = time.monotonic()
@@ -128,6 +142,13 @@ class PoolModelChannel:
                 self._chain_source = "pinned-fallback"
             self._chain_at = now
         assert self._chain is not None
+        # 人挑的那个排最前：它是"这次用哪个"的答案，实况链只是兜底。
+        chosen = self._pinned()
+        if chosen and self._chain and self._chain[0] != chosen:
+            rest = tuple(name for name in self._chain if name != chosen)
+            return (chosen, *rest)
+        if chosen and not self._chain:
+            return (chosen,)
         return self._chain
 
     def _usable_chain(self) -> list[str]:

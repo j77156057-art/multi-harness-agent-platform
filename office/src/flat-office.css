@@ -2140,3 +2140,71 @@
   line-height: 1.55;
   color: var(--ao-ink-soft);
 }
+
+/* 「模型用不了」的弹窗：一件事一块，块里直接选模型。 */
+.flat-model-trouble {
+  height: auto;
+  max-height: 80vh;
+}
+
+.flat-model-trouble .flat-trouble {
+  border: 1px solid var(--ao-line, #e3e6ea);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: #fbfcfd;
+}
+
+.flat-model-trouble .flat-trouble h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.flat-model-trouble .flat-trouble-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.flat-model-trouble .flat-trouble-pick label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  flex: 1 1 320px;
+}
+
+.flat-model-trouble select {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--ao-line, #e3e6ea);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+
+.flat-model-trouble .flat-trouble-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #b4232a;
+  min-height: 1em;
+}
+
+.flat-card-trouble {
+  border-left: 3px solid #d08b1a;
+}
+/* 非模态：弹窗要和办公室同时看得见、同时点得动。 */
+.flat-model-trouble {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  left: auto;
+  margin: 0;
+  width: min(92vw, 560px);
+  max-width: 560px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
+}

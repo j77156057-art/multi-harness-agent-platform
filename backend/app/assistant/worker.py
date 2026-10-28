@@ -279,6 +279,40 @@ def parse_worker_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _pinned_model(client: PlatformClient, assistant_id: str):
+    """人给这个助手指定了哪个模型（没有就是空串）。
+
+    问的是平台已经有的那条读面（``/pool/plan``）：它知道人给这个窗口选了什么，
+    助手不必自己再抄一份规则。缓存一分钟 —— 一步问一次平台太吵，而人改选择之后
+    一分钟内生效够用。
+    """
+    cache: dict[str, Any] = {"at": 0.0, "model": ""}
+
+    def read() -> str:
+        now = time.monotonic()
+        if now - float(cache["at"] or 0.0) < 60.0:
+            return str(cache["model"] or "")
+        cache["at"] = now
+        cache["model"] = ""
+        try:
+            plan = client.get(
+                "/pool/plan",
+                task_id=f"assistant:{assistant_id}",
+                harness_id=assistant_id,
+                attempt_no=0,
+            )
+        except Exception:  # noqa: BLE001 - 问不出来就按没指定处理
+            return ""
+        if isinstance(plan, dict) and str(plan.get("mode") or "") == "pool":
+            chosen = str(plan.get("model") or "")
+            # 只有**人挑过**才算指定：平台自己兜底选的那条走实况链更活。
+            if chosen and str(plan.get("reason") or "").startswith("the operator chose"):
+                cache["model"] = chosen
+        return str(cache["model"] or "")
+
+    return read
+
+
 def build_worker(args: argparse.Namespace, client: PlatformClient) -> AssistantWorker:
     """Wire the CLI options into the worker; split out so the wiring is testable."""
     from app.assistant.loop import Budget
@@ -289,7 +323,7 @@ def build_worker(args: argparse.Namespace, client: PlatformClient) -> AssistantW
         client=client,
         group_id=args.group,
         harness_id=args.assistant_id,
-        model=PoolModelChannel(client, fallback=fallback),
+        model=PoolModelChannel(client, fallback=fallback, pin=_pinned_model(client, args.assistant_id)),
         state=AssistantState.load(state_path),
         state_path=state_path,
         budget=Budget(max_calls=args.max_calls, max_seconds=args.max_seconds),

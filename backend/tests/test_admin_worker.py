@@ -852,8 +852,15 @@ def test_a_direct_question_is_answered_privately_and_only_once(tmp_path, monkeyp
 
     worker.poll_messages()
 
+    # 回答与细化/修订/审阅同一个规矩：`route` 必须一起传（人给这个窗口选了
+    # 池子里的模型，回答也走池子）。这里没有选择，所以是 None。
     assert admin.answer_calls == [
-        {"question": "FD-1 为什么被放弃？", "group_id": "G-1", "asker": "office-operator"}
+        {
+            "question": "FD-1 为什么被放弃？",
+            "group_id": "G-1",
+            "asker": "office-operator",
+            "route": None,
+        }
     ]
     assert admin.refine_calls == []
 
