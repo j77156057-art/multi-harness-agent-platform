@@ -75,8 +75,7 @@ try {
   assert.equal(await boxes.count(), MEMBERS.length);
   for (let index = 0; index < MEMBERS.length; index += 1) await boxes.nth(index).check();
   await page.locator('[data-confirm-create]').click();
-  await page.locator('#aoStartBtn').click();
-await page.waitForSelector('#openingDialog', { state: 'visible' });
+  await page.locator('#openingDialog[open]').waitFor({ state: 'visible' });
 
   const dialog = page.locator('#openingDialog');
   assert.equal(await dialog.locator('[data-field="goal"]').count(), 1, 'goal is the one owner input');

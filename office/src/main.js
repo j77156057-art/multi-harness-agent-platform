@@ -15,7 +15,6 @@
  * 将来要再做一版场景，那是另一件事，不该混在办公路径里。
  */
 
-import './app-shell.css';
 import '../contributions/office-opening-phone/office-opening-phone.css';
 import '../contributions/office-opening-phone/office-opening-phone.js';
 import './opening-host.css';
@@ -24,6 +23,7 @@ import { mountFlatOffice } from './flat-office.js';
 import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import './app-shell.css';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -57,7 +57,7 @@ const app = $('#app');
 app.innerHTML = `
   <header class="ao-topbar">
     <div class="ao-brand">
-      <span class="ao-mark">AO</span>
+      <span class="ao-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9M8 5.25l8 4.5"/></svg></span>
       <div class="ao-brand-text">
         <strong>Agent Office</strong>
         <span id="aoScope">协作控制台</span>
@@ -66,7 +66,7 @@ app.innerHTML = `
     <div class="ao-topbar-actions">
       <span class="ao-conn" id="aoConn"><i></i><span>正在连接平台…</span></span>
       <button class="ao-btn" id="aoStartBtn" type="button" hidden>开工配置</button>
-      <button class="ao-btn" id="aoRefreshBtn" type="button" title="重新读平台的数据，并重新探一遍额度池">刷新</button>
+      <button class="ao-btn" id="aoRefreshBtn" type="button" aria-label="刷新" title="重新读平台的数据，并重新探一遍额度池"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.2a8 8 0 0 1 13 3.3M4.9 14.5a8 8 0 0 0 13 3.3"/></svg><span>刷新</span></button>
       <span id="aoTopActions" class="ao-topbar-actions"></span>
       <button class="ao-btn" id="aoLobbyBtn" type="button">项目列表</button>
       <span class="ao-user" title="你就是群主：项目里的事都由你拍板">群主</span>
@@ -224,7 +224,7 @@ const projectWorkspace = mountProjectWorkspace({
     role: '成员窗口',
     status: h.status === 'online' ? 'online' : 'offline',
   })),
-  onOpenProject(project) {
+  onOpenProject(project, { openAfterCreate = false } = {}) {
     activeProject = project;
     openingHost?.setProjectContext(project.name);
     openingHost?.setProjectMembers(project.members || []);
@@ -268,6 +268,7 @@ const projectWorkspace = mountProjectWorkspace({
     } else {
       void office.refresh();
     }
+    if (openAfterCreate) openingHost.open();
   },
 });
 

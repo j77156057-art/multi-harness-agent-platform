@@ -61,20 +61,27 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   root.innerHTML = `
     <section class="project-lobby" aria-labelledby="projectLobbyTitle">
       <div class="project-lobby-body">
-        <div class="project-lobby-copy"><p class="project-instance-note" data-instance-note hidden></p><h1 id="projectLobbyTitle">从一个项目开始</h1><p>每个项目都有自己的任务、方案与额度。点「新建项目」填写名称与成员，即可进入该项目的办公室。</p><div class="project-lobby-actions"><button type="button" class="project-new primary" data-new-project><span>新建项目</span></button><button type="button" class="project-connect" data-open-connections>连接工作窗口</button></div>
-          <p class="project-lobby-hint" data-worker-hint hidden></p>
-          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span>点击「新建项目」，填写项目名称并指定参与成员</li><li><span>2</span>创建后进入「开工配置」，描述项目目标</li><li><span>3</span>在开工向导中指定管理员与成员，由管理员细化并分派任务</li></ol>
-        </div>
+        <header class="project-lobby-copy">
+          <p class="project-instance-note" data-instance-note hidden></p>
+          <div class="project-lobby-heading"><div><p class="eyebrow">工作空间 / 概览</p><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">让目标、团队与进展，在同一个地方保持同步。</p></div>
+            <div class="project-lobby-actions"><button type="button" class="project-connect" data-open-connections><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>连接工作窗口</button><button type="button" class="project-new primary" data-new-project><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建项目</span></button></div>
+          </div>
+        </header>
         <div class="project-lobby-side">
-        <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><h2 id="projectHistoryTitle">项目历史</h2><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon">+</span><strong>还没有项目</strong><span>新建后会在这里留下历史记录</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
-        <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
-          <div class="project-section-head"><h2 id="projectPlatformTitle">平台上已有的项目</h2><span data-platform-count></span></div>
-          <p class="project-platform-note">这些是正式平台上已经在做的事。点「打开」即可进入该项目的办公室 —— 无需重新创建。</p>
-          <div class="project-platform-list" data-platform-list></div>
-        </section>
+          <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><h2 id="projectHistoryTitle">项目历史</h2><p>继续上次的工作，或开启一段新的协作。</p></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M7 15a3 3 0 0 1 3-3h10l4 5h14a3 3 0 0 1 3 3v17a3 3 0 0 1-3 3H10a3 3 0 0 1-3-3V15Z"/><path d="M7 23h34M19 31h10"/></svg></span><strong>还没有项目</strong><span>点击「新建项目」，添加成员并设定第一个目标。</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
+          <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
+            <div class="project-section-head"><div><h2 id="projectPlatformTitle">平台上已有的项目</h2><p>来自正式平台的协作项目。</p></div><span data-platform-count></span></div>
+            <p class="project-platform-note">直接打开已有项目，无需重新创建。</p>
+            <div class="project-platform-list" data-platform-list></div>
+          </section>
         </div>
+        <aside class="project-onboarding" aria-labelledby="projectOnboardingTitle">
+          <span class="project-onboarding-label">快速开始</span><h2 id="projectOnboardingTitle">从一个项目开始</h2><p>你确定方向，管理员拆解任务，成员窗口协同执行。</p>
+          <ol class="project-lobby-steps" aria-label="新建项目流程"><li><span>1</span><div><strong>建立项目</strong><p>点击「新建项目」，填写项目名称并指定参与成员</p></div></li><li><span>2</span><div><strong>明确目标</strong><p>创建后进入「开工配置」，描述项目目标</p></div></li><li><span>3</span><div><strong>开始协作</strong><p>在开工向导中指定管理员与成员，由管理员细化并分派任务</p></div></li></ol>
+          <div class="project-onboarding-status"><span>工作窗口</span><p class="project-lobby-hint" data-worker-hint hidden></p></div>
+        </aside>
       </div>
-      <footer class="project-lobby-foot"><span>这份项目历史存在这台电脑的浏览器里</span><span>换一个入口（比如评审端口）就看不到它</span></footer>
+      <footer class="project-lobby-foot"><span>项目历史保存在当前浏览器</span><span>正式任务与协作状态以平台为准</span></footer>
     </section>`;
 
   // 4176 是跨提供方评审实例，和 4174 不同源，项目历史本来就不共享。这里把
