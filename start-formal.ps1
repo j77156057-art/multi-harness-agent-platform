@@ -23,12 +23,51 @@ $tokenNames = @(
     'qoder-member-2',
     'codex-window-admin'
 )
+
+# Issue a missing credential instead of making the operator create one.
+#
+# This used to be a bare throw ("Missing credential file: ..."). A credential is
+# an `apt_`-prefixed string that only `python -m app.auth issue` can mint, and its
+# plaintext is printed exactly once -- so "go make that file yourself" was never a
+# workable instruction. Now the script mints whatever is missing and says so.
+#
+# The planner needs the harness to be registered first; `app.auth issue` refuses
+# otherwise (loudly, with the reason), so that failure is reported as-is.
+$dataDir = Join-Path $PSScriptRoot 'data'
+New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+$backendDir = Join-Path $PSScriptRoot 'backend'
 foreach ($name in $tokenNames) {
-    $tokenPath = Join-Path $PSScriptRoot "data\$name.key"
-    if (-not (Test-Path $tokenPath)) {
-        throw "Missing credential file: $tokenPath. Formal mode needs tokens issued for the registered Harnesses."
+    $tokenPath = Join-Path $dataDir "$name.key"
+    $existing = ''
+    if (Test-Path $tokenPath) {
+        $existing = (Get-Content -Raw -Path $tokenPath -ErrorAction SilentlyContinue)
+        if ($existing) { $existing = $existing.Trim() }
     }
+    if ($existing -match '^apt_[a-f0-9]{64}$') { continue }
+    Write-Host "[credential] $name has no usable token; issuing one..."
+    Push-Location $backendDir
+    try {
+        $issued = & $python -m app.auth issue --type harness --id $name --label 'start-formal' 2>&1
+        $issueCode = $LASTEXITCODE
+    } finally {
+        Pop-Location
+    }
+    if ($issueCode -ne 0) {
+        throw "Could not issue a token for $name (exit $issueCode): $issued. Register that window first, then re-run .\start-formal.ps1"
+    }
+    try {
+        $parsed = ($issued | Select-Object -Last 1) | ConvertFrom-Json
+    } catch {
+        throw "Token issuance for $name returned something unreadable: $issued"
+    }
+    if (-not $parsed.issued -or -not $parsed.issued.token) {
+        throw "Token issuance for $name was refused: $($parsed.refused). Register that window first."
+    }
+    # The plaintext appears once: put it exactly where the worker reads it.
+    Set-Content -Path $tokenPath -Value $parsed.issued.token -NoNewline -Encoding ascii
+    Write-Host "[credential] $name issued -> data\$name.key"
 }
+
 
 $env:AP_AUTH_MODE = 'enforce'
 $env:AP_ADMIN_SUBJECTS = $AdminHarnessId
