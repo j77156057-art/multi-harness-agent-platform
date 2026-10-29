@@ -935,3 +935,36 @@ def test_a_quota_answer_without_any_allowance_is_not_a_balance():
 
     assert reading["known"] is False
     assert reading["reason"]
+
+
+def test_a_cli_slot_refuses_a_request_that_carries_tool_definitions():
+    """把 CLI 当模型用，服务不了带工具定义的请求 —— 要拒绝，不能装作能服务。
+
+    这一跳只能回一段文字，回不了 `tool_calls`；而它的提示词里写着「Do not use
+    tools, do not read or write files, do not run commands」（对「问一句话」是
+    对的）。以前这里照单全收，这句就混进调用方自己的系统提示词里，调用方开始相信
+    自己不许用工具 —— 2026-10-29 实测：pi 被路由到额度池后，每条活都回「我无法在
+    『不许用工具』的前提下完成这个任务」，10 次领活、0 次交付，而且平台上看不出
+    是这个原因。
+    """
+    import pytest
+
+    from app.pool.service import PoolError, PoolService
+
+    class _Upstream:
+        name = "codebuddy-cli"
+        cli = object()
+
+    class _Route:
+        model = "codebuddy/hy3"
+        upstream = _Upstream()
+
+    service = PoolService.__new__(PoolService)  # 只要这个方法，不必造整个池子
+    with pytest.raises(PoolError, match="tool_calls"):
+        service._cli_chat(
+            _Route(),
+            {
+                "messages": [{"role": "user", "content": "do the work"}],
+                "tools": [{"type": "function", "function": {"name": "write"}}],
+            },
+        )
