@@ -1154,12 +1154,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     root.dataset.flatState = 'ready';
     if (adminDialog.open) syncAdminDialog();
     syncBriefDialog();
-    // 模型用不了：有新的一件事就弹出来让人挑模型。处理过的（或明确说先不管的）
-    // 不再打扰；人正在里面挑的时候不重画，免得把他选到一半的抹掉。
-    if (!modelTroubleDialog.open && openModelTroubles().length) {
-      syncModelTroubleDialog();
-      modelTroubleDialog.show();
-    }
+    // 需要人处理的事**不再弹**：左栏那一行带红点，点进去是一页。浮层以前压在
+    // 内容上（正好盖住模型清单），而且"关掉"不等于有结论。
   }
 
   /**
@@ -1354,7 +1350,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     head.textContent = '会话';
     list.append(head);
 
-    const addRow = (kind, id, name, status, onClick) => {
+    const addRow = (kind, id, name, status, onClick, dot = false) => {
       const button = document.createElement('button');
       button.type = 'button';
       const on = state.view.kind === kind && (state.view.id || null) === (id || null);
@@ -1362,7 +1358,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 窗口行带上自己的身份：名单的顺序会变（谁在线、谁先被读到），
       // 按位置找窗口就会找错人；按身份找才是那一个窗口。
       if (id) button.dataset.harness = id;
-      button.innerHTML = `<b>${escape(name)}</b><span>${escape(status)}</span>`;
+      // 红点 = **还有事没结论**：处理掉或说了「先不管」才消失（不是"看过了"就消失）。
+      button.innerHTML = `<b>${escape(name)}${
+        dot ? '<i class="flat-conv-dot" title="有待你处理的事"></i>' : ''
+      }</b><span>${escape(status)}</span>`;
       // 右键这一行 = 「给这一家再开一个窗口」。只在窗口行上有（项目任务/群聊
       // 那两行不是 Harness，右键没意义）。
       if (kind === 'window' && id) {
@@ -1377,6 +1376,20 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     };
 
     const counts = countBy(state.tasks || []);
+    // 需要你处理的事排在最上面：它是唯一一类"卡住等你一句话"的东西，
+    // 埋在一串窗口中间就没人看。红点只在这一行、只在这类事真有结论时才灭。
+    const attention = attentionCount();
+    addRow(
+      'alerts',
+      null,
+      '需要你处理',
+      attention ? `${attention} 件事在等你` : '没有待你处理的事',
+      () => {
+        state.view = { kind: 'alerts', id: null };
+        render();
+      },
+      attention > 0,
+    );
     addRow('tasks', null, '项目任务', `${(state.tasks || []).length} 条任务 · ${counts.waiting} 条待领取`);
 
     const groupMessages = (state.messages || []).filter(
@@ -1752,6 +1765,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (state.view.kind === 'window') {
       pane.append(windowPane(state.view.id));
+      return pane;
+    }
+    if (state.view.kind === 'alerts') {
+      pane.append(alertsPane());
       return pane;
     }
     // 项目任务：选中一条活就看详情，没选就看任务表。
@@ -2456,7 +2473,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (!MODEL_TROUBLE.test(raw)) continue;
       // 模型坏掉的时候，这条活记在**最后持有它**的窗口上（合入后平台会清 owner）。
       const holders = holderIds(task);
-      note(holders.now || holders.before, reasonText(raw), task.last_failure?.at || '');
+      note(holders.now || holders.before, troubleReason(reasonText(raw)), task.last_failure?.at || '');
     }
     // 管理员与助手在群里报的失败：只看最近一小段，且只认它们自己发的。
     // 成员的消息不参与：传阅意见里讨论到「429」是在讨论额度，不是它自己的
@@ -2475,7 +2492,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 拿那句摘要去判，永远判不出模型坏了。展示才用人话。
       const body = String(message.body || '');
       if (!MODEL_TROUBLE.test(body)) continue;
-      note(sender, oneLine(readableMessageBody(message) || body), message.created_at);
+      // 展示用尾巴那一截（见 troubleReason）：摘要只截 26 字，放在这一页上看不到成因。
+      note(sender, troubleReason(body), message.created_at);
     }
     return [...found.values()];
   }
@@ -2483,6 +2501,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 这次这件事的指纹：换一次失败就是新的一件事，处理过的不再打扰。 */
   function troubleSignature(entry) {
     return `${entry.harnessId}|${String(entry.why || '').slice(0, 60)}|${entry.when || ''}`;
+  }
+
+  /**
+   * 一条消息/一句失败里"为什么用不了"的那一句。
+   *
+   * 取**尾巴**：成因往往写在后半段（"这一条没有答上来。原因：… connection refused"），
+   * 从头截断只会剩下 "AdminHarnessE…"，等于没写。所以在"需要你处理"这一页上
+   * 最多留 160 字、优先留后面那半。
+   */
+  function troubleReason(text) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!flat) return '';
+    // 原始失败常常是**半截 JSON**（`…ailed","error":{"message":"stream disconnected…"}`）：
+    // 里面那句 message 才是"为什么用不了"，把机器结构整段摆给人看等于没说。
+    const quoted = /"message"\s*:\s*"([^"]{4,300})"/.exec(flat);
+    const base = quoted ? quoted[1] : flat;
+    const marker = base.lastIndexOf('原因');
+    const tail = marker >= 0 ? base.slice(marker) : base;
+    return tail.length > 160 ? `…${tail.slice(-160)}` : tail;
   }
 
   /** 一个窗口的"换成哪个模型"：按额度属主分组，每条标出档位。 */
@@ -2518,80 +2555,77 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       </select>`;
   }
 
-  /** 模型用不了的那个弹窗。挂在 body 上：办公室每次重画都会把它收走。 */
-  function buildModelTroubleDialog() {
-    const dialog = document.createElement('dialog');
-    dialog.className = 'flat-dialog flat-model-trouble';
-    dialog.id = 'flatModelTrouble';
-    dialog.setAttribute('aria-label', '有窗口的模型用不了了');
-    // **非模态**：它是一件事，不是一道闸。人可以先接着看别的、先处理更急的，
-    // 回头再来挑模型 —— 模态会把整个办公室按住，而这里要的是"告诉你，你去处理"。
-    dialog.setAttribute('aria-modal', 'false');
-    dialog.innerHTML = `
-      <header class="flat-dialog-head">
-        <div>
-          <h2>有窗口的模型用不了了</h2>
-          <p class="flat-note">限流、额度用尽、通道连不上都会这样。换成额度池里的模型就能继续 ——
-          你选完，下一轮这个窗口就按它跑，活不用重做。</p>
-        </div>
-        <button type="button" class="flat-dialog-close" data-act="close-model-trouble" aria-label="关闭">×</button>
-      </header>
-      <div class="flat-dialog-list" id="flatModelTroubleList"></div>
-      <footer class="flat-dialog-actions">
-        <button type="button" data-act="close-model-trouble">先不管</button>
-      </footer>`;
-    document.body.append(dialog);
-    // 这个对话框挂在 body 上（不跟着办公室重画），办公室的点击委托听不到它 ——
-    // 所以它自己的按钮必须自己处理，否则「就用这个模型」点了没反应。
-    dialog.addEventListener('click', (event) => {
-      if (event.target.closest('[data-act="close-model-trouble"]')) {
-        dialog.close();
-        return;
-      }
-      const apply = event.target.closest('[data-act="apply-trouble-model"]');
-      if (apply) {
-        void applyTroubleModel(apply);
-        return;
-      }
-      if (event.target === dialog) dialog.close();
-    });
-    return dialog;
+  /**
+   * 「需要你处理」这一页里的事。
+   *
+   * 现在只有一类：某个窗口的模型用不了了。以后要加别的（等不到人拍板的方案、
+   * 成员一直在等的求助），在这里加一条就行 —— 左栏那个红点看的是这份清单，
+   * 不是某一类，这样"还有事没处理"只有一个出处。
+   */
+  function attentionItems() {
+    return openModelTroubles().map((entry) => ({
+      kind: 'model-trouble',
+      signature: troubleSignature(entry),
+      harnessId: entry.harnessId,
+      title: harnessName(entry.harnessId) || entry.harnessId,
+      why: entry.why,
+      count: entry.count,
+      when: entry.when,
+    }));
   }
 
-  const modelTroubleDialog = buildModelTroubleDialog();
+  /**
+   * 需要人处理的事有几件 —— 左栏那个红点只看这一句。
+   *
+   * 它随「处理掉」或「先不管」一起消失：两条路都记在
+   * `agent-office.model-trouble-dismissed.v1` 里，所以红点不是"看过了就没了"，
+   * 而是"这件事有结论了才没了"。
+   */
+  function attentionCount() {
+    return attentionItems().length;
+  }
 
-  /** 把当前这些"模型用不了"的窗口铺进弹窗。 */
-  function syncModelTroubleDialog() {
-    const list = modelTroubleDialog.querySelector('#flatModelTroubleList');
-    if (!list) return;
-    const entries = openModelTroubles();
-    if (!entries.length) {
-      list.innerHTML = '<p class="flat-empty">现在没有窗口因为模型用不了而卡住。</p>';
-      return;
+  /** 这一页：需要你处理的事，一件一块。处理完就没了。 */
+  function alertsPane() {
+    const pane = document.createElement('section');
+    pane.className = 'flat-main flat-alerts';
+    const items = attentionItems();
+    const head = document.createElement('header');
+    head.className = 'flat-detail-head';
+    head.innerHTML = `<div>
+        <h2>需要你处理</h2>
+        <p class="flat-summary">${
+          items.length ? `${items.length} 件事在等你。处理完或选择「先不管」之后，左栏的红点会消失。` : '现在没有需要你处理的事。'
+        }</p>
+      </div>`;
+    pane.append(head);
+    if (!items.length) return pane;
+    for (const item of items) {
+      const block = document.createElement('section');
+      block.className = 'flat-spec flat-alert';
+      block.dataset.signature = item.signature;
+      block.dataset.harness = item.harnessId;
+      block.innerHTML = `
+        <h3>${escape(item.title)}</h3>
+        <p class="flat-note">它的模型用不了了${item.count > 1 ? `（${item.count} 条活都卡在这）` : ''}。${escape(item.why)}</p>
+        <p class="flat-note">换成额度池里的模型就能继续 —— 你选完，下一轮这个窗口就按它跑，活不用重做。</p>
+        <div class="flat-alert-pick">
+          <label>换成 ${troublePicker(item.harnessId)}</label>
+          <button type="button" data-act="apply-trouble-model" data-harness="${escape(item.harnessId)}">就用这个模型</button>
+          <button type="button" data-act="dismiss-trouble" data-harness="${escape(
+            item.harnessId,
+          )}" data-signature="${escape(item.signature)}">先不管</button>
+        </div>
+        <p class="flat-trouble-error" data-trouble-error="${escape(item.harnessId)}"></p>`;
+      pane.append(block);
     }
-    list.innerHTML = entries
-      .map((entry) => {
-        const name = harnessName(entry.harnessId) || entry.harnessId;
-        const extra = entry.count > 1 ? `（${entry.count} 条活都卡在这）` : '';
-        return `<section class="flat-trouble" data-harness="${escape(entry.harnessId)}">
-          <h3>${escape(name)}</h3>
-          <p class="flat-note">它的模型用不了了${escape(extra)}。${escape(entry.why)}</p>
-          <div class="flat-trouble-pick">
-            <label>换成 ${troublePicker(entry.harnessId)}</label>
-            <button type="button" data-act="apply-trouble-model" data-harness="${escape(
-              entry.harnessId,
-            )}">就用这个模型</button>
-          </div>
-          <p class="flat-trouble-error" data-trouble-error="${escape(entry.harnessId)}"></p>
-        </section>`;
-      })
-      .join('');
+    return pane;
   }
 
   /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
   async function applyTroubleModel(button) {
     const harnessId = String(button.dataset.harness || '');
-    const block = button.closest('.flat-trouble');
+    const block = button.closest('.flat-alert') || button.closest('.flat-trouble');
     const select = block ? block.querySelector('[data-trouble-select]') : null;
     const modelId = select ? String(select.value || '') : '';
     const note = block ? block.querySelector(`[data-trouble-error="${harnessId}"]`) : null;
@@ -2625,7 +2659,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (availability && Array.isArray(availability.availability)) {
         state.availability = availability.availability;
       }
-      if (!openModelTroubles().length) modelTroubleDialog.close();
       render();
     } catch (error) {
       button.disabled = false;
@@ -2633,28 +2666,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-  /** 还没处理过的那些：处理过的不再占着右栏，也不再弹。 */
+  /** 「先不管」：这件事有结论了（不处理），左栏的红点跟着消失。 */
+  function dismissTrouble(button) {
+    const signature = String(button.dataset.signature || '');
+    if (!signature) return;
+    rememberTroubleDismissed(signature);
+    render();
+  }
+
+  /** 还没处理过的那些：处理过的不再占着这一页，也不再让红点亮着。 */
   function openModelTroubles() {
     const dismissed = dismissedTroubles();
     return modelTroubleWindows().filter((entry) => !dismissed.has(troubleSignature(entry)));
-  }
-
-  /** 右栏那张卡：有窗口等模型时才出现。 */
-  function modelTroubleCard() {
-    const entries = openModelTroubles();
-    if (!entries.length) return '';
-    const names = entries
-      .slice(0, 4)
-      .map((entry) => harnessName(entry.harnessId) || entry.harnessId)
-      .join('、');
-    return `<section class="flat-card flat-card-trouble">
-      <h3>模型用不了</h3>
-      <p>${entries.length} 个窗口的模型用不了了：${escape(names)}${
-        entries.length > 4 ? '…' : ''
-      }</p>
-      <p class="flat-note">换成额度池里的模型就能继续，活不用重做。</p>
-      <button type="button" data-act="open-model-trouble">选一个模型</button>
-    </section>`;
   }
 
   /**
@@ -4840,7 +4863,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     wrap.innerHTML = `
       ${askCard()}
-      ${modelTroubleCard()}
       ${waitingCard()}
       <section class="flat-card flat-card-brief">
         <h3>${cardIcon('brief')}待办事项</h3>
@@ -5508,13 +5530,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       syncAdminDialog();
       return;
     }
-    if (button.dataset.act === 'open-model-trouble') {
-      syncModelTroubleDialog();
-      if (!modelTroubleDialog.open) modelTroubleDialog.show();
-      return;
-    }
     if (button.dataset.act === 'apply-trouble-model') {
       void applyTroubleModel(button);
+      return;
+    }
+    if (button.dataset.act === 'dismiss-trouble') {
+      dismissTrouble(button);
       return;
     }
     if (button.dataset.act === 'close-admin-chat') {

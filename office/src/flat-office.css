@@ -2159,13 +2159,8 @@
   color: var(--ao-ink-soft);
 }
 
-/* 「模型用不了」的弹窗：一件事一块，块里直接选模型。 */
-.flat-model-trouble {
-  height: auto;
-  max-height: 80vh;
-}
-
-.flat-model-trouble .flat-trouble {
+/* 「需要你处理」那一页：一件事一块，块里直接选模型。 */
+.flat-alert {
   border: 1px solid var(--ao-line, #e3e6ea);
   border-radius: 8px;
   padding: 12px 14px;
@@ -2173,12 +2168,12 @@
   background: #fbfcfd;
 }
 
-.flat-model-trouble .flat-trouble h3 {
+.flat-alert h3 {
   margin: 0 0 4px;
   font-size: 14px;
 }
 
-.flat-model-trouble .flat-trouble-pick {
+.flat-alert-pick {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2186,7 +2181,7 @@
   margin-top: 8px;
 }
 
-.flat-model-trouble .flat-trouble-pick label {
+.flat-alert-pick label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2194,7 +2189,7 @@
   flex: 1 1 320px;
 }
 
-.flat-model-trouble select {
+.flat-alert select {
   flex: 1 1 220px;
   min-width: 0;
   padding: 5px 7px;
@@ -2205,27 +2200,24 @@
   background: #fff;
 }
 
-.flat-model-trouble .flat-trouble-error {
+.flat-alert .flat-trouble-error {
   margin: 6px 0 0;
   font-size: 12px;
   color: #b4232a;
   min-height: 1em;
 }
 
-.flat-card-trouble {
-  border-left: 3px solid #d08b1a;
+/* 左栏那一行上的红点：还有事没结论。 */
+.flat-conv-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #d4232a;
+  vertical-align: middle;
 }
-/* 非模态：弹窗要和办公室同时看得见、同时点得动。 */
-.flat-model-trouble {
-  position: fixed;
-  top: 24px;
-  right: 24px;
-  left: auto;
-  margin: 0;
-  width: min(92vw, 560px);
-  max-width: 560px;
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);
-}
+
 /* 左栏窗口行的右键菜单：一个动作，贴着鼠标出现。 */
 .flat-ctxmenu {
   position: fixed;
