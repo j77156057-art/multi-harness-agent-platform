@@ -49,9 +49,109 @@ CLI_TIERS = ("free", "reserve", "metered")
 KNOWN_CLI_STORES = ("opencode",)
 
 
+#: 非 CLI 上游（写在各家 CLI 自己配置里那几条）的档位覆盖。
+#:
+#: 它们的档位本来是**代码里的默认值**（`claude-provider`、`opencode:1` 按付费，
+#: `minimax` 按兜底），所以池子里没有任何东西可改 —— 人若知道"这条其实是免费
+#: 额度"，就只能去改代码。这里给一份可写的覆盖：按上游名记一条档位，撤掉就回到
+#: 代码默认。档位仍然只有三档，平台不猜"这条到底花不花钱"。
+def declared_upstream_tiers(config_path: Path | None = None) -> list[dict[str, Any]]:
+    """人给非 CLI 上游写下的档位（只有人写过的，不含代码默认）。"""
+    path = config_path or pool_config_path()
+    document = _read_json(path) if path.exists() else None
+    if not isinstance(document, dict):
+        return []
+    entries = document.get("upstream_tiers")
+    if not isinstance(entries, list):
+        return []
+    return [
+        {"name": str(entry.get("name")), "tier": str(entry.get("tier") or "")}
+        for entry in entries
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+    ]
+
+
+def declare_upstream_tier(
+    name: str, tier: str, *, config_path: Path | None = None
+) -> dict[str, Any]:
+    """Give one non-CLI upstream a tier, overriding the code default."""
+    upstream_name = str(name or "").strip()
+    tier_name = str(tier or "").strip().lower()
+    if not upstream_name:
+        raise PoolDeclarationError("which upstream must be named")
+    if tier_name not in CLI_TIERS:
+        raise PoolDeclarationError(
+            "the tier must be free, reserve or metered -- the platform will not "
+            "guess whether spending this quota costs money"
+        )
+    path = config_path or pool_config_write_path()
+    document = _read_json(path) if path.exists() else {}
+    payload = dict(document) if isinstance(document, dict) else {}
+    raw = payload.get("upstream_tiers")
+    kept = [
+        {"name": str(entry.get("name")), "tier": str(entry.get("tier") or "")}
+        for entry in (raw if isinstance(raw, list) else [])
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+    ]
+    kept = [entry for entry in kept if entry["name"] != upstream_name]
+    kept.append({"name": upstream_name, "tier": tier_name})
+    payload["upstream_tiers"] = kept
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return {"name": upstream_name, "tier": tier_name}
+
+
+def withdraw_upstream_tier(name: str, *, config_path: Path | None = None) -> bool:
+    """Take back the override: the upstream goes back to its code default."""
+    upstream_name = str(name or "").strip()
+    if not upstream_name:
+        raise PoolDeclarationError("which upstream must be named")
+    path = config_path or pool_config_write_path()
+    document = _read_json(path) if path.exists() else None
+    if not isinstance(document, dict):
+        return False
+    raw = document.get("upstream_tiers")
+    if not isinstance(raw, list):
+        return False
+    kept = [
+        entry
+        for entry in raw
+        if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+        and str(entry.get("name")) != upstream_name
+    ]
+    if len(kept) == len([entry for entry in raw if isinstance(entry, dict)]):
+        return False
+    payload = dict(document)
+    payload["upstream_tiers"] = kept
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
+def _apply_upstream_tiers(
+    upstreams: list[Upstream], config_path: Path | None = None
+) -> list[Upstream]:
+    """把人的档位覆盖贴到上游上（人写的优先于代码默认）。
+
+    用户自己的 key（`tier="user"`）不动：那一档不是一个"价格"，是"这笔钱是用户
+    的、平台不自己花"，改档会把这个约定改坏。
+    """
+    overrides = {
+        entry["name"]: entry["tier"]
+        for entry in declared_upstream_tiers(config_path)
+        if entry.get("tier") in CLI_TIERS
+    }
+    if not overrides:
+        return upstreams
+    return [
+        replace(upstream, tier=overrides[upstream.name])
+        if upstream.name in overrides and upstream.tier != "user"
+        else upstream
+        for upstream in upstreams
+    ]
+
+
 def declared_cli_slots() -> list[dict[str, Any]]:
     """The slots an operator declared in the pool config -- **no CLI is spawned**.
-
     The live list is :func:`discover_cli_slots` (it runs the CLIs to find out what
     they can do); this one is the *declared* side only, cheap enough for a read
     face that answers "what is still missing for this CLI?".
@@ -1033,6 +1133,10 @@ def discover_upstreams(
     found.extend(_minimax_upstream(home))
     if include_cli:
         found.extend(discover_cli_slots(config_path, home=home))
+    # 人给这几家写的档位（`claude-provider`、`opencode:1`、`minimax` …）在这里生效：
+    # 它们没有声明文件可写，档位本来是代码默认值。放在去重之前 —— 去重只按
+    # host:port 留一条，档位要跟着被留下的那一条走。
+    found = _apply_upstream_tiers(found, config_path)
     # The same service can show up under two names (the codex chain and the
     # opencode "openai" provider both point at 127.0.0.1:8402).  Two
     # upstreams on one port would double-count one quota -- and the chat

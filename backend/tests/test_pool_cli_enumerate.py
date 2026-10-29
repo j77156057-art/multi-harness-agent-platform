@@ -296,6 +296,52 @@ def test_a_namespaced_roster_name_can_be_declared(tmp_path):
     assert bare["model"] == "opencode/beam-free"
 
 
+def test_a_non_cli_upstream_can_be_retiered_and_withdrawn(tmp_path):
+    """非 CLI 上游（写在各家 CLI 自己配置里那几条）也能改档、能撤档。
+
+    它们的档位本来是**代码里的默认值**（`claude-provider` / `opencode:1` 按付费，
+    `minimax` 按兜底），池子里没有可改的东西 —— 人若知道"这条其实是免费额度"，
+    以前只能去改代码。现在写成一份覆盖，撤掉就回到默认。
+    """
+    from app.pool import sources
+
+    config = tmp_path / "config.json"
+    sources.declare_upstream_tier("opencode:1", "free", config_path=config)
+    assert sources.declared_upstream_tiers(config) == [{"name": "opencode:1", "tier": "free"}]
+
+    upstreams = sources.discover_upstreams(include_cli=False, config_path=config)
+    hit = [u for u in upstreams if u.name == "opencode:1"]
+    assert hit and hit[0].tier == "free", "人的说法要盖过代码默认"
+
+    assert sources.withdraw_upstream_tier("opencode:1", config_path=config) is True
+    back = [u for u in sources.discover_upstreams(include_cli=False, config_path=config) if u.name == "opencode:1"]
+    assert back and back[0].tier == "metered", "撤掉就回到代码默认"
+    assert sources.withdraw_upstream_tier("opencode:1", config_path=config) is False
+
+
+def test_a_non_cli_upstream_tier_is_validated(tmp_path):
+    """档位只有三档、名字不能空：平台不猜"这条到底花不花钱"。"""
+    from app.pool.sources import PoolDeclarationError, declare_upstream_tier
+
+    config = tmp_path / "config.json"
+    with pytest.raises(PoolDeclarationError):
+        declare_upstream_tier("", "free", config_path=config)
+    with pytest.raises(PoolDeclarationError):
+        declare_upstream_tier("opencode:1", "maybe", config_path=config)
+
+
+def test_the_users_own_key_tier_is_never_overridden(tmp_path):
+    """用户自己的 key 那一档不是"价格"，是"这笔钱是用户的"，覆盖不能动它。"""
+    from app.pool import sources
+
+    config = tmp_path / "config.json"
+    sources.declare_upstream_tier("my-key", "metered", config_path=config)
+    user = [
+        sources.Upstream(name="my-key", protocol="openai_chat", base_url="https://x/v1", tier="user")
+    ]
+    assert sources._apply_upstream_tiers(user, config)[0].tier == "user"
+
+
 def test_a_declaration_can_be_taken_back(tmp_path):
     """撤档：撤的只是**人写的那条**，内置档位撤不掉、也不该被撤没。
 

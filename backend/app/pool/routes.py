@@ -34,9 +34,12 @@ from app.pool.service import PoolError, PoolService, invalidate_discovery
 from app.pool.sources import (
     PoolDeclarationError,
     declare_cli_model,
+    declare_upstream_tier,
     declared_cli_slots,
+    declared_upstream_tiers,
     invalidate_rosters,
     withdraw_cli_model,
+    withdraw_upstream_tier,
 )
 
 router = APIRouter(tags=["pool"])
@@ -139,6 +142,9 @@ def _pool_status(service: PoolService) -> dict[str, Any]:
             for slot in declared_cli_slots()
             if slot.get("model")
         ],
+        # 人给**非 CLI 上游**（写在各家 CLI 自己配置里那几条）写的档位。它们的默认
+        # 档位在代码里，所以界面上只有这份清单能说明"这一行可以改、也可以撤"。
+        "upstream_tiers": declared_upstream_tiers(),
     }
 
 
@@ -176,6 +182,41 @@ def pool_declaration(
     invalidate_discovery()
     invalidate_rosters()
     return {"declaration": slot, "pool": _pool_status(_service())}
+
+
+@router.post("/pool/upstream-tier")
+def pool_upstream_tier(
+    body: dict[str, Any],
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """给**非 CLI 上游**定档（`claude-provider`、`opencode:1`、`minimax` …）。
+
+    这几条上游的档位本来是代码里的默认值，池子里没有可改的东西 —— 人若知道"这条
+    其实是免费额度"，以前只能去改代码。现在写成一份覆盖；撤掉就回到代码默认。
+    """
+    name = str(body.get("name") or "").strip()
+    tier = str(body.get("tier") or "").strip().lower()
+    try:
+        slot = declare_upstream_tier(name, tier)
+    except PoolDeclarationError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    invalidate_discovery()
+    return {"upstream_tier": slot, "pool": _pool_status(_service())}
+
+
+@router.post("/pool/upstream-tier/withdraw")
+def pool_upstream_tier_withdraw(
+    body: dict[str, Any],
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """撤掉这条覆盖：那条上游回到代码默认的档位。"""
+    name = str(body.get("name") or "").strip()
+    try:
+        withdrawn = withdraw_upstream_tier(name)
+    except PoolDeclarationError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    invalidate_discovery()
+    return {"withdrawn": withdrawn, "pool": _pool_status(_service())}
 
 
 @router.post("/pool/declaration/withdraw")

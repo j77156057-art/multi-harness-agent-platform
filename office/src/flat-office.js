@@ -2011,6 +2011,62 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  /**
+   * 非 CLI 上游改档：`claude-provider`、`opencode:1`、`minimax` 这些写在各家 CLI
+   * 自己配置里的额度，档位本来是代码里的默认值。这里把人那一句话写成覆盖。
+   *
+   * 与 CLI 那几家一样：改的若是**这个窗口正在用的模型**且改成收费，先切回窗口
+   * 自带模型 —— 按量计费要人点头才花。
+   */
+  async function retierUpstream(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const name = String(button.dataset.upstream || '');
+    const tier = String(button.dataset.tier || '');
+    if (!name || !tier) return;
+    button.disabled = true;
+    try {
+      const result = await api('/pool/upstream-tier', {name, tier});
+      if (!result || !result.pool) throw new Error('平台没有回新的额度池清单');
+      applyPool(result.pool);
+      state.tierEdit = null;
+      const usesIt = (state.pool.models || []).some(
+        (item) => String(item.upstream) === name && String(item.id) === currentPoolModelOf(harnessId),
+      );
+      if (usesIt && tier === 'metered') {
+        await applyModelChoice({harnessId, mode: 'cli', modelId: '', paidConsent: false});
+        state.modelNote = `${name} 已按收费定档。这个窗口原本在用它，先切回窗口自带模型 —— 按量计费要你点头才花。`;
+      } else {
+        state.modelNote = `${name} 已按${TIER_WORDS[tier] || tier}定档。`;
+      }
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `改档失败：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
+  /** 撤掉非 CLI 上游的档位：回到代码默认。 */
+  async function withdrawUpstream(button) {
+    const name = String(button.dataset.upstream || '');
+    if (!name) return;
+    button.disabled = true;
+    try {
+      const result = await api('/pool/upstream-tier/withdraw', {name});
+      if (!result || !result.pool) throw new Error('平台没有回新的额度池清单');
+      applyPool(result.pool);
+      state.tierEdit = null;
+      state.modelNote = result.withdrawn
+        ? `已撤掉 ${name} 的档位，它回到原来那一档。`
+        : `${name} 没有可撤的覆盖 —— 它现在用的就是原来那一档。`;
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `撤档失败：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
   /** 撤档：撤掉**人写的那条**声明，模型回到「没定档」。 */
   async function withdrawModel(button) {
     const harnessId = String(button.dataset.harness || '');
@@ -2214,11 +2270,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         (entry) => `${entry.cli}/${String(entry.model).split('/').pop()}`,
       ),
     );
+    // 人给**非 CLI 上游**写过档位的那些（`claude-provider`、`opencode:1`…）：
+    // 他们的默认档位在代码里，所以只有这份清单能说明这一行可以撤。
+    const upstreamTiers = new Set(
+      ((state.pool && state.pool.upstream_tiers) || []).map((entry) => String(entry.name || '')),
+    );
     const groupHtml = [...groups.values()]
       .map((group) => {
         const rows = [];
-        // 只有 CLI 那几家的模型能在这里改档：别家的额度写在各自的配置里，
-        // 平台没有替它们改档的口子。
         const cliGroup = Object.prototype.hasOwnProperty.call(rosters, group.key);
         for (const item of group.models) {
           const label = poolModelLabel(item);
@@ -2229,9 +2288,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           const cliModel = String(item.upstream || '').includes(':')
             ? String(item.upstream).split(':').slice(1).join(':')
             : String(item.model || label.model);
-          const editing = cliGroup && state.tierEdit === id;
+          // 上游的名字就是它自己的身份（`opencode:1` 与 `opencode:local` 同属一组，
+          // 但要各改各的档，所以按行取，不按组取）。
+          const upstreamName = String(item.upstream || '');
+          // 用户自己的 key 那一档不是"价格"，是"这笔钱是用户的"，不给改。
+          const editable = tier !== 'user';
+          const editing = editable && state.tierEdit === id;
           const editor = editing
-            ? `<span class="flat-model-edit">
+            ? cliGroup
+              ? `<span class="flat-model-edit">
                  <button type="button" data-act="retier-model" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(cliModel)}" data-tier="free">按免费</button>
                  <button type="button" data-act="retier-model" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(cliModel)}" data-tier="metered">按收费</button>
                  ${
@@ -2241,7 +2306,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                  }
                  <button type="button" data-act="edit-tier" data-model-id="">收起</button>
                </span>`
-            : cliGroup
+              : `<span class="flat-model-edit">
+                 <button type="button" data-act="retier-upstream" data-harness="${escape(harnessId)}" data-upstream="${escape(upstreamName)}" data-tier="free">按免费</button>
+                 <button type="button" data-act="retier-upstream" data-harness="${escape(harnessId)}" data-upstream="${escape(upstreamName)}" data-tier="metered">按收费</button>
+                 <button type="button" data-act="retier-upstream" data-harness="${escape(harnessId)}" data-upstream="${escape(upstreamName)}" data-tier="reserve">按兜底</button>
+                 ${
+                   upstreamTiers.has(upstreamName)
+                     ? `<button type="button" data-act="withdraw-upstream" data-harness="${escape(harnessId)}" data-upstream="${escape(upstreamName)}">撤档</button>`
+                     : '<span class="flat-model-hint">代码默认档位，撤不了</span>'
+                 }
+                 <button type="button" data-act="edit-tier" data-model-id="">收起</button>
+               </span>`
+            : editable
               ? `<span class="flat-model-edit"><button type="button" data-act="edit-tier" data-model-id="${escape(id)}">改档</button></span>`
               : '';
           rows.push(
@@ -5366,6 +5442,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'withdraw-model') {
       event.preventDefault();
       void withdrawModel(button);
+      return;
+    }
+    if (button.dataset.act === 'retier-upstream') {
+      event.preventDefault();
+      void retierUpstream(button);
+      return;
+    }
+    if (button.dataset.act === 'withdraw-upstream') {
+      event.preventDefault();
+      void withdrawUpstream(button);
       return;
     }
     if (button.dataset.act === 'dismiss-model-note') {
