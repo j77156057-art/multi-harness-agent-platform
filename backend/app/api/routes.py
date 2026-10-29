@@ -549,9 +549,15 @@ def availability(
     attempts = {
         str(row["owner"]): dict(row)
         for row in database.read(
-            "SELECT a.owner, a.task_id, a.attempt_id, a.status, a.created_at FROM task_attempts a"
+            # 连上 tasks 取**任务**的状态：attempt 行不随任务收口往前走
+            # （合入/放弃之后它仍停在 verifying / in_progress），只看 attempt
+            # 会把一条早已结束的活说成「执行中」（2026-10-29 实测：窗口页对一条
+            # 已放弃的活写「最近一次尝试 …（执行中）」）。
+            "SELECT a.owner, a.task_id, a.attempt_id, a.status, a.created_at,"
+            " t.status AS task_status FROM task_attempts a"
             " JOIN (SELECT owner, MAX(rowid) AS latest FROM task_attempts GROUP BY owner) latest"
             "  ON latest.latest = a.rowid"
+            " LEFT JOIN tasks t ON t.task_id = a.task_id"
         )
     }
     failures: dict[str, str] = {}
@@ -732,6 +738,9 @@ def availability(
                 ],
                 "last_task_id": attempt["task_id"] if attempt else None,
                 "last_attempt_status": attempt["status"] if attempt else None,
+                # 这条活**现在**是什么状态（权威）。attempt 行不随任务收口往前走，
+                # 所以界面要说"这个窗口在干什么"必须看这个，而不是 attempt.status。
+                "last_task_status": attempt.get("task_status") if attempt else None,
                 "recovered": recovered,
                 "usable": not reasons,
                 "reasons": reasons,

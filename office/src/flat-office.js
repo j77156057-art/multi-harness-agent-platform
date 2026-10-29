@@ -1551,11 +1551,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return `执行中：${clip(titleParts(running[0]).main || running[0].title || '', 18)}`;
     }
     if (info && info.last_attempt_status && info.last_task_id) {
-      const label = STATE_LABEL[info.last_attempt_status] || info.last_attempt_status;
-      // 还在跑的那一轮不是「上一轮」—— 它就是现在。
-      return RUNNING_STATUSES.has(String(info.last_attempt_status))
-        ? '执行中'
-        : `上一轮：${label}`;
+      // 这条活**现在**怎么样，看**任务**的状态：attempt 行不随任务收口往前走
+      // （合入/放弃之后它仍停在 verifying / in_progress），只看 attempt 会把一条
+      // 早已结束的活说成「执行中」（2026-10-29 实测：一条已放弃的活，窗口页写着
+      // 「最近一次尝试 …（执行中）」）。
+      const status = String(info.last_task_status || info.last_attempt_status);
+      const label = STATE_LABEL[status] || status;
+      return RUNNING_STATUSES.has(status) ? '执行中' : `上一轮：${label}`;
     }
     if (mine.length) return `手上有 ${mine.length} 条任务`;
     if (info && info.status === 'offline') return '进程没在跑';
@@ -3199,9 +3201,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     facts.push(['本项目里的任务', `${mine.length} 条（执行中 ${running.length}、已完成 ${done.length}、未完成 ${failed.length}）`]);
     if (info && info.last_task_id) {
+      // 同一条口径：说这条活**现在**的状态，不是那条 attempt 行的旧状态。
+      const status = String(info.last_task_status || info.last_attempt_status || '');
       facts.push([
         '最近一次尝试',
-        `${info.last_task_id}（${STATE_LABEL[info.last_attempt_status] || info.last_attempt_status || '未知'}）`,
+        `${info.last_task_id}（${STATE_LABEL[status] || status || '未知'}）`,
       ]);
     }
 
