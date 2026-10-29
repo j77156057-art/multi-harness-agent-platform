@@ -22,6 +22,7 @@ from typing import Any
 
 import httpx
 
+from app.adapter import presence
 from app.admin.worker import PlatformClient
 from app.assistant.loop import AssistantLoop
 from app.assistant.memory import memory_context, thread_turns
@@ -337,6 +338,8 @@ def main() -> None:
 
     client = PlatformClient(args.url, args.token_file.read_text(encoding="utf-8").strip())
     worker = build_worker(args, client)
+    # 在场：报「我还在」的节拍。界面上的「在线」只认它。
+    last_presence_at = 0.0
     try:
         while True:
             try:
@@ -355,6 +358,14 @@ def main() -> None:
                 )
                 if args.once:
                     raise
+            # 在场：助手进程的「还在」。界面上的「在线」只认它 ——
+            # 注册表里的 status 是注册那一刻的声明，进程停了它不会变。
+            now = time.monotonic()
+            if now - last_presence_at >= presence.PRESENCE_ANNOUNCE_SECONDS:
+                last_presence_at = now
+                presence.announce(
+                    lambda body: client.post("/adapter/presence", body), role="assistant"
+                )
             if args.once:
                 return
             time.sleep(max(1.0, float(args.interval)))

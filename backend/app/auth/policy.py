@@ -36,6 +36,9 @@ POLICY: dict[str, frozenset[str]] = {
     # --- R10 §17 adapter face (harness token) ---
     "harness:probe": frozenset({HARNESS}),
     "harness:capabilities": frozenset({HARNESS}),
+    # 窗口报「我的进程还在跑」：观察面（注册表里的 status 是注册时的声明，
+    # 进程停了它不会变 —— 界面要说「在线」就得有活的凭据）。
+    "harness:presence": frozenset({HARNESS}),
     # 平台额度池：harness 拿着自己的 token 来借模型额度（自己的 provider 挂了的时候，
     # 从池子里换一份还活着的额度）。这是**加性**的平台面，2026-10-21 由平台所有者
     # 批准；它只发模型请求，不领活、不改任务归属、不代表任何 harness 说话。

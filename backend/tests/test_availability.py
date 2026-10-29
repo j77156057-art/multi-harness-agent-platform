@@ -13,7 +13,11 @@ guess:
   failure (a Git error, a locked database) is the platform's problem and must
   not black-list the window;
 * a window that **delivered something after** its last failure is working
-  again.
+  again;
+* a window whose **process is not running** cannot work either -- the registry
+  says "online" from the moment of registration and never changes, so the
+  presence heartbeat is the only honest source for "is it running right now"
+  (2026-10-29: the registry listed 13 windows while only 7 workers ran).
 
 The route is read-only: it writes no state and grants nothing.
 """
@@ -21,9 +25,10 @@ The route is read-only: it writes no state and grants nothing.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.adapter.models import configured_model
+from app.adapter.presence import record_presence
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry
 from app.auth.tokens import TokenService
@@ -45,6 +50,11 @@ def _register(database, harness_id: str, *, status: str = "online") -> None:
             status=status,
         )
     )
+
+
+def _present(database, harness_id: str) -> None:
+    """这个窗口的进程正在跑（worker 的心跳）。"""
+    record_presence(database, harness_id, role="member")
 
 
 def _availability(client) -> dict[str, dict[str, object]]:
@@ -108,6 +118,7 @@ def test_a_window_without_a_credential_is_not_a_candidate(tmp_path, monkeypatch)
     _register(database, "h-ready")
     _register(database, "h-no-credential")
     TokenService(database).issue(subject_type="harness", subject_id="h-ready", label="primary")
+    _present(database, "h-ready")
 
     entries = _availability(client)
     assert entries["h-ready"]["usable"] is True
@@ -115,6 +126,72 @@ def test_a_window_without_a_credential_is_not_a_candidate(tmp_path, monkeypatch)
     assert entries["h-ready"]["reasons"] == []
     assert entries["h-no-credential"]["usable"] is False
     assert "no_credential" in [r["code"] for r in entries["h-no-credential"]["reasons"]]
+
+
+def test_a_window_whose_process_is_not_running_is_not_a_candidate(tmp_path, monkeypatch):
+    """登记在册 ≠ 进程在跑。
+
+    2026-10-29 的真实演练：注册表上 13 个窗口全是「在线」（那是注册那一刻
+    写下的声明），实际只有 7 个 worker 在跑。界面上写「13 在线」是假数字。
+    所以「在线」只认在场：worker 定期报一声「我还在」，没报就算没在跑。
+    """
+    client, database = make_client(tmp_path)
+    monkeypatch.setattr(
+        "app.api.routes.configured_model",
+        lambda harness_id: {"model": f"model-of-{harness_id}", "source": "test"},
+    )
+    _register(database, "h-alive")
+    _register(database, "h-gone")
+    for harness_id in ("h-alive", "h-gone"):
+        TokenService(database).issue(subject_type="harness", subject_id=harness_id, label="p")
+    _present(database, "h-alive")
+
+    entries = _availability(client)
+
+    alive = entries["h-alive"]
+    assert alive["live"] is True
+    assert alive["status"] == "online"
+    assert alive["usable"] is True
+    assert alive["last_seen_at"]
+
+    gone = entries["h-gone"]
+    assert gone["live"] is False
+    assert gone["status"] == "offline"
+    # 注册表里它仍然写着 online —— 那是登记面，不能拿来当「在线」。
+    assert gone["registered_status"] == "online"
+    assert gone["usable"] is False
+    assert "worker_not_running" in [r["code"] for r in gone["reasons"]]
+
+
+def test_the_registry_status_does_not_outlive_the_process(tmp_path, monkeypatch):
+    """进程停了很久之后，「在线」要自己掉下来。
+
+    没有这条，界面会在人停了 worker 之后一直显示「在线」—— 而那正是这次
+    要修的那个假数字。
+    """
+    from app.adapter.presence import presence_snapshot
+
+    client, database = make_client(tmp_path)
+    monkeypatch.setattr(
+        "app.api.routes.configured_model",
+        lambda harness_id: {"model": None, "source": "test"},
+    )
+    _register(database, "h-stopped")
+    TokenService(database).issue(subject_type="harness", subject_id="h-stopped", label="p")
+    _present(database, "h-stopped")
+
+    # 心跳停在一个很久以前的时间点（模拟进程被杀掉后再没报过）。
+    long_ago = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    with database.transaction() as conn:
+        conn.execute(
+            "UPDATE harness_presence SET seen_at = ?, started_at = ? WHERE harness_id = ?",
+            (long_ago, long_ago, "h-stopped"),
+        )
+
+    assert presence_snapshot(database)["h-stopped"]["live"] is False
+    entry = _availability(client)["h-stopped"]
+    assert entry["live"] is False
+    assert entry["status"] == "offline"
 
 
 def test_an_offline_window_is_not_a_candidate(tmp_path, monkeypatch):
@@ -155,6 +232,7 @@ def test_a_provider_failure_marks_the_window_unusable(tmp_path, monkeypatch):
     )
     _register(database, "h-fail")
     TokenService(database).issue(subject_type="harness", subject_id="h-fail", label="primary")
+    _present(database, "h-fail")
     seed_project(database)
     seed_task(database, task_id="T-1")
     _attempt(database, task_id="T-1", owner="h-fail")
@@ -182,6 +260,7 @@ def test_a_platform_side_failure_does_not_black_list_the_window(tmp_path, monkey
     )
     _register(database, "h-git")
     TokenService(database).issue(subject_type="harness", subject_id="h-git", label="primary")
+    _present(database, "h-git")
     seed_project(database)
     seed_task(database, task_id="T-1")
     _attempt(database, task_id="T-1", owner="h-git")
@@ -209,6 +288,7 @@ def test_delivering_after_a_failure_makes_the_window_usable_again(tmp_path, monk
     )
     _register(database, "h-back")
     TokenService(database).issue(subject_type="harness", subject_id="h-back", label="primary")
+    _present(database, "h-back")
     seed_project(database)
     seed_task(database, task_id="T-1")
     _attempt(database, task_id="T-1", owner="h-back")

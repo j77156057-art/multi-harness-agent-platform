@@ -397,6 +397,11 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   const ADMIN_THREAD_REFS = ['to-admin', 'reassign-request', 'dispatch-request'];
   // 定向消息的签名（R10 §19）：只有发送方与收件方看得到。
   const DIRECT_REF = 'direct';
+  /** 这条消息发给了谁（平台的投递记录）。空数组 = 没定向给别人。 */
+  function messageRecipients(message) {
+    const raw = Array.isArray(message && message.recipients) ? message.recipients : [];
+    return raw.map((item) => String(item || '')).filter(Boolean);
+  }
   // 「这条要改目标」的签名（R10 §19）：成员窗口提，管理员听见并带给群主。
   const GOAL_CHANGE_REF = 'goal-change';
 // 还在跑的状态：这些不是「上一轮」，是「现在正在做」。
@@ -446,10 +451,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const isAdmin = (message) => message.sender_id === adminId;
     const isDirect = (message) =>
       (Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF);
+    // 定向消息要看**发给谁**：私聊有两个对方（管理员、助手），都只带 direct
+    // 签名 —— 只按「有没有 direct」挑，助手回我的话就会跑到与管理员的对话里
+    // （2026-10-29 实测：两个线程串成一锅）。收件人是平台记下的事实。
+    const toAdmin = (message) => messageRecipients(message).includes(adminId);
     const isMine = (message) =>
       !isAdmin(message) &&
       ((Array.isArray(message.refs) ? message.refs : []).some((ref) => ADMIN_THREAD_REFS.includes(ref)) ||
-        isDirect(message));
+        (isDirect(message) && toAdmin(message)));
     const mine = ordered.filter(isMine);
     const started = mine.length > 0;
     const from = started ? Math.min(...mine.map((message) => Number(message.created_seq || 0))) : null;
@@ -1521,9 +1530,27 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         : `上一轮：${label}`;
     }
     if (mine.length) return `手上有 ${mine.length} 条任务`;
-    if (info && info.status === 'offline') return '离线';
+    if (info && info.status === 'offline') return '进程没在跑';
     if (info && info.usable === false) return '暂时无法领取任务';
     return '空闲';
+  }
+
+  /**
+   * 这个窗口在不在跑（平台上的**在场**事实，不是注册时的声明）。
+   *
+   * 注册表里的在线是窗口当初报「我上线了」时写下的，进程被关掉它不会变 ——
+   * 所以「在线」这个字眼只能配着「进程还在跑」这句话才不算撒谎。
+   */
+  function windowStateText(info) {
+    if (!info) return '未知';
+    if (info.live === false) {
+      const age = Number(info.presence_age_seconds);
+      return Number.isFinite(age) && age > 0
+        ? `离线（进程没在跑，${Math.round(age / 60)} 分钟前还在）`
+        : '离线（进程没在跑）';
+    }
+    if (info.status === 'degraded') return '在线（自报降级）';
+    return '在线';
   }
 
   /**
@@ -1724,9 +1751,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 这条私聊里的对话（我问的 + 它答的），按时间排。 */
   function assistantThread() {
     return (state.messages || [])
-      .filter((message) =>
-        (Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
-      )
+      .filter((message) => {
+        const refs = Array.isArray(message.refs) ? message.refs : [];
+        if (!refs.includes(DIRECT_REF)) return false;
+        // 只算**与助手之间**的那条线：发给我的（收件人是助手）或它回我的。
+        // 管理员的定向私聊是另一条线，混进来就成了串台。
+        const toAssistant = messageRecipients(message).includes(ASSISTANT_ID);
+        const fromAssistant = String(message.sender_id || '') === ASSISTANT_ID;
+        return toAssistant || fromAssistant;
+      })
       .sort((a, b) => Number(a.created_seq || 0) - Number(b.created_seq || 0));
   }
 
@@ -3123,7 +3156,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const isAssistant = info ? isPlatformAssistantHarness(info) : false;
 
     const facts = [];
-    facts.push(['状态', info ? (info.status === 'online' ? '在线' : '离线') : '未知']);
+    facts.push(['状态', info ? windowStateText(info) : '未知']);
     // 还没在这个项目里的窗口：给一个「加入这个项目」——中途来的人也得能干活。
     const isMember = projectMembers.has(harnessId);
     // 管理员窗口不算「要加进来的成员」：它是管理员（开工时就定下了）。
@@ -6127,7 +6160,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 读到的安装方式不会每 15 秒变，所以只取一次；失败时等人点「探测」再重试。
       if (!state.installs && !state.installsError) void loadInstalls();
       state.loaded = true;
-      // 顶栏的状态：平台连不连得上、几个窗口在线（平台上的事实，不猜）。
+      // 顶栏的状态：平台连不连得上、几个窗口**在跑**（平台上的在场事实，不猜）。
+      // 「在跑」只认进程报过到：注册表里的在线是注册那一刻的声明，进程停了它不会变。
       const online = state.availability.filter((item) => item.status === 'online').length;
       onStatus?.({
         connected: true,

@@ -1009,6 +1009,59 @@ def test_a_direct_question_is_answered_in_the_same_private_channel(tmp_path):
     assert [m for m in outsider if "direct" in (m.get("refs") or [])] == []
 
 
+def test_the_read_face_says_who_a_private_message_went_to(tmp_path):
+    """两个私聊线程要分得开，读面就得说得出收件人。
+
+    2026-10-29 的真实演练：发给管理员的私聊与发给助手的私聊**都只带 direct
+    签名**，界面按「有没有 direct」挑，助手的回答就出现在与管理员的对话里
+    （串台）。收件人是平台早就记下的事实（``message_deliveries``），读面把它
+    带出来，界面才能按对方分开。
+    """
+    from app.tasks.service import SchedulerService
+
+    chain = _admin_chain(tmp_path)
+    service = SchedulerService(chain.database)
+
+    service.post_message(
+        group_id=DEFAULT_GROUP,
+        author_kind="human",
+        author_id="office-operator",
+        body="给管理员：现在到哪一步了？",
+        mentions=[ADMIN_WINDOW],
+        refs=["direct"],
+        direct=True,
+    )
+    service.post_message(
+        group_id=DEFAULT_GROUP,
+        author_kind="human",
+        author_id="office-operator",
+        body="给助手：现在有几条任务？",
+        mentions=["office-assistant"],
+        refs=["direct"],
+        direct=True,
+    )
+
+    messages = service.list_messages(DEFAULT_GROUP, viewer="office-operator")
+    by_body = {str(m["body"]): m for m in messages}
+    to_admin = by_body["给管理员：现在到哪一步了？"]
+    to_assistant = by_body["给助手：现在有几条任务？"]
+    assert to_admin["recipients"] == [ADMIN_WINDOW]
+    assert to_assistant["recipients"] == ["office-assistant"]
+    # 群消息没有收件人（没有定向给谁）——空数组，不是猜。
+    service.post_message(
+        group_id=DEFAULT_GROUP,
+        author_kind="harness",
+        author_id=MEMBER,
+        body="群里说一声。",
+        mentions=[],
+    )
+    group_message = [
+        m for m in service.list_messages(DEFAULT_GROUP, viewer="office-operator")
+        if m["body"] == "群里说一声。"
+    ][0]
+    assert group_message["recipients"] == []
+
+
 def test_the_private_answer_reads_the_ledger_and_is_told_not_to_invent(tmp_path):
     """Without the ledger, "为什么失败" can only be answered by guessing."""
     chain = _admin_chain(tmp_path)

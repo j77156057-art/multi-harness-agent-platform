@@ -34,6 +34,7 @@ from typing import Any
 
 import httpx
 
+from app.adapter import presence
 from app.adapter.harnesses.cli import ProviderRoute
 from app.admin.service import AdminHarnessError, AdminService
 from app.config import settings
@@ -2153,6 +2154,8 @@ def main() -> None:
         replay_latest=args.replay_latest,
         review_rounds=args.review_rounds,
     )
+    # 在场：报「我还在」的节拍。界面上的「在线」只认它。
+    last_presence_at = 0.0
     try:
         while True:
             try:
@@ -2173,6 +2176,14 @@ def main() -> None:
                 )
                 if args.once:
                     raise
+            # 在场：管理员窗口的进程还在跑。界面上的「在线」只认它 ——
+            # 注册表里的 status 是注册那一刻的声明，进程停了它不会变。
+            now = time.monotonic()
+            if now - last_presence_at >= presence.PRESENCE_ANNOUNCE_SECONDS:
+                last_presence_at = now
+                presence.announce(
+                    lambda body: client.post("/adapter/presence", body), role="admin"
+                )
             if args.once:
                 return
             time.sleep(max(1.0, float(args.interval)))

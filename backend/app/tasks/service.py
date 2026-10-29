@@ -1852,6 +1852,26 @@ class SchedulerService:
             # refs is a JSON TEXT column (004); the wire contract wants an array,
             # and pre-004 rows default to '[]', never null.
             message["refs"] = json.loads(str(message["refs"]))
+        # 收件人（R10 §19 的投递记录）：读面要带上它。
+        #
+        # 没有它，**两个私聊线程分不开**：发给助手的定向消息与助手回我的消息
+        # 都只带 direct 签名，界面按「有没有 direct」挑，就把它俩和与管理员的
+        # 私聊混成一锅（2026-10-29 的真实演练就是这样：管理员的回话和助手的
+        # 回答出现在同一条线程里）。收件人是平台已经记下的事实，读出来即可。
+        recipients: dict[str, list[str]] = {}
+        ids = [str(m["message_id"]) for m in messages if m.get("message_id")]
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            for row in self.database.read(
+                "SELECT message_id, recipient_id FROM message_deliveries"
+                f" WHERE message_id IN ({placeholders})",
+                tuple(ids),
+            ):
+                recipients.setdefault(str(row["message_id"]), []).append(
+                    str(row["recipient_id"])
+                )
+        for message in messages:
+            message["recipients"] = recipients.get(str(message["message_id"]), [])
         return messages
 
     def _message_visible_to(self, message: dict[str, object], viewer: str | None) -> bool:

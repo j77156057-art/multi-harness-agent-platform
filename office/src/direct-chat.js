@@ -42,8 +42,19 @@ function adminName() {
 
 /** \u53ea\u770b\u5b9a\u5411\u6d88\u606f\uff1a\u5e26 direct \u7b7e\u540d\u7684\u90a3\u4e9b\u3002 */
 function directMessages() {
+  const id = adminId();
   return state.messages
-    .filter((message) => (Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF))
+    .filter((message) => {
+      const refs = Array.isArray(message.refs) ? message.refs : [];
+      if (!refs.includes(DIRECT_REF)) return false;
+      // 只看**与管理员之间**的那条线。这个页面写的是「与管理员的私聊」：
+      // 别的定向线（平台助手的回答）也带 direct 签名，不按收件人挑就会混进来
+      // （2026-10-29 实测：助手的回答出现在这个页面上）。
+      const recipients = Array.isArray(message.recipients)
+        ? message.recipients.map((item) => String(item || ''))
+        : [];
+      return recipients.includes(id) || String(message.sender_id || '') === id;
+    })
     .sort((a, b) => Number(a.created_seq || 0) - Number(b.created_seq || 0));
 }
 

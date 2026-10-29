@@ -457,6 +457,27 @@ def probe(
     )
 
 
+@adapter.post("/presence")
+def report_presence(
+    body: dict[str, Any],
+    database: DatabaseDep,
+    principal: _guard("harness:presence"),
+) -> dict[str, Any]:
+    """这个窗口的进程现在还在跑。
+
+    登记表里的 ``status`` 是**注册那一刻**的声明，进程被关掉它也不会变 ——
+    于是「N 个窗口在线」可能一个都没在跑。这里记的是**另一件事**：worker
+    定期来说一声「我还在」，超时没来的算离线。
+
+    只写观察面：不领活、不改任务归属、不发消息。
+    """
+    from app.adapter.presence import record_presence  # local import: keeps the cycle out
+
+    if principal is None:
+        raise ApiError("permission_denied", 403, "presence is reported by a harness")
+    return record_presence(database, principal.subject_id, role=str(body.get("role") or ""))
+
+
 @adapter.get("/capabilities")
 def capabilities(
     database: DatabaseDep,
@@ -556,6 +577,12 @@ def availability(
         successes[str(row["actor_id"])] = int(row["seq"])
     entries: list[dict[str, Any]] = []
     evidence_dir = Path(database.path).parent / "formal-runs"
+    # 在场（进程还在不在跑）：与注册状态是两件事。注册状态是**注册那一刻**的
+    # 声明，进程被关掉它不会变 —— 拿它当「在线」会让界面报出假数字
+    # （2026-10-29 实测：注册表 13 个，在跑的 worker 只有 7 个）。
+    from app.adapter.presence import presence_snapshot  # local import: keeps the cycle out
+
+    presence = presence_snapshot(database)
     for row in listing:
         harness_id = str(row["harness_id"])
         model = configured_model(harness_id)
@@ -577,8 +604,13 @@ def availability(
                 failure_detail = None
         credential_count = int(row.get("credential_count") or 0)
         registered = bool(row.get("registration_version"))
-        online = str(row.get("status")) == "online"
+        registered_status = str(row.get("status") or "")
+        online = registered_status == "online"
         degraded = bool(probe["degraded"]) if probe else False
+        here = presence.get(harness_id) or {}
+        live = bool(here.get("live"))
+        # 「在线」只认在场：进程没在跑，它就领不了活，也就不该算在线。
+        effective_status = registered_status if live else "offline"
         # ``reasons`` carries a stable code plus a human-readable detail: the
         # office localises the code, and the detail keeps the exact fact.
         reasons: list[dict[str, str]] = []
@@ -588,6 +620,20 @@ def availability(
         if not online:
             reasons.append(
                 {"code": "offline", "detail": f"registration status: {row.get('status')}"}
+            )
+        if not live:
+            # 进程不在跑 —— 这不是「窗口坏了」，是「没人起它」。说清楚是哪一种，
+            # 人看到的是「要起 worker」，不是「这个窗口废了」。
+            age = here.get("age_seconds")
+            reasons.append(
+                {
+                    "code": "worker_not_running",
+                    "detail": (
+                        f"窗口进程不在运行（{int(age)} 秒前还在）"
+                        if isinstance(age, (int, float))
+                        else "窗口进程不在运行"
+                    ),
+                }
             )
         if credential_count == 0:
             reasons.append({"code": "no_credential", "detail": "no platform credential"})
@@ -652,7 +698,13 @@ def availability(
                 "harness_id": harness_id,
                 "provider": row.get("provider"),
                 "adapter": row.get("adapter"),
-                "status": row.get("status"),
+                # 生效的在线状态：进程在跑才叫在线。
+                "status": effective_status,
+                # 注册时声明的状态（登记面）：进程停了它也不会变。
+                "registered_status": registered_status,
+                "live": live,
+                "last_seen_at": here.get("seen_at"),
+                "presence_age_seconds": here.get("age_seconds"),
                 "registration_version": row.get("registration_version"),
                 "credential_count": credential_count,
                 "model": model["model"],

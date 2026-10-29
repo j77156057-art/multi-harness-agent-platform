@@ -101,7 +101,7 @@ function paintConnection({ connected, online, offline } = {}) {
   const windows =
     online === undefined
       ? ''
-      : ` · 窗口 ${online} 在线${offline ? ` · ${offline} 离线` : ''}`;
+      : ` · 窗口 ${online} 个在跑${offline ? ` · ${offline} 个没在跑` : ''}`;
   connectionText.textContent = `已连接平台${windows}`;
 }
 

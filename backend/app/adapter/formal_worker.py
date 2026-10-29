@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from app.adapter import cli_output
+from app.adapter import presence
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.cli import (
     CliFailed,
@@ -1335,6 +1336,9 @@ def main():
     # 这两步都要及时：管理员开轮后会等申请，宽限期一过就冻结候选集合。
     allocation_every_seconds = 10.0
     last_allocation_at = 0.0
+    # 在场：窗口每隔一会儿报一声「我还在」。界面上的「在线」只认它。
+    presence_every_seconds = 20.0
+    last_presence_at = 0.0
     worker_token = args.token_file.read_text().strip()
     with httpx.Client(
         base_url=args.url,
@@ -1414,6 +1418,14 @@ def main():
                 print(json.dumps({"worker_error": type(exc).__name__}), flush=True)
                 if once:
                     raise
+            # 在场：这个窗口的进程还在跑。界面上的「在线」只认它 ——
+            # 注册表里的 status 是注册那一刻的声明，进程被关掉它不会变。
+            if time.monotonic() - last_presence_at >= presence_every_seconds:
+                last_presence_at = time.monotonic()
+                presence.announce(
+                    lambda body: client.post("/api/v1/adapter/presence", json=body),
+                    role="member",
+                )
             if once:
                 return
             time.sleep(3)
