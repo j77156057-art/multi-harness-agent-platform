@@ -3921,6 +3921,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         return '执行成员正在求助，等待协助。';
       case 'reclaiming':
         return '正在重新分派该任务。';
+      case 'draft':
+        return '任务还在方案里：方案被人批准之后它才会放出来。';
+      case 'draft_rejected':
+        return '这条任务所在的方案被驳回了，它不会再执行。';
       default:
         return '该任务仍在进行中。';
     }

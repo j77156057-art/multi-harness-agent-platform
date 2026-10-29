@@ -96,10 +96,24 @@ try {
   }
 
   // 一条真实的活（任务行是 button.flat-task）
-  const task = page.locator('button.flat-task').first();
+  // 先回「项目任务」：上一步点过成员窗口，中栏已经是窗口页，那里没有任务行。
+  const tasksView = page.locator('#aoWorkspace .flat-conv', {hasText: '项目任务'}).first();
+  if (await tasksView.isVisible().catch(() => false)) {
+    await tasksView.click();
+    await until(async () => (await page.locator('.flat-task').count()) > 0, {timeout: 20000});
+    await sleep(1200);
+  }
+  // 点**标题**而不是行中心：行的中心可能正好落在「看最后一次输出 ↓」那个链接上，
+  // 那个链接是"跳去看日志"，点了不选任务（2026-10-29 探针就这么空过一次）。
+  const task = page.locator('.flat-task-title').first();
   if (await task.isVisible().catch(() => false)) {
     await task.click();
-    await sleep(2500);
+    const shown = await until(
+      async () => (await page.locator('.flat-detail').count()) > 0,
+      {timeout: 20000},
+    );
+    report.checks.taskDetailShown = Boolean(shown);
+    await sleep(1500);
     report.checks.taskDetail = await page.evaluate(() => {
       const pane = document.querySelector('.flat-detail');
       return pane ? pane.textContent.replace(/\s+/g, ' ').trim().slice(0, 700) : null;
