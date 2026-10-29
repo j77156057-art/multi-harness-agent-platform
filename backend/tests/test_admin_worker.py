@@ -195,6 +195,67 @@ def _worker(tmp_path, monkeypatch, *, admin, client, dry_run=False):
     )
 
 
+class AllocationClient(FakeClient):
+    """一轮分配：轮已收，候选在册，只回「裁决成功」。"""
+
+    def __init__(self):
+        super().__init__()
+        self.decisions: list[dict] = []
+
+    def get(self, path, **params):
+        if path == "/allocation/rounds":
+            return {
+                "rounds": [
+                    {
+                        "round_id": "alloc-1",
+                        "state": "decided",
+                        "revision": 3,
+                        "assignments": [],
+                    }
+                ]
+            }
+        if path == "/allocation/candidates":
+            return {
+                "candidates": [
+                    {"application_id": "app-1", "harness_id": "m-1", "state": "frozen"}
+                ]
+            }
+        return super().get(path, **params)
+
+    def post(self, path, body):
+        if path.endswith("/allocation/decision"):
+            self.decisions.append(body)
+            return {"state": "decided"}
+        return super().post(path, body)
+
+
+def test_the_allocation_state_is_cleared_when_the_round_is_fully_decided(
+    tmp_path, monkeypatch
+):
+    """一轮分配裁完，就把 pending 清掉 —— 否则平台自己卡死。
+
+    2026-10-29 的真实演练：管理员把一轮的任务全裁完了，``pending_allocation``
+    却还指着那一轮。于是它永远不去给**下一个**已批准的方案开分配轮：新方案的活
+    停在 ready，成员没有轮可申请，没人开工，群里也不出声 —— 平台静默地僵住。
+    """
+    admin = FakeAdmin()
+    client = AllocationClient()
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.pending_allocation = {
+        "plan_id": "plan-1",
+        "plan_snapshot_id": "snap-1",
+        "round_id": "alloc-1",
+        "opened_at": 0.0,
+        "decided": [],
+        "tasks": [{"id": "FD-1", "title": "t", "assigned_harness_ids": ["m-1"]}],
+    }
+
+    worker._decide_allocation_tasks("alloc-1", worker.state.pending_allocation)
+
+    assert client.decisions, "the task was decided"
+    assert worker.state.pending_allocation is None, "the finished round is not carried over"
+
+
 def test_a_reassign_request_makes_the_administrator_re_point_the_task(tmp_path, monkeypatch):
     """The office *asks*; the administrator decides and does it.
 

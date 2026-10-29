@@ -920,6 +920,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         const submitter = row.submits.length
           ? row.submits.map((s) => s.actor_id).filter((v, i, a) => a.indexOf(v) === i).map(who).join('、')
           : null;
+        // 合并冲突要说清**冲在哪些文件上**：光说「冲突」主人无从裁决
+        // （平台把冲突文件写在事件 payload 里，这里只是把它摆出来）。
+        const conflictFiles =
+          row.lastReview && Array.isArray(row.lastReview.payload?.conflicts)
+            ? row.lastReview.payload.conflicts.filter(Boolean)
+            : [];
         return `<section class="flat-brief-task">
           <header>
             <span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
@@ -931,6 +937,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             <dd>${escape(owner)}${history.length ? `· 接手：${escape(history.map(who).join(' → '))}` : ''}· 第 ${escape(task.attempt_no ?? 0)}/${escape(task.max_attempts ?? 0)} 次尝试</dd>
             <dt>执行情况</dt>
             <dd>交了 ${row.submits.length} 次${submitter ? `（${escape(submitter)}）` : ''}；${escape(verdict)}${row.median !== null ? `；接手到交付 ${row.median}s` : ''}</dd>
+            ${conflictFiles.length ? `<dt>冲突的文件</dt><dd>${escape(conflictFiles.join('、'))}</dd>` : ''}
             ${task.last_failure && task.last_failure.reason ? `<dt>没完成的原因</dt><dd>${escape(reasonText(task.last_failure.reason))}</dd>` : ''}
           </dl>
         </section>`;

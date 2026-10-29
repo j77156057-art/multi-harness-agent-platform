@@ -280,3 +280,63 @@ def test_plan_validator_rejects_limits_resources_globs_and_acceptance():
     assert any("invalid acceptance" in error for error in result.errors)
     assert any("POSIX" in error for error in result.errors)
     assert any("duplicates" in error for error in result.errors)
+
+
+def test_the_acceptance_may_not_require_a_file_outside_the_landing_scope():
+    """验收条款要求交出的文件，必须在工单的落点范围里。
+
+    2026-10-29 的真实演练：管理员在第 2 轮把「提交 SHA 往哪儿交」折成了
+    「另写一个 portfolio/lanes/<lane>/receipt.txt」，而 exclusive_paths 只允许
+    retro-round2.md。成员照做写了回执，平台按范围规则正确地拒收了 —— 但错的是
+    方案：它要求人交一样东西，又不让那样东西进仓库。
+    """
+    contradictory = PlanSpec.from_mapping(
+        {
+            "plan_id": "plan-receipt",
+            "tasks": [
+                {
+                    "id": "T-001",
+                    "exclusive_paths": ["portfolio/lanes/claude/retro-round2.md"],
+                    "acceptance": [
+                        {
+                            "id": "ok",
+                            "check": "human",
+                            "description": (
+                                "(5) portfolio/lanes/claude/receipt.txt 中的 SHA 与 "
+                                "git log --oneline -20 中实际存在的提交一致"
+                            ),
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    result = PlanValidator().validate(contradictory)
+    assert not result.ok
+    assert any("receipt.txt" in error for error in result.errors)
+
+
+def test_the_acceptance_may_still_say_which_file_it_must_not_touch():
+    """「未改动 X」是禁止，不是要求 —— 这样的条款不该被当成矛盾。"""
+    prohibiting = PlanSpec.from_mapping(
+        {
+            "plan_id": "plan-prohibition",
+            "tasks": [
+                {
+                    "id": "T-001",
+                    "exclusive_paths": ["portfolio/lanes/claude/retro-round2.md"],
+                    "acceptance": [
+                        {
+                            "id": "ok",
+                            "check": "human",
+                            "description": (
+                                "(7) 该提交未改动 portfolio/lanes/claude/retro.md"
+                                " 及别的车道的文件"
+                            ),
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    assert PlanValidator().validate(prohibiting).ok

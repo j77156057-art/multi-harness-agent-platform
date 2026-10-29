@@ -905,6 +905,25 @@ class AdminWorker:
                 ),
                 flush=True,
             )
+            # 平台拒了**管理员自己拟的方案**（校验不过、路径越界、……）。
+            # 以前这里只在运行日志里留一行，群里什么也没说 —— 群主投了目标，
+            # 方案起不来，他只会一直等。沉默不是诚实（平台助手那边也是这么处理的）：
+            # 把拒的理由说给群主听，他才知道该改目标还是该改工单。
+            detail = ""
+            if isinstance(exc, httpx.HTTPStatusError):
+                try:
+                    body = exc.response.json()
+                    raw = body.get("error", body)
+                    detail = (
+                        raw.get("message", "") if isinstance(raw, dict) else str(raw)
+                    ) or ""
+                except (ValueError, AttributeError):
+                    detail = ""
+            self._post_admin_message(
+                "管理员拟的方案被平台拒了，这一轮开不起来："
+                + (detail or f"（HTTP {getattr(exc, 'response', None) and exc.response.status_code}）")
+                + " 请群主把目标里的落点/验收写清楚（或者说明该改哪一条），我再拟一版。"
+            )
             return
         self.state.pending_circulation = {
             "goal_seq": pending["goal_seq"],
@@ -1450,6 +1469,25 @@ class AdminWorker:
             print(
                 json.dumps(
                     {"allocation_decided": task_id, "round_id": round_id},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+        # 这一轮的任务都裁完了：**把 pending 清掉**。
+        #
+        # 不清的后果是平台自己把自己卡死（2026-10-29 的真实演练）：管理员一直以为
+        # 上一轮还没完，就永远不去给**下一个**已批准的方案开分配轮 —— 新方案的活
+        # 停在 ready，成员申请不了（没有轮可申请），没人开工，群里也不出声。
+        if tasks and all(
+            str(task.get("id") or "") in decided
+            for task in tasks
+            if str(task.get("id") or "").strip()
+        ):
+            self.state.pending_allocation = None
+            self.state.save(self.state_path)
+            print(
+                json.dumps(
+                    {"allocation_round_finished": round_id, "plan_id": pending.get("plan_id")},
                     ensure_ascii=False,
                 ),
                 flush=True,

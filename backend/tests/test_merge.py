@@ -8,6 +8,8 @@ value.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from app.git.repo import run_git
@@ -221,6 +223,18 @@ def test_conflict_in_the_tasks_own_files_needs_the_owner(tmp_path):
     assert outcome.event == "merge_conflict_needs_owner"
     assert status_of(chain) == "changes_requested"
     assert outcome.conflicts
+    # 事件里要带上**冲在哪些文件上**：光说「冲突」，主人不知道要看哪儿，
+    # 也就没法裁决（界面上这一条是从事件 payload 里读的）。
+    events = chain.database.read(
+        "SELECT event_name, payload_json FROM task_events"
+        " WHERE aggregate_id = ? AND event_name LIKE 'merge_conflict%'",
+        (chain.task_id,),
+    )
+    assert events, "the conflict is recorded as an event"
+    payload = json.loads(str(events[-1]["payload_json"]))
+    assert "README.md" in payload["conflicts"]
+    assert payload["conflict_scope"] == "own_files"
+    assert "README.md" in payload["detail"]
 
 
 def test_rename_rename_conflict_belongs_to_the_merge_worker(tmp_path):

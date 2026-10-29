@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from app.claim.transitions import apply_transition
 from app.db.connection import Database
@@ -199,7 +200,27 @@ class MergeWorker:
         event = (
             EventKind.MERGE_CONFLICT_NEEDS_OWNER if owner_must_resolve else EventKind.MERGE_CONFLICT
         )
-        next_status = self._transition(task_id, current=TaskStatus.MERGING, event=event)
+        # 冲突要说清楚**冲在哪些文件上**。事件原来只写一个空 payload —— 界面上
+        # 只有「合并冲突（需人工决定）」四个字，主人不知道要看哪儿，也就无法裁决
+        # （2026-10-29 的真实演练：两条工单都写同一个落点，冲突后只有主人自己
+        # 从仓库里翻才知道是撞了路径）。
+        conflict_files = list(conflicts)
+        next_status = self._transition(
+            task_id,
+            current=TaskStatus.MERGING,
+            event=event,
+            payload={
+                "conflicts": conflict_files,
+                "conflict_scope": "own_files" if owner_must_resolve else "other_files",
+                "detail": (
+                    "冲突在任务自己的文件里："
+                    + "、".join(conflict_files)
+                    + "。这份落点已经有别的交付合进来了，要主人决定是覆盖还是改落点。"
+                    if owner_must_resolve
+                    else "冲突在别的任务的文件里：" + "、".join(conflict_files)
+                ),
+            },
+        )
         return MergeOutcome(
             status="conflict",
             task_status=next_status,
@@ -410,7 +431,14 @@ class MergeWorker:
             applied=apply,
         )
 
-    def _transition(self, task_id: str, *, current: TaskStatus, event: EventKind) -> TaskStatus:
+    def _transition(
+        self,
+        task_id: str,
+        *,
+        current: TaskStatus,
+        event: EventKind,
+        payload: dict[str, Any] | None = None,
+    ) -> TaskStatus:
         with self.database.transaction() as conn:
             task = conn.execute(
                 "SELECT current_epoch FROM tasks WHERE task_id = ?", (task_id,)
@@ -423,7 +451,7 @@ class MergeWorker:
                 aggregate_id=task_id,
                 actor_type="merge_worker",
                 actor_id="merge-worker-1",
-                payload={},
+                payload=payload or {},
                 connection=conn,
             )
             return apply_transition(

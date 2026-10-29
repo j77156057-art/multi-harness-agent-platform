@@ -2,10 +2,41 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from app.adapter.scope import path_in_scope
+
+#: 验收条款里提到的**仓库相对文件路径**。
+#:
+#: 只认「带斜杠、带扩展名」的形状：`docs/x/note.md` 是路径，`3.5`、`N/A`、
+#: `TODO` 不是。裸文件名也不认 —— 工单里写 `retro-round2.md` 说的是「那个文件」，
+#: 真正的落点由 ``exclusive_paths`` 说了算。
+_PATH_IN_TEXT = re.compile(
+    r"(?<![\w./-])([A-Za-z_][\w.-]*(?:/[\w.-]+)*\.[A-Za-z0-9]{1,8})(?![\w/])"
+)
+
+#: 验收条款里「**不要动它**」的说法：出现这些词时，那句话是在禁止，不是要求。
+#:
+#: 「该提交未改动 portfolio/lanes/claude/retro.md」是在说别碰它 —— 不是要求交出它。
+#:
+#: 窗口只取路径**前 12 个字**：再宽就会把上一句的「为不通过」当成对这个路径的否定
+#: （2026-10-29 实测：窗口 24 字时，5 条真矛盾里只抓到 2 条）。
+_NEGATION_MARKERS = (
+    "未",
+    "不",
+    "无",
+    "非",
+    "别",
+    "勿",
+    "禁",
+    "never",
+    "not ",
+    "without",
+)
 
 
 class PlanError(ValueError):
@@ -18,6 +49,7 @@ class TaskSpec:
     capabilities: frozenset[str] = frozenset()
     depends_on: tuple[str, ...] = ()
     exclusive_resources: tuple[str, ...] = ()
+    exclusive_paths: tuple[str, ...] = ()
     outputs: tuple[Mapping[str, str], ...] = ()
     consumes: tuple[Mapping[str, str], ...] = ()
     acceptance: tuple[Mapping[str, Any], ...] = ()
@@ -34,6 +66,7 @@ class TaskSpec:
             capabilities=frozenset(str(x) for x in raw.get("capabilities", ())),
             depends_on=tuple(str(x) for x in raw.get("depends_on", ())),
             exclusive_resources=tuple(str(x) for x in raw.get("exclusive_resources", ())),
+            exclusive_paths=tuple(str(x) for x in raw.get("exclusive_paths", ())),
             outputs=tuple(raw.get("outputs", ())),
             consumes=tuple(raw.get("consumes", ())),
             acceptance=tuple(raw.get("acceptance", ())),
@@ -139,6 +172,7 @@ class PlanValidator:
                 errors.append(
                     f"task {task.task_id} uses unregistered verify profile {task.verify_profile}"
                 )
+            errors.extend(self._validate_acceptance_scope(task, plan))
             # R10 section 9: a dependency edge declared twice is a malformed
             # plan, not a no-op. De-duplicate before graph construction so the
             # repeated edge cannot inflate indegree and fake a Kahn cycle.
@@ -211,6 +245,57 @@ class PlanValidator:
                 # source 必须登记 id、类型、命令模板、输出形态、权限和 policy
                 # hash；空注册表意味着什么都没登记，任何 source 都算未登记。
                 errors.append(f"task {task.task_id} uses an unregistered evidence source {source}")
+
+    @staticmethod
+    def _validate_acceptance_scope(task: TaskSpec, plan: PlanSpec) -> list[str]:
+        """验收条款提到的文件，必须落在这条工单允许改的范围里。
+
+        2026-10-29 的真实演练撞到过：管理员在第 2 轮把成员的「提交 SHA 往哪儿交」
+        折成了「另写一个 ``portfolio/lanes/<lane>/receipt.txt``」，而工单的
+        ``exclusive_paths`` 只允许 ``retro-round2.md``。成员照做写了回执 —— 平台
+        按范围规则正确地拒收了（越界文件没提交，工作树脏），但**错的是方案**：
+        它要求人交一样东西，又不让那样东西进仓库。
+
+        所以这条要**在计划入库前**就拦住：验收条款提到的路径越界，方案本身就不成立。
+
+        判据收紧到只抓真正的矛盾（两条，避免误伤把方案也拒了）：
+
+        * 越界的路径得是**落点旁边的兄弟文件**（同一个目录）—— 验收条款顺口提到
+          另一个目录里的文件，多半是「参考一下」，不是「交出它」；
+        * 那句话得是在**要求**它，而不是在**禁止**它（「该提交未改动 X」是禁止）。
+        """
+        errors: list[str] = []
+        patterns = [str(item) for item in task.exclusive_paths if str(item).strip()]
+        if not patterns:
+            # 没有落点范围的任务不判这条：范围由别的层负责（没有范围时，
+            # 「提到某个文件」不构成矛盾）。
+            return errors
+        directories = {
+            pattern.rsplit("/", 1)[0] + "/" if "/" in pattern else "" for pattern in patterns
+        }
+        for acceptance in task.acceptance:
+            text = str(acceptance.get("description") or "")
+            for match in _PATH_IN_TEXT.finditer(text):
+                path = match.group(1)
+                if "/" not in path:
+                    continue
+                if path_in_scope(path, patterns):
+                    continue
+                if any(path_in_scope(path, [glob]) for glob in plan.path_globs):
+                    continue
+                directory = path.rsplit("/", 1)[0] + "/"
+                if directory not in directories:
+                    # 不是落点旁边的兄弟文件：多半是「参考别处的写法」，不是要求。
+                    continue
+                before = text[max(0, match.start() - 12) : match.start()]
+                if any(marker in before for marker in _NEGATION_MARKERS):
+                    # 这句话在说「别动它」，不是「交出它」。
+                    continue
+                errors.append(
+                    f"task {task.task_id} acceptance requires {path!r},"
+                    f" which is outside its exclusive_paths {patterns}"
+                )
+        return errors
 
     @staticmethod
     def _normalize_glob(glob: str, errors: list[str]) -> str:
