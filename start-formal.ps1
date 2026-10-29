@@ -106,8 +106,9 @@ $existing = Get-FormalWorkerPids 'app.adapter.formal_worker'
 $existingAdmin = Get-FormalWorkerPids 'app.admin.worker'
 $existingRuntime = Get-FormalWorkerPids 'app.runtime'
 $existingAssistant = Get-FormalWorkerPids 'app.assistant.worker'
-if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0 -or $existingRuntime.Count -gt 0 -or $existingAssistant.Count -gt 0) {
-    $ids = @($existing) + @($existingAdmin) + @($existingRuntime) + @($existingAssistant) | Where-Object { $_ } | Sort-Object -Unique
+$existingScheduler = Get-FormalWorkerPids 'app.scheduler'
+if ($existing.Count -gt 0 -or $existingAdmin.Count -gt 0 -or $existingRuntime.Count -gt 0 -or $existingAssistant.Count -gt 0 -or $existingScheduler.Count -gt 0) {
+    $ids = @($existing) + @($existingAdmin) + @($existingRuntime) + @($existingAssistant) + @($existingScheduler) | Where-Object { $_ } | Sort-Object -Unique
     throw ("Formal workers are already running (pid: $($ids -join ', '))." +
         " Stop them first, otherwise two instances compete for the same tasks.")
 }
@@ -161,6 +162,16 @@ Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group
 # the task stops at "approved" -- the work is done and reviewed, but it never
 # reaches the repository.
 Start-Python 'runtime' @('-m', 'app.runtime', '--loop', '--interval', '15')
+
+# The sweeper family (app.scheduler): it is the only thing that recycles the
+# worktrees of finished attempts.
+#
+# Without it the platform locks itself up: a merged task keeps its worktree
+# forever, the concurrent-worktree cap (8) is slowly eaten by dead attempts,
+# and then every new task fails to get a worktree -- "concurrent worktree cap
+# reached (8/8)" -- burning its whole attempt budget in seconds and ending up
+# stuck in 'ready' with a confusing "claim outcome was 'rejected'".
+Start-Python 'scheduler' @('-m', 'app.scheduler', '--loop')
 
 # The platform assistant (office-assistant): it answers the owner's private
 # questions -- "why did this fail", "does this diff meet the acceptance",

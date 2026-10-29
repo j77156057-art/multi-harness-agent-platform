@@ -780,6 +780,37 @@ _NOT_MODEL_TROUBLE = re.compile(
 )
 
 
+def human_failure_reason(exc: BaseException) -> str:
+    """把失败写成**人能读懂的一句**：发生了什么 + CLI 自己说的那一句。
+
+    以前这里只写异常类名（`formal worker error: CliFailed`），界面和事件上就这一句
+    —— 人看不出到底为什么。而 CLI 的 stderr 里往往已经把原因说尽了
+    （`Refused: no committed change against base db8340…` = 它只把内容说出来了、
+    没真的落到工作树里）。异常类名是给开发者看的，这一句才是给干活的人看的。
+    """
+    name = type(exc).__name__
+    detail = ""
+    if isinstance(exc, CliFailed):
+        lines = [
+            line.strip()
+            for line in str(exc.result.stderr or "").splitlines()
+            if line.strip() and not line.strip().startswith("[")
+        ]
+        detail = lines[-1] if lines else ""
+        if detail.lower().startswith("refused:"):
+            # 平台自己的拒收：说清它拒的是什么，别让人以为模型坏了。
+            return (
+                "平台拒收了这个窗口的交付物："
+                f"{detail.split(':', 1)[1].strip()}"
+                "（它把内容说出来了，但没有把改动真正提交到工作树里）"
+            )
+    if not detail:
+        detail = str(exc)
+    one_line = detail.strip().splitlines()[0] if detail.strip() else ""
+    one_line = one_line[:200]
+    return f"{name}：{one_line}" if one_line else name
+
+
 def _provider_outage_hint(exc: BaseException) -> str:
     """模型用不了时给失败原因补一句 —— 不含则返回空串。
 
@@ -1136,7 +1167,7 @@ def run_one(
                 release_or_abandon(
                     adapter,
                     task["task_id"],
-                    f"formal worker error: {type(exc).__name__}",
+                    human_failure_reason(exc),
                 )
                 try:
                     manager.archive_and_recycle(attempt_id=str(attempt_id))
