@@ -9,7 +9,7 @@ import { parseTranscript } from '../src/cli-transcript.js';
 const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
-const BASE_HARNESSES=new Set(['codex','claude-code','opencode','qoder','codebuddy']);
+const BASE_HARNESSES=new Set(['codex','claude-code','opencode','qoder','codebuddy','platform']);
 // 声明出来的基座（`adapters/cli.json`）：平台知道它们（`known_bases()` 读声明表），
 // 办公室本地照着它登记 —— 「加一个新 harness 不用改代码」在本地这一侧也成立。
 // 模板由平台给（与 `GenericCliAdapter` 造注册表的是同一份），这里不自己拼。
@@ -31,6 +31,10 @@ const BASE_ADAPTERS={
   'opencode':{name:'OpenCode',provider:'sst',adapter:'opencode-run',adapter_version:'1.0.0',capabilities:['coding'],registration_version:'reg-001'},
   'qoder':{name:'Qoder CLI CN',provider:'qoder',adapter:'qoderclicn-print',adapter_version:'1.0.0',capabilities:['coding'],registration_version:'reg-001'},
   'codebuddy':{name:'CodeBuddy',provider:'tencent',adapter:'codebuddy-print',adapter_version:'1.0.0',capabilities:['coding'],registration_version:'reg-001'},
+  // 平台自己的工具：不是某个 CLI，而是平台替模型执行工具的那条路（见
+  // `backend/app/agenttools/`）。放进这张表的用处只有一个 —— 窗口创建时能选到它，
+  // 不需要人先手工登记一次基座。
+  'platform':{name:'平台工具',provider:'pool',adapter:'platform-tools',adapter_version:'1.0.0',capabilities:['coding'],registration_version:'reg-001'},
   // The administrator is an external Harness window chosen in the opening guide
   // (R10-fix-15). `office-admin` used to be registered here as an extra harness;
   // it is the platform assistant's model identity, not a window, and no Harness

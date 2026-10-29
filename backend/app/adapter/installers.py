@@ -168,6 +168,17 @@ CATALOG: tuple[CliInstall, ...] = (
 )
 
 
+#: Bases that ship **inside** the platform: there is no CLI to put on a
+#: computer, because the thing that runs is this repository's own Python
+#: entry point.  They are named here so that "every base the platform can
+#: drive can tell you how it gets here" stays true -- for these the honest
+#: answer is "nothing to install", and that answer belongs in the code rather
+#: than as a silent hole in the catalog.
+SELF_HOSTED_BASES: dict[str, str] = {
+    "platform": "随平台自带：工具由平台执行（backend/app/agenttools），不需要另装 CLI。",
+}
+
+
 def host_os() -> str:
     """This machine's OS in the catalog's vocabulary."""
     return {"nt": "windows", "darwin": "macos"}.get(os.name, "linux")

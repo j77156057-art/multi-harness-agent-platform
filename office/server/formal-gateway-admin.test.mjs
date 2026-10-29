@@ -312,6 +312,13 @@ test('a declared base is offered and registered with the platform\'s own templat
   assert.equal(declaredBase.adapter, 'newcli-print');
   assert.equal(declaredBase.name, 'New CLI');
 
+  // 「平台自己的工具」也是可以开窗口的基座：模型用不了工具时改用它。
+  // 这一条守的是**人能选到它**，不是它能不能跑（那由后端测试守）。
+  const platformBase = payload.base_adapters.find((item) => item.harness_id === 'platform');
+  assert.ok(platformBase, 'the platform-tools base is offered next to the CLIs');
+  assert.equal(platformBase.name, '平台工具');
+  assert.equal(platformBase.adapter, 'platform-tools');
+
   // 2. 登记它时，用的是**平台给的那份**模板。
   const { status: regStatus } = await exchange(gateway, '/base-harnesses', { harness_id: 'newcli' });
   assert.equal(regStatus, 200);

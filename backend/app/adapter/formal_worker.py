@@ -29,6 +29,7 @@ from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.generic import GenericCliAdapter, load_declarations
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.pi import PiAdapter
+from app.adapter.harnesses.platform import PlatformToolsAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
 from app.adapter.scope import path_in_scope
 from app.config import settings
@@ -46,6 +47,9 @@ ADAPTER_TYPES = {
     "pi": PiAdapter,
     "qoder": QoderAdapter,
     "codebuddy": CodeBuddyAdapter,
+    # 平台自己的 Harness：工具由平台执行（见 app.agenttools）。它不是某个 CLI 的
+    # 替代品，而是给「模型用不了工具」的那条路一个能真干活的出口。
+    "platform": PlatformToolsAdapter,
 }
 
 _INSTANCE_RE = re.compile(
@@ -729,7 +733,12 @@ def build_goal(
                 "Only write files inside exclusive_paths. Do not run shell commands or Git; "
                 "the platform will validate scope and create the commit. "
                 if harness_id == "pi"
-                else "Commit the deliverable on the current branch. "
+                else (
+                    "You execute no tools yourself: the platform executes them and hands you the result. "
+                    "Stay inside exclusive_paths and do not run Git; the platform commits after checking scope. "
+                    if harness_id.split("-member-")[0].split("-window-")[0] == "platform"
+                    else "Commit the deliverable on the current branch. "
+                )
             )
         )
         + "Task specification: "
@@ -1043,14 +1052,19 @@ def run_one(
         spec,
         service.repo_head(manager),
         # Claude 与 Pi 不自己提交：平台替它们提交（Claude 是因为它跑在沙箱里，
-        # Pi 是因为它不写 Git）。
-        platform_commit=isinstance(adapter, ClaudeCodeAdapter | PiAdapter),
+        # Pi 是因为它不写 Git）。平台工具那一类也一样：它的工具里根本没有 git 写，
+        # 提交由平台做完再判范围。
+        platform_commit=isinstance(adapter, ClaudeCodeAdapter | PiAdapter | PlatformToolsAdapter),
         commit_message=f"chore({task['task_id']}): submit Claude deliverable"
         if isinstance(adapter, ClaudeCodeAdapter)
         else (
             f"chore({task['task_id']}): submit Pi deliverable"
             if isinstance(adapter, PiAdapter)
-            else "chore(formal): submit harness deliverable"
+            else (
+                f"chore({task['task_id']}): submit platform-tools deliverable"
+                if isinstance(adapter, PlatformToolsAdapter)
+                else "chore(formal): submit harness deliverable"
+            )
         ),
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
@@ -1079,6 +1093,11 @@ def run_one(
         route_env = dict(adapter.route_environment())
         route_env["AGENT_OFFICE_POOL_SOURCE"] = str(plan.get("upstream") or "pool")
         route_env["AGENT_OFFICE_POOL_REASON"] = str(plan.get("reason") or "")
+    # 这条活授权给它的落点。走池子时它随 route_env 一起给子进程；不走池子时也照样给
+    # ——「平台工具」那一类 Harness 的写入范围就是这里的清单，它不需要别的来源。
+    route_env["AGENT_OFFICE_SCOPE"] = json.dumps(
+        [str(item) for item in (spec.get("exclusive_paths") or [])], ensure_ascii=False
+    )
     # 上一轮失败留下的断点报告：这一次（重试或别人接手）从断点继续，而不是从零开始。
     handoff = read_handoff_report(evidence / f"{task['task_id']}.handoff.json")
     goal = build_goal(spec, harness_id=harness_id, review=review, handoff=handoff)

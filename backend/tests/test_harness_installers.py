@@ -54,10 +54,22 @@ def shimmed(monkeypatch, tmp_path):
 
 
 def test_every_installed_base_has_an_entry():
-    """A base the platform can drive but cannot tell you how to get is a gap."""
+    """A base the platform can drive but cannot tell you how to get is a gap.
+
+    "How to get" has two honest answers: install this CLI (a catalog entry),
+    or it ships with the platform and there is nothing to install
+    (``SELF_HOSTED_BASES``).  A base in neither is the gap this checks for.
+    """
     listed = {entry.harness_id for entry in installers.CATALOG}
 
-    assert set(ADAPTER_TYPES) <= listed
+    assert set(ADAPTER_TYPES) <= listed | set(installers.SELF_HOSTED_BASES)
+
+
+def test_a_self_hosted_base_names_why_there_is_nothing_to_install():
+    """「不用装」也是一句要说清楚的话，不是一个空目录。"""
+    for harness_id in installers.SELF_HOSTED_BASES:
+        assert harness_id not in {entry.harness_id for entry in installers.CATALOG}
+        assert installers.SELF_HOSTED_BASES[harness_id].strip()
 
 
 def test_an_entry_names_the_command_the_adapter_launches():

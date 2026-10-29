@@ -42,7 +42,7 @@ from app.config import settings
 #:
 #: ``pi`` is here because the platform ships a measured Pi adapter too: a
 #: declaration must not be able to shadow it.
-BUILTIN_BASES = ("codex", "claude-code", "opencode", "pi", "qoder", "codebuddy")
+BUILTIN_BASES = ("codex", "claude-code", "opencode", "pi", "qoder", "codebuddy", "platform")
 
 #: A declared base is a lowercase, hyphen-separated identifier.
 BASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
