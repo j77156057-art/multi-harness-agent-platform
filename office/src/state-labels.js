@@ -8,6 +8,7 @@
 // 两个页面的说法不会各说各话。
 export const STATE_LABEL = {
   draft: '尚未开始',
+  draft_rejected: '方案已驳回',
   ready: '待领取',
   queued: '排队中',
   claimed: '已领取',

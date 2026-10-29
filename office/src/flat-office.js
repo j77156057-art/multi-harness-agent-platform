@@ -43,7 +43,17 @@ const escape = escapeHtml;
 // 独立页面共用一份，两个页面的说法不会各说各话。
 
 const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
-const WAITING_STATES = new Set(['draft', 'ready', 'queued']);
+// 「待领取」= 平台已经**放出来**、等窗口来接的活。
+//
+// `draft` 不在里面：草案还挂在方案上（方案没被人批准之前，谁都领不动它）。
+// 把它算成「待领取」，界面就会说「5 条没人领」—— 而事实上那不是没人领，是
+// 还没到能领的时候（2026-10-29 实测：一个没批准方案的 5 条草案，被助手报成
+// 「5 条没人领」，看着像活堆着没人干）。
+const WAITING_STATES = new Set(['ready', 'queued']);
+//: 草案：方案的草稿任务，等方案批准。
+const DRAFT_STATES = new Set(['draft']);
+//: 方案被驳回后留下的草稿：终态，不会再跑。
+const REJECTED_STATES = new Set(['draft_rejected']);
 
 // 平台助手（后台那个**有模型、有只读工具**的助手主体）。
 //
@@ -190,15 +200,16 @@ function projectScope() {
   }
 }
 
-/** 一眼看清"现在怎样"：待领取 / 进行中 / 待审 / 失败 / 已完成。 */
+/** 一眼看清"现在怎样"：草案 / 待领取 / 进行中 / 待审 / 失败 / 已完成。 */
 function countBy(tasks) {
-  const counts = { waiting: 0, active: 0, review: 0, failed: 0, done: 0 };
+  const counts = { draft: 0, waiting: 0, active: 0, review: 0, failed: 0, done: 0 };
   for (const task of tasks) {
     const status = String(task.status || '');
-    if (WAITING_STATES.has(status)) counts.waiting += 1;
+    if (DRAFT_STATES.has(status)) counts.draft += 1;
+    else if (WAITING_STATES.has(status)) counts.waiting += 1;
     else if (['claimed', 'in_progress', 'verifying'].includes(status)) counts.active += 1;
     else if (['awaiting_review', 'changes_requested', 'escalated', 'awaiting_human'].includes(status)) counts.review += 1;
-    else if (FAILED_STATES.has(status)) counts.failed += 1;
+    else if (FAILED_STATES.has(status) || REJECTED_STATES.has(status)) counts.failed += 1;
     else if (status === 'merged') counts.done += 1;
   }
   return counts;
@@ -1294,6 +1305,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-today">${escape(todayStory())}</p>
       </div>
       <ul class="flat-counts">
+        ${counts.draft ? `<li><span>草案</span><b>${counts.draft}</b></li>` : ''}
         <li class="${counts.waiting ? 'has-value' : ''}"><span>待领取</span><b>${counts.waiting}</b></li>
         <li class="${counts.active ? 'has-value' : ''}"><span>执行中</span><b>${counts.active}</b></li>
         <li class="is-review ${counts.review ? 'has-value' : ''}"><span>待处理</span><b>${counts.review}</b></li>
@@ -1417,7 +1429,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       attention > 0,
     );
     addRow('tasks', null, '项目任务', `${(state.tasks || []).length} 条任务 · ${counts.waiting} 条待领取`);
-
     const groupMessages = (state.messages || []).filter(
       (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
     );
@@ -1603,7 +1614,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const facts = document.createElement('dl');
     facts.className = 'flat-facts';
     const rows = [
-      ['任务', `${tasks.length} 条：待领取 ${counts.waiting} · 执行中 ${counts.active} · 待处理 ${counts.review} · 未完成 ${counts.failed} · 已完成 ${counts.done}`],
+      ['任务', `${tasks.length} 条：草案 ${counts.draft} · 待领取 ${counts.waiting} · 执行中 ${counts.active} · 待处理 ${counts.review} · 未完成 ${counts.failed} · 已完成 ${counts.done}`],
       ['还没人领', unclaimed.length
         ? `${unclaimed.length} 条：${unclaimed.slice(0, 3).map((task) => task.title || task.task_id).join('、')}${unclaimed.length > 3 ? ' 等' : ''}`
         : '没有（排队的活都有人领了）'],
