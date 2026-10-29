@@ -582,11 +582,11 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         row.append(note);
       }
       const actions = document.createElement('div'); actions.className = 'agent-actions';
-      // 预算用完的活：只有人能给它"再给一次机会"（R10 §8 拒绝自动回环）。
+      // 预算用完的活：只有人能给它"解除次数上限"（R10 §8 拒绝自动回环）。
       const spent = Number(task.attempt_no || 0) >= Number(task.max_attempts || 0);
       if (spent) {
-        const again = actionButton('请求再给一次机会（预算豁免）', () => grantBudgetOverride(task),
-          '该任务的尝试预算已用尽（R10 §8）。仅人工可追加一次尝试 —— 平台与管理员窗口均不能自行豁免。');
+        const again = actionButton('请求解除次数上限（预算豁免）', () => grantBudgetOverride(task),
+          '该任务的尝试预算已用尽（R10 §8）。仅人工可解除次数上限 —— 平台与管理员窗口均不能自行豁免。');
         actions.append(again);
       }
       let select = null;
@@ -957,15 +957,15 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     } catch (error) { showAction(`请求失败：${error.message}`, false); }
   }
 
-  // 人给一次机会：尝试预算用完的活，只有人能给它续一次。这是**人**的动作
+  // 人来解除上限：尝试预算用完的活，只有人能让它继续被领。这是**人**的动作
   // （平台不给自己豁免，管理员窗口也不代劳）。
   async function grantBudgetOverride(task) {
     try {
       await api('/task/budget_override', {
         task_id: task.task_id,
-        reason: '人给一次机会：尝试预算已用完',
+        reason: '人解除尝试次数上限：预算已用完',
       });
-      showAction(`已给 ${task.task_id} 一次机会（预算豁免）`);
+      showAction(`已解除 ${task.task_id} 的尝试次数上限（预算豁免）`);
       void refresh();
     } catch (error) { showAction(`请求失败：${error.message}`, false); }
   }

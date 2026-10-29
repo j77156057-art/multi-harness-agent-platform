@@ -369,6 +369,21 @@ def test_budget_override_lets_an_exhausted_task_be_claimed(database):
     assert task_row(database, "T-1")["attempt_no"] == 4
 
 
+def test_the_budget_override_removes_the_cap_rather_than_adding_one_try(database):
+    """豁免的口径是**解除次数上限**，不是「只多给一次」。
+
+    R10 §10 的领取门禁是 `attempt_no < max_attempts OR budget_override_by IS NOT
+    NULL` —— 所以人豁免过之后，这条活的尝试计数就不再是上限（2026-10-29 的真实
+    演练里有一条从 3 次上限一路跑到第 8 次）。界面上写「不再限制尝试次数」，
+    就是因为「只多给一次」是平台兑现不了的承诺。
+    """
+    seed_task(database, attempt_no=8, max_attempts=3, budget_override_by="human-1")
+    result = claim_one(database)
+
+    assert result.outcome == OUTCOME_CLAIMED
+    assert task_row(database, "T-1")["attempt_no"] == 9
+
+
 def test_claim_rejects_a_task_that_is_not_ready(database):
     seed_task(database, status="draft")
     result = claim_one(database)

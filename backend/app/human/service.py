@@ -269,7 +269,7 @@ class HumanOpsService:
         decided_by: str,
         reason: str = "",
     ) -> dict[str, object]:
-        """Give a task whose attempt budget is spent **one more chance**.
+        """Let a task whose attempt budget is spent be claimed again.
 
         R10 §8: once ``attempt_no`` has reached ``max_attempts`` a plain
         release would just send the task back to ``ready`` where the next claim
@@ -279,9 +279,17 @@ class HumanOpsService:
         This is the human's own move -- the platform does not grant it to
         itself, and the administrator harness does not either.  It changes **no
         task state** (the task stays where it is; only the *claim guard* learns
-        that one more attempt is allowed), so it needs no new state edge and
-        no new event name: the decision row is the audit trail, and the next
-        claim records the override in its own payload.
+        that the attempt counter no longer caps this task), so it needs no new
+        state edge and no new event name: the decision row is the audit trail,
+        and the next claim records the override in its own payload.
+
+        What the override actually does (2026-10-29 澄清过一次)：it **removes the
+        cap**, it does not add a single extra attempt.  The claim guard is
+        ``attempt_no < max_attempts OR budget_override_by IS NOT NULL``, so once a
+        human has overridden, that task's attempt counter stops being a limit
+        (a real run reached attempt 8 against a cap of 3).  The wording in the
+        office says "不再限制尝试次数" for exactly this reason -- promising "one
+        more chance" would be a promise the platform does not keep.
         """
         with self.database.transaction() as conn:
             task = self._task(conn, task_id)

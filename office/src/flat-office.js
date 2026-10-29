@@ -94,9 +94,9 @@ const MACHINE_ONLY_FIELDS = new Set([
 const FIELD_LABEL = {
   attempt_id: '第几次尝试',
   attempt_no: '第几次尝试',
-  attempt_budget_override: '多给了一次机会',
+  attempt_budget_override: '不再限制尝试次数',
   branch: '分支',
-  budget_override_by: '谁多给了一次机会',
+  budget_override_by: '谁解除了次数上限',
   claim_request_id: '领取请求',
   commit: 'commit',
   completion: '成员自述',
@@ -1043,8 +1043,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <textarea data-decision-text rows="3"></textarea>
       </label>
       <label class="flat-check" data-decision-override-wrap hidden>
-        <input type="checkbox" data-decision-override /> 顺便追加一次尝试
-        <span class="flat-note">这条活的尝试次数已经用完了。不勾这个，平台不放行它。</span>
+        <input type="checkbox" data-decision-override /> 不再限制尝试次数
+        <span class="flat-note">这条活的尝试次数已经用完了。勾上之后平台不再拦它领活；不勾，平台不放行它。</span>
       </label>
       <div class="flat-dialog-actions">
         <button type="button" data-decision-cancel>取消</button>
@@ -5908,7 +5908,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'override' && task) {
       void doAction('/task/budget_override', {
         route: '/task/budget_override',
-        body: { task_id: task.task_id, reason: '人工追加尝试：尝试预算已用完' },
+        body: { task_id: task.task_id, reason: '人工解除尝试次数上限：尝试预算已用完' },
       });
       return;
     }
@@ -6013,7 +6013,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         }
         if (needsOverride && !answer.override) {
           // 平台会回 409（R10 §8），但让人自己读那个码不如直接说清楚。
-          state.error = '该任务的尝试次数已用尽。重新分派前需勾选「顺便追加一次尝试」。';
+          state.error = '该任务的尝试次数已用尽。重新分派前需勾选「不再限制尝试次数」。';
           render();
           return;
         }

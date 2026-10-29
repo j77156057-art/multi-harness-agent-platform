@@ -10,8 +10,8 @@
 // 也明写"裁决…界面不代点"。`human/adjudicate` 仍然可以在网关与 CLI 上走到。
 //
 // R10 §8：预算用完的任务，普通的 release 会被平台的预算守卫拒绝，
-// 必须显式带上 `attempt_budget_override`。所以放行按钮要显式问一次，
-// 而不是让人从 409 里猜（R10 §8 / R8-08）。
+// 必须显式带上 `attempt_budget_override`（= 不再限制尝试次数）。所以放行按钮要
+// 显式问一次，而不是让人从 409 里猜（R10 §8 / R8-08）。
 
 /** 可以"回答并恢复"的状态（R10 §10：human.resume）。 */
 export const RESUME_STATES = new Set(['awaiting_human', 'plan_drift', 'impl_drift']);
@@ -91,7 +91,12 @@ export function humanDecisionActions(task) {
  *
  * R10 §8：一旦 `attempt_no` 到了 `max_attempts`，普通的 release 会把任务放回队列，
  * 而下一次 claim 又会被同一个预算守卫拒绝 —— 那就是"放回去了但没人能领"。
- * 人必须显式说"再给一次"。已经带过豁免的任务（`budget_override_by` 有值）不用再问。
+ * 人必须显式说一句"不再限制尝试次数"。已经带过豁免的任务（`budget_override_by`
+ * 有值）不用再问。
+ *
+ * 豁免的口径是**解除次数上限**，不是"只多给一次"：带过之后这条活的尝试次数不再
+ * 受 `max_attempts` 限制（R10 §10 的 guard：`attempt_no < max_attempts OR
+ * budget_override_by IS NOT NULL`）。界面上要说准，免得人以为只多给一次。
  */
 export function releaseNeedsOverride(task) {
   if (!task || task.status !== 'escalated') return false;
