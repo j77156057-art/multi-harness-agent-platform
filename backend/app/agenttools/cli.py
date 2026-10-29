@@ -50,7 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--order", required=True, help="work order file")
     parser.add_argument("--scope", default="", help="comma-separated authorized paths")
     parser.add_argument("--read-only", action="store_true", help="review mode: look, never change")
-    parser.add_argument("--max-steps", type=int, default=0)
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=0,
+        help="步数上限；0（默认）表示不设上限，只按时间预算收口",
+    )
     parser.add_argument("--max-seconds", type=float, default=0.0)
     args = parser.parse_args(argv)
 
@@ -80,18 +85,27 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     tools = build_registry(floor, read_only=args.read_only)
+    # 步数默认**不设上限**：一次跑多少步取决于活本身，不该由启动参数替它猜。
+    # 真正收口的是时间预算（以及 worker 自己的 deadline）—— 到点就停，如实说停在哪。
+    steps = args.max_steps or _env_int("AP_TOOL_MAX_STEPS", 0)
     loop = PlatformLoop(
         channel,
         tools,
         floor=floor,
         goal=work_order,
-        max_steps=args.max_steps or _env_int("AP_TOOL_MAX_STEPS", 24),
+        max_steps=steps if steps > 0 else None,
         max_seconds=args.max_seconds or _env_float("AP_TOOL_MAX_SECONDS", 900.0),
     )
     print(f"[platform] 模型通道：{channel.base_url} · {channel.model}", flush=True)
     print(f"[platform] 工作树：{floor.root.as_posix()}", flush=True)
     if scope:
         print("[platform] 授权落点：" + "、".join(scope), flush=True)
+    print(
+        "[platform] 步数：不设上限"
+        if loop.max_steps is None
+        else f"[platform] 步数上限：{loop.max_steps}",
+        flush=True,
+    )
 
     result = loop.run()
     for step in result.steps:

@@ -109,7 +109,17 @@ CONTRACT = """你在替这个平台干活。这台机器上的 Harness 有的用
 
 
 class PlatformLoop:
-    """Run one task: the model plans, the platform executes, the platform records."""
+    """Run one task: the model plans, the platform executes, the platform records.
+
+    ``max_steps`` defaults to ``None`` -- **no step cap**.  A cap counted in
+    turns is a guess about how long a real task takes, and when the guess is
+    low the work is thrown away at an arbitrary point (the transcript then
+    shows "工作没有完成" for a task that was three steps from done).  What
+    actually bounds a run is **wall clock**: the worker kills the child at its
+    own deadline, so the loop keeps its own ``max_seconds`` honest and lets the
+    model take as many turns as it needs inside it.  A caller that really wants
+    a cap can still pass one (tests do).
+    """
 
     def __init__(
         self,
@@ -118,7 +128,7 @@ class PlatformLoop:
         *,
         floor: Floor,
         goal: str,
-        max_steps: int = 24,
+        max_steps: int | None = None,
         max_seconds: float = 900.0,
         clock: Any = time.monotonic,
     ) -> None:
@@ -126,7 +136,7 @@ class PlatformLoop:
         self.tools = tools
         self.floor = floor
         self.goal = goal
-        self.max_steps = max(1, int(max_steps))
+        self.max_steps = None if max_steps is None else max(1, int(max_steps))
         self.max_seconds = max(30.0, float(max_seconds))
         self._clock = clock
 
@@ -152,11 +162,12 @@ class PlatformLoop:
                 parts.append(f"  结果: {observation or '（空）'}")
         else:
             parts += ["", "## 到目前为止", "（还没有做任何一步。先看清场地，再动手。）"]
-        remaining = self.max_steps - len(steps)
-        parts += [
-            "",
-            f"还剩 {remaining} 步。下一步只输出一个 JSON 对象。",
-        ]
+        budget = (
+            "下一步只输出一个 JSON 对象。"
+            if self.max_steps is None
+            else f"还剩 {self.max_steps - len(steps)} 步。下一步只输出一个 JSON 对象。"
+        )
+        parts += ["", budget]
         return "\n".join(parts)
 
     # -------------------------------------------------------------------- run
@@ -172,7 +183,7 @@ class PlatformLoop:
                     steps=steps,
                     error=f"用完了时间预算（{int(self.max_seconds)} 秒）",
                 )
-            if len(steps) >= self.max_steps:
+            if self.max_steps is not None and len(steps) >= self.max_steps:
                 return LoopResult(
                     ok=False,
                     summary=self._where(steps),

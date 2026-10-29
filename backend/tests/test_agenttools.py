@@ -257,6 +257,20 @@ def test_the_step_budget_ends_honestly(tmp_path: Path) -> None:
     assert "工作没有完成" in result.summary
 
 
+def test_by_default_there_is_no_step_cap(tmp_path: Path) -> None:
+    """步数不设上限：一次跑多少步取决于活，不该由启动参数替它猜。"""
+    many = ['{"tool": "list_files", "input": {}}'] * 12
+    loop, model = _loop(
+        tmp_path, many + ['{"tool": "finish", "input": {"summary": "跑完了"}}']
+    )
+    assert loop.max_steps is None
+    result = loop.run()
+    assert result.ok, result.error
+    assert len(result.steps) == 13
+    # 提示里不再报「还剩 N 步」——那个数字已经不存在了。
+    assert "还剩" not in model.prompts[-1]
+
+
 def test_a_dead_channel_reports_the_channel(tmp_path: Path) -> None:
     class Dead:
         def text(self, prompt: str) -> str:
