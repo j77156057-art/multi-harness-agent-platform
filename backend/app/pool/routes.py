@@ -31,7 +31,13 @@ from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.routing import plan_attempt
 from app.pool.service import PoolError, PoolService, invalidate_discovery
-from app.pool.sources import PoolDeclarationError, declare_cli_model, invalidate_rosters
+from app.pool.sources import (
+    PoolDeclarationError,
+    declare_cli_model,
+    declared_cli_slots,
+    invalidate_rosters,
+    withdraw_cli_model,
+)
 
 router = APIRouter(tags=["pool"])
 
@@ -122,6 +128,17 @@ def _pool_status(service: PoolService) -> dict[str, Any]:
         # office compares it with the models above, so "a new model nobody
         # declared" is visible instead of silently missing.
         "rosters": service.rosters(),
+        # 哪些定档是**人写下来的**（写在这台机器的池子配置里）。界面据此决定
+        # 某一行能不能「改档 / 撤档」：内置档位没有可撤的声明，撤了它也不会消失。
+        "declarations": [
+            {
+                "cli": str(slot.get("name") or ""),
+                "model": str(slot.get("model") or ""),
+                "tier": str(slot.get("tier") or ""),
+            }
+            for slot in declared_cli_slots()
+            if slot.get("model")
+        ],
     }
 
 
@@ -159,6 +176,28 @@ def pool_declaration(
     invalidate_discovery()
     invalidate_rosters()
     return {"declaration": slot, "pool": _pool_status(_service())}
+
+
+@router.post("/pool/declaration/withdraw")
+def pool_declaration_withdraw(
+    body: dict[str, Any],
+    principal: _guard("harness:register"),
+) -> dict[str, Any]:
+    """Take back one declaration: the model goes back to 「没定档」.
+
+    档位是人的一句话，而人会点错。没有这一步，一条错标成"免费"的收费额度会
+    一直按免费花下去 —— 平台以为不花钱，就真的花了。撤的只是**人写的那条声明**；
+    它若盖住了内置档位，撤完内置的那条会照原样回来。
+    """
+    cli = str(body.get("cli") or "").strip()
+    model = str(body.get("model") or "").strip()
+    try:
+        withdrawn = withdraw_cli_model(cli, model)
+    except PoolDeclarationError as error:
+        raise ApiError("request.invalid", 400, str(error)) from error
+    invalidate_discovery()
+    invalidate_rosters()
+    return {"withdrawn": withdrawn, "pool": _pool_status(_service())}
 
 
 @router.post("/pool/probe")

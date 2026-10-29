@@ -713,6 +713,17 @@ export function createFormalGateway(config={}){
         },undefined,'POST',30000);
         json(res,200,result);return true;
       }
+      if(req.method==='POST'&&route==='/pool/declaration/withdraw'){
+        // 撤掉一条定档：档位是人说的一句话，人会点错。撤的只是**人写的声明**；
+        // 它若盖住了内置档位，撤完内置那条照原样回来。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.cli!=='string'||typeof body.model!=='string'||
+           !body.cli.trim()||!body.model.trim()||body.cli.length>100||body.model.length>200)
+          throw fail(400,'invalid_withdraw_request');
+        const result=await call('/pool/declaration/withdraw',{cli:body.cli.trim(),model:body.model.trim()},undefined,'POST',30000);
+        json(res,200,result);return true;
+      }
       if(req.method==='POST'&&route==='/pool/probe'){
         // 人点的「重新探一遍」：平台清掉发现缓存，重读一遍各家 CLI 的额度，
         // 回一份新的清单（新增的免费额度、变成收费的额度都要看得见）。

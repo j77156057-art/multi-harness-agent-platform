@@ -244,6 +244,10 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 上一件「成功了但还没说完」的事（比如刚给某个窗口开好新成员）。
     // 与 error 分开：成功和失败摆同一个框里，人会以为是失败。
     memberNote: '',
+    // 哪一行的「改档」按钮是展开的（按模型 id）；重画之后要还在。
+    tierEdit: null,
+    // 定档/改档/撤档之后的那句话说在这里（与 error 分开）。
+    modelNote: '',
     messages: [],
     userKeys: [],
     userKeyPending: null,
@@ -1931,6 +1935,93 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     render();
   }
 
+  /** 收下平台回的额度池清单（定档、改档、撤档、重探都会回一份新的）。 */
+  function applyPool(pool) {
+    if (!pool) return;
+    state.pool = pool;
+    state.poolAt = Date.now();
+    state.poolProbe = comparePool(pool);
+    savePoolSnapshot(pool);
+  }
+
+  /** 这个窗口此刻选的是哪个额度池模型（不是池子模型就返回空串）。 */
+  function currentPoolModelOf(harnessId) {
+    const info = (state.availability || []).find((item) => item.harness_id === harnessId);
+    if (!info || String(info.model_mode || '') !== 'pool') return '';
+    return String(info.model_id || '');
+  }
+
+  /** 展开/收起某一行的改档按钮。 */
+  function editTier(button) {
+    state.tierEdit = String(button.dataset.modelId || '') || null;
+    render();
+  }
+
+  /**
+   * 改档：同一条声明会被覆盖，所以再声明一次就是改档。
+   *
+   * 改的若是**这个窗口正在用的模型**，平台对"能不能花"的判断也跟着变：把一条
+   * 正在用的模型改成收费，却留着窗口继续用，就等于让它按量计费而没人点过头。
+   * 所以那一档切换时先退回窗口自带模型，并说明为什么。
+   */
+  async function retierModel(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const cli = String(button.dataset.cli || '');
+    const model = String(button.dataset.model || '');
+    const tier = String(button.dataset.tier || '');
+    const modelId = `${cli}/${String(model).split('/').pop()}`;
+    button.disabled = true;
+    try {
+      const result = await api('/pool/declaration', {cli, model, tier});
+      if (!result || !result.pool) throw new Error('平台没有回新的额度池清单');
+      applyPool(result.pool);
+      state.tierEdit = null;
+      if (currentPoolModelOf(harnessId) === modelId) {
+        if (tier === 'metered') {
+          await applyModelChoice({harnessId, mode: 'cli', modelId: '', paidConsent: false});
+          state.modelNote = `${modelId} 已按收费定档。这个窗口原本在用它，先切回窗口自带模型 —— 按量计费要你点头才花。`;
+        } else {
+          state.modelNote = `${modelId} 已按免费定档，这个窗口继续用它。`;
+        }
+      } else {
+        state.modelNote = `${modelId} 已按${tier === 'metered' ? '收费' : '免费'}定档。`;
+      }
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `改档失败：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
+  /** 撤档：撤掉**人写的那条**声明，模型回到「没定档」。 */
+  async function withdrawModel(button) {
+    const harnessId = String(button.dataset.harness || '');
+    const cli = String(button.dataset.cli || '');
+    const model = String(button.dataset.model || '');
+    const modelId = `${cli}/${String(model).split('/').pop()}`;
+    button.disabled = true;
+    try {
+      const result = await api('/pool/declaration/withdraw', {cli, model});
+      if (!result || !result.pool) throw new Error('平台没有回新的额度池清单');
+      applyPool(result.pool);
+      state.tierEdit = null;
+      if (!result.withdrawn) {
+        state.modelNote = `${modelId} 没有可撤的声明 —— 它用的是内置档位。`;
+      } else if (currentPoolModelOf(harnessId) === modelId) {
+        await applyModelChoice({harnessId, mode: 'cli', modelId: '', paidConsent: false});
+        state.modelNote = `已撤掉 ${modelId} 的档位。这个窗口原本在用它，已切回窗口自带模型。`;
+      } else {
+        state.modelNote = `已撤掉 ${modelId} 的档位，它回到「没定档」。`;
+      }
+      render();
+    } catch (error) {
+      button.disabled = false;
+      state.error = `撤档失败：${String((error && error.message) || error)}`;
+      render();
+    }
+  }
+
   /**
    * 给「CLI 自己说它能用、但没人定档」的模型定档。
    *
@@ -1944,12 +2035,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     button.disabled = true;
     try {
       const result = await api('/pool/declaration', { cli, model, tier });
-      if (result && result.pool) {
-        state.pool = result.pool;
-        state.poolAt = Date.now();
-        state.poolProbe = comparePool(result.pool);
-        savePoolSnapshot(result.pool);
-      }
+      applyPool(result && result.pool);
       state.error = null;
       render();
     } catch (error) {
@@ -2106,20 +2192,48 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         group.undeclared.push({ id, name: String(name) });
       }
     }
+    const declaredKeys = new Set(
+      ((state.pool && state.pool.declarations) || []).map(
+        (entry) => `${entry.cli}/${String(entry.model).split('/').pop()}`,
+      ),
+    );
     const groupHtml = [...groups.values()]
       .map((group) => {
         const rows = [];
+        // 只有 CLI 那几家的模型能在这里改档：别家的额度写在各自的配置里，
+        // 平台没有替它们改档的口子。
+        const cliGroup = Object.prototype.hasOwnProperty.call(rosters, group.key);
         for (const item of group.models) {
           const label = poolModelLabel(item);
           const tier = String(item.tier || '');
           const mark = POOL_TIER_GROUPS.find((entry) => entry.tier === tier);
+          const id = String(item.id);
+          // 声明的写法是 CLI 自己那种（`opencode/beam-free`），不是短名。
+          const cliModel = String(item.upstream || '').includes(':')
+            ? String(item.upstream).split(':').slice(1).join(':')
+            : String(item.model || label.model);
+          const editing = cliGroup && state.tierEdit === id;
+          const editor = editing
+            ? `<span class="flat-model-edit">
+                 <button type="button" data-act="retier-model" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(cliModel)}" data-tier="free">按免费</button>
+                 <button type="button" data-act="retier-model" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(cliModel)}" data-tier="metered">按收费</button>
+                 ${
+                   declaredKeys.has(id)
+                     ? `<button type="button" data-act="withdraw-model" data-harness="${escape(harnessId)}" data-cli="${escape(group.key)}" data-model="${escape(cliModel)}">撤档</button>`
+                     : '<span class="flat-model-hint">内置档位，撤不了</span>'
+                 }
+                 <button type="button" data-act="edit-tier" data-model-id="">收起</button>
+               </span>`
+            : cliGroup
+              ? `<span class="flat-model-edit"><button type="button" data-act="edit-tier" data-model-id="${escape(id)}">改档</button></span>`
+              : '';
           rows.push(
-            `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(item.id)}" ${
-              modelId === String(item.id) ? 'checked' : ''
+            `<label class="flat-model-row"><input type="radio" name="flatModelMode" value="pool" data-model-id="${escape(id)}" ${
+              modelId === id ? 'checked' : ''
             }>
               <span>${escape(label.model)}</span><em class="flat-model-mark is-${escape(tier)}">${escape(
                 mark ? mark.mark : '未知',
-              )}</em></label>`,
+              )}</em>${editor}</label>`,
           );
         }
         for (const entry of group.undeclared) {
@@ -2178,7 +2292,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button>
         <button type="button" data-act="probe-pool">重新探一遍</button>
         ${probe ? `<span class="flat-model-probe">${escape(probe)}</span>` : ''}
-      </p>`;
+      </p>
+      ${
+        state.modelNote
+          ? `<div class="flat-note-row">${escape(state.modelNote)}
+              <button type="button" data-act="dismiss-model-note">知道了</button>
+            </div>`
+          : ''
+      }`;
     return section;
   }
 
@@ -5206,6 +5327,28 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'use-undeclared') {
       void useUndeclaredModel(button);
+      return;
+    }
+    if (button.dataset.act === 'edit-tier') {
+      // 这些按钮挂在 <label> 里（那一行同时是单选项）：不拦住的话，点「改档」
+      // 会顺带把这一行选上。
+      event.preventDefault();
+      editTier(button);
+      return;
+    }
+    if (button.dataset.act === 'retier-model') {
+      event.preventDefault();
+      void retierModel(button);
+      return;
+    }
+    if (button.dataset.act === 'withdraw-model') {
+      event.preventDefault();
+      void withdrawModel(button);
+      return;
+    }
+    if (button.dataset.act === 'dismiss-model-note') {
+      state.modelNote = '';
+      render();
       return;
     }
     if (button.dataset.act === 'add-member') {

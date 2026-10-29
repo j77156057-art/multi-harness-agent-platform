@@ -809,6 +809,42 @@ def declare_cli_model(
     return slot
 
 
+def withdraw_cli_model(cli: str, model: str, *, config_path: Path | None = None) -> bool:
+    """Take back one declaration, so the model goes back to "nobody said its tier".
+
+    Needed because the tier is the human's sentence and people misclick: without
+    this, a model wrongly marked *free* stayed free for ever, and the platform
+    would spend a paid quota believing it costs nothing.  Only the **declaration**
+    is removed -- a built-in slot it was overriding comes back as it was.
+    """
+    name = str(cli or "").strip()
+    bare = str(model or "").strip().split("/")[-1]
+    if not name or not bare:
+        raise PoolDeclarationError("which CLI and which model must be named")
+    path = config_path or pool_config_write_path()
+    document = _read_json(path) if path.exists() else None
+    if not isinstance(document, dict):
+        return False
+    slots = document.get("cli_slots")
+    if not isinstance(slots, list):
+        return False
+    declared = [slot for slot in slots if isinstance(slot, dict)]
+    kept = [
+        entry
+        for entry in declared
+        if not (
+            str(entry.get("name") or "") == name
+            and str(entry.get("model") or "").strip().split("/")[-1] == bare
+        )
+    ]
+    if len(kept) == len(declared):
+        return False
+    payload = dict(document)
+    payload["cli_slots"] = kept
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
 def _merge_slots(declared: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The built-in slots plus the declared ones.
 
@@ -861,6 +897,12 @@ def discover_cli_slots(
             declared = [slot for slot in slots if isinstance(slot, dict)]
     upstreams: list[Upstream] = []
     home = home if home is not None else Path.home()
+    # 人写下来的每一条（name, model）：展开家族时让路给它们（见下面的循环）。
+    declared_models = {
+        (str(slot.get("name") or ""), str(slot.get("model") or "").strip())
+        for slot in declared
+        if slot.get("enabled") is not False
+    }
     for slot in _merge_slots(declared):
         name = str(slot.get("name") or "cli-slot")
         model = str(slot.get("model") or "").strip()
@@ -942,8 +984,14 @@ def discover_cli_slots(
         # roster is read from the CLI itself (a listing costs no quota), the
         # naming rule is the operator's declaration.  Each hit joins with the
         # same argv contract; the declared model itself never duplicates.
+        #
+        # **人给某一条定过档的，就按人的那条来，不在这里再按家族档位加一遍。**
+        # 否则免费家族先按 free 加进来，声明那条晚一步、同名，`models()` 去重时
+        # 先到先得 —— 声明被悄悄丢掉，"改档"看着成功其实没生效。
         for raw_model in _enumerate_roster(slot, source, listing_runner):
             if raw_model == model:
+                continue
+            if (name, raw_model) in declared_models:
                 continue
             if any(existing.name == f"{name}:{raw_model}" for existing in upstreams):
                 continue

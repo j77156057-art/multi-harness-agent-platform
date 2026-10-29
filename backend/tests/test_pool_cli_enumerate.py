@@ -174,6 +174,40 @@ def test_an_empty_listing_is_retried_sooner_than_a_good_one(tmp_path, monkeypatc
     assert calls["count"] == before, "好名册不该被当成空的重列"
 
 
+def test_a_declared_tier_beats_the_family_rule(tmp_path):
+    """人给家族里的某一条定过档，就按人的那条来。
+
+    免费家族按 free 先加进来，声明那条晚一步、同名；`models()` 去重时先到先得，
+    于是**声明被悄悄丢掉** —— "改成收费"看着成功，池子里它还是免费。这是真机上
+    撞出来的：改档回成功、档位没变。
+    """
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "cli_slots": [
+                    {
+                        "name": "opencode-cli",
+                        "model": "opencode/beam-free",
+                        "tier": "metered",
+                        "binary": "opencode",
+                        "args": ["run"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    sources._ENUM_ROSTER.clear()
+    upstreams = sources.discover_cli_slots(
+        config_path=config, home=tmp_path, listing_runner=_fake_runner
+    )
+    hits = [u for u in upstreams if u.name == "opencode-cli:opencode/beam-free"]
+    assert len(hits) == 1, "同一个模型只能有一条上游"
+    assert hits[0].tier == "metered", "人的档位要盖过家族规则"
+
+
 def test_a_slot_without_an_enumerate_rule_is_left_alone(tmp_path):
     upstreams = _discover(tmp_path)
     codebuddy = sorted(u.name for u in upstreams if u.name.startswith("codebuddy:"))
@@ -260,6 +294,39 @@ def test_a_namespaced_roster_name_can_be_declared(tmp_path):
         "opencode-cli", "beam-free", "metered", config_path=config, roster=roster
     )
     assert bare["model"] == "opencode/beam-free"
+
+
+def test_a_declaration_can_be_taken_back(tmp_path):
+    """撤档：撤的只是**人写的那条**，内置档位撤不掉、也不该被撤没。
+
+    档位是人的一句话，而人会点错：没有撤档时，一条错标成"免费"的收费额度会一直
+    按免费花下去（平台以为不花钱，就真花了）。
+    """
+    from app.pool.sources import declare_cli_model, withdraw_cli_model
+
+    config = tmp_path / "config.json"
+    declare_cli_model(
+        "opencode-cli", "opencode/beam-free", "metered", config_path=config, roster=["opencode/beam-free"]
+    )
+    assert withdraw_cli_model("opencode-cli", "beam-free", config_path=config) is True
+    assert json.loads(config.read_text(encoding="utf-8"))["cli_slots"] == []
+    # 再撤一次什么都没得撤
+    assert withdraw_cli_model("opencode-cli", "beam-free", config_path=config) is False
+    # 内置档位不在声明文件里 —— 撤不到它
+    assert withdraw_cli_model("opencode-cli", "minimax-m3.1-flash-free", config_path=config) is False
+
+
+def test_withdraw_does_not_touch_other_declarations(tmp_path):
+    from app.pool.sources import declare_cli_model, withdraw_cli_model
+
+    config = tmp_path / "config.json"
+    roster = ["opencode/beam-free", "opencode/big-pickle"]
+    declare_cli_model("opencode-cli", "opencode/beam-free", "free", config_path=config, roster=roster)
+    declare_cli_model("opencode-cli", "opencode/big-pickle", "free", config_path=config, roster=roster)
+
+    assert withdraw_cli_model("opencode-cli", "opencode/beam-free", config_path=config) is True
+    left = json.loads(config.read_text(encoding="utf-8"))["cli_slots"]
+    assert [slot["model"] for slot in left] == ["opencode/big-pickle"]
 
 
 def test_a_model_the_cli_does_not_list_is_refused(tmp_path):

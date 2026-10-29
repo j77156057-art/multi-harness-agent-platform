@@ -1981,6 +1981,24 @@
   padding: 1px 8px;
 }
 
+/* 未定档那一组：按钮推到右边成一列。跟着名字排会一条一个位置，看着像没对齐。 */
+.flat-model-row.is-undeclared button:first-of-type {
+  margin-left: auto;
+}
+
+/* 已定档那一行右侧的「改档」：同样靠右成一列。 */
+.flat-model-edit {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.flat-model-edit button {
+  font-size: 12px;
+  padding: 1px 8px;
+}
+
 .flat-model-probe {
   margin-left: 8px;
   color: rgba(160, 160, 160, 0.95);
