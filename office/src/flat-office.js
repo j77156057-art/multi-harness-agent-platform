@@ -228,6 +228,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 第二批数据（窗口名单、群消息、额度池）到了没有：没到的时候左栏要说
     // 「正在读取…」，不能让它看起来像"这个项目里没有窗口"。
     loaded: false,
+    // 群消息是**更晚**一批到的（它在额度池那一个 Promise.all 里）。单独记，
+    // 否则在两者之间，左栏会把「还没读到」说成「暂无消息」。
+    messagesLoaded: false,
     // 当前筛选下的活（任务表算好的）：详情里的紧凑列表要用同一份，
     // 免得详情里摆着一条被筛选掉的活。
     filtered: [],
@@ -1433,13 +1436,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
     );
     const last = groupMessages.slice(-1)[0];
+    // 消息比窗口名单**晚一步**到（它们不在同一批 Promise 里）。这中间如果说
+    // 「暂无消息」，就是把「还没读到」说成了「没有」—— 2026-10-29 截图里抓到过：
+    // 群里明明有 65 条，左栏那一行写着「暂无消息」。
     addRow(
       'group',
       null,
       '项目群聊',
       last
         ? oneLine(readableMessageBody(last) || last.body || '')
-        : state.loaded
+        : state.messagesLoaded
           ? '暂无消息'
           : '正在读取…',
     );
@@ -6207,6 +6213,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       }
       state.plan = plan;
       state.messages = messages.messages || [];
+      // 「读到了」是一个**自己的**事实：`loaded` 在窗口名单那一步就置位了，
+      // 而消息是更晚一批才到的。分开记，界面才不会把「还没读到」说成「没有」。
+      state.messagesLoaded = true;
       state.assistantRuns = runs.runs || [];
       state.events = events.events || [];
       // 人话从平台来（问过的会缓存，不会每 15 秒问一次）。
