@@ -245,6 +245,64 @@ Agent Office 的右栏有一张对应的「Harness CLI」卡片：按状态分�
 默认收起、每条给出官方文档与安装命令，并有一个「探测这台机器」按钮。进页面时
 只取安装方式，按下按钮才真的去跑版本命令，因此打开面板不会卡住。
 
+## 用不了工具的 Harness：平台自己的工具
+
+有的窗口干不动活，不是因为模型笨，而是因为**它调不了工具**：这个 attempt 被路由到额度池里一条
+CLI 顶替的模型（免费那档），那条通道只会回话，没有 `tool_calls` 可给。这类窗口改用平台自己的
+Harness 即可 —— 基座 ID 是 `platform`（界面显示「平台工具」）。
+
+它和别的 Harness 走同一条路：claim → 平台给它一个工作树 → 在里面跑一个进程 → 判范围 → 提交。
+区别只有一个：**工具由平台执行**，模型只负责说下一步做什么，用的是一个 JSON 对象：
+
+```json
+{"thought": "先看看有什么", "tool": "list_files", "input": {"path": "docs"}}
+{"thought": "写它", "tool": "create_file", "input": {"path": "docs/a.md", "content": "全文"}}
+{"thought": "交活", "tool": "finish", "input": {"summary": "改了哪些文件、怎么验证的"}}
+```
+
+所以它不需要模型会 function calling —— 文本能写 JSON 就够。工具表很小，刻意的：
+`list_files` / `read_file` / `grep` / `create_file` / `apply_edit` / `run_command` /
+`git_read` / `finish`。
+
+三条下限写在 `backend/app/agenttools/floor.py` 里，越界一律**当场拒绝并把原因回灌给模型**
+（拒绝是观察，不是死路）：
+
+| 下限 | 内容 |
+|---|---|
+| 路径 | 读写都在这次 attempt 的工作树里；写入还必须落在任务的 `exclusive_paths` 内 |
+| 凭据 | `data/*.key`、`.env`、私钥按**文件名**拒绝，不进模型上下文，也不进目录清单 |
+| 命令 | 批量删除 / 外网传输 / 系统操控按名单拦；`git` 写操作（commit、push、reset…）一律不跑 |
+
+提交由平台做：工具表里没有 git 写，交活后由 `ScopedRunner` 核对范围再提交，
+所以它不会把别人的改动顺手带走。
+
+**它必须有一个池子里的模型。** 这个 Harness 没有自己的 provider，用哪个模型由人在额度池里指定
+（`POST /api/v1/adapter/model-selection`，`model_mode=pool`）。没指定时进程退出并说清这一点，
+不会假装交了个空活。
+
+审阅用它时是**只读**的（`--read-only`）：写文件、改文件、跑命令都回一句「本次审阅不可用」，
+只有读与搜能用 —— 会动手的审阅者不是审阅者。
+
+一次真实运行的形状（本机实测，免费档 `codebuddy/hy3`，52 秒）：
+
+```text
+[platform] 模型通道：http://127.0.0.1:8848/api/v1/pool/v1 · codebuddy/hy3
+[platform] 工作树：…/wt/2ae1
+[platform] 授权落点：docs/platform-tools.md
+[1] list_files → …
+[2] create_file → 已写入 `docs/platform-tools.md`（7 行）。
+[3] read_file → `docs/platform-tools.md` （7 行）：
+[4] finish → …
+```
+
+启动一个窗口（和别的窗口一样，只是基座不同）：
+
+```powershell
+python -m app.adapter.formal_worker --url http://127.0.0.1:8848 `
+  --token-file data\platform-member-1.key --harness-id platform-member-1 `
+  --group <分组> --canonical-repo <repo>\canonical.git --worktree-root <repo>\wt --once
+```
+
 访问：
 
 ```text
