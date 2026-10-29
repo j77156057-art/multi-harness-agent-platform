@@ -16,6 +16,7 @@ Two rules shape everything here:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -70,6 +71,60 @@ def _notes_for_unsupported(payload: dict[str, Any]) -> list[str]:
 # --------------------------------------------------------------------------- #
 
 
+def _openai_tools_to_anthropic(tools: Any) -> list[dict[str, Any]]:
+    """OpenAI 的 tools 定义 -> Anthropic 的 tools 定义。
+
+    这一层以前**直接丢掉**（notes 里写一句 "dropped N tool definitions"）。代价不是
+    "少个功能"，而是把 agent 弄残：调用方（pi、claude 这类自己有工具的 CLI）拿到的是
+    一个只会说话、永远不调工具的模型，于是它把活干成了"我在回答里写好了内容"，
+    平台再判它"没有真正提交"（2026-10-29 实测：pi 10 次领活、0 次交付）。
+    """
+    converted: list[dict[str, Any]] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        # OpenAI: {"type":"function","function":{"name","description","parameters"}}
+        function = tool.get("function") if isinstance(tool.get("function"), dict) else None
+        if function is None:
+            # 已经是 Anthropic 形状（调用方就是 anthropic 的），原样留下。
+            if tool.get("name") and ("input_schema" in tool or "parameters" in tool):
+                converted.append(
+                    {
+                        "name": str(tool["name"]),
+                        "description": str(tool.get("description") or ""),
+                        "input_schema": tool.get("input_schema")
+                        or tool.get("parameters")
+                        or {"type": "object", "properties": {}},
+                    }
+                )
+            continue
+        converted.append(
+            {
+                "name": str(function.get("name") or ""),
+                "description": str(function.get("description") or ""),
+                "input_schema": function.get("parameters")
+                or {"type": "object", "properties": {}},
+            }
+        )
+    return [tool for tool in converted if tool["name"]]
+
+
+def _openai_tool_choice_to_anthropic(choice: Any) -> dict[str, Any] | None:
+    """`tool_choice` 也要跟着翻译，否则上游会用默认值（auto / none）。"""
+    if choice is None:
+        return None
+    if isinstance(choice, str):
+        return {"type": {"auto": "auto", "none": "none", "required": "any"}.get(choice, "auto")}
+    if isinstance(choice, dict):
+        function = choice.get("function") if isinstance(choice.get("function"), dict) else None
+        name = str((function or {}).get("name") or "")
+        if name:
+            return {"type": "tool", "name": name}
+        wanted = str(choice.get("type") or "auto")
+        return {"type": {"auto": "auto", "none": "none", "required": "any"}.get(wanted, "auto")}
+    return None
+
+
 def openai_to_anthropic(payload: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     """OpenAI chat request -> Anthropic messages request."""
     messages: list[dict[str, Any]] = []
@@ -84,8 +139,47 @@ def openai_to_anthropic(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
                 system_parts.append(text)
             continue
         if role == "tool":
-            # Anthropic has no tool role: a tool result is a user turn.
-            messages.append({"role": "user", "content": text or "(tool result)"})
+            # Anthropic 没有 tool 角色：工具结果是**一轮 user 消息里的 tool_result 块**。
+            # 光把结果当普通文字塞进去，模型就不知道自己刚才调过什么，会重复调用。
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": str(message.get("tool_call_id") or ""),
+                            "content": text or "(tool result)",
+                        }
+                    ],
+                }
+            )
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            blocks: list[dict[str, Any]] = []
+            if text:
+                blocks.append({"type": "text", "text": text})
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                raw_arguments = function.get("arguments")
+                try:
+                    parsed = (
+                        json.loads(raw_arguments)
+                        if isinstance(raw_arguments, str) and raw_arguments.strip()
+                        else (raw_arguments if isinstance(raw_arguments, dict) else {})
+                    )
+                except ValueError:
+                    parsed = {}
+                blocks.append(
+                    {
+                        "type": "tool_use",
+                        "id": str(call.get("id") or "toolu_relay"),
+                        "name": str(function.get("name") or ""),
+                        "input": parsed if isinstance(parsed, dict) else {},
+                    }
+                )
+            messages.append({"role": "assistant", "content": blocks})
             continue
         messages.append({"role": "assistant" if role == "assistant" else "user", "content": text})
     if system_parts:
@@ -104,9 +198,16 @@ def openai_to_anthropic(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
     if payload.get("stop"):
         stop = payload["stop"]
         body["stop_sequences"] = [stop] if isinstance(stop, str) else list(stop)
+    tools = _openai_tools_to_anthropic(payload.get("tools"))
+    if tools:
+        body["tools"] = tools
+        choice = _openai_tool_choice_to_anthropic(payload.get("tool_choice"))
+        if choice is not None:
+            body["tool_choice"] = choice
     if payload.get("stream"):
         body["stream"] = True
-    return body, _notes_for_unsupported(payload)
+    notes = [note for note in _notes_for_unsupported(payload) if "tool definitions" not in note]
+    return body, notes
 
 
 def anthropic_response_to_openai(data: dict[str, Any], *, model: str) -> dict[str, Any]:
@@ -119,6 +220,25 @@ def anthropic_response_to_openai(data: dict[str, Any], *, model: str) -> dict[st
         "stop_sequence": "stop",
         "tool_use": "tool_calls",
     }.get(stop_reason, "stop")
+    # Anthropic 把工具调用放在 content 的 tool_use 块里；OpenAI 那边是 message.tool_calls。
+    # 不转这一步，调用方永远看不到工具调用，只能看到一段"我打算这么做"的文字。
+    tool_calls: list[dict[str, Any]] = []
+    for block in data.get("content") or []:
+        if not isinstance(block, dict) or block.get("type") != "tool_use":
+            continue
+        tool_calls.append(
+            {
+                "id": str(block.get("id") or f"call_relay_{len(tool_calls)}"),
+                "type": "function",
+                "function": {
+                    "name": str(block.get("name") or ""),
+                    "arguments": json.dumps(block.get("input") or {}, ensure_ascii=False),
+                },
+            }
+        )
+    message: dict[str, Any] = {"role": "assistant", "content": text}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     usage = data.get("usage") or {}
     return {
         "id": str(data.get("id") or "chatcmpl-relay"),
@@ -128,8 +248,8 @@ def anthropic_response_to_openai(data: dict[str, Any], *, model: str) -> dict[st
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
-                "finish_reason": finish,
+                "message": message,
+                "finish_reason": "tool_calls" if tool_calls else finish,
             }
         ],
         "usage": {
@@ -230,6 +350,39 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
             if text:
                 instructions.append(text)
             continue
+        if role == "tool":
+            # Responses 里工具结果是**独立的一条 function_call_output**，
+            # 不是一段 user 文字（否则模型不知道自己在接着上一步）。
+            items.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": str(message.get("tool_call_id") or ""),
+                    "output": text or "(tool result)",
+                }
+            )
+            continue
+        if role == "assistant" and message.get("tool_calls"):
+            if text:
+                items.append(
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text}],
+                    }
+                )
+            for call in message.get("tool_calls") or []:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                raw = function.get("arguments")
+                items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": str(call.get("id") or "call_relay"),
+                        "name": str(function.get("name") or ""),
+                        "arguments": raw if isinstance(raw, str) else json.dumps(raw or {}),
+                    }
+                )
+            continue
         items.append(
             {
                 "role": "assistant" if role == "assistant" else "user",
@@ -239,6 +392,46 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
             }
         )
     body: dict[str, Any] = {"model": payload.get("model"), "input": items}
+    # 工具定义也要过去：以前这里整块没写，模型收到的就是「没有工具可用」。
+    tools = payload.get("tools")
+    if tools:
+        converted = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+            function = tool.get("function") if isinstance(tool.get("function"), dict) else None
+            if function is not None:
+                converted.append(
+                    {
+                        "type": "function",
+                        "name": str(function.get("name") or ""),
+                        "description": str(function.get("description") or ""),
+                        "parameters": function.get("parameters")
+                        or {"type": "object", "properties": {}},
+                    }
+                )
+            elif tool.get("name"):
+                converted.append(
+                    {
+                        "type": "function",
+                        "name": str(tool["name"]),
+                        "description": str(tool.get("description") or ""),
+                        "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+                    }
+                )
+        converted = [tool for tool in converted if tool["name"]]
+        if converted:
+            body["tools"] = converted
+            choice = payload.get("tool_choice")
+            if isinstance(choice, str) and choice in {"auto", "none", "required"}:
+                body["tool_choice"] = choice
+            elif isinstance(choice, dict):
+                function = choice.get("function") if isinstance(choice.get("function"), dict) else {}
+                if function.get("name"):
+                    body["tool_choice"] = {
+                        "type": "function",
+                        "name": str(function["name"]),
+                    }
     if instructions:
         body["instructions"] = "\n\n".join(instructions)
     if payload.get("max_tokens") or payload.get("max_completion_tokens"):
@@ -257,13 +450,32 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
 def responses_to_chat(data: dict[str, Any], *, model: str) -> dict[str, Any]:
     """OpenAI Responses response -> OpenAI chat response."""
     text = ""
+    tool_calls: list[dict[str, Any]] = []
     for item in data.get("output") or []:
         if not isinstance(item, dict):
+            continue
+        if item.get("type") == "function_call":
+            arguments = item.get("arguments")
+            tool_calls.append(
+                {
+                    "id": str(item.get("call_id") or item.get("id") or f"call_relay_{len(tool_calls)}"),
+                    "type": "function",
+                    "function": {
+                        "name": str(item.get("name") or ""),
+                        "arguments": arguments
+                        if isinstance(arguments, str)
+                        else json.dumps(arguments or {}, ensure_ascii=False),
+                    },
+                }
+            )
             continue
         for block in item.get("content") or []:
             if isinstance(block, dict) and isinstance(block.get("text"), str):
                 text += block["text"]
     usage = data.get("usage") or {}
+    message: dict[str, Any] = {"role": "assistant", "content": text}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     return {
         "id": str(data.get("id") or "chatcmpl-relay"),
         "object": "chat.completion",
@@ -272,8 +484,12 @@ def responses_to_chat(data: dict[str, Any], *, model: str) -> dict[str, Any]:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
-                "finish_reason": "stop" if data.get("status") == "completed" else "length",
+                "message": message,
+                "finish_reason": (
+                    "tool_calls"
+                    if tool_calls
+                    else ("stop" if data.get("status") == "completed" else "length")
+                ),
             }
         ],
         "usage": {

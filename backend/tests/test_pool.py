@@ -968,3 +968,167 @@ def test_a_cli_slot_refuses_a_request_that_carries_tool_definitions():
                 "tools": [{"type": "function", "function": {"name": "write"}}],
             },
         )
+
+
+def test_tool_definitions_survive_the_anthropic_translation_in_both_directions():
+    """工具的**请求**与**回话**都要过翻译层。
+
+    以前这一层把 `tools` 直接丢掉（notes 里写一句 "dropped N tool definitions"）。
+    代价不是"少个功能"：调用方（pi、claude 这类自己有工具的 CLI）拿到的是一个只会
+    说话、永远不调工具的模型 —— 它把活写成"我在回答里写好了内容"，平台再判它
+    "没有真正提交"。2026-10-29 的真实演练里，pi 10 次领活、0 次交付。
+    """
+    payload = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "写一个文件"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_note",
+                    "description": "写一个文件",
+                    "parameters": {"type": "object", "properties": {"text": {"type": "string"}}},
+                },
+            }
+        ],
+        "tool_choice": "required",
+    }
+
+    body, notes = openai_to_anthropic(payload)
+    assert body["tools"] == [
+        {
+            "name": "write_note",
+            "description": "写一个文件",
+            "input_schema": {"type": "object", "properties": {"text": {"type": "string"}}},
+        }
+    ]
+    assert body["tool_choice"] == {"type": "any"}
+    assert not any("tool definitions" in note for note in notes)
+
+    # 回话方向：Anthropic 的 tool_use 块要变成 OpenAI 的 tool_calls。
+    answer = anthropic_response_to_openai(
+        {
+            "id": "r-1",
+            "content": [
+                {"type": "text", "text": "我来写。"},
+                {"type": "tool_use", "id": "tu-1", "name": "write_note", "input": {"text": "hi"}},
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        },
+        model="m",
+    )
+    message = answer["choices"][0]["message"]
+    assert message["tool_calls"] == [
+        {
+            "id": "tu-1",
+            "type": "function",
+            "function": {"name": "write_note", "arguments": '{"text": "hi"}'},
+        }
+    ]
+    assert answer["choices"][0]["finish_reason"] == "tool_calls"
+
+    # 没有工具时不能凭空长出字段。
+    plain, _ = openai_to_anthropic({"model": "m", "messages": [{"role": "user", "content": "hi"}]})
+    assert "tools" not in plain
+
+
+def test_tool_definitions_survive_the_responses_translation_in_both_directions():
+    payload = {
+        "model": "m",
+        "messages": [{"role": "user", "content": "写一个文件"}],
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "write_note",
+                    "description": "写一个文件",
+                    "parameters": {"type": "object", "properties": {"text": {"type": "string"}}},
+                },
+            }
+        ],
+    }
+
+    body = chat_to_responses(payload)
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "name": "write_note",
+            "description": "写一个文件",
+            "parameters": {"type": "object", "properties": {"text": {"type": "string"}}},
+        }
+    ]
+
+    answer = responses_to_chat(
+        {
+            "id": "x-1",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "call_id": "c-1",
+                    "name": "write_note",
+                    "arguments": '{"text": "hi"}',
+                }
+            ],
+            "usage": {},
+        },
+        model="m",
+    )
+    message = answer["choices"][0]["message"]
+    assert message["tool_calls"][0]["function"]["name"] == "write_note"
+    assert message["tool_calls"][0]["id"] == "c-1"
+    assert answer["choices"][0]["finish_reason"] == "tool_calls"
+
+    assert "tools" not in chat_to_responses(
+        {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    )
+
+
+def test_a_tool_result_rides_back_as_the_protocol_expects():
+    """工具结果是「接着上一步」，不能降级成一段普通 user 文字。
+
+    降级之后模型不知道自己刚才调过什么，会反复调同一个工具（或者干脆重新开始）。
+    """
+    anthropic_body, _ = openai_to_anthropic(
+        {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "写"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "type": "function",
+                            "function": {"name": "write_note", "arguments": '{"text":"hi"}'},
+                        }
+                    ],
+                },
+                {"role": "tool", "tool_call_id": "call-1", "content": "已写入"},
+            ],
+        }
+    )
+    assistant_turn = [
+        item for item in anthropic_body["messages"] if item["role"] == "assistant"
+    ][-1]
+    assert assistant_turn["content"][0]["type"] == "tool_use"
+    assert assistant_turn["content"][0]["input"] == {"text": "hi"}
+    result_turn = anthropic_body["messages"][-1]
+    assert result_turn["content"][0]["type"] == "tool_result"
+    assert result_turn["content"][0]["tool_use_id"] == "call-1"
+
+    responses_body = chat_to_responses(
+        {
+            "model": "m",
+            "messages": [
+                {"role": "user", "content": "写"},
+                {"role": "tool", "tool_call_id": "call-1", "content": "已写入"},
+            ],
+        }
+    )
+    output = [
+        item for item in responses_body["input"] if item.get("type") == "function_call_output"
+    ]
+    assert output and output[0]["call_id"] == "call-1"
