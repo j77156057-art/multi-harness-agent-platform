@@ -336,6 +336,44 @@ def _exhaust_budget(database) -> None:
         conn.execute("UPDATE tasks SET attempt_no = 3, max_attempts = 3 WHERE task_id = 'T-1'")
 
 
+def test_a_human_release_hands_the_allocation_authorization_back(tmp_path):
+    """人放行的活，要把用掉的分配授权还回去 —— 否则它永远没人领得动。
+
+    §39 硬规则 2：分配授权在「开出 attempt」的那一刻就被标记用掉（"只能用一次"）。
+    人把一条升级挂起的活放行回 ready 时，若不再还回去，门禁会拒绝每一次领取，而
+    管理员也开不出第二轮（一个快照一轮就够）—— 活就永远躺在 ready。
+
+    成员自己 release 的那条路早就还了；人的这条路以前没还（2026-10-29 实测：人放行
+    之后成员一次次去领、一次次被拒）。
+    """
+    database = _rig(tmp_path, status="escalated", attempt=True, owner="harness-1", escalated_at=NOW)
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO allocation_rounds(round_id, group_id, plan_snapshot_id, opened_by,"
+            " opened_at, state, revision) VALUES ('r-1', 'G-1', 'snap-1', 'ops', ?, 'decided', 1)",
+            (NOW.isoformat(),),
+        )
+        conn.execute(
+            "INSERT INTO allocations(allocation_id, round_id, task_id, harness_id, state,"
+            " accepted_at, claimed_at, revision)"
+            " VALUES ('al-1', 'r-1', 'T-1', 'harness-1', 'accepted', ?, ?, 1)",
+            (NOW.isoformat(), NOW.isoformat()),
+        )
+        claim_id = conn.execute(
+            "SELECT claim_id FROM task_claims WHERE task_id = 'T-1'"
+        ).fetchone()
+
+    _service(database).release(task_id="T-1", decided_by="ops", reason="infra hiccup")
+
+    row = database.read(
+        "SELECT state, claimed_at, claim_id FROM allocations WHERE allocation_id = 'al-1'"
+    )[0]
+    assert str(row["state"]) == "accepted", "the assignment itself stays"
+    assert row["claimed_at"] is None, "the authorization is available again"
+    assert row["claim_id"] is None
+    assert _task(database)["status"] == "ready"
+
+
 def test_release_refuses_to_bypass_an_exhausted_budget_without_the_override(tmp_path):
     database = _rig(tmp_path, status="escalated", attempt=False, owner=None, escalated_at=NOW)
     _exhaust_budget(database)

@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
 import shutil
 import sqlite3
 import stat
@@ -300,6 +301,7 @@ class WorktreeManager:
             target_root.mkdir(parents=True, exist_ok=True)
             bundle = target_root / f"{attempt_id}.bundle"
             patch = target_root / f"{attempt_id}.patch"
+            self._heal_config(path)
             base = self._base_commit(path)
 
             run_git("bundle", "create", str(bundle), branch, cwd=path)
@@ -345,6 +347,65 @@ class WorktreeManager:
         return ArchiveResult(
             attempt_id=attempt_id, bundle=bundle, patch=patch, size_bytes=bundle.stat().st_size
         )
+
+    @staticmethod
+    def _heal_config(path: Path) -> str | None:
+        """工作树的 git 配置坏了就修好它。
+
+        成员 CLI 会在工作树里跑自己的 git 命令。有的 CLI 把
+        ``git config core.autocrlf --global`` 当成了「设值」（``--global`` 本该在
+        键名**前面**），于是 ``core.autocrlf = --global`` 被写进这个工作树的本地
+        配置 —— 而 git 读到一个非法布尔值，就让**这个仓库的所有 git 命令**全废
+        （连 ``git rev-parse --git-dir`` 都报 "bad boolean config value"）。
+
+        2026-10-29 实测的代价：平台回收工作树的那一步因此抛错，把整个 sweeper
+        带走了 —— 这一群的周期维护（回收工位、救合入中的任务、升级提醒）全停，
+        而且没人知道。
+
+        这个配置是**平台自己的**工作树（平台建的、平台回收的），坏了平台可以修：
+        把那几行去掉，其余配置照旧生效。修不了就返回说明，由调用方决定怎么办。
+        """
+        config = None
+        gitdir = path / ".git"
+        try:
+            if gitdir.is_file():
+                pointer = gitdir.read_text(encoding="utf-8", errors="replace").strip()
+                if not pointer.startswith("gitdir:"):
+                    return None
+                config = Path(pointer.split(":", 1)[1].strip()) / "config"
+            elif gitdir.is_dir():
+                # ``git init --separate-git-dir`` 的布局：git 目录在同级 <name>.git。
+                sibling = path.parent / f"{path.name}.git"
+                if sibling.is_dir():
+                    config = sibling / "config"
+            if config is None or not config.is_file():
+                return None
+            # 探测要用**真的 git 命令**：``git config --file … --list`` 不会校验布尔值
+            # （它照样列得出 ``core.autocrlf=--global``），坏值是在 git **要用**这个值
+            # 时才炸。
+            probe = run_git("rev-parse", "--git-dir", cwd=path, check=False)
+            if probe.returncode == 0:
+                return None
+            detail = probe.stderr or ""
+            match = re.search(
+                r"bad boolean config value '([^']+)' for '([^']+)'", detail
+            )
+            if match is None:
+                return None
+            value, key = match.group(1), match.group(2)
+            leaf = key.rsplit(".", 1)[-1]
+            lines = config.read_text(encoding="utf-8", errors="replace").splitlines()
+            kept = [
+                line
+                for line in lines
+                if not re.match(rf"\s*{re.escape(leaf)}\s*=\s*{re.escape(value)}\s*$", line)
+            ]
+            if len(kept) == len(lines):
+                return None
+            config.write_text("\n".join(kept) + "\n", encoding="utf-8")
+            return f"removed the broken {key} = {value} from the worktree config"
+        except OSError:
+            return None
 
     @staticmethod
     def _base_commit(path: Path) -> str:

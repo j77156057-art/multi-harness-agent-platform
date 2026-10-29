@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 
 from app.claim.service import ClaimRequest, ClaimService
 from app.scheduler import SWEEPS, run_all_sweeps, sweep_dependencies, sweep_resources
+from app.scheduler.report import SweepReport
 from app.spec import TaskStatus
 from tests.claim_support import hold_resource, make_database, seed_project, seed_task
 
@@ -153,6 +154,38 @@ def test_a_queued_task_resumes_to_claimed_when_the_resource_frees(tmp_path):
     assert item.lease_token
 
     assert sweep_resources(database, NOW).actions == 0, "idempotent second round"
+
+
+def test_one_failing_sweep_does_not_take_the_others_down(tmp_path, monkeypatch):
+    """一个 sweep 抛错，不能把这一群的周期维护带走。
+
+    2026-10-29 的真实事故：一条工作树的 git 配置被成员 CLI 写坏（``core.autocrlf
+    = --global``），``sweep_worktree_recycle`` 抛错，**整个 sweeper 进程退出了** ——
+    之后工位不再回收、合入中的任务不再被救、升级提醒不再发，而群里一声不吭。
+
+    现在：崩掉的那一个被记成一条带 error 的报告，其余照跑。
+    """
+    database = _queued_rig(tmp_path)
+    calls: list[str] = []
+
+    def boom(db, now, repo):  # noqa: ANN001 - the sweep signature
+        calls.append("boom")
+        raise RuntimeError("this worktree's git config is broken")
+
+    def fine(db, now, repo):  # noqa: ANN001 - the sweep signature
+        calls.append("fine")
+        return SweepReport("fine", 0, {})
+
+    monkeypatch.setattr(
+        "app.scheduler.runner.SWEEPS", (("boom", boom), ("fine", fine))
+    )
+    reports = run_all_sweeps(database, now=NOW)
+
+    assert calls == ["boom", "fine"], "the second sweep still ran"
+    assert [report.sweep for report in reports] == ["boom", "fine"]
+    assert "error" in reports[0].detail
+    assert "this worktree's git config is broken" in reports[0].detail["error"]
+    assert reports[1].actions == 0
 
 
 def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):

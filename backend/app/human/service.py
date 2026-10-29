@@ -477,6 +477,23 @@ class HumanOpsService:
                     attempt_id=str(task["current_attempt_id"]),
                     reason="release",
                 )
+                # **把用掉的分配授权还回去**（§39 硬规则 2）。
+                #
+                # 授权在「开出 attempt」的那一刻就被标记用掉了（"只能用一次"）。人把
+                # 一条升级挂起的活放行回 ready 时，如果不再还回去，这条活就永远没人
+                # 领得动：门禁拒绝它，而管理员也开不出第二轮（一个快照一轮就够）。
+                #
+                # 成员自己 release 的那条路早就还了（见 /adapter/release 的路由），
+                # 人的这条路以前没还 —— 2026-10-29 实测：人放行的活回到 ready，
+                # 成员一次次去领、一次次被拒，界面上只看到它一直躺在那里。
+                #
+                # 门禁要防的是「换一个窗口自选」，不是「同一份已经答应的分配在什么都
+                # 没干完之后作废」。
+                conn.execute(
+                    "UPDATE allocations SET claimed_at = NULL, claim_id = NULL"
+                    " WHERE task_id = ? AND claimed_at IS NOT NULL",
+                    (task_id,),
+                )
             override_by = existing_override
             if budget_override:
                 if existing_override is None:

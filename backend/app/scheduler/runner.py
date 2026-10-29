@@ -80,6 +80,28 @@ def run_all_sweeps(
 
     ``repo`` reaches the drift sweep's ancestry check; the other sweeps take it
     and ignore it (one uniform signature beats a special case).
+
+    One sweep that raises must **not** take the others down with it.  The
+    sweeper is this group's periodic maintenance (recycle worktrees, recover
+    half-finished merges, remind about escalations): one bad row — a worktree
+    whose git config a member CLI corrupted, say — used to kill the process,
+    and then *nothing* was maintained any more, silently
+    (2026-10-29: ``sweep_worktree_recycle`` raised on a poisoned worktree and
+    the scheduler exited; the platform stopped recycling worktrees and stopped
+    recovering stuck merges, with nothing in the group saying so).
     """
     moment = now or datetime.now(UTC)
-    return [sweep(database, moment, repo) for _name, sweep in SWEEPS]
+    reports: list[SweepReport] = []
+    for name, sweep in SWEEPS:
+        try:
+            reports.append(sweep(database, moment, repo))
+        except Exception as exc:  # noqa: BLE001 - one sweep must not kill the rest
+            # 少跑一个 sweep 只是少做一件事；进程死了，下一件也没人做了。
+            reports.append(
+                SweepReport(
+                    name,
+                    0,
+                    {"error": f"{type(exc).__name__}: {exc}"},
+                )
+            )
+    return reports
