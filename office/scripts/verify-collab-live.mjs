@@ -95,14 +95,14 @@ try {
     await shot('03-window-detail');
   }
 
-  // 一条真实的活
-  const task = page.locator('.flat-tasks .flat-task, .flat-task-row, [data-task-id]').first();
+  // 一条真实的活（任务行是 button.flat-task）
+  const task = page.locator('button.flat-task').first();
   if (await task.isVisible().catch(() => false)) {
     await task.click();
     await sleep(2500);
     report.checks.taskDetail = await page.evaluate(() => {
       const pane = document.querySelector('.flat-detail');
-      return pane ? pane.textContent.replace(/\s+/g, ' ').trim().slice(0, 600) : null;
+      return pane ? pane.textContent.replace(/\s+/g, ' ').trim().slice(0, 700) : null;
     });
     await shot('04-task-detail');
   }
@@ -136,6 +136,13 @@ try {
     report.checks.groupChat.ready = ready;
     await sleep(1200);
     await shot('05-group-chat');
+    // 群聊摘要是在**第二批**数据（消息）到手之后才准的：重新读一遍左栏，
+    // 别把「消息还没加载」那一帧当成结论记下来。
+    report.checks.roster = await page.evaluate(() =>
+      [...document.querySelectorAll('#aoWorkspace .flat-conv')].map((n) =>
+        n.textContent.replace(/\s+/g, ' ').trim(),
+      ),
+    );
   }
 
   // 平台助手

@@ -16,6 +16,7 @@ worker 定期来说一声「我还在」（``POST /adapter/presence``）；超�
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 from typing import Any
 
@@ -124,3 +125,26 @@ def announce(post: Any, *, role: str = "") -> bool:
     except Exception:  # noqa: BLE001 - 观察面不该拖垮干活的那条线
         return False
     return True
+
+
+def start_heartbeat(
+    post: Any, *, role: str = "", every_seconds: float = PRESENCE_ANNOUNCE_SECONDS
+) -> threading.Thread:
+    """起一个后台心跳线程，worker 一直报「我还在」。
+
+    为什么不能挂在干活循环上：成员跑一条 CLI 可能要好几分钟（模型在写文件、
+    在提交），主循环那时候腾不出手来报心跳 —— 界面就会把一个**正在干活**的
+    窗口说成「没在跑」（2026-10-29 实测：opencode 正在执行，窗口列表里却写着
+    「进程没在跑」，而它的进程明明活着）。
+
+    所以心跳走自己的线程：干活那条线卡住多久，它照样每 20 秒报一次。
+    """
+    stop = threading.Event()
+
+    def loop() -> None:
+        while not stop.wait(every_seconds):
+            announce(post, role=role)
+
+    thread = threading.Thread(target=loop, name="presence-heartbeat", daemon=True)
+    thread.start()
+    return thread

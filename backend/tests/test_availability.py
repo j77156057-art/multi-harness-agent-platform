@@ -327,3 +327,34 @@ def test_delivering_after_a_failure_makes_the_window_usable_again(tmp_path, monk
     assert entry["recovered"] is True
     assert entry["usable"] is True
     assert entry["reasons"] == []
+
+
+def test_the_heartbeat_keeps_reporting_while_the_worker_is_busy():
+    """心跳走自己的线程：干活那条线卡住时也要报「我还在」。
+
+    2026-10-29 的真实演练：opencode 正在执行一条要跑好几分钟的活，主循环腾不出
+    手来报心跳，界面就把一个**正在干活**的窗口写成「进程没在跑」—— 而它的进程
+    明明活着。心跳必须与干活那条线分开。
+    """
+    import threading
+    import time
+
+    from app.adapter.presence import start_heartbeat
+
+    calls: list[dict] = []
+    busy = threading.Event()
+
+    def post(body):
+        busy.wait(0.2)  # 模拟主循环卡住时 HTTP 客户端还在忙
+        calls.append(dict(body))
+
+    thread = start_heartbeat(post, role="member", every_seconds=0.05)
+    try:
+        deadline = time.monotonic() + 5.0
+        while len(calls) < 2 and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        # 线程是 daemon，主流程结束它自己会退出。
+        pass
+    assert len(calls) >= 2, "the heartbeat kept reporting"
+    assert calls[0].get("role") == "member"

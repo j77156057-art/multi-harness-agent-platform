@@ -1336,15 +1336,18 @@ def main():
     # 这两步都要及时：管理员开轮后会等申请，宽限期一过就冻结候选集合。
     allocation_every_seconds = 10.0
     last_allocation_at = 0.0
-    # 在场：窗口每隔一会儿报一声「我还在」。界面上的「在线」只认它。
-    presence_every_seconds = 20.0
-    last_presence_at = 0.0
     worker_token = args.token_file.read_text().strip()
     with httpx.Client(
         base_url=args.url,
         headers={"Authorization": "Bearer " + worker_token},
         timeout=30,
     ) as client:
+        # 在场：报「我还在」的心跳走自己的线程。干活那条线（跑 CLI 可能好几
+        # 分钟）卡住时，界面照样知道这个窗口活着。
+        presence.start_heartbeat(
+            lambda body: client.post("/api/v1/adapter/presence", json=body),
+            role="member",
+        )
         while True:
             try:
                 now = time.monotonic()
@@ -1420,12 +1423,8 @@ def main():
                     raise
             # 在场：这个窗口的进程还在跑。界面上的「在线」只认它 ——
             # 注册表里的 status 是注册那一刻的声明，进程被关掉它不会变。
-            if time.monotonic() - last_presence_at >= presence_every_seconds:
-                last_presence_at = time.monotonic()
-                presence.announce(
-                    lambda body: client.post("/api/v1/adapter/presence", json=body),
-                    role="member",
-                )
+            # 心跳走**自己的线程**（见 presence.start_heartbeat）：干活那条线
+            # 卡住时也要报「我还在」，否则正在干活的窗口会被说成「没在跑」。
             if once:
                 return
             time.sleep(3)
