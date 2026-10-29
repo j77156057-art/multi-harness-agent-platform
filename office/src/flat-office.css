@@ -2218,6 +2218,78 @@
   vertical-align: middle;
 }
 
+/* 「测试模型」那一页：一家一块，块里是它列出来的模型。 */
+.flat-model-test-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ao-ink-soft);
+}
+
+.flat-model-test-scope select {
+  padding: 4px 7px;
+  border: 1px solid var(--ao-line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12.5px;
+  background: #fff;
+}
+
+.flat-probe {
+  border: 1px solid var(--ao-line-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+
+.flat-probe h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+/* 长清单：默认收起（一家几十个模型），要看再展开。 */
+.flat-probe-rows {
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.flat-probe-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.flat-probe-row:hover { background: rgba(127, 127, 127, 0.12); }
+.flat-probe-row span { font-size: 12.5px; }
+
+.flat-probe-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--ao-line-soft);
+}
+
+.flat-probe-run b { font-size: 12.5px; }
+
+.flat-probe-ok {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #1f4d35;
+}
+
 /* 左栏窗口行的右键菜单：一个动作，贴着鼠标出现。 */
 .flat-ctxmenu {
   position: fixed;

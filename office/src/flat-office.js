@@ -248,6 +248,16 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     tierEdit: null,
     // 定档/改档/撤档之后的那句话说在这里（与 error 分开）。
     modelNote: '',
+    // 「测试模型」那一页：这一轮探测到哪了（平台回的快照，不做假动画）、
+    // 选了哪家当范围、每家选了哪个模型、每家的测试结论。
+    //
+    // 测试结论必须存在 state 里：一次测试可能要十几秒，中间页面会重画好几轮，
+    // 直接写进 DOM 会被下一轮抹掉 —— 人就看不到"成功/失败"了。
+    rosterProbe: null,
+    modelTestGroup: '',
+    modelTestPick: {},
+    modelTestResults: {},
+    modelTesting: {},
     messages: [],
     userKeys: [],
     userKeyPending: null,
@@ -1769,6 +1779,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (state.view.kind === 'alerts') {
       pane.append(alertsPane());
+      return pane;
+    }
+    if (state.view.kind === 'model-test') {
+      pane.append(modelTestPane());
       return pane;
     }
     // 项目任务：选中一条活就看详情，没选就看任务表。
@@ -4615,8 +4629,187 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
           : '<p class="flat-note">尚无人从额度池借用额度。</p>'}
         ${userKeysBlock()}
+        <p class="flat-model-actions">
+          <button type="button" data-act="open-model-test">测试模型</button>
+        </p>
       </details>
     </section>`;
+  }
+
+  /**
+   * 「测试模型」这一页：先挑池子，点刷新并行探测各家的模型，探完一家显示一家；
+   * 选一个模型点「测试」，平台真的调它一次，成功就说成功，失败给原因。
+   */
+  function modelTestPane() {
+    const pane = document.createElement('section');
+    pane.className = 'flat-main flat-model-test';
+    const probe = state.rosterProbe;
+    const entries = (probe && probe.entries) || [];
+    const picked = state.modelTestPick || {};
+    const group = state.modelTestGroup || '';
+
+    // 「池子」= 这一次要探/要测的范围。默认全部；也能只看某一家，免得在一长串里找。
+    const clis = entries.length
+      ? entries.map((entry) => entry.cli)
+      : Object.keys((state.pool && state.pool.rosters) || {});
+    const visible = entries.filter((entry) => !group || entry.cli === group);
+
+    const header = document.createElement('header');
+    header.className = 'flat-detail-head';
+    header.innerHTML = `<div>
+        <h2>测试模型</h2>
+        <p class="flat-summary">先选池子，点「刷新」让平台并行去问各家 CLI 都有什么模型 —— 探完一家就先显示那一家。选中一个模型点「测试」，平台会真的调用它一次（会花一次额度），成功就说成功，失败给原因。</p>
+      </div>
+      <div class="flat-detail-actions">
+        <label class="flat-model-test-scope">池子
+          <select data-act="model-test-scope">
+            <option value="">全部（${clis.length} 家）</option>
+            ${clis
+              .map(
+                (cli) =>
+                  `<option value="${escape(cli)}"${
+                    group === cli ? ' selected' : ''
+                  }>${escape(poolSourceName(cli))}</option>`,
+              )
+              .join('')}
+          </select>
+        </label>
+        <button type="button" data-act="start-roster-probe">刷新</button>
+      </div>`;
+    pane.append(header);
+
+    if (probe && probe.running) {
+      const note = document.createElement('p');
+      note.className = 'flat-note';
+      note.textContent = `正在探测：已探完 ${probe.summary.finished} / ${probe.summary.total} 家（已列出 ${probe.summary.models} 个模型）…`;
+      pane.append(note);
+    } else if (probe && probe.entries && probe.entries.length) {
+      const note = document.createElement('p');
+      note.className = 'flat-note';
+      note.textContent = `探测完成：${probe.summary.ok} / ${probe.summary.total} 家列出了模型，共 ${probe.summary.models} 个。`;
+      pane.append(note);
+    }
+
+    if (!visible.length) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = (probe && probe.note) || '还没有探测结果。点右上角「刷新」让平台去问各家 CLI。';
+      pane.append(empty);
+      return pane;
+    }
+
+    for (const entry of visible) {
+      const block = document.createElement('section');
+      block.className = 'flat-spec flat-probe';
+      block.dataset.cli = entry.cli;
+      const stateWord =
+        entry.status === 'done'
+          ? `${entry.models.length} 个模型 · ${entry.seconds}s`
+          : entry.status === 'running' || entry.status === 'pending'
+            ? '正在探测…'
+            : entry.status === 'empty'
+              ? '没列出模型'
+              : '探测失败';
+      const rows =
+        entry.status === 'done'
+          ? entry.models
+              .map((name) => {
+                const short = name.split('/').pop();
+                const modelId = `${entry.cli}/${short}`;
+                const tier = ((state.pool && state.pool.models) || []).find(
+                  (item) => String(item.id) === modelId,
+                );
+                const isPicked = picked[entry.cli] === name;
+                return `<label class="flat-probe-row">
+                  <input type="radio" name="probeModel" value="${escape(modelId)}" data-cli="${escape(
+                    entry.cli,
+                  )}" data-model="${escape(name)}"${isPicked ? ' checked' : ''}>
+                  <span>${escape(short)}</span>
+                  ${
+                    tier
+                      ? `<em class="flat-model-mark is-${escape(String(tier.tier || ''))}">${escape(
+                          TIER_WORDS[String(tier.tier || '')] || String(tier.tier || ''),
+                        )}</em>`
+                      : '<em class="flat-model-mark is-unknown">未定档</em>'
+                  }
+                </label>`;
+              })
+              .join('')
+          : '';
+      block.innerHTML = `<h3>${escape(poolSourceName(entry.cli))}
+          <span class="flat-note">${escape(stateWord)}</span></h3>
+        ${entry.error ? `<p class="flat-trouble-error">${escape(entry.error)}</p>` : ''}
+        ${rows ? `<div class="flat-probe-rows">${rows}</div>` : ''}
+        ${
+          picked[entry.cli]
+            ? `<div class="flat-probe-run">
+                 <span class="flat-note">要测：<b>${escape(String(picked[entry.cli]).split('/').pop())}</b></span>
+                 <button type="button" data-act="test-model" data-model="${escape(
+                   `${entry.cli}/${String(picked[entry.cli]).split('/').pop()}`,
+                 )}"${state.modelTesting[entry.cli] ? ' disabled' : ''}>${
+                   state.modelTesting[entry.cli] ? '正在测试…' : '测试'
+                 }</button>
+               </div>`
+            : ''
+        }
+        ${
+          state.modelTestResults[entry.cli]
+            ? `<p class="${
+                state.modelTestResults[entry.cli].ok ? 'flat-probe-ok' : 'flat-trouble-error'
+              }" data-test-result="${escape(entry.cli)}">${escape(
+                state.modelTestResults[entry.cli].text,
+              )}</p>`
+            : `<p class="${'flat-trouble-error'}" data-test-result="${escape(entry.cli)}"></p>`
+        }`;
+      pane.append(block);
+    }
+    return pane;
+  }
+
+  /** 点「测试」：真的调一次这个模型，结论写进 state（重画之后也还在）。 */
+  async function testModel(button) {
+    const modelId = String(button.dataset.model || '');
+    if (!modelId) return;
+    const cli = modelId.split('/')[0];
+    state.modelTesting = {...state.modelTesting, [cli]: true};
+    delete state.modelTestResults[cli];
+    render();
+    try {
+      const result = await api('/pool/model-test', {model: modelId});
+      state.modelTestResults = {
+        ...state.modelTestResults,
+        [cli]: {model: modelId, ok: Boolean(result.ok), text: testResultText(result)},
+      };
+    } catch (error) {
+      state.modelTestResults = {
+        ...state.modelTestResults,
+        [cli]: {
+          model: modelId,
+          ok: false,
+          text: `没测成：${String((error && error.message) || error)}`,
+        },
+      };
+    } finally {
+      state.modelTesting = {...state.modelTesting, [cli]: false};
+      render();
+    }
+  }
+
+  /** 一句结论：成功就说成功（耗时、它回了什么），失败就把原因原样摆出来。 */
+  function testResultText(result) {
+    const how = result.declared === false ? '（这个模型还没定档：直接问了它自己的 CLI 一次）' : '';
+    if (result.ok) {
+      return `成功 · ${result.seconds}s${how} · 它回了：${result.reply || '（空回答）'}`;
+    }
+    return `失败 · ${result.seconds}s${how} · ${result.error}`;
+  }
+
+  /** 校对：拉一次探测状态（界面每轮刷新都用它，不做假动画）。 */
+  async function refreshRosterProbe() {
+    const state_ = await api('/pool/roster-probe').catch(() => null);
+    if (!state_) return null;
+    state.rosterProbe = state_;
+    return state_;
   }
 
   /**
@@ -5383,6 +5576,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     void askAssistant(input.value);
   });
 
+  root.addEventListener('change', (event) => {
+    const field = event.target;
+    if (!field) return;
+    if (field.dataset && field.dataset.act === 'model-test-scope') {
+      state.modelTestGroup = String(field.value || '');
+      render();
+      return;
+    }
+    if (field.name === 'probeModel' && field.dataset.cli) {
+      // 每家只记一个：人要测的是"这一家的这个模型"。
+      state.modelTestPick = {...state.modelTestPick, [field.dataset.cli]: String(field.dataset.model || '')};
+      render();
+    }
+  });
+
   root.addEventListener('click', (event) => {    // 任务行里的「看本次失败的真实日志」：选那条活，再把日志滚到眼前。
     const jump = event.target.closest('[data-jump="log"]');
     if (jump) {
@@ -5614,6 +5822,29 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (button.dataset.act === 'open-admin-chat') {
       if (!adminDialog.open) adminDialog.showModal();
       syncAdminDialog();
+      return;
+    }
+    if (button.dataset.act === 'open-model-test') {
+      state.view = { kind: 'model-test', id: null };
+      void refreshRosterProbe().then(() => render());
+      return;
+    }
+    if (button.dataset.act === 'start-roster-probe') {
+      button.disabled = true;
+      button.textContent = '正在探测…';
+      void api('/pool/roster-probe', {})
+        .then((snapshot) => {
+          state.rosterProbe = snapshot;
+          render();
+        })
+        .catch((error) => {
+          state.error = `探测失败：${String((error && error.message) || error)}`;
+          render();
+        });
+      return;
+    }
+    if (button.dataset.act === 'test-model') {
+      void testModel(button);
       return;
     }
     if (button.dataset.act === 'apply-trouble-model') {
@@ -5963,6 +6194,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   const timer = setInterval(() => void refresh(), 15000);
   // 正在跑的活 4 秒一轮（只有选中它的时候才有请求）。
   const liveTimer = setInterval(() => void refreshLive(), 4000);
+  // 「测试模型」那一页：探测在跑的时候才去问一次（探完一家就长出来一格）。
+  // 不在那一页、或者已经探完，就不发请求。
+  const probeTimer = setInterval(() => {
+    const probing = state.rosterProbe && state.rosterProbe.running;
+    if (!probing || state.view.kind !== 'model-test') return;
+    void refreshRosterProbe().then((snapshot) => {
+      if (snapshot) render();
+    });
+  }, 800);
   void refresh();
 
   return {
@@ -5970,6 +6210,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     stop: () => {
       clearInterval(timer);
       clearInterval(liveTimer);
+      clearInterval(probeTimer);
     },
   };
 }

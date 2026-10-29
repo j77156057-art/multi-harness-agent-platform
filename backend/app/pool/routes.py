@@ -184,6 +184,50 @@ def pool_declaration(
     return {"declaration": slot, "pool": _pool_status(_service())}
 
 
+@router.post("/pool/roster-probe")
+def pool_roster_probe(principal: _guard("harness:register")) -> dict[str, Any]:
+    """开始一轮**并行**名册探测：各家 CLI 各开一线程，探完一家就记一家。
+
+    人要的是"探完哪家先看到哪家"，所以结果是**逐家长出来**的（界面轮询
+    `GET /pool/roster-probe`），不是等最慢那家。探测不花额度，只花一次进程。
+    """
+    from app.pool import probe
+
+    return probe.start_roster_probe()
+
+
+@router.get("/pool/roster-probe")
+def pool_roster_probe_state(principal: _guard("harness:register")) -> dict[str, Any]:
+    """这一轮探测到哪了；每家的模型一探到就在这里出现。"""
+    from app.pool import probe
+
+    return probe.snapshot()
+
+
+@router.post("/pool/model-test")
+def pool_model_test(
+    body: dict[str, Any], principal: _guard("harness:register")
+) -> dict[str, Any]:
+    """测一个模型能不能用：真的调用它一次，只发一句话、只让它回几个字。
+
+    这会**花一次额度** —— 所以必须由人点名一个模型才做，平台不自己跑批。
+
+    两条路（见 `app.pool.probe.test_model`）：池子里有就走池子那条**现成**的服务
+    路径；池子里没有、但这家 CLI 的名册里有，就按同一条调用约定直接问一次 CLI
+    （临时路由，**不写声明** —— 要不要给它定档仍是人的决定）。
+    """
+    from app.pool import probe
+
+    model_id = str(body.get("model") or "").strip()
+    if not model_id:
+        raise ApiError("request.invalid", 400, "which model must be named")
+    return probe.test_model(
+        model_id,
+        _service(),
+        consumer=f"human/{getattr(principal, 'subject_id', 'operator')}",
+    )
+
+
 @router.post("/pool/upstream-tier")
 def pool_upstream_tier(
     body: dict[str, Any],

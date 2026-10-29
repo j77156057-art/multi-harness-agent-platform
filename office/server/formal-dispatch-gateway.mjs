@@ -713,6 +713,25 @@ export function createFormalGateway(config={}){
         },undefined,'POST',30000);
         json(res,200,result);return true;
       }
+      if(req.method==='POST'&&route==='/pool/roster-probe'){
+        // 并行探测各家 CLI 都有什么模型；探完一家就记一家，界面轮询下面的 GET。
+        const result=await call('/pool/roster-probe',{},undefined,'POST',30000);
+        json(res,200,result);return true;
+      }
+      if(req.method==='GET'&&route==='/pool/roster-probe'){
+        const result=await call('/pool/roster-probe',undefined,undefined,undefined,30000);
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&route==='/pool/model-test'){
+        // 测一个模型能不能用：真的调一次（花一次额度）。超时给足 —— 走 CLI 的模型
+        // 要 spawn 一个进程，慢的那家能到十几秒。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.model!=='string'||!body.model.trim()||body.model.length>200)
+          throw fail(400,'invalid_model_test_request');
+        const result=await call('/pool/model-test',{model:body.model.trim()},undefined,'POST',180000);
+        json(res,200,result);return true;
+      }
       if(req.method==='POST'&&route==='/pool/upstream-tier'){
         // 非 CLI 上游（各家 CLI 自己配置里那几条）的档位：它们的默认值在代码里，
         // 这里让人一句话覆盖它，或撤回到默认。
