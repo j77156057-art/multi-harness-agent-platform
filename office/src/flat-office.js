@@ -828,8 +828,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const status = String(task.status || '');
       if (['claimed', 'in_progress', 'verifying'].includes(status)) group.active += 1;
       else if (DONE_STATES.has(status)) group.done += 1;
-      else if (FAILED_STATES.has(status)) group.failed += 1;
-      else group.waiting += 1;
+      else if (FAILED_STATES.has(status) || REJECTED_STATES.has(status)) group.failed += 1;
+      // 「待领取」只算真等在那儿的（ready/queued）。草案与被驳回的草稿不在里面 ——
+      // 它们领不了，说成「待领取」会让人以为活堆着没人干。
+      else if (WAITING_STATES.has(status)) group.waiting += 1;
     }
     const list = [...groups.values()];
     // 顺序是一句话：**谁在干活 → 活还缺人 → 谁有空**。
@@ -845,7 +847,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 这一堆是忙是闲（依据：手上有几条在做的活）。 */
   function groupMood(group) {
     if (group.active > 0) return { text: '忙碌', kind: 'is-busy' };
-    if (!group.key) return { text: '待领取', kind: 'is-waiting' };
+    if (!group.key) return { text: group.waiting ? '待领取' : '没人接', kind: 'is-waiting' };
     return { text: '空闲', kind: 'is-idle' };
   }
 
@@ -856,6 +858,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (group.waiting) bits.push(`待领取 ${group.waiting} 条`);
     if (group.done) bits.push(`已完成 ${group.done} 条`);
     if (group.failed) bits.push(`未完成 ${group.failed} 条`);
+    // 什么数都没有（全是领不了的草案）时也得说一句，否则标题下面空着。
+    if (!bits.length) bits.push(`共 ${group.tasks.length} 条，都还没到能领的时候`);
     return bits.join(' · ');
   }
 
