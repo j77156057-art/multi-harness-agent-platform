@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from app.adapter.harnesses.platform import PlatformToolsAdapter
 from app.agenttools.floor import Floor, FloorRefused, command_refusal
 from app.agenttools.loop import PlatformLoop
 from app.agenttools.registry import ToolRefused, build_registry
@@ -297,3 +298,65 @@ def test_a_model_that_answers_with_a_finish_key_is_understood(tmp_path: Path) ->
     result = loop.run()
     assert result.ok
     assert result.summary == "写在 finish 字段里"
+
+
+# ------------------------------------------------------------------ 适配器层
+
+
+def test_the_review_command_is_read_only_and_the_task_one_is_not(tmp_path: Path) -> None:
+    """会动手的审阅者不是审阅者：审阅那条命令必须带 --read-only。"""
+    adapter = PlatformToolsAdapter(object(), harness_id="platform-member-1")
+    try:
+        adapter.prepare_work_order("请给意见", tmp_path)
+        review = adapter.review_command("请给意见", tmp_path)
+        task = adapter.command("请给意见", tmp_path)
+    finally:
+        adapter.cleanup_work_order()
+    assert "--read-only" in review
+    assert "--read-only" not in task
+    assert "app.agenttools.cli" in task
+
+
+def test_the_token_travels_in_a_file_not_in_argv(tmp_path: Path) -> None:
+    """Windows 的命令行对全机可见：令牌进 argv 等于把令牌贴出来。"""
+    adapter = PlatformToolsAdapter(object(), harness_id="platform-member-1")
+    adapter.provider_route = type(
+        "Route",
+        (),
+        {
+            "base_url": "http://127.0.0.1:8848/api/v1/pool/v1",
+            "token": "apt_should_not_leak",
+            "model": "m",
+        },
+    )()
+    try:
+        adapter.prepare_work_order("干这条活", tmp_path)
+        argv = adapter.command("干这条活", tmp_path)
+        bundle = Path(argv[argv.index("--bundle") + 1])
+        assert "apt_should_not_leak" not in " ".join(argv)
+        assert json.loads(bundle.read_text(encoding="utf-8"))["token"] == "apt_should_not_leak"
+    finally:
+        adapter.cleanup_work_order()
+    assert not bundle.exists(), "这次尝试的通道文件用完就要删掉"
+
+
+def test_no_pool_model_is_reported_as_a_missing_channel() -> None:
+    """没有通道就说没有，不要交一个空活。"""
+    from app.agenttools.model import ChannelFailed, from_bundle
+
+    with pytest.raises(ChannelFailed) as exc:
+        from_bundle({"base_url": "", "token": "", "model": ""})
+    assert "额度池里给这个窗口指定一个模型" in str(exc.value)
+
+
+def test_the_receipt_is_read_off_the_marked_line() -> None:
+    adapter = PlatformToolsAdapter(object(), harness_id="platform-member-1")
+    stdout = "\n".join(
+        [
+            "[platform] 起来啦",
+            'PLATFORM-TOOLS-RESULT {"ok": true, "steps": 4, "summary": "写完了"}',
+        ]
+    )
+    parsed = adapter.parse_output(stdout)
+    assert parsed["ok"] is True
+    assert parsed["steps"] == 4
