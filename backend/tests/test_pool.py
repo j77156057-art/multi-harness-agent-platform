@@ -405,6 +405,25 @@ def test_every_builtin_slot_declares_its_tier():
         assert slot.get("tier") in CLI_TIERS, slot
 
 
+def test_a_paid_model_is_not_declared_free():
+    """`codebuddy` 的 `minimax-m3.1-flash` 是**收费**的，不能标成 free。
+
+    2026-10-29 实测：这里写着 "free"，平台就把它当成不花钱的额度放心用 ——
+    这条模型吃了 98 次请求 / 1010 万输入 token（opencode 一个窗口就占 850 万），
+    而操作者一直以为是免费档。「免费」是声明，平台不查价：声明错了，下面每一层
+    都照着错。标成 metered 之后，花这笔钱需要人明确点头。
+    """
+    from app.pool.sources import DEFAULT_CLI_SLOTS
+
+    paid = {
+        (slot["name"], slot["model"]): slot.get("tier")
+        for slot in DEFAULT_CLI_SLOTS
+    }
+    assert paid[("codebuddy", "minimax-m3.1-flash")] == "metered"
+    # 别把整家都改成收费：hy3 确实是 codebuddy 账号里免费的那一档。
+    assert paid[("codebuddy", "hy3")] == "free"
+
+
 def test_a_declared_slot_extends_the_builtin_slots(tmp_path):
     """Adding a harness must not drop every other free slot."""
     config = tmp_path / "pool.json"

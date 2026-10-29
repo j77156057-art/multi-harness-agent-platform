@@ -244,7 +244,16 @@ DEFAULT_CLI_SLOTS = (
     {
         "name": "codebuddy",
         "model": "minimax-m3.1-flash",
-        "tier": "free",
+        # **不是免费**：这台机器上的 codebuddy 账号把 MiniMax M3.1 算在收费额度里。
+        #
+        # 以前这里写的是 "free"，平台于是把它当成不花钱的额度放心用 —— 2026-10-29
+        # 的真实演练里，这条模型吃了 **98 次请求 / 1010 万输入 token**（其中
+        # opencode 一个窗口就占 850 万），而操作者一直以为是免费档。
+        #
+        # 「免费」是**声明**，平台自己不去查价：声明错了，下面每一层都会照着错。
+        # 所以标成计量（metered）—— 它仍然可用，但要花这笔钱必须有人明确点头
+        # （`model_tier` 与 `paid_consent` 一起记在选择里）。
+        "tier": "metered",
         "binary": "codebuddy",
         "args": [
             "-p",
