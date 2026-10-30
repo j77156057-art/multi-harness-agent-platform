@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -58,10 +58,21 @@ class Tool:
     usage: str
     run: Callable[[dict[str, Any]], str]
     writes: bool = False
+    #: JSON Schema for the arguments, used by the MCP surface.  The text
+    #: protocol keeps using ``usage`` (a sentence a model can copy); the two
+    #: descriptions serve different readers and must not be merged.
+    schema: dict[str, Any] | None = None
 
     def call(self, raw: Any) -> str:
         """Run with arguments in either accepted shape (object, or text)."""
         return str(self.run(_coerce(raw)))
+
+    def input_schema(self) -> dict[str, Any]:
+        return self.schema or {
+            "type": "object",
+            "properties": {"input": {"type": "string"}},
+            "additionalProperties": True,
+        }
 
 
 # --------------------------------------------------------------------- inputs
@@ -124,6 +135,85 @@ def _tail_head(text: str, limit: int) -> str:
 
 
 # ---------------------------------------------------------------------- tools
+
+
+#: What each tool accepts, in JSON Schema form, for clients that speak MCP.
+#: Kept next to the text ``usage`` sentences on purpose: one is for a model
+#: reading prose, the other for a client that validates arguments.
+INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "list_files": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "只列这个前缀下的文件（相对工作树，可省）"}
+        },
+        "additionalProperties": False,
+    },
+    "read_file": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "相对工作树的文件路径"},
+            "start": {"type": "integer", "minimum": 1, "description": "起始行（从 1 开始）"},
+            "end": {"type": "integer", "minimum": 0, "description": "结束行（含）"},
+        },
+        "required": ["path"],
+        "additionalProperties": False,
+    },
+    "grep": {
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "正则表达式"},
+            "path": {"type": "string", "description": "限定目录前缀（可省）"},
+        },
+        "required": ["pattern"],
+        "additionalProperties": False,
+    },
+    "create_file": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "相对工作树的路径；父目录会自动创建"},
+            "content": {"type": "string", "description": "完整文件内容"},
+        },
+        "required": ["path", "content"],
+        "additionalProperties": False,
+    },
+    "apply_edit": {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "old": {"type": "string", "description": "要被替换的原文，必须在文件里唯一命中"},
+            "new": {"type": "string", "description": "替换成什么"},
+        },
+        "required": ["path", "old", "new"],
+        "additionalProperties": False,
+    },
+    "run_command": {
+        "type": "object",
+        "properties": {
+            "cmd": {"type": "string", "description": "在工作树里执行的命令"},
+            "timeout": {"type": "integer", "minimum": 5, "maximum": 600},
+        },
+        "required": ["cmd"],
+        "additionalProperties": False,
+    },
+    "git_read": {
+        "type": "object",
+        "properties": {
+            "sub": {
+                "type": "string",
+                "enum": ["status", "log", "diff", "show", "ls-files", "rev-parse", "branch"],
+            },
+            "args": {"type": "string", "description": "子命令后面的参数"},
+        },
+        "required": ["sub"],
+        "additionalProperties": False,
+    },
+    "finish": {
+        "type": "object",
+        "properties": {"summary": {"type": "string", "description": "做了什么、依据是什么"}},
+        "required": ["summary"],
+        "additionalProperties": False,
+    },
+}
 
 
 def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
@@ -369,6 +459,12 @@ def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
             usage='{"summary": "改了 docs/a.md 的两处，因为…"}',
             run=finish,
         ),
+    }
+    # One table, two surfaces: the text protocol reads ``usage``, an MCP client
+    # reads ``schema``.  Both come from here so they cannot drift.
+    table = {
+        name: tool if name not in INPUT_SCHEMAS else replace(tool, schema=INPUT_SCHEMAS[name])
+        for name, tool in table.items()
     }
     if not read_only:
         return table
