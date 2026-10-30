@@ -771,6 +771,35 @@ class PoolService:
 
     # ----------------------------------------------------------- CLI slots
 
+    def refuse_tools_for_cli(self, route: "Route", payload: dict[str, Any]) -> None:
+        """带上工具定义的请求不许打到 CLI 槽位上。
+
+        这一跳把另一个 CLI 当模型用，它只能回一段文字，回不了 ``tool_calls``；
+        而它的提示词里写着「Do not use tools, do not read or write files, do not
+        run commands」（对「问一句话」是对的）。旧版照单全收的代价是把 agent 弄残：
+        2026-10-29 实测 pi 被路由到额度池后，每一条活都回「我无法在『不许用工具』
+        的前提下完成这个任务」，10 次领活、0 次交付。
+
+        **为什么单独一个方法**：拒绝必须在**开流之前**发生。``chat_completions_stream``
+        是生成器，函数体要等第一次迭代才跑 —— 在生成器里抛错时响应头已经发出去了，
+        调用方看到的是「连接被关闭」，而不是这句话。2026-10-30 实测：qwen 指向
+        free 档时只拿到 ``UND_ERR_SOCKET: other side closed``，绕了几圈才查到是这个
+        原因。所以路由层先调这里，再决定要不要开流。
+        """
+        upstream = route.upstream
+        if not payload.get("tools"):
+            return
+        raise PoolError(
+            f"{route.model} 由一个 CLI 当模型来服务（{upstream.name}），这一跳只能回文字、"
+            "回不了 tool_calls；带着 "
+            f"{len(payload['tools'])} 个工具定义来用它，会让调用方以为自己不许用工具。"
+            "请给这个窗口换一个真 provider 的模型（额度池里非 CLI 上游的那一档）。",
+            status=502,
+            # 给自己一个 code：调用方与人都要能一眼认出这是"选错档"，而不是
+            # "池子抽风"。没有 code 时对外只有一句 "could not serve"。
+            code="relay_cli_cannot_use_tools",
+        )
+
     def _cli_chat(
         self,
         route: Route,
@@ -797,14 +826,7 @@ class PoolService:
         upstream = route.upstream
         if upstream.cli is None:
             raise PoolError(f"upstream {upstream.name} has no CLI slot", status=500)
-        if payload.get("tools"):
-            raise PoolError(
-                f"{route.model} 由一个 CLI 当模型来服务（{upstream.name}），这一跳只能回文字、"
-                "回不了 tool_calls；带着 "
-                f"{len(payload['tools'])} 个工具定义来用它，会让调用方以为自己不许用工具。"
-                "请给这个窗口换一个真 provider 的模型（额度池里非 CLI 上游的那一档）。",
-                status=502,
-            )
+        self.refuse_tools_for_cli(route, payload)
         started = time.monotonic()
         try:
             report = upstream.cli.run(_messages_of(payload))

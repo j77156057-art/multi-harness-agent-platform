@@ -956,6 +956,40 @@ def test_a_quota_answer_without_any_allowance_is_not_a_balance():
     assert reading["reason"]
 
 
+def test_the_streaming_path_refuses_tools_before_it_opens_the_stream():
+    """同一句拒绝必须在**开流之前**给出，否则调用方只看到「连接被关闭」。
+
+    2026-10-30 实测：qwen 指向 free 档时拿到的是 ``UND_ERR_SOCKET: other side
+    closed``，而不是池子那句"这一跳回不了 tool_calls"。原因是拒绝写在生成器里，
+    响应头已经发出去了。所以这里直接问那个方法：它必须是能提前调用的普通方法，
+    而不是生成器的一部分。
+    """
+    import pytest
+
+    from app.pool.service import PoolError, PoolService
+
+    class _Upstream:
+        name = "qoder-cli"
+        cli = object()
+
+    class _Route:
+        model = "qoder/Qwen3.8-Flash"
+        upstream = _Upstream()
+
+    service = PoolService.__new__(PoolService)
+
+    # 没有工具：放行（返回 None，不抛）。
+    assert service.refuse_tools_for_cli(_Route(), {"messages": []}) is None
+    # 有工具：立刻拒绝，且话说清楚该怎么办。
+    with pytest.raises(PoolError) as caught:
+        service.refuse_tools_for_cli(
+            _Route(), {"messages": [], "tools": [{"type": "function"}]}
+        )
+    assert caught.value.status == 502
+    assert caught.value.code == "relay_cli_cannot_use_tools"
+    assert "tool_calls" in str(caught.value)
+
+
 def test_a_cli_slot_refuses_a_request_that_carries_tool_definitions():
     """把 CLI 当模型用，服务不了带工具定义的请求 —— 要拒绝，不能装作能服务。
 

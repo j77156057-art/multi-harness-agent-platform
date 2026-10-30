@@ -54,6 +54,14 @@ _POOL_MESSAGES = {
     "pool_user_key_pending": ("the pool is waiting for the user to approve spending their own key"),
     "relay_model_required": "a model name is required",
     "relay_model_not_found": "no upstream serves that model",
+    # 这一档由某个 CLI 当模型来服务，只能回文字。编码用的 CLI 一定带工具定义，
+    # 所以它会撞上这句话 —— 与其让调用方看到"连接被关闭"或"池子抽风"，不如明说
+    # 该怎么办：换一个真 provider 的模型。
+    "relay_cli_cannot_use_tools": (
+        "this model is served by a CLI slot, which can only return text and never "
+        "tool_calls; a coding client always sends tool definitions, so point the "
+        "window at a real provider model instead of this tier"
+    ),
 }
 
 
@@ -309,7 +317,10 @@ def pool_chat_completions(
         # Where it would go is decided **before** the stream starts: a refusal
         # has to be a status the caller can read, not a stream that breaks
         # halfway through.
-        service.route(str(payload.get("model") or ""))
+        route = service.route(str(payload.get("model") or ""))
+        # 同一句话也要在**开流之前**说完：CLI 槽位服务不了带工具定义的请求，而
+        # 生成器里抛错时响应头已经发出去了，调用方只会看到「连接被关闭」。
+        service.refuse_tools_for_cli(route, payload)
         return StreamingResponse(
             service.chat_completions_stream(payload, consumer=_consumer(principal)),
             media_type="text/event-stream",
