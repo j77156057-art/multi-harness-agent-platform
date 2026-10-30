@@ -48,7 +48,9 @@ def test_initialize_names_the_protocol_and_the_tool_capability(tmp_path: Path) -
 def test_tools_list_carries_json_schemas(tmp_path: Path) -> None:
     answer = mcp.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, _tools(tmp_path))
     tools = {item["name"]: item for item in answer["result"]["tools"]}
-    assert {"create_file", "read_file", "run_command", "finish"} <= set(tools)
+    assert {"create_file", "read_file", "run_command"} <= set(tools)
+    # `finish` 是平台侧循环的交活动作，不属于 CLI —— 摆出来只会误导它。
+    assert "finish" not in tools
     schema = tools["create_file"]["inputSchema"]
     assert schema["required"] == ["path", "content"]
     assert schema["properties"]["path"]["type"] == "string"
@@ -102,6 +104,22 @@ def test_an_unknown_tool_lists_the_real_ones(tmp_path: Path) -> None:
     )
     assert answer["result"]["isError"] is True
     assert "create_file" in answer["result"]["content"][0]["text"]
+
+
+def test_finish_is_explained_instead_of_run(tmp_path: Path) -> None:
+    """CLI 有自己的结束方式：被问到时说清，而不是当成一次正常交活。"""
+    answer = mcp.handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": "finish", "arguments": {"summary": "完"}},
+        },
+        _tools(tmp_path),
+    )
+    result = answer["result"]
+    assert result["isError"] is False
+    assert "不在这条通道里" in result["content"][0]["text"]
 
 
 def test_a_notification_gets_no_answer(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -154,23 +155,77 @@ class ScopedRunner(SubprocessRunner):
         spec: dict,
         base: str,
         *,
-        platform_commit: bool = False,
+        platform_commit: bool | Any = False,
         commit_message: str = "chore(formal): submit harness deliverable",
+        transient: Any = None,
     ):
         super().__init__()
         self.spec, self.base = spec, base
-        self.platform_commit = platform_commit
+        #: 可以是布尔，也可以是一个**跑起来才求值**的判断：适配器是拿到这次
+        #: 尝试的上下文之后才知道自己有没有平台工具，构造 runner 时还太早。
+        self._platform_commit = platform_commit
         self.commit_message = commit_message
+        #: 适配器自己写进工作树、跑完要删掉的文件（相对路径）。
+        #: 一个 CLI 的配置文件不该让整个交付被判成"留了脏东西"；反过来，
+        #: 真实交付物想躲进这里也不行 —— 见 ``_transient_names`` 的拒绝条件。
+        self._transient = transient or (lambda: ())
+
+    def _commits_for_harness(self) -> bool:
+        decision = self._platform_commit
+        return bool(decision() if callable(decision) else decision)
+
+    def _transient_names(self) -> set[str]:
+        """适配器声明的临时文件，转成 POSIX 相对路径。
+
+        声明里若出现授权落点**之内**的路径，直接丢掉这条声明：那会把真实交付
+        物藏进"临时文件"里被删掉，等于平台替它作弊。
+        """
+        raw = self._transient() or ()
+        paths = self.spec.get("exclusive_paths") or []
+        names: set[str] = set()
+        for item in raw:
+            name = str(item or "").replace("\\", "/").strip()
+            if not name or name.startswith("/") or ".." in name.split("/"):
+                continue
+            if path_in_scope(name, paths):
+                continue
+            names.add(name)
+        return names
+
+    def _line_path(self, line: str) -> str:
+        path = line[3:].strip()
+        if " -> " in path:
+            path = path.rsplit(" -> ", 1)[1]
+        return _unquote_git_path(path).replace("\\", "/")
+
+    def _drop_transient(self, cwd: Path, names: set[str]) -> None:
+        for name in names:
+            target = cwd / name
+            try:
+                if target.is_file():
+                    target.unlink()
+                elif target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+            except OSError:
+                pass
 
     def run(self, argv, *, cwd, **kwargs):
         result = super().run(argv, cwd=cwd, **kwargs)
+        names = self._transient_names()
+        if names:
+            self._drop_transient(cwd, names)
         if result.returncode:
             return result
-        if self.platform_commit:
+        if self._commits_for_harness():
             self._commit_uncommitted_scope(cwd)
         changed = run_git("diff", "--name-only", f"{self.base}..HEAD", cwd=cwd).stdout.splitlines()
         paths = self.spec["exclusive_paths"]
-        dirty = run_git("status", "--porcelain", cwd=cwd).stdout.strip()
+        transient = self._transient_names()
+        dirty = "\n".join(
+            line
+            for line in run_git("status", "--porcelain", cwd=cwd).stdout.strip().splitlines()
+            if self._line_path(line) not in transient
+        )
         # Name the condition that fired. The old single sentence ("dirty, empty
         # or out-of-scope") made a scope-rule bug look like a member mistake and
         # cost a full re-run to tell the two apart.
@@ -194,7 +249,12 @@ class ScopedRunner(SubprocessRunner):
 
     def _commit_uncommitted_scope(self, cwd: Path) -> None:
         """Submit an authorized Claude result without granting Claude Git access."""
-        status = run_git("status", "--porcelain", cwd=cwd).stdout.splitlines()
+        transient = self._transient_names()
+        status = [
+            line
+            for line in run_git("status", "--porcelain", cwd=cwd).stdout.splitlines()
+            if self._line_path(line) not in transient
+        ]
         if not status:
             return
         paths = self.spec["exclusive_paths"]
@@ -1054,7 +1114,14 @@ def run_one(
         # Claude 与 Pi 不自己提交：平台替它们提交（Claude 是因为它跑在沙箱里，
         # Pi 是因为它不写 Git）。平台工具那一类也一样：它的工具里根本没有 git 写，
         # 提交由平台做完再判范围。
-        platform_commit=isinstance(adapter, ClaudeCodeAdapter | PiAdapter | PlatformToolsAdapter),
+        # 用平台工具的窗口一律由平台提交：工具那一侧**没有** git 写
+        # （提交要过范围判定），所以窗口自己提不了 —— 这一点在实测里踩过：
+        # opencode 拿平台的 run_command 去 git commit，被工具的门槛拒了，
+        # 于是没人提交，交付被判成"没有提交"而整单退回。
+        platform_commit=lambda: (
+            isinstance(adapter, ClaudeCodeAdapter | PiAdapter | PlatformToolsAdapter)
+            or adapter.mcp_binding() is not None
+        ),
         commit_message=f"chore({task['task_id']}): submit Claude deliverable"
         if isinstance(adapter, ClaudeCodeAdapter)
         else (
@@ -1066,6 +1133,9 @@ def run_one(
                 else "chore(formal): submit harness deliverable"
             )
         ),
+        # 适配器自己写进工作树的配置文件（例如 opencode.json）：下载跑完要删掉，
+        # 也不该让整次交付因为"多了个文件"被拒。
+        transient=adapter.transient_paths,
     )
     worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
     # 额度池：平台说这条活该换额度，就走池子；没说，就用这个窗口自己的 provider。

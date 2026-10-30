@@ -43,6 +43,11 @@ from app.agenttools.floor import Floor, FloorRefused
 from app.agenttools.registry import Tool, ToolRefused, build_registry
 
 PROTOCOL_VERSION = "2025-06-18"
+
+#: 只属于**平台侧循环**的工具：``finish`` 是那个循环的"交活"，由它读 summary。
+#: CLI 有自己的结束方式；给它一个 finish 只会让它以为必须调用它 —— 实测里模型
+#: 确实调了，还专门在总结里解释"我按平台要求交活了"。
+LOOP_ONLY_TOOLS = frozenset({"finish"})
 SERVER_INFO = {"name": "agent-office-tools", "version": "1.0.0"}
 
 #: JSON-RPC error codes we actually use.
@@ -80,6 +85,7 @@ def tools_payload(tools: dict[str, Tool]) -> list[dict[str, Any]]:
             "inputSchema": tool.input_schema(),
         }
         for tool in tools.values()
+        if tool.name not in LOOP_ONLY_TOOLS
     ]
 
 
@@ -124,6 +130,12 @@ def handle(message: Any, tools: dict[str, Tool]) -> dict[str, Any] | None:
 
 
 def _call(tools: dict[str, Tool], name: str, arguments: Any) -> dict[str, Any]:
+    if name in LOOP_ONLY_TOOLS:
+        return _text_result(
+            f"`{name}` 是平台自己那套循环用的交活动作，不在这条通道里。"
+            "你这一轮做完直接结束就行，平台会自己提交本任务工作树里的改动。",
+            is_error=False,
+        )
     tool = tools.get(name)
     if tool is None:
         available = "、".join(sorted(tools))

@@ -290,6 +290,29 @@ class CliHarness(HttpAdapter):
     def parse_output(self, stdout: str) -> dict[str, Any]:
         return {}
 
+    # ---------------------------------------------------------------- 平台工具
+
+    #: 这一轮属于哪次尝试。worker 在跑 CLI 之前填，适配器据此拼平台工具的地址。
+    #: 不放进 ``command`` 的签名里：那是每个适配器都要实现的 CLI argv 契约，
+    #: 加参数等于让每个 CLI 适配器都知道"平台工具"这件事。
+    task_context: dict[str, str] | None = None
+
+    def mcp_binding(self) -> dict[str, Any] | None:
+        """这次尝试可用的平台工具端点；没有就是 ``None``。
+
+        基类返回 ``None``：只有**确认过怎么把 MCP 配置交给这个 CLI** 的适配器才
+        实现它。没确认就假装支持，会让窗口以为自己有工具而实际没有。
+        """
+        return None
+
+    def transient_paths(self) -> tuple[str, ...]:
+        """适配器**自己**写进工作树、跑完要删掉的文件（相对工作树）。
+
+        ``ScopedRunner`` 会把它们从"脏文件/越界"里排除，并在跑完删除。这条
+        通道只给适配器自己的配置文件用：一个真实交付物躲在里面会被判成越界。
+        """
+        return ()
+
 
 class SubprocessRunner:
     """The production runner: a real child process, killed at the deadline.
@@ -595,6 +618,9 @@ class CliHarnessWorker:
             goal=goal,
         )
         prepared_order = self.adapter.prepare_work_order(work_order, self.worktree)
+        # 这一轮属于哪次尝试：适配器据此把「平台工具」的地址拼进它自己的配置。
+        # 只在这里填，命令签名不变 —— 每个 CLI 适配器都不该知道平台工具的存在。
+        self.adapter.task_context = {"task_id": task_id, "attempt_id": context.attempt_id}
         argv = self.adapter.command(prepared_order, self.worktree)
 
         # Only mention stdin when this adapter actually uses it: the keyword is

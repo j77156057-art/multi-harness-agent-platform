@@ -70,6 +70,7 @@ class OpenCodeAdapter(CliHarness):
         bash_path: str | None = None,
         harness_id: str = "opencode",
         display_name: str | None = None,
+        model: str | None = None,
     ) -> None:
         registration = replace(
             OPENCODE_REGISTRATION,
@@ -85,6 +86,10 @@ class OpenCodeAdapter(CliHarness):
         self.bash_path = shutil.which("bash") if bash_path is None else (bash_path or None)
         self._work_order_bundle: Path | None = None
         self._pool_config_root: Path | None = None
+        #: 不走池子时用哪个模型。不写死：这台机器的默认模型在地区上被拒
+        #: （``This model is not available in your country``），窗口需要能说清
+        #: 自己该用哪一个。
+        self.model = model or os.environ.get("AP_OPENCODE_MODEL", "")
 
     def _needs_cmd_transport_file(self) -> bool:
         return (
@@ -142,6 +147,7 @@ class OpenCodeAdapter(CliHarness):
         return self.platform == "nt" and self.bash_path is not None
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
+        self._inject_mcp(worktree)
         if self._work_order_bundle is not None:
             script = self._work_order_bundle / "run.cmd"
             # Keep the script path as its own argv item.  Passing a quoted
@@ -160,6 +166,9 @@ class OpenCodeAdapter(CliHarness):
             # work still happens here.  The provider name matches the isolated
             # config written by ``route_environment``.
             argv += ["--model", f"pool/{route.model}"]
+        elif self.model:
+            # 自己 provider 的模型：``<provider>/<model>``，由人指定，平台不猜。
+            argv += ["--model", self.model]
         argv.append(work_order)
         if self.use_shell_shim():
             # The WindowsApps ``bash.exe`` alias is a WSL launcher that drops
@@ -194,6 +203,52 @@ class OpenCodeAdapter(CliHarness):
             argv[index + 1] = agent
             return argv
         return [*argv[:1], "--agent", agent, *argv[1:]]
+
+    # ---------------------------------------------------------------- 平台工具
+
+    #: 写进工作树的配置文件（相对路径）。跑完由 ``ScopedRunner`` 删掉，
+    #: 并且不算"未提交改动" —— 否则每次带工具的交付都会被判成留了脏东西。
+    _MCP_FILE = "opencode.json"
+
+    def mcp_binding(self) -> dict[str, object] | None:
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        return None if binding is None else {"url": binding.url()}
+
+    def transient_paths(self) -> tuple[str, ...]:
+        return (self._MCP_FILE,)
+
+    def _inject_mcp(self, worktree: Path) -> None:
+        """把平台工具的端点交给 OpenCode。
+
+        两条路，取决于这个窗口怎么拿模型：
+
+        * 走了额度池 —— 平台已经在 ``route_environment`` 里写了一份**隔离**的
+          ``XDG_CONFIG_HOME``，MCP 块并进那份文件即可，用户自己的配置一点不碰；
+        * 没走池子 —— 用它自己 provider 时必须读**工作目录**里的
+          ``opencode.json``。那个文件写进工作树，所以声明成临时文件，跑完删掉。
+        """
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is None:
+            return
+        fragment = binding.opencode_document()
+        if self._pool_config_root is not None:
+            path = self._pool_config_root / "opencode" / "opencode.json"
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                existing = {}
+            mcp_config.write_json(path, mcp_config.merge(existing, fragment))
+            return
+        target = worktree / self._MCP_FILE
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = {}
+        mcp_config.write_json(target, mcp_config.merge(existing, fragment))
 
     def route_environment(self) -> dict[str, str]:
         """The pool route for this window: an **isolated** CLI config.

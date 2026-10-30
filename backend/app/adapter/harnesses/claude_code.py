@@ -104,8 +104,33 @@ class ClaudeCodeAdapter(CliHarness):
             # rewritten.
             settings_path = self._write_pool_settings(worktree, route)
             command += ["--settings", str(settings_path)]
+        # 平台工具：Claude 用 ``--mcp-config`` 收一个 JSON 文件。文件写在临时
+        # 目录里（``_write_mcp_config``），**不进工作树** —— 工作树里多一个文件
+        # 会让这次交付被判成"留了脏东西"；令牌更不该出现在命令行上。
+        if self.mcp_binding() is not None:
+            command += ["--mcp-config", str(self._write_mcp_config())]
         command.append(work_order)
         return command
+
+    # ---------------------------------------------------------------- 平台工具
+
+    def mcp_binding(self) -> dict[str, object] | None:
+        """Claude 的工具端点；没有这次尝试就返回 ``None``。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        return None if binding is None else {"url": binding.url()}
+
+    def _write_mcp_config(self) -> Path:
+        """把 ``--mcp-config`` 要的那份文件写到临时目录里。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is None:
+            raise RuntimeError("no task context: cannot build the MCP binding")
+        bundle = Path(tempfile.mkdtemp(prefix="agent-platform-claude-mcp-"))
+        self._mcp_bundle = bundle
+        return mcp_config.write_json(bundle / "mcp.json", binding.claude_document())
 
     def review_command(self, prompt: str, workdir: Path) -> list[str]:
         """A review runs in **plan** mode: the reviewer may look, not touch."""
@@ -139,6 +164,9 @@ class ClaudeCodeAdapter(CliHarness):
         bundle, self._pool_bundle = getattr(self, "_pool_bundle", None), None
         if bundle is not None:
             shutil.rmtree(bundle, ignore_errors=True)
+        mcp, self._mcp_bundle = getattr(self, "_mcp_bundle", None), None
+        if mcp is not None:
+            shutil.rmtree(mcp, ignore_errors=True)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         """Read the final ``result`` event out of the JSONL stream.
