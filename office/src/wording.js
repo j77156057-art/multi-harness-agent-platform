@@ -11,6 +11,17 @@
 
 const cache = new Map();
 
+/**
+ * 缓存**被写过几次**。
+ *
+ * 界面要靠它判断"这一轮除了数据没变、翻译到货了没有"：译文是异步补上的，
+ * 数据一样但译文刚到的那一轮仍然必须重画一次，否则屏幕上永远停着原文。
+ * 只报版本号，不暴露缓存内容。
+ */
+export function wordingVersion() {
+  return cache.size;
+}
+
 const post = async (route, body) => {
   const response = await fetch(`/api/formal${route}`, {
     method: 'POST',

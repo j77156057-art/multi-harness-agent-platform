@@ -309,11 +309,23 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   function paintTools(payload) {
     if (!payload) return;
+    // **先记住人点开/收起了哪几组，再重画。**
+    //
+    // 这一块会画两次：先出安装方式（纯数据、很快），探测结果回来后**再画一次**
+    // 把状态补上。不记住的话，人刚展开「未安装」想看命令，第二笔就把整块换成
+    // 默认状态 —— 他看到的正是"页面自己刷新了一下，我要看的东西没了"。
+    const opened = new Set();
+    const closed = new Set();
+    for (const fold of toolsList.querySelectorAll('details[data-fold-key]')) {
+      const key = fold.dataset.foldKey;
+      if (fold.open) opened.add(key);
+      else closed.add(key);
+    }
     toolsSummary.textContent = [summaryLine(payload), drivenLine(payload)].filter(Boolean).join(' ');
-    // 「还没探测」这一组也展开：大厅里的这一段本来就是给人看"官方从哪装"的，
-    // 全都收起等于只留一行字，第一次用的人还是不知道点什么。
     toolsList.innerHTML = installGroupsHtml(payload, {
       openStatuses: ['missing', 'version_failed', 'unknown'],
+      openKeys: opened,
+      closedKeys: closed,
     });
     toolsHost.textContent = hostLine(payload);
     const counts = payload.summary || {};

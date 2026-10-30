@@ -25,7 +25,7 @@ import { ACTION_HINT, ACTION_LABEL, CANCEL_STATES, humanDecisionActions, release
 import { STATE_LABEL, DONE_STATES, eventLabel as eventLabelLocal } from './state-labels.js';
 // 人话从**平台**来（平台才是这些文本的出处）：失败原因是平台写的、事件名是平台的
 // 事件、窗口登记名在平台的注册表里。平台够不着时用本地兜底。
-import { humanize, summarize, translated } from './wording.js';
+import { humanize, summarize, translated, wordingVersion } from './wording.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 import {
@@ -281,7 +281,10 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     //
     // 右栏每 15 秒重画一次（为了看到新数据）。不记住这件事，用户刚点开
     // 「额度池」，下一轮刷新就"啪"地合上了 —— 正在看的东西会从手里跑掉。
+    // 人点开过 / 点收起的折叠块。**两个都要记**：只记"点开"的话，默认展开的
+    // 那一组被人收起后会在下一次重画里自己弹开 —— 那也是一种"页面自己动"。
     openFolds: new Set(),
+    closedFolds: new Set(),
     source: 'platform',
     sort: 'updated',
     page: 1,
@@ -1195,6 +1198,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const sourceSelect = root.querySelector('#flatSourceSelect');
     if (sourceSelect) sourceSelect.value = state.source;
     root.dataset.flatState = 'ready';
+    // **这一屏画过几次**（只加不减）。轮询每 15 秒一轮，数据没变时不该重画 ——
+    // 有这个计数，就能用一条查询验证"没变就不画"（`#aoWorkspace[data-flat-renders]`
+    // 隔 20 秒读两次应当相等），而不是靠肉眼觉得"好像没闪"。
+    root.dataset.flatRenders = String(Number(root.dataset.flatRenders || 0) + 1);
     if (adminDialog.open) syncAdminDialog();
     syncBriefDialog();
     // 需要人处理的事**不再弹**：左栏那一行带红点，点进去是一页。浮层以前压在
@@ -1468,7 +1475,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       render();
     });
     if (adminId) {
-      addRow('window', adminId, `管理员 · ${harnessName(adminId)}`, windowStatusText(adminId));
+      // 登记名里常常已经带了「管理员」（"Codex · 管理员"）—— 再前缀一次就成了
+      // 「管理员 · Codex · 管理员」，同一个词说两遍。已经说了就不再前缀。
+      const registered = harnessName(adminId);
+      const label = registered.includes('管理员') ? registered : `管理员 · ${registered}`;
+      addRow('window', adminId, label, windowStatusText(adminId));
     }
     for (const item of roster) {
       const id = String(item.harness_id || '');
@@ -4556,7 +4567,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-empty">读不到安装清单：${escape(state.installsError)}</p>
         <p class="flat-note">这条路要平台后端一起更新；本地样例模式没有安装清单。</p></section>`;
     }
-    const lists = installGroupsHtml(payload);
+    const lists = installGroupsHtml(payload, {
+      openKeys: state.openFolds,
+      closedKeys: state.closedFolds,
+    });
     const open = state.openFolds.has('installs');
     const missing = Number((payload.summary && payload.summary.missing) || 0);
     return `<section class="flat-card flat-card-fold">
@@ -4606,7 +4620,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 这一屏问的是「我现在该装哪个」，所以连「还没探测」那一组也展开 ——
     // 收起一组人就得自己再点一次才知道里面是什么。
     const lists = payload
-      ? installGroupsHtml(payload, { openStatuses: ['missing', 'version_failed', 'unknown'] })
+      ? installGroupsHtml(payload, {
+          openStatuses: ['missing', 'version_failed', 'unknown'],
+          openKeys: state.openFolds,
+          closedKeys: state.closedFolds,
+        })
       : '';
     wrap.innerHTML = `
       <h2>开始使用</h2>
@@ -4664,7 +4682,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const consumersHere = used?.consumers || {};
       // 次数一律兜底：平台没给这个数的时候显示 0，而不是 "undefined 次"。
       const usedCount = Number(used?.requests || 0);
-      return `<details class="flat-pool-item">
+      return `<details class="flat-pool-item" data-fold-key="pool:${escape(name)}">
         <summary>
           <b>${escape(poolSourceName(name))}</b>
           <span>${own.length ? `${own.length} 个模型` : '尚未探测到模型'}</span>
@@ -4703,7 +4721,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${timelineBlock()}
         ${items.join('')}
         ${consumerItems.length
-          ? `<details class="flat-pool-item"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
+          ? `<details class="flat-pool-item" data-fold-key="pool:consumers"><summary><b>谁用了额度</b><span>${consumerItems.length} 个成员</span></summary><ul class="flat-pool-consumers">${consumerItems.join('')}</ul></details>`
           : '<p class="flat-note">尚无人从额度池借用额度。</p>'}
         ${userKeysBlock()}
         <p class="flat-model-actions">
@@ -5210,15 +5228,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     wrap.innerHTML = `
       ${askCard()}
       ${waitingCard()}
-      <section class="flat-card flat-card-brief">
-        <h3>${cardIcon('brief')}待办事项</h3>
-        ${brief.planId
-          ? `<p><b>${escape(brief.title)}</b></p>
-             <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条尚未领取）` : ''}</p>
-             <button type="button" data-act="open-brief">查看全部待办</button>`
-          : `<p class="flat-note">${(state.tasks || []).length} 条任务</p>
-             <p class="flat-empty">暂无方案正文。</p>`}
-      </section>
+      ${
+        // 空项目里这张卡只剩"0 条任务 / 暂无方案正文"—— 中间栏已经把同一句话说过了，
+        // 摆在这里只是多一块噪音。有方案或有活的时候才有信息量。
+        brief.planId || (state.tasks || []).length
+          ? `<section class="flat-card flat-card-brief">
+               <h3>${cardIcon('brief')}待办事项</h3>
+               ${brief.planId
+                 ? `<p><b>${escape(brief.title)}</b></p>
+                    <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条尚未领取）` : ''}</p>
+                    <button type="button" data-act="open-brief">查看全部待办</button>`
+                 : `<p class="flat-note">${(state.tasks || []).length} 条任务</p>
+                    <p class="flat-empty">暂无方案正文。</p>`}
+             </section>`
+          : ''
+      }
       <section class="flat-card flat-card-members">
         <h3>${cardIcon('people')}成员求助</h3>
         ${helps.length
@@ -5236,8 +5260,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                : thread.length
                  ? `本轮对话 ${thread.length} 条。`
                  : '尚未发送消息。发送后管理员即可收到。'}</p>
-             <button type="button" data-act="open-admin-chat">打开对话</button>
-             <button type="button" data-act="open-direct-window">开私聊窗口</button>`
+             <p class="flat-note">用哪一个都行：「查看对话」在办公室里弹出一层，「独立窗口」另开一页、可以一直留着。</p>
+             <button type="button" data-act="open-admin-chat">查看对话</button>
+             <button type="button" data-act="open-direct-window">开独立窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
       ${(state.tasks || []).length ? installCard() : ''}
@@ -5602,11 +5627,20 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   });
 
   // 记住哪些折叠卡片是开着的（右栏每 15 秒重画一次，不记住就会"啪"地合上）。
+  // 两种键都认：`data-fold`（整张卡）与 `data-fold-key`（卡里面的分组，例如
+  // 「装 CLI」按状态分的那几组）—— 只认前者时，卡里的分组一重画就合上。
   root.addEventListener('toggle', (event) => {
-    const fold = event.target.closest?.('details[data-fold]');
+    const fold = event.target.closest?.('details[data-fold], details[data-fold-key]');
     if (!fold) return;
-    if (fold.open) state.openFolds.add(fold.dataset.fold);
-    else state.openFolds.delete(fold.dataset.fold);
+    const key = fold.dataset.fold || fold.dataset.foldKey;
+    if (!key) return;
+    if (fold.open) {
+      state.openFolds.add(key);
+      state.closedFolds.delete(key);
+    } else {
+      state.openFolds.delete(key);
+      state.closedFolds.add(key);
+    }
   }, true);
 
   root.addEventListener('change', (event) => {
@@ -6192,7 +6226,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 每 15 秒把它抹掉，等于"点了没反应" —— 提示闪过就没了，人只记得没反应。
       // 不自动选中第一条活：默认给人看**任务表**，点开哪条再看哪条
       // （会话式的用法：先看列表，再点进去）。
-      render();
+      //
+      // 这一笔是"先把任务表画出来"（额度池要问二十几个上游，几秒）。但它以前
+      // **每轮都画**，于是每 15 秒页面都会自己刷一下、把展开的折叠块合上 —— 人
+      // 看到的就是"我刚打开想看的东西被刷掉了"。所以它只在**任务这一部分真的
+      // 变了**时才画：首次加载，或确实有新任务/状态变化。
+      const quick = quickSignature();
+      if (!state.loaded || quick !== state.quickSignature) {
+        state.quickSignature = quick;
+        render();
+      }
       const poolReadAt = Date.now();
       // 窗口名单与状态栏**先**落地：池子那一次读可能要十几秒（冷启动要问各家
       // CLI 的名册），把它和名单放在同一个 Promise.all 里，慢的那个会把快的
@@ -6249,7 +6292,86 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     } catch (error) {
       state.error = String(error.message || error);
     }
+    // **数据没变就别重画。**
+    //
+    // 15 秒一轮的重画会把正在看的东西刷掉：展开的折叠块合上、刚滚到的位置
+    // 弹回去、正在读的一行字消失 —— 而多数时候平台上的东西一个字都没变。
+    // 所以先算一份"这一屏依赖什么"的指纹，跟上一轮一样就**整块跳过**。
+    // 指纹只覆盖**视图真的用到**的东西：少写一项会导致该刷不刷，多写一项
+    // 会让"没变"被判成"变了"（等于没修）。
+    const signature = viewSignature();
+    if (signature === state.viewSignature) return;
+    state.viewSignature = signature;
     render();
+  }
+
+  /**
+   * **任务这一部分**变没变 —— 首屏那一笔只依赖它。
+   *
+   * 与 `viewSignature` 分开：首屏抢在额度池之前画，那时池子还没有新数据，
+   * 拿整屏指纹去比一定"不等"，等于没判断。
+   */
+  function quickSignature() {
+    return [
+      state.tasks.map((task) => `${task.task_id}:${task.status}:${task.owner || ''}:${task.updated_at || ''}`).join('|'),
+      (state.events || []).length,
+      state.status ? `${state.status.connected ? 1 : 0}:${state.status.group_id || ''}` : '-',
+      state.error || '',
+    ].join('#');
+  }
+
+  /**
+   * 这一屏依赖什么 —— 一份紧凑指纹。
+   *
+   * 只取**会影响画面**的量：任务与它们的状态/归属/时间、事件最后一条的序号、
+   * 窗口名单的在线状态、额度池、方案、群消息条数与最后序号、助手跑过的轮次、
+   * 当前读的是哪份数据、以及"译文缓存又长了几条"。
+   *
+   * 刻意不含 `state.selected` / `state.view` 这类**人点出来的**状态：它们变的时候
+   * 调用方本来就直接 render()，不靠这一轮轮询。
+   */
+  function viewSignature() {
+    const tasks = (state.tasks || []).map(
+      (task) =>
+        `${task.task_id}:${task.status}:${task.owner || ''}:${task.attempt_no || 0}:${task.updated_at || ''}`,
+    );
+    const events = state.events || [];
+    const lastEvent = events.length ? `${events.length}:${events[events.length - 1]?.seq ?? ''}` : '0';
+    const windows = (state.availability || []).map(
+      (item) => `${item.harness_id}:${item.status || ''}:${item.usable ? 1 : 0}:${item.model || ''}`,
+    );
+    const pool = state.pool
+      ? `${(state.pool.upstreams || []).length}:${(state.pool.models || []).length}:${
+          ((state.pool.usage || {}).requests || 0)
+        }`
+      : '-';
+    const plan = state.plan && state.plan.draft ? String(state.plan.draft.plan_id || 'draft') : '-';
+    const messages = state.messages || [];
+    const lastMessage = messages.length ? `${messages.length}:${messages[messages.length - 1]?.created_seq ?? ''}` : '0';
+    const runs = (state.assistantRuns || []).length;
+    const installs = state.installs
+      ? (state.installs.installers || [])
+          .map((row) => `${row.harness_id}:${row.status}:${row.version || ''}`)
+          .join('|')
+      : state.installsError || '-';
+    return [
+      state.source,
+      state.loaded ? 1 : 0,
+      state.messagesLoaded ? 1 : 0,
+      state.status ? `${state.status.connected ? 1 : 0}:${state.status.group_id || ''}` : '-',
+      tasks.join('|'),
+      lastEvent,
+      windows.join('|'),
+      pool,
+      plan,
+      lastMessage,
+      runs,
+      installs,
+      state.error || '',
+      state.memberNote || '',
+      // 译文是异步补上的：数据一样、译文刚到，也必须重画一次。
+      wordingVersion(),
+    ].join('#');
   }
 
   /**

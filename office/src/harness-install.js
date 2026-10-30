@@ -212,21 +212,37 @@ export function drivenLine(payload) {
  *   2. **市面上常见的其他 CLI**，单独一组默认收起 —— 装着有用，但在这里接不了任务。
  *
  * 混在一起就得逐条读状态和归属；分开之后"我该装哪个"是一眼的事。
+ *
+ * 每个折叠块都带一个稳定的 `data-fold-key`：这一屏会被**重画**（探测结果回来、
+ * 或办公室每轮刷新），不记住人点了什么，"刚展开就被合上"就成了常态。调用方
+ * 把 `openKeys` / `closedKeys` 传进来，这里按"人点过的优先、没点过按默认"决定。
  */
-export function installGroupsHtml(payload, { openStatuses = OPEN_STATUSES } = {}) {
+export function installGroupsHtml(
+  payload,
+  { openStatuses = OPEN_STATUSES, openKeys = null, closedKeys = null } = {},
+) {
   const rows = rowsView(payload);
-  const open = new Set(openStatuses);
+  const opened = openKeys instanceof Set ? openKeys : new Set();
+  const closed = closedKeys instanceof Set ? closedKeys : new Set();
+  const defaultOpen = new Set(openStatuses);
+  const isOpen = (key, fallback) => (opened.has(key) ? true : closed.has(key) ? false : fallback);
+  const foldKey = (suffix) => `installs:${suffix}`;
+
   const driven = groupByStatus(rows.filter((row) => row.driven))
-    .map(
-      (group) => `<details class="flat-pool-item"${open.has(group.status) ? ' open' : ''}>
+    .map((group) => {
+      const key = foldKey(group.status);
+      const open = isOpen(key, defaultOpen.has(group.status));
+      return `<details class="flat-pool-item" data-fold-key="${key}"${open ? ' open' : ''}>
         <summary><b>${escape(statusOf({ status: group.status }).label)}</b><span>${group.rows.length} 个</span></summary>
         <ul class="flat-list">${group.rows.map((row) => installRowHtml(row)).join('')}</ul>
-      </details>`,
-    )
+      </details>`;
+    })
     .join('');
   const reference = rows.filter((row) => !row.driven);
+  const referenceKey = foldKey('reference');
+  const referenceOpen = isOpen(referenceKey, false);
   const others = reference.length
-    ? `<details class="flat-pool-item">
+    ? `<details class="flat-pool-item" data-fold-key="${referenceKey}"${referenceOpen ? ' open' : ''}>
         <summary><b>市面上其他 CLI</b><span>${reference.length} 个</span></summary>
         <p class="flat-note">这些 CLI 可以单独使用；本平台还没有把它们接上，装上也不会在这里接任务。安装方式同样来自各家官方渠道。</p>
         <ul class="flat-list">${reference.map((row) => installRowHtml(row, { showStatus: true })).join('')}</ul>
