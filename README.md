@@ -182,6 +182,40 @@ npm run verify
 .\start-office.bat
 ```
 
+### 从空白到能用：一条命令
+
+上面那两步之后，**后端能跑，但界面会显示「未配置」** —— 这不是坏了，是设计如此：Agent Office 能派活、能批方案，所以它的网关拒绝连到没有强制认证的后端（`formal_authentication_required`）。要让界面真的能用，还差：强制认证、两个令牌文件、一个项目与分组、五个 `OFFICE_FORMAL_*` 变量。
+
+这些一条命令做完（幂等，重复跑不会出问题）：
+
+```powershell
+.\start-demo.ps1
+```
+
+它按顺序做四件事：
+
+1. 以 `AP_AUTH_MODE=enforce` + `AP_ADMIN_SUBJECTS=codex-window-admin` 起后端（端口 `AP_PORT`，默认 8848）
+2. 签发两个令牌文件：`data\office-operator.key`（人）与 `data\codex-window-admin.key`（管理员窗口）
+3. 登记管理员窗口，并建一个演示项目 `demo-project` 与分组 `demo-group`（已存在就复用）
+4. 带着 `OFFICE_FORMAL_UPSTREAM` / `TOKEN_FILE` / `ADMIN_TOKEN_FILE` / `PROJECT` / `GROUP` 起 Agent Office
+
+跑完窗口里会打印两个地址与启动 worker 的命令。界面端口用 `OFFICE_PORT` 改（默认 4174）。
+
+**已经跑过 `start.bat` 的话**：它会以 `auth_mode=off` 占着 8848，脚本会明确报错让你先停掉，而不是偷偷连上去。
+
+### 空白机器实测
+
+在一台只装了 Python 3.11+ 与 Node 18+ 的机器上，从 `git clone` 开始的实际结果：
+
+| 步骤 | 结果 |
+|---|---|
+| `.\setup.ps1` | 建 `.venv`、装后端依赖、`npm ci` 装前端依赖，输出 `Setup complete.` |
+| `.\start-demo.ps1` | 后端 `auth_mode=enforce`、两个令牌、项目与分组、界面全部就绪；`/api/formal/status` 返回 `configured:true, connected:true` |
+| 数据放在哪 | 全部在这个克隆里：`data\state.db`（首次启动自动建）、`wt\`（工作树根）、`data\*.key`（令牌，不进仓库） |
+
+没有预先存在的令牌、数据库或仓库：`data\`、`wt\` 由后端自己创建，`canonical.git` 由正式模式的脚本创建。产品代码里没有写死的本机路径。
+
+
 ### Windows 正式 Harness 模式
 
 本地基础演示默认使用 `AP_AUTH_MODE=off`，不需要令牌；真实 Harness worker 和正式 Office 网关必须使用强制认证。面试官如果要运行真实成员协作，需要先拥有平台已登记的 Harness 令牌文件，并放在本机 `data\*.key` 中。令牌内容不会写入仓库。
@@ -413,6 +447,7 @@ python -m app.adapter.formal_worker --url http://127.0.0.1:8848 `
 ## 项目目录
 
 ```text
+start-demo.ps1        一条命令从空白到「界面能用」（认证 + 令牌 + 项目/分组 + 界面）
 backend/app/          FastAPI 服务、领域服务、数据库、worker、适配器
 backend/tests/        单元、并发、集成和真实 Git 流程测试
 backend/migrations/   SQLite schema migrations

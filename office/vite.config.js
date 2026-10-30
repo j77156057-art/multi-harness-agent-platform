@@ -16,8 +16,13 @@ export default defineConfig({
     project: process.env.OFFICE_FORMAL_PROJECT,
     group: process.env.OFFICE_FORMAL_GROUP,
   }), harnessGatewayPlugin()],
-  server: { host: '127.0.0.1' },
-  preview: { host: '127.0.0.1' },
+  server: {
+    host: '127.0.0.1',
+    // 端口必须写在这里，否则 vite 用它的默认 5173 —— 而脚本、README 里都说
+    // 4174，人按文档的地址打不开（这台机器上实测过）。OFFICE_PORT 留给人改。
+    port: Number(process.env.OFFICE_PORT || 4174),
+  },
+  preview: { host: '127.0.0.1', port: Number(process.env.OFFICE_PORT || 4174) },
   build: {
     target: 'esnext',
     // 独立页面有三个：办公室本体、与管理员的私聊、各窗口说了什么。
