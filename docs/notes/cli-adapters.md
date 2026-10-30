@@ -38,11 +38,26 @@
 
 ## 三、几处必须知道的坑
 
-**Qwen 的池子没跑通（实测）**：变量名（`OPENAI_BASE_URL` / `OPENAI_API_KEY` /
-`OPENAI_MODEL`）是它自己文档里的，但把 base url 指到平台池子时，qwen 0.26.4 反复报
-`transport-error (UND_ERR_SOCKET)` 并退出 1。池子里那些免费档是 **cli 协议槽位**
-（`protocol: "cli"`，背后是另一个 CLI），不是 HTTP 端点。所以这一条现在是"变量名
-有据、端到端未验证"——别在别处写成"已验证"。
+**免费档接不了任何编码 CLI（这是设计，不是 bug）**。实测走过一遍完整的路：把
+Qwen 窗口的模型选成池子里的免费档（`qoder/Qwen3.8-Flash`，tier=free），worker 领活、
+建工作树、按我们生成的 argv 把 qwen 起来 —— qwen 的 init 事件里看得到
+`model: qoder/Qwen3.8-Flash`、`permission_mode: yolo`、cwd 是工作树，说明
+argv 与池子环境变量都对上了。然后它报 `UND_ERR_SOCKET: other side closed`。
+
+原因是额度池里那些免费档都是 **`protocol: cli` 槽位**（背后是另一个 CLI），而
+`_cli_chat` 明确**拒绝**带工具定义的请求：这一跳只能回文字、回不了 `tool_calls`，
+它的提示词里还写着「不许用工具」。任何编码 CLI 都会发工具定义，所以必然撞上。
+
+结论：**免费档只能回答"问一句话"，不能驱动编码 agent**。想让新 CLI 真干活，得让它
+用自己的账号（Gemini 用 Google 账号、Qwen 用 Qwen OAuth），或者给它一个真 provider
+的模型。这一条已同时记在 `app/pool/service.py::refuse_tools_for_cli` 的注释里。
+
+（原先这条拒绝写在生成器里，调用方看到的是"连接被切断"而不是这句话；
+2026-10-30 已改成**开流之前**就返回 502 + `relay_cli_cannot_use_tools`。）
+
+**Qwen 的池子变量名有据、端到端未通**：`OPENAI_BASE_URL` / `OPENAI_API_KEY` /
+`OPENAI_MODEL` 是它自己文档里的，但按上面那条，接到免费档上不会成功。别在别处写成
+"已验证"。
 
 **Gemini**：无 TTY 它会自动进 headless，但仍然要 `--skip-trust`，否则卡在"信任
 这个目录吗"上；`GOOGLE_GEMINI_BASE_URL` 只收 HTTPS（localhost 除外），而平台池子
