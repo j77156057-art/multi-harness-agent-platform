@@ -118,6 +118,12 @@ class OpenCodeAdapter(CliHarness):
         route = self.provider_route
         if route is not None:
             model_flag = f"--model pool/{route.model} "
+        elif self.model:
+            # 这条 transport 分支同样要带模型。漏了它的后果实测过：worker 明明
+            # 指定了免费档，脚本里没写 --model，CLI 就用**它自己的默认模型**
+            # （这台机器上是 opencode-go/minimax-m3.1-flash，按量计费的那条），
+            # 5 次尝试花了 72 次调用、$0.0754 —— 而我的目的是不花钱的验证。
+            model_flag = f"--model {self.model} "
         (bundle / "run.cmd").write_text(
             "@echo off\r\n"
             f'opencode run --standalone --format json --auto {model_flag}--file "%~dp0work-order.txt" '
