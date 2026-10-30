@@ -289,7 +289,26 @@ class ScopedRunner(SubprocessRunner):
         ]
         if not staged or any(not path_in_scope(path, paths) for path in staged):
             raise RuntimeError("platform commit refused: staged path outside exclusive_paths")
-        run_git("commit", "-m", self.commit_message, cwd=cwd)
+        self._commit_with_retry(cwd)
+
+    def _commit_with_retry(self, cwd: Path, *, attempts: int = 4) -> None:
+        """提交这一步要重试：这台机器上 git 偶发写不了 ref。
+
+        实测过的那条：``fatal: couldn't set 'refs/heads/...'`` —— 仓库结构、
+        磁盘、其它 ref 都正常，隔一下再来就过（mergeguard 对 ``ORIG_HEAD``
+        早就这么处理了）。提交失败会把**已经做完的活**判成失败，代价太大，
+        所以在这里重试，而不是让 worker 重跑整条。
+        """
+        last: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                run_git("commit", "-m", self.commit_message, cwd=cwd)
+                return
+            except Exception as exc:  # noqa: BLE001 - 只在这里兜 git 的偶发失败
+                last = exc
+                if attempt + 1 < attempts:
+                    time.sleep(0.5 * (attempt + 1))
+        raise last if last is not None else RuntimeError("commit failed")
 
 
 def ask_pool_plan(

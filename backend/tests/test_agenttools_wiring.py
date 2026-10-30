@@ -161,3 +161,55 @@ def test_the_platform_harness_reports_no_transient_files(tmp_path: Path) -> None
     adapter: Any = PlatformToolsAdapter(object(), harness_id="platform-member-1")
     adapter.provider_route = None
     assert adapter.transient_paths() == ()
+
+
+# ------------------------------------------------------------------- 提交重试
+
+
+def test_a_flaky_ref_write_is_retried_instead_of_failing_the_task(monkeypatch) -> None:
+    """这台机器上 git 偶发写不了 ref；提交失败会把做完的活判死，必须重试。"""
+    from app.adapter import formal_worker
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        if args and args[0] == "commit":
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("fatal: couldn't set 'refs/heads/x'")
+        return None
+
+    monkeypatch.setattr(formal_worker, "run_git", flaky)
+    monkeypatch.setattr(formal_worker.time, "sleep", lambda _seconds: None)
+    runner = ScopedRunner({"exclusive_paths": ["docs"]}, "HEAD~1")
+    runner.commit_message = "chore: x"
+    runner._commit_with_retry(Path("."))
+    assert calls["n"] == 3, "第三次才成功，说明重试生效"
+
+
+
+def test_the_cmd_transport_script_carries_the_model(tmp_path: Path, monkeypatch) -> None:
+    """Windows 那条 cmd 分支也必须带 --model。
+
+    漏过它的后果实测过：worker 指定了免费档，脚本里没有 ``--model``，CLI 就用它
+    **自己的默认模型**（这台机器上是按量计费的那条），5 次尝试烧了 72 次调用。
+    """
+    worktree = _worktree(tmp_path)
+    adapter = OpenCodeAdapter(
+        FakeClient(), platform="nt", bash_path="C:/WINDOWS/bash.exe", model="opencode/flint-40b-free"
+    )
+    monkeypatch.setattr(adapter, "_needs_cmd_transport_file", lambda: True)
+    adapter.prepare_work_order("干活", worktree)
+    try:
+        assert adapter._work_order_bundle is not None
+        script = (adapter._work_order_bundle / "run.cmd").read_text(encoding="utf-8")
+        assert "--model opencode/flint-40b-free" in script
+    finally:
+        adapter.cleanup_work_order()
+
+
+def test_the_direct_argv_path_carries_the_model(tmp_path: Path) -> None:
+    adapter = OpenCodeAdapter(FakeClient(), platform="nt", bash_path="", model="opencode/flint-40b-free")
+    argv = adapter.command("干活", _worktree(tmp_path))
+    assert "--model" in argv
+    assert argv[argv.index("--model") + 1] == "opencode/flint-40b-free"
