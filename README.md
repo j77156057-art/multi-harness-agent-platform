@@ -133,6 +133,9 @@ README 不把“有代码”当成“已验证”。仓库中已有针对关键�
 - `backend/tests/test_adapter.py`：覆盖 claim → start → commit → publish → verify → review → merge 的完整链路，并覆盖 stale attempt 被接管后的旧 epoch 拒绝。
 - `backend/tests/test_database_events.py`：验证迁移幂等、WAL、事件序号、事件重放、追加写入约束和事务一致性。
 - `backend/tests/test_admin_multi_harness_review.py`：用三个独立 Harness 走管理员派发与逐项审核，验证 Harness 不能冒充管理员 review。
+- `backend/tests/test_agenttools.py`：平台工具的三条下限（路径 / 凭据 / 命令）、文本协议循环的"拒绝回灌"、以及审阅只读。
+- `backend/tests/test_agenttools_mcp.py`：MCP 协议本身，以及"别人的尝试借不走、过期尝试自动关闭、工作树指到工位目录外就拒"。
+- `backend/tests/test_agenttools_wiring.py`：把工具交给 CLI 的那一层——令牌不进 argv、写进工作树的配置算临时文件、**声明不许覆盖授权落点**（否则交付物能被藏进临时文件删掉）。
 - `backend/tests/test_runtime_driver.py`：用真实 Git 和隔离 worktree 驱动任务从 claim 到 publish/submit，而不是只手工拼数据库状态。
 - `office/npm run build`：验证前端生产构建。
 - `git diff --check`：检查提交中的空白和补丁格式问题。
@@ -245,64 +248,6 @@ Agent Office 的右栏有一张对应的「Harness CLI」卡片：按状态分�
 默认收起、每条给出官方文档与安装命令，并有一个「探测这台机器」按钮。进页面时
 只取安装方式，按下按钮才真的去跑版本命令，因此打开面板不会卡住。
 
-## 用不了工具的 Harness：平台自己的工具
-
-有的窗口干不动活，不是因为模型笨，而是因为**它调不了工具**：这个 attempt 被路由到额度池里一条
-CLI 顶替的模型（免费那档），那条通道只会回话，没有 `tool_calls` 可给。这类窗口改用平台自己的
-Harness 即可 —— 基座 ID 是 `platform`（界面显示「平台工具」）。
-
-它和别的 Harness 走同一条路：claim → 平台给它一个工作树 → 在里面跑一个进程 → 判范围 → 提交。
-区别只有一个：**工具由平台执行**，模型只负责说下一步做什么，用的是一个 JSON 对象：
-
-```json
-{"thought": "先看看有什么", "tool": "list_files", "input": {"path": "docs"}}
-{"thought": "写它", "tool": "create_file", "input": {"path": "docs/a.md", "content": "全文"}}
-{"thought": "交活", "tool": "finish", "input": {"summary": "改了哪些文件、怎么验证的"}}
-```
-
-所以它不需要模型会 function calling —— 文本能写 JSON 就够。工具表很小，刻意的：
-`list_files` / `read_file` / `grep` / `create_file` / `apply_edit` / `run_command` /
-`git_read` / `finish`。
-
-三条下限写在 `backend/app/agenttools/floor.py` 里，越界一律**当场拒绝并把原因回灌给模型**
-（拒绝是观察，不是死路）：
-
-| 下限 | 内容 |
-|---|---|
-| 路径 | 读写都在这次 attempt 的工作树里；写入还必须落在任务的 `exclusive_paths` 内 |
-| 凭据 | `data/*.key`、`.env`、私钥按**文件名**拒绝，不进模型上下文，也不进目录清单 |
-| 命令 | 批量删除 / 外网传输 / 系统操控按名单拦；`git` 写操作（commit、push、reset…）一律不跑 |
-
-提交由平台做：工具表里没有 git 写，交活后由 `ScopedRunner` 核对范围再提交，
-所以它不会把别人的改动顺手带走。
-
-**它必须有一个池子里的模型。** 这个 Harness 没有自己的 provider，用哪个模型由人在额度池里指定
-（`POST /api/v1/adapter/model-selection`，`model_mode=pool`）。没指定时进程退出并说清这一点，
-不会假装交了个空活。
-
-审阅用它时是**只读**的（`--read-only`）：写文件、改文件、跑命令都回一句「本次审阅不可用」，
-只有读与搜能用 —— 会动手的审阅者不是审阅者。
-
-一次真实运行的形状（本机实测，免费档 `codebuddy/hy3`，52 秒）：
-
-```text
-[platform] 模型通道：http://127.0.0.1:8848/api/v1/pool/v1 · codebuddy/hy3
-[platform] 工作树：…/wt/2ae1
-[platform] 授权落点：docs/platform-tools.md
-[1] list_files → …
-[2] create_file → 已写入 `docs/platform-tools.md`（7 行）。
-[3] read_file → `docs/platform-tools.md` （7 行）：
-[4] finish → …
-```
-
-启动一个窗口（和别的窗口一样，只是基座不同）：
-
-```powershell
-python -m app.adapter.formal_worker --url http://127.0.0.1:8848 `
-  --token-file data\platform-member-1.key --harness-id platform-member-1 `
-  --group <分组> --canonical-repo <repo>\canonical.git --worktree-root <repo>\wt --once
-```
-
 访问：
 
 ```text
@@ -343,6 +288,114 @@ chmod +x setup.sh start-backend.sh
 - 运行期目录：仓库内 `.venv`、`data/` 和 `office/node_modules/`，均不提交
 
 脚本使用自身目录定位，不依赖开发机绝对路径。它们会创建本地虚拟环境和依赖目录，但不会把依赖包本体塞进 Git 仓库；这比提交 `.venv` 或 `node_modules` 更适合跨 Windows、Linux、macOS 的公开项目。
+
+## 平台自己的工具：MCP 为主路，`platform` 保底
+
+有的窗口干不动活，不是因为模型笨，而是因为**它调不了工具**：这个 attempt 被路由到额度池里一条
+CLI 顶替的模型（免费那档），那条通道只会回话，没有 `tool_calls` 可给。这是一条**通道**问题，
+不是提示词问题 —— 所以在提示词里加"请使用工具"没有用。
+
+平台因此提供同一张工具表的两种用法：
+
+| | 谁在跑循环 | 什么时候用 |
+|---|---|---|
+| **MCP**（主路） | 窗口自己的 CLI | 模型能调工具 —— 平台只提供工具和执行 |
+| **`platform` 基座**（保底） | 平台进程 | 模型连"调用"都产不出来 |
+
+### 主路：MCP —— 窗口用自己的循环
+
+```text
+POST /api/v1/agenttools/mcp?task_id=<任务>&attempt_id=<尝试>
+Authorization: Bearer <该窗口自己的平台令牌>
+```
+
+讲 JSON-RPC（`initialize` / `tools/list` / `tools/call`），工具带 JSON Schema 供客户端校验参数。
+**worker 会自动把这份配置交给 CLI**，不需要人手工写：
+
+| CLI | 怎么交给它 | 临时文件 |
+|---|---|---|
+| `claude` | `--mcp-config <文件>` | 写在临时目录，不进工作树、不进 argv |
+| `opencode` | 走额度池时并进那份隔离配置；不走时写工作树里的 `opencode.json` | 声明为临时文件，跑完删除 |
+
+没确认过机制的 CLI 不会"假装有工具"（`CliHarness.mcp_binding()` 返回 `None`）。
+
+**四条边界，全部来自平台自己写下的事实，不由客户端声明：**
+
+| 边界 | 从哪来 |
+|---|---|
+| 工作树 | `workspaces.path`（平台发给这次尝试的那一个） |
+| 授权落点 | 这次尝试**认领时**的方案快照——方案后来改了也不会放大已开跑的范围 |
+| 谁可以调 | 尝试的 `owner` 必须等于令牌主人，别人的窗口借用一律 403 |
+| 还能不能调 | 任务当前尝试一变就关闭（409），上一轮不能再改树 |
+
+拒绝是**内容**而不是传输错误：越界、凭据、命令被拦都以 `isError: true` 加一句能照着改的话返回。
+`finish` 不在这条通道里——它是平台侧循环的交活动作，CLI 有自己的结束方式。
+
+实测（本机、免费档 `opencode/flint-40b-free`、18 次模型调用、零计费）：opencode 用自己原来的
+循环依次调用 `platform.create_file` / `platform.read_file` / `platform.run_command`，文件真落到
+工作树，机器校验 1 → 0 通过，提交由平台完成。
+
+### 保底：`platform` 基座 —— 平台替模型跑循环
+
+基座 ID 是 `platform`（界面显示「平台工具」）。它和别的 Harness 走同一条路：
+claim → 平台给它一个工作树 → 在里面跑一个进程 → 判范围 → 提交。
+
+区别只有一个：**工具由平台执行**，模型只负责说下一步做什么，用的是一个 JSON 对象：
+
+```json
+{"thought": "先看看有什么", "tool": "list_files", "input": {"path": "docs"}}
+{"thought": "写它", "tool": "create_file", "input": {"path": "docs/a.md", "content": "全文"}}
+{"thought": "交活", "tool": "finish", "input": {"summary": "改了哪些文件、怎么验证的"}}
+```
+
+所以它不需要模型会 function calling —— 文本能写 JSON 就够。工具表很小，刻意的：
+`list_files` / `read_file` / `grep` / `create_file` / `apply_edit` / `run_command` /
+`git_read` / `finish`（`finish` 只有这条保底路有；MCP 那条没有，见上）。
+
+### 两条路共用一套下限
+
+三条下限写在 `backend/app/agenttools/floor.py` 里，越界一律**当场拒绝并把原因回灌给执行方**
+（拒绝是观察，不是死路）：
+
+| 下限 | 内容 |
+|---|---|
+| 路径 | 读写都在这次 attempt 的工作树里；写入还必须落在任务的 `exclusive_paths` 内 |
+| 凭据 | `data/*.key`、`.env`、私钥按**文件名**拒绝，不进模型上下文，也不进目录清单 |
+| 命令 | 批量删除 / 外网传输 / 系统操控按名单拦；`git` 写操作（commit、push、reset…）一律不跑 |
+
+提交由平台做：工具表里没有 git 写，交活后由 `ScopedRunner` 核对范围再提交，
+所以它不会把别人的改动顺手带走。
+
+**这条规则对 MCP 那条同样成立**：拿到平台工具的窗口一律由平台提交。实测踩过——opencode 用平台的
+`run_command` 去 `git commit`，被工具门槛拒了（那条通道故意没有 git 写），结果谁都没提交，交付被
+判成"没有提交"而整单退回。给了平台工具就必须由平台提交，这是同一件事的两面。
+
+**`platform` 保底路必须有一个池子里的模型。** 它没有自己的 provider，用哪个模型由人在额度池里指定
+（`POST /api/v1/adapter/model-selection`，`model_mode=pool`）。没指定时进程退出并说清这一点，
+不会假装交了个空活。
+
+审阅用它时是**只读**的（`--read-only`）：写文件、改文件、跑命令都回一句「本次审阅不可用」，
+只有读与搜能用 —— 会动手的审阅者不是审阅者。
+
+一次真实运行的形状（本机实测，免费档 `codebuddy/hy3`，52 秒）：
+
+```text
+[platform] 模型通道：http://127.0.0.1:8848/api/v1/pool/v1 · codebuddy/hy3
+[platform] 工作树：…/wt/2ae1
+[platform] 授权落点：docs/platform-tools.md
+[1] list_files → …
+[2] create_file → 已写入 `docs/platform-tools.md`（7 行）。
+[3] read_file → `docs/platform-tools.md` （7 行）：
+[4] finish → …
+```
+
+启动一个窗口（和别的窗口一样，只是基座不同）：
+
+```powershell
+python -m app.adapter.formal_worker --url http://127.0.0.1:8848 `
+  --token-file data\platform-member-1.key --harness-id platform-member-1 `
+  --group <分组> --canonical-repo <repo>\canonical.git --worktree-root <repo>\wt --once
+```
 
 ## Agent Office 能看什么
 
@@ -402,3 +455,9 @@ docs/adr/             架构决策记录
 ## 当前边界
 
 当前版本的重点是协作平台核心链路、状态一致性、可恢复执行和 Agent Office 观察面。后端依赖安装、pytest 和真实 HTTP health 检查仍受运行机器网络条件影响；真实生产部署、高可用、第三方模型费用和云端密钥管理不属于本地演示范围。
+
+平台工具（`backend/app/agenttools/`）这块的边界写清楚，免得当成"什么都支持"：
+
+- **MCP 自动接线只做了 `claude` 与 `opencode`**。`pi` / `codebuddy` / `codex` / `qoder` 的 MCP 配置方式还没核对过，它们的 `mcp_binding()` 返回 `None` —— 不假装支持。
+- **模型仍要能调工具**。MCP 救不了"通道本身给不出 `tool_calls`"那种情况（额度池里 CLI 顶替的免费档），那种只能走 `platform` 保底路。
+- **写操作只在本任务的工作树内**，且必须有授权落点；提交、推送、切分支都不在工具手里。
