@@ -215,9 +215,9 @@ npm run verify
 
 大厅（以及空项目里的办公室）有一段**「本机可用的工具」**：这台机器上装了哪个 CLI、官方从哪装、装什么命令、装完怎么自检、装完还差什么（登录或 provider）。三件事说清楚：
 
-- **平台能驱动的**（有适配器：Codex / Claude Code / OpenCode / Pi / Qoder / CodeBuddy）—— 装上并登录，就能在平台上接任务；
-- **市面上其他常见 CLI**（Gemini CLI / Qwen Code / Copilot CLI / Amp / Crush / iFlow / Cursor CLI / Continue / Aider / Mistral Vibe）—— 官方装法照给，但平台还没接上它们，装上也不会在这里接任务。这一句在界面上明写；
-- 「能驱动」由 `ADAPTER_TYPES` 推导，不是另写一张表：加适配器不用记得改第二处（`tests/test_harness_installers.py` 钉住了这一点）。
+- **十六个都能接任务**：Codex、Claude Code、OpenCode、Pi、Qoder、CodeBuddy、Gemini CLI、Qwen Code、Cursor CLI、Continue CLI、Aider、GitHub Copilot CLI、Mistral Vibe、Amp、Crush、iFlow CLI —— 装上并登录，就能在平台上接任务；
+- 「能驱动」由 `ADAPTER_TYPES` 推导，不是另写一张表：加适配器不用记得改第二处（`tests/test_harness_installers.py` 钉住了这一点）；
+- 但能接任务不等于条件都一样：Amp 需要 `AMP_API_KEY`（否则会卡在设备登录）、Crush 的自动批准只能写进配置、Copilot 与 Vibe 的 JSON 字段未核实。**每条的契约、限制与证据等级写在 [`docs/notes/cli-adapters.md`](docs/notes/cli-adapters.md)**，代码在 `backend/app/adapter/harnesses/market_cli.py` 的一份规格表里。
 
 命令全部来自各家自己的渠道（npm registry 元数据、PyPI 元数据、厂商文档页），平台不下载、不执行安装脚本，也不猜地址。
 

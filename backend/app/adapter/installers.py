@@ -78,6 +78,10 @@ class CliInstall:
 #:   one of these already on the machine, and the question "what do I install"
 #:   has the same shape), but the office must say it cannot take tasks.
 #:
+#: Today every entry is driven; the reference kind stays because the two
+#: questions do not go away -- adding a catalog row is not adding an adapter,
+#: and the office has to be able to say so.
+#:
 #: Which one an entry is, is *derived* from ``ADAPTER_TYPES`` rather than written
 #: here: adding an adapter must not require remembering to edit a second list.
 #:
@@ -180,9 +184,10 @@ CATALOG: tuple[CliInstall, ...] = (
         login_note="首次运行会显示登录方式（国内站 / 国际站 / 企业域），需要 Node.js 18.20 以上。",
         notes=("原生二进制安装（Beta）：irm https://www.codebuddy.cn/cli/install.ps1 | iex。",),
     ),
-    # --------------------------------------------------------------- reference
-    # 市面上常见的 CLI（无适配器）。安装方式和官方地址是真的；"平台能不能驱动它"
-    # 由 ADAPTER_TYPES 决定，不写在这里。
+    # ------------------------------------------------- 市面上常见的其余 CLI
+    # 这十条现在**也有适配器**（见 ``harnesses/market_cli.py``）：``driven`` 由
+    # ``ADAPTER_TYPES`` 推导，所以它们在上面的六条之后自动变成"能接任务"。
+    # 这里的安装方式仍然是各家官方渠道的事实，不因为有了适配器而改变。
     CliInstall(
         harness_id="gemini",
         display_name="Gemini CLI",

@@ -41,8 +41,29 @@ from app.config import settings
 #: was not, and a silent override would make the receipt lie.
 #:
 #: ``pi`` is here because the platform ships a measured Pi adapter too: a
-#: declaration must not be able to shadow it.
-BUILTIN_BASES = ("codex", "claude-code", "opencode", "pi", "qoder", "codebuddy", "platform")
+#: declaration must not be able to shadow it.  The ten market CLIs share one
+#: table (``market_cli.py``) but each still owns its name here: a declaration
+#: called ``gemini`` would otherwise replace a contract that was measured
+#: against the real binary.
+BUILTIN_BASES = (
+    "codex",
+    "claude-code",
+    "opencode",
+    "pi",
+    "qoder",
+    "codebuddy",
+    "platform",
+    "gemini",
+    "qwen-code",
+    "cursor-cli",
+    "continue-cli",
+    "aider",
+    "copilot-cli",
+    "mistral-vibe",
+    "amp",
+    "crush",
+    "iflow",
+)
 
 #: A declared base is a lowercase, hyphen-separated identifier.
 BASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")

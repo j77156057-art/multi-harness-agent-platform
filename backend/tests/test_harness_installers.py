@@ -267,19 +267,21 @@ def test_driven_is_read_from_the_adapter_table_not_written_by_hand(tmp_path):
     assert driven == set(ADAPTER_TYPES) & {row["harness_id"] for row in body["installers"]}
 
 
-def test_the_catalog_also_covers_clis_this_build_cannot_drive(tmp_path):
-    """清单不只是一个适配器对照表：市面上常见的 CLI 也要给出官方装法。
+def test_a_catalog_row_without_an_adapter_says_it_cannot_take_tasks(monkeypatch):
+    """清单不是适配器清单：没有适配器的行必须自己说「装了也接不了任务」。
 
-    Those rows must say ``driven: false`` -- an office that implies they can take
-    tasks would send a person to install something that then sits idle.
+    这一条刻意**不依赖今天的目录内容**（现在 16 条全都适配了，一条 reference 也
+    没有）。它问的是那个标记本身：只要某个 harness_id 没有适配器，那一行就得是
+    ``driven: false`` —— 否则办公室会让人去装一个装上也不会干活的东西。
     """
-    client, _ = make_client(tmp_path)
+    monkeypatch.setattr(installers, "_DRIVEN_IDS", {"codex"})
 
-    body = client.get("/api/v1/harnesses/installers?probe_local=false").json()
-    reference = [row for row in body["installers"] if not row["driven"]]
+    rows = installers.catalog(target_os="windows")
+    reference = [row for row in rows if not row["driven"]]
 
-    assert len(reference) >= 6, [row["harness_id"] for row in reference]
+    assert reference, [row["harness_id"] for row in rows]
     for row in reference:
+        assert row["harness_id"] != "codex"
         assert row["official_url"].startswith("https://"), row["harness_id"]
         assert row["install_command"], row["harness_id"]
         assert row["verify_command"], row["harness_id"]

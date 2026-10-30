@@ -28,6 +28,8 @@ from app.adapter.harnesses.cli import (
 from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.generic import GenericCliAdapter, load_declarations
+# 市面上常见的十个 CLI：契约与限制写在 market_cli 里的一份规格表上。
+from app.adapter.harnesses.market_cli import MARKET_ADAPTERS
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.pi import PiAdapter
 from app.adapter.harnesses.platform import PlatformToolsAdapter
@@ -51,6 +53,9 @@ ADAPTER_TYPES = {
     # 平台自己的 Harness：工具由平台执行（见 app.agenttools）。它不是某个 CLI 的
     # 替代品，而是给「模型用不了工具」的那条路一个能真干活的出口。
     "platform": PlatformToolsAdapter,
+    # 市面上常见的其它 CLI（十份实测/文档契约，见 harnesses/market_cli.py）。
+    # 它们与上面六个同形：装上并登录之后就是一个能接活的窗口。
+    **MARKET_ADAPTERS,
 }
 
 _INSTANCE_RE = re.compile(
@@ -962,7 +967,11 @@ def _classify_failure(
         return True, "the platform has no free worktree slot right now (capacity)"
     if isinstance(exc, CliUnavailable):
         # The binary is not on PATH: the same window would fail the same way.
-        return False, "the harness CLI is not available on this host"
+        # 带上适配器自己给的原因（"缺 AMP_API_KEY"这类），否则人只知道
+        # "不可用"，还得自己猜是没装还是没登录。
+        detail = str(exc).strip()
+        suffix = f" ({detail})" if detail else ""
+        return False, f"the harness CLI is not available on this host{suffix}"
     if isinstance(exc, HarnessTimeout):
         return True, "the harness CLI ran out of time"
     budget = int(task.get("max_attempts") or 0)
