@@ -136,7 +136,14 @@ class PlatformToolsAdapter(CliHarness):
         return self._argv(read_only=True)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
-        """Read the loop's own receipt off the last marked line."""
+        """Read the loop's own receipt off the last marked line.
+
+        ``final_message`` is set on purpose: every other adapter reports what
+        its CLI *said* under that key, and the circulation review reads the
+        opinion from exactly there.  Without it a review would submit the raw
+        receipt line as the window's opinion -- a JSON blob where a person
+        expects a sentence.
+        """
         from app.agenttools.cli import RESULT_MARKER
 
         for line in reversed(stdout.splitlines()):
@@ -148,6 +155,9 @@ class PlatformToolsAdapter(CliHarness):
             except ValueError:
                 continue
             if isinstance(parsed, dict):
+                summary = str(parsed.get("summary") or "").strip()
+                if summary and parsed.get("ok"):
+                    parsed.setdefault("final_message", summary)
                 return parsed
         return {}
 

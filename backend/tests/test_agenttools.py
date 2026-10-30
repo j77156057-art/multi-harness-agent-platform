@@ -374,3 +374,5 @@ def test_the_receipt_is_read_off_the_marked_line() -> None:
     parsed = adapter.parse_output(stdout)
     assert parsed["ok"] is True
     assert parsed["steps"] == 4
+    # 传阅审阅从 `final_message` 读这个窗口的意见：少了它，平台会把回执行当成意见。
+    assert parsed["final_message"] == "写完了"
