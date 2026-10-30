@@ -3270,6 +3270,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       empty.className = 'flat-empty';
       empty.textContent = '该窗口当前没有进行中的任务。';
       panel.append(empty);
+      // 「没在跑」时把**启动它的那条命令**摆出来。
+      //
+      // 走到这一步的人已经装好、登录好了，卡住他的最后一件事是"那我怎么让它开工"
+      // —— 这句话以前只出现在启动脚本的控制台里，关掉就没了。命令就是仓库脚本用的
+      // 那一条（见 start-demo.ps1 最后打印的那行），这里不另造一种写法。
+      const offline = info && (info.live === false || info.status === 'offline');
+      if (offline) {
+        const group = (state.status && state.status.group_id) || '<分组>';
+        const box = document.createElement('section');
+        box.className = 'flat-spec';
+        box.innerHTML = `<h3>它现在没在跑</h3>
+          <p class="flat-note">在你自己的终端里启动它。令牌文件就是签发这个窗口令牌时保存的那个
+          （本仓库的脚本按约定放在 <code>data\\${escape(harnessId)}.key</code>）。</p>
+          <pre class="flat-output">python -m app.adapter.formal_worker --url http://127.0.0.1:8848 --token-file data\\${escape(harnessId)}.key --harness-id ${escape(harnessId)} --group ${escape(group)}</pre>
+          <p class="flat-note">跑起来之后这个页面会显示它的在场状态；它领到活就能在这里看到实时输出。</p>`;
+        panel.append(box);
+      }
     }
 
     // 这个窗口的活：**详细清单**。每条一张可展开的卡片 —— 收起时是
