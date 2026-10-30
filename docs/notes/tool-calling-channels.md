@@ -74,7 +74,10 @@ CLI 本来就是一个 agent（它有自己的工具、自己的循环、自己�
 - 工具表与"平台代执行"那条**共用同一份**（`app/agenttools/registry.py` 的 8 个工具）；这次多了一份 JSON Schema，给客户端校验参数用。
 - **范围不由客户端声明**：工作树取 `workspaces.path`，授权落点取这次尝试**认领时**的快照（方案后来改了也不会放大已开跑的范围）。所以一个窗口只够得到自己的工作树，而且只有它仍是"当前尝试"时才可用——尝试一换代，工具立刻关闭。
 - 用真的 HTTP 客户端跑通过：`initialize` → `tools/list`（8 个工具带 schema）→ 授权内写入真落盘 → 授权外写入被拒且不落盘 → `../../data/*.key` 被拒（越界在凭据检查之前就被拦下）。
-- **还没做**：让一个真 CLI 当客户端那一步。本机 `opencode` 的会话库是旧 schema（`Database is not empty and has no session table`）；`claude` 能跑但要花自己的订阅额度，没擅自用。
+- **真 CLI 当客户端也跑通了**（2026-10-30，opencode 免费档 `flint-40b-free`）：它用自己的循环依次调 `platform.create_file` → `platform.read_file` → `platform.finish`，平台返回「已写入 `docs/mcp-cli.md`（1 行）」，工作树里真的出现了那个文件。证据在 opencode 自己的会话库里（每一步的工具名与返回值都在）。
+  - 工作树后来被 sweeper 回收了（这次尝试没有 worker 续心跳，租约到期），文件随之消失——这是平台的正常行为，不是失败。
+  - 一个坑值得记：这台机器上装了两个 opencode —— npm 的 `v2.0.22` 能读 v2 的库（`session_v2`），winget 的 `1.18.33` 只认 v1 的 `session` 表，用它会报 `Database is not empty and has no session table`。**不是库坏了，是旧二进制在跑。**
+  - 另一个坑：`opencode/beam-free` 与 `opencode-go/beam-free` 在这台机器被地区限制（`This model is not available in your country`）；`flint-40b-free` / `glm-5.3-flash-free` / `mimo-v2.6-flash-free` 可用。
 
 ---
 
