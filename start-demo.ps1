@@ -184,29 +184,73 @@ if ($groupResult.__status -and $groupResult.__status -ge 400 -and $groupResult._
 Write-Host "[demo] project '$Project' / group '$Group' ready"
 
 # 4. office ------------------------------------------------------------------
-Write-Host "[demo] starting Agent Office on http://127.0.0.1:$officePort"
 $env:OFFICE_FORMAL_UPSTREAM = $base
 $env:OFFICE_FORMAL_TOKEN_FILE = $operatorKey
 $env:OFFICE_FORMAL_ADMIN_TOKEN_FILE = $adminKey
 $env:OFFICE_FORMAL_PROJECT = $Project
 $env:OFFICE_FORMAL_GROUP = $Group
-$env:OFFICE_PORT = $officePort
-# Reuse an office that is already answering: double-clicking twice must not
-# start a second dev server on the same port.
-$officeUp = $false
-try {
-    $officeUp = (Invoke-WebRequest -Uri "http://127.0.0.1:$officePort/" -UseBasicParsing -TimeoutSec 2).StatusCode -ge 200
-} catch {
-    $officeUp = $false
+
+function Test-PortListening([int]$candidate) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $client.Connect('127.0.0.1', $candidate)
+        return $true
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
 }
-if ($officeUp) {
-    Write-Host "[demo] Agent Office already answering on http://127.0.0.1:$officePort - reusing it."
+
+# "Is the thing on that port the office THIS script would have started?"  The
+# answer is not "does something answer": a stray dev server started by hand
+# answers too, and it has none of the five OFFICE_FORMAL_* variables -- so the
+# browser would open on a page that cannot reach the platform and says only
+# "not connected". Ask the office itself: an office that was given a project and
+# a group reports configured=true.
+function Test-OfficeConfigured([string]$url) {
+    try {
+        $status = Invoke-RestMethod -Uri "${url}api/formal/status" -TimeoutSec 3
+        return [bool]$status.configured
+    } catch {
+        return $false
+    }
+}
+
+$officeUrl = "http://127.0.0.1:$officePort/"
+$reuse = $false
+if (Test-PortListening ([int]$officePort)) {
+    if (Test-OfficeConfigured $officeUrl) {
+        $reuse = $true
+        Write-Host "[demo] Agent Office already configured on $officeUrl - reusing it."
+    } else {
+        # Occupied by something that is not a configured office. Never silently
+        # reuse it; move to the next free port so the person still gets a working
+        # page, and say why the address changed.
+        $moved = $false
+        foreach ($candidate in (([int]$officePort + 1)..([int]$officePort + 9))) {
+            if (Test-PortListening $candidate) { continue }
+            Write-Host "[demo] port $officePort is held by something that is not a configured office;"
+            Write-Host "[demo] using port $candidate instead."
+            $officePort = [string]$candidate
+            $officeUrl = "http://127.0.0.1:$officePort/"
+            $moved = $true
+            break
+        }
+        if (-not $moved) {
+            throw "Ports $officePort..$([int]$officePort + 9) are all taken. Close one of them, or set OFFICE_PORT to a free port."
+        }
+    }
+}
+$env:OFFICE_PORT = $officePort
+if ($reuse) {
+    # nothing to start
 } else {
+    Write-Host "[demo] starting Agent Office on $officeUrl"
     Start-Process -FilePath 'cmd.exe' -WorkingDirectory $office -ArgumentList '/c', 'npm run dev' -WindowStyle Normal
 }
 
 Write-Host ''
-$officeUrl = "http://127.0.0.1:$officePort/"
 Write-Host "[demo] Agent Office: $officeUrl"
 Write-Host "[demo] backend:      $base   (docs: $base/docs)"
 Write-Host "[demo] first screen: the lobby lists every Harness CLI with its official"

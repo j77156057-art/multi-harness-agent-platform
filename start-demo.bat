@@ -29,8 +29,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-demo.ps1"
 if errorlevel 1 goto :failed
 echo.
 echo [demo] The browser should be open now.
-echo [demo] Keep the two windows that just opened (backend + office) running;
-echo [demo] closing them stops the platform. This window can be closed.
+echo [demo] Keep the platform windows (backend + office) running; closing them
+echo [demo] stops it. This window can be closed.
 echo.
 pause
 exit /b 0
