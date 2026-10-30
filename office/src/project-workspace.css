@@ -14,7 +14,7 @@ dialog:not([open]) { display: none !important; }
 .project-instance-note { margin: 0 0 20px; padding: 12px 16px; border: 1px solid #ead6be; border-radius: var(--ao-radius); background: #fff8ed; color: var(--ao-warn); font-size: 13px; line-height: 1.6; }
 .project-instance-note a { color: var(--ao-warn); font-weight: 600; }
 .project-lobby-side { display: grid; gap: 24px; align-content: start; min-width: 0; }
-.project-history, .project-platform { min-width: 0; padding: 24px; border: 1px solid var(--ao-border); border-radius: 12px; background: var(--ao-surface); box-shadow: 0 2px 4px #20263103; }
+.project-history, .project-platform, .project-tools { min-width: 0; padding: 24px; border: 1px solid var(--ao-border); border-radius: 12px; background: var(--ao-surface); box-shadow: 0 2px 4px #20263103; }
 .project-section-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--ao-line-soft); }
 .project-section-head h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
 .project-section-head p { margin: 6px 0 0; color: var(--ao-text-faint); font-size: 13px; }
@@ -41,8 +41,7 @@ dialog:not([open]) { display: none !important; }
 .project-card-status.phone { background: var(--ao-bg); color: var(--ao-text-soft); }
 .project-card-open { border: 1px solid var(--ao-border); border-radius: 6px; padding: 8px 12px; min-height: 36px; background: var(--ao-surface); color: var(--ao-accent); font-size: 13px; white-space: nowrap; cursor: pointer; }
 .project-card-open:hover { background: var(--ao-accent-soft); border-color: var(--ao-border-strong); }
-.project-platform-note { margin: 16px 0 4px; font-size: 13px; color: var(--ao-text-soft); line-height: 1.6; }
-.project-platform-list { display: grid; gap: 0; padding-top: 4px; }
+.project-platform-note { margin: 16px 0 4px; font-size: 13px; color: var(--ao-text-soft); line-height: 1.6; }.project-platform-list { display: grid; gap: 0; padding-top: 4px; }
 .project-platform-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 76px; padding: 14px 8px; border-bottom: 1px solid var(--ao-line-soft); border-radius: 6px; }
 .project-platform-item:last-child { border-bottom: 0; }
 .project-platform-item:hover { background: var(--ao-bg); }
@@ -52,6 +51,18 @@ dialog:not([open]) { display: none !important; }
 .project-platform-open { min-height: 36px; padding: 6px 8px; border: 0; border-radius: 6px; background: none; color: var(--ao-accent); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; white-space: nowrap; }
 .project-platform-open::after { content: ' →'; margin-left: 8px; }
 .project-platform-open:hover { background: var(--ao-accent-soft); }
+
+/* 大厅里的「本机可用的工具」：谁缺 CLI、官方从哪装。
+   第一次用的人打开办公室看到的第一屏就是这里，所以这一段要能读、能抄命令，
+   而不是把六个名字平铺成一行。 */
+.project-tools-summary { margin: 16px 0 10px; color: var(--ao-text); font-size: 13px; line-height: 1.7; }
+.project-tools-list { display: grid; gap: 6px; }
+.project-tools-list .flat-cmd { background: var(--ao-bg); border-color: var(--ao-border); }
+.project-tools-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--ao-line-soft); }
+.project-tools-actions button { min-height: 34px; padding: 6px 12px; border: 1px solid var(--ao-border-strong); border-radius: var(--ao-radius); background: var(--ao-surface); color: var(--ao-accent); font: inherit; font-size: 13px; cursor: pointer; }
+.project-tools-actions button:hover { background: var(--ao-accent-soft); }
+.project-tools-actions button:disabled { opacity: .55; cursor: not-allowed; }
+.project-tools-actions span { color: var(--ao-text-faint); font-size: 12px; }
 .project-onboarding { align-self: start; padding: 24px; border: 1px solid var(--ao-sidebar); border-radius: 12px; background: var(--ao-sidebar); color: var(--ao-sidebar-ink); }
 .project-onboarding-label { display: inline-block; font-size: 12px; color: var(--ao-sidebar-muted); margin-bottom: 12px; }
 .project-onboarding h2 { margin: 0 0 12px; font-size: 21px; font-weight: 600; letter-spacing: -.02em; }

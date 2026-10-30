@@ -14,6 +14,9 @@
  * 而是「这六个 CLI 我去哪装」。这件事埋在文档里等于没有。
  */
 
+import { shortenPath } from './cli-transcript.js';
+import { escapeHtml as escape } from './html-escape.js';
+
 /** 平台给的状态 -> 人读的一句话。顺序就是该先看哪个。 */
 export const INSTALL_STATUS = {
   missing: { label: '未安装', tone: 'bad' },
@@ -113,6 +116,9 @@ export function rowView(row) {
     status: String(row?.status || 'unknown'),
     statusLabel: status.label,
     tone: status.tone,
+    // 「装上能不能在这个平台上接活」。旧后端没有这个字段：那时清单里只有
+    // 平台能驱动的几种，所以缺省为 true 才是对的。
+    driven: row?.driven !== false,
     command: String(row?.command || ''),
     foundCommand: row?.found_command ? String(row.found_command) : '',
     path: row?.path ? String(row.path) : '',
@@ -141,4 +147,90 @@ export function leftoverHint(view) {
   return view.loginNote
     ? `命令已可用；是否已登录平台查不到，需要你确认：${view.loginNote}`
     : '命令已可用；平台不读登录状态，是否已登录需要你自己确认。';
+}
+
+/**
+ * 一条 CLI 的完整说明（HTML 片段）。
+ *
+ * 顺序就是人要做的事的顺序：**这是什么 → 官方从哪拿 → 装什么命令 → 怎么自检 →
+ * 装完还差什么**。「装完还差什么」放最后，因为那一步平台查不到，只能提醒。
+ *
+ * 这段 HTML 给两处共用（大厅的「快速开始」与办公室的「开始使用」）—— 一处改、
+ * 两处一样，免得同一台机器在两屏里有两种说法。
+ */
+export function installRowHtml(view, { showStatus = false } = {}) {
+  const bits = [];
+  if (view.version) bits.push(`版本 ${view.version}`);
+  if (view.foundCommand) bits.push(`命令 ${view.foundCommand}`);
+  if (view.path) bits.push(shortenPath(view.path));
+  const hint = leftoverHint(view);
+  return `<li>
+      <b>${escape(view.name)}${showStatus ? ` <span class="flat-tier">${escape(view.statusLabel)}</span>` : ''}</b>
+      <span>${escape(bits.join(' · ') || view.provider || '')}</span>
+      ${view.detail ? `<span class="flat-note">${escape(view.detail)}</span>` : ''}
+      ${
+        view.officialUrl
+          ? `<a href="${escape(view.officialUrl)}" target="_blank" rel="noreferrer noopener">官方页面</a>`
+          : '<span class="flat-note">官方地址未核实，平台不猜。</span>'
+      }
+      ${
+        view.installCommand
+          ? `<code class="flat-cmd">${escape(view.installCommand)}</code>`
+          : '<span class="flat-note">这个系统没有官方安装命令。</span>'
+      }
+      ${view.verifyCommand ? `<span class="flat-note">装完自检：${escape(view.verifyCommand)}</span>` : ''}
+      ${hint ? `<span class="flat-note">${escape(hint)}</span>` : ''}
+      ${view.notes.length ? `<span class="flat-note">${escape(view.notes.join(' '))}</span>` : ''}
+    </li>`;
+}
+
+/** 默认哪几组是展开的：缺的与装了但读不到版本的 —— 那才是人现在要动的事。 */
+export const OPEN_STATUSES = ['missing', 'version_failed'];
+
+/**
+ * 一句话说清「装上它能不能在这里接活」。
+ *
+ * 清单里有两类 CLI：平台有适配器的（装上、登录，就能接任务），和市面上常见但
+ * 平台还没接上的（能单独用，装了也不会在这里接活）。这句话必须出现，否则人按
+ * 清单装了一圈，回到办公室发现没人可派。
+ */
+export function drivenLine(payload) {
+  const rows = rowsView(payload);
+  if (!rows.length) return '';
+  const driven = rows.filter((row) => row.driven).length;
+  const reference = rows.length - driven;
+  if (!reference) return `这 ${rows.length} 个都能在本平台接任务。`;
+  if (!driven) return `这 ${rows.length} 个都还没有适配器，装上也只能单独使用。`;
+  return `其中 ${driven} 个平台可以直接驱动（装上并登录后可接任务），另外 ${reference} 个只能单独使用。`;
+}
+
+/**
+ * 按状态分组的一串 CLI（HTML 片段）。
+ *
+ * 两张单子分开摆：
+ *   1. **平台能驱动的**，按状态分组 —— 缺的那几组默认展开，因为那是人现在要动的事；
+ *   2. **市面上常见的其他 CLI**，单独一组默认收起 —— 装着有用，但在这里接不了任务。
+ *
+ * 混在一起就得逐条读状态和归属；分开之后"我该装哪个"是一眼的事。
+ */
+export function installGroupsHtml(payload, { openStatuses = OPEN_STATUSES } = {}) {
+  const rows = rowsView(payload);
+  const open = new Set(openStatuses);
+  const driven = groupByStatus(rows.filter((row) => row.driven))
+    .map(
+      (group) => `<details class="flat-pool-item"${open.has(group.status) ? ' open' : ''}>
+        <summary><b>${escape(statusOf({ status: group.status }).label)}</b><span>${group.rows.length} 个</span></summary>
+        <ul class="flat-list">${group.rows.map((row) => installRowHtml(row)).join('')}</ul>
+      </details>`,
+    )
+    .join('');
+  const reference = rows.filter((row) => !row.driven);
+  const others = reference.length
+    ? `<details class="flat-pool-item">
+        <summary><b>市面上其他 CLI</b><span>${reference.length} 个</span></summary>
+        <p class="flat-note">这些 CLI 可以单独使用；本平台还没有把它们接上，装上也不会在这里接任务。安装方式同样来自各家官方渠道。</p>
+        <ul class="flat-list">${reference.map((row) => installRowHtml(row, { showStatus: true })).join('')}</ul>
+      </details>`
+    : '';
+  return driven + others;
 }

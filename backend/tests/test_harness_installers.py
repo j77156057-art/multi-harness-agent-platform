@@ -250,3 +250,36 @@ def test_asking_without_probing_returns_pure_guidance(tmp_path):
     assert body["guidance_only"] is True
     assert all(row["status"] == "unknown" for row in body["installers"])
     assert all(row["official_url"].startswith("https://") for row in body["installers"])
+
+
+def test_driven_is_read_from_the_adapter_table_not_written_by_hand(tmp_path):
+    """「装上能不能接活」只能由适配器表回答。
+
+    Rapired by hand it drifts: the day an adapter is added, the office would
+    still say "no adapter for this one" (or worse, the reverse -- promising a
+    window the worker cannot start).
+    """
+    client, _ = make_client(tmp_path)
+
+    body = client.get("/api/v1/harnesses/installers?probe_local=false").json()
+    driven = {row["harness_id"] for row in body["installers"] if row["driven"]}
+
+    assert driven == set(ADAPTER_TYPES) & {row["harness_id"] for row in body["installers"]}
+
+
+def test_the_catalog_also_covers_clis_this_build_cannot_drive(tmp_path):
+    """清单不只是一个适配器对照表：市面上常见的 CLI 也要给出官方装法。
+
+    Those rows must say ``driven: false`` -- an office that implies they can take
+    tasks would send a person to install something that then sits idle.
+    """
+    client, _ = make_client(tmp_path)
+
+    body = client.get("/api/v1/harnesses/installers?probe_local=false").json()
+    reference = [row for row in body["installers"] if not row["driven"]]
+
+    assert len(reference) >= 6, [row["harness_id"] for row in reference]
+    for row in reference:
+        assert row["official_url"].startswith("https://"), row["harness_id"]
+        assert row["install_command"], row["harness_id"]
+        assert row["verify_command"], row["harness_id"]

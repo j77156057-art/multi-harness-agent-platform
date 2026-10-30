@@ -29,11 +29,10 @@ import { humanize, summarize, translated } from './wording.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { escapeHtml } from './html-escape.js';
 import {
-  groupByStatus,
+  drivenLine,
+  guidanceOnly,
   hostLine,
-  leftoverHint,
-  rowsView,
-  statusOf,
+  installGroupsHtml,
   summaryLine,
 } from './harness-install.js';
 
@@ -3623,23 +3622,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       list.append(empty);
       if (!hasAnyTask) {
         // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的
-        // 地方。原先这句话长在详情栏的空状态里，可详情栏只有选中一条活才出现 ——
-        // 空项目反而看不到它。放到任务表这一侧才对。
-        const hint = document.createElement('p');
-        hint.className = 'flat-empty';
-        hint.textContent = '任务将在此处展示：当前执行者、执行进度与失败原因。';
-        list.append(hint);
-        const start = document.createElement('button');
-        start.type = 'button';
-        start.className = 'flat-start';
-        start.dataset.act = 'start-project';
-        start.textContent = '配置目标';
-        list.append(start);
-        const note = document.createElement('p');
-        note.className = 'flat-note';
-        // 不重复顶部那句话：这里只解释**这个按钮**会带来什么。
-        note.textContent = '将打开顶部「开工配置」。只需描述目标，无需事先拆解步骤。';
-        list.append(note);
+        // 地方：把三步（装 CLI → 登录 → 配置目标）整块摆在这里，而不是只留一个按钮。
+        list.append(firstRunPanel());
       }
     }
 
@@ -4557,6 +4541,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    *
    * 放在右栏靠前的位置，因为它是新电脑上的第一步 —— 没有 CLI，
    * 后面的窗口、任务、传阅都无从谈起。
+   *
+   * 空项目里不摆这张卡：那一屏的「开始使用」已经把同一份清单摆得更完整
+   * （带三步顺序、默认展开缺的那几组）。同一份东西同屏出现两次，人只会问
+   * "这两处是不是不一样"。
    */
   function installCard() {
     const payload = state.installs;
@@ -4568,25 +4556,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-empty">读不到安装清单：${escape(state.installsError)}</p>
         <p class="flat-note">这条路要平台后端一起更新；本地样例模式没有安装清单。</p></section>`;
     }
-    const rows = rowsView(payload);
-    const groups = groupByStatus(rows);
+    const lists = installGroupsHtml(payload);
     const open = state.openFolds.has('installs');
     const missing = Number((payload.summary && payload.summary.missing) || 0);
     return `<section class="flat-card flat-card-fold">
       <details data-fold="installs"${open ? ' open' : ''}>
         <summary>Harness CLI · ${escape(summaryLine(payload))}</summary>
         <p class="flat-note">${escape(hostLine(payload))}${
-          payload.guidanceOnly ? '' : ' 安装后需要重开终端，PATH 才会生效。'
+          guidanceOnly(payload) ? '' : ' 安装后需要重开终端，PATH 才会生效。'
         }</p>
         <p class="flat-note">安装命令给人在自己的终端里执行；平台不会替你下载或运行安装脚本。</p>
-        ${groups
-          .map(
-            (group) => `<details class="flat-pool-item">
-              <summary><b>${escape(statusOf({ status: group.status }).label)}</b><span>${group.rows.length} 个</span></summary>
-              <ul class="flat-list">${group.rows.map(installRow).join('')}</ul>
-            </details>`,
-          )
-          .join('')}
+        ${lists}
         <p class="flat-inline-actions">
           <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${
             state.installsChecking ? '正在探测…' : '探测这台机器'
@@ -4601,31 +4581,59 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     </section>`;
   }
 
-  /** 一条 CLI 的展开内容：官方地址、安装命令、验证命令、装完还差什么。 */
-  function installRow(view) {
-    const bits = [];
-    if (view.version) bits.push(`版本 ${view.version}`);
-    if (view.foundCommand) bits.push(`命令 ${view.foundCommand}`);
-    if (view.path) bits.push(shortenPath(view.path));
-    const hint = leftoverHint(view);
-    return `<li>
-      <b>${escape(view.name)}</b>
-      <span>${escape(bits.join(' · ') || view.provider || '')}</span>
-      ${view.detail ? `<span class="flat-note">${escape(view.detail)}</span>` : ''}
-      ${
-        view.officialUrl
-          ? `<a href="${escape(view.officialUrl)}" target="_blank" rel="noreferrer noopener">官方文档</a>`
-          : '<span class="flat-note">官方地址未核实，平台不猜。</span>'
-      }
-      ${
-        view.installCommand
-          ? `<code class="flat-cmd">${escape(view.installCommand)}</code>`
-          : '<span class="flat-note">这个系统没有官方安装命令。</span>'
-      }
-      ${view.verifyCommand ? `<span class="flat-note">装完自检：${escape(view.verifyCommand)}</span>` : ''}
-      ${hint ? `<span class="flat-note">${escape(hint)}</span>` : ''}
-      ${view.notes.length ? `<span class="flat-note">${escape(view.notes.join(' '))}</span>` : ''}
-    </li>`;
+  /**
+   * 「开始使用」—— 空项目里那一屏。
+   *
+   * 第一次用的人面对的是三件事，按顺序是：**这台电脑上有没有可执行的 CLI、
+   * 它们登录了没有、然后才是要做的事**。原先这里是「暂无任务」加一个「配置目标」
+   * 按钮 —— 等于把人直接推到第三步，而前两步一个字都没说。
+   *
+   * 安装方式一律来自平台（`/installers`）：官方地址、安装命令、自检命令、装完还
+   * 差什么。平台不下载、不执行安装脚本，这里也只把命令摆给人看。
+   */
+  function firstRunPanel() {
+    const wrap = document.createElement('section');
+    wrap.className = 'flat-firstrun';
+    const payload = state.installs;
+    let guide;
+    if (state.installsError) {
+      guide = `读不到安装清单：${state.installsError}。这条路要平台后端一起更新。`;
+    } else if (!payload) {
+      guide = '正在读取各 CLI 的官方安装方式…';
+    } else {
+      guide = summaryLine(payload);
+    }
+    // 这一屏问的是「我现在该装哪个」，所以连「还没探测」那一组也展开 ——
+    // 收起一组人就得自己再点一次才知道里面是什么。
+    const lists = payload
+      ? installGroupsHtml(payload, { openStatuses: ['missing', 'version_failed', 'unknown'] })
+      : '';
+    wrap.innerHTML = `
+      <h2>开始使用</h2>
+      <p class="flat-note">这个项目还没有任务。下面三步把运行环境准备好，已经具备的步骤可以跳过。</p>
+      <section class="flat-firstrun-step">
+        <h3><span>1</span>安装 Harness CLI</h3>
+        <p class="flat-note">平台通过各家 CLI 执行任务；缺少 CLI 就没有可用的执行成员。安装命令请在你自己打开的终端里执行，平台不会替你下载或运行安装脚本。</p>
+        <p class="flat-note">${escape(guide)}</p>
+        ${payload ? `<p class="flat-note">${escape(drivenLine(payload))}</p>` : ''}
+        ${lists}
+        <p class="flat-inline-actions">
+          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${
+            state.installsChecking ? '正在探测…' : '重新探测这台机器'
+          }</button>
+        </p>
+      </section>
+      <section class="flat-firstrun-step">
+        <h3><span>2</span>登录并配置模型</h3>
+        <p class="flat-note">命令在 PATH 上不等于可用：每个 CLI 首次使用都需要登录或填写 provider，具体见上一步每条末尾的说明。登录状态平台读不到，需要你自己确认。</p>
+      </section>
+      <section class="flat-firstrun-step">
+        <h3><span>3</span>配置开工</h3>
+        <p class="flat-note">在「开工配置」中指定管理员与成员窗口，用一句话描述要做的事；管理员据此拆解并分派任务。</p>
+        <button type="button" class="flat-start" data-act="start-project">配置目标</button>
+        <p class="flat-note">任务将在此处展示：当前执行者、执行进度与失败原因。</p>
+      </section>`;
+    return wrap;
   }
 
   /**
@@ -5232,7 +5240,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
              <button type="button" data-act="open-direct-window">开私聊窗口</button>`
           : '<p class="flat-empty">平台还没配置管理员窗口。</p>'}
       </section>
-      ${installCard()}
+      ${(state.tasks || []).length ? installCard() : ''}
       ${poolCard()}
       <section class="flat-card flat-card-fold">
         <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
@@ -6194,7 +6202,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 安装清单**自己一段、自己重绘**：它不该等额度池那几秒（那边一问就是二十几个
       // 上游）才跟着出现。没读到就让它自己说没读到，别一直挂着「正在读取」。
       // 读到的安装方式不会每 15 秒变，所以只取一次；失败时等人点「探测」再重试。
-      if (!state.installs && !state.installsError) void loadInstalls();
+      //
+      // 空项目例外：那时屏幕上摆的就是「开始使用」，人等着知道的正是**这台机器
+      // 缺哪个 CLI**。只给安装方式让他自己比对，等于把第一步推回给他。所以这种
+      // 情形下进页面就探一次（几个版本命令，几秒），而且只探这一次。
+      if (!state.installs && !state.installsError) {
+        void loadInstalls({ probe: (state.tasks || []).length === 0 });
+      }
       state.loaded = true;
       // 顶栏的状态：平台连不连得上、几个窗口**在跑**（平台上的在场事实，不猜）。
       // 「在跑」只认进程报过到：注册表里的在线是注册那一刻的声明，进程停了它不会变。

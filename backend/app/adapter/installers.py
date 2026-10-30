@@ -68,9 +68,24 @@ class CliInstall:
     notes: tuple[str, ...] = ()
 
 
-#: The catalog.  One entry per built-in Harness base (the ones
-#: ``app.adapter.formal_worker.ADAPTER_TYPES`` can drive), so the office can
-#: answer "what do I install on a new computer" without a declaration file.
+#: The catalog.  Two kinds of entries, both answering "how does this get onto a
+#: computer":
+#:
+#: * **driven** -- the platform has an adapter for it (``ADAPTER_TYPES``), so a
+#:   person who installs it and signs in gets a window that can take real tasks;
+#: * **reference** -- a CLI that is common in the wild but has no adapter here
+#:   yet.  Its install instructions are still worth showing (people arrive with
+#:   one of these already on the machine, and the question "what do I install"
+#:   has the same shape), but the office must say it cannot take tasks.
+#:
+#: Which one an entry is, is *derived* from ``ADAPTER_TYPES`` rather than written
+#: here: adding an adapter must not require remembering to edit a second list.
+#:
+#: Every address and command below was read from the vendor's own published
+#: channel (npm registry metadata for npm packages, PyPI metadata for Python
+#: packages, the vendor's docs page for native installers) at the time of
+#: writing.  Nothing here is recalled from memory; a CLI whose channel could not
+#: be checked is simply absent.
 CATALOG: tuple[CliInstall, ...] = (
     CliInstall(
         harness_id="codex",
@@ -165,6 +180,156 @@ CATALOG: tuple[CliInstall, ...] = (
         login_note="首次运行会显示登录方式（国内站 / 国际站 / 企业域），需要 Node.js 18.20 以上。",
         notes=("原生二进制安装（Beta）：irm https://www.codebuddy.cn/cli/install.ps1 | iex。",),
     ),
+    # --------------------------------------------------------------- reference
+    # 市面上常见的 CLI（无适配器）。安装方式和官方地址是真的；"平台能不能驱动它"
+    # 由 ADAPTER_TYPES 决定，不写在这里。
+    CliInstall(
+        harness_id="gemini",
+        display_name="Gemini CLI",
+        provider="Google",
+        command="gemini",
+        official_url="https://github.com/google-gemini/gemini-cli",
+        install={
+            "windows": "npm install -g @google/gemini-cli",
+            "macos": "npm install -g @google/gemini-cli",
+            "linux": "npm install -g @google/gemini-cli",
+        },
+        login_note="首次运行会提示用 Google 账号登录；也可以配置 API key。",
+        notes=("包名 @google/gemini-cli，可执行文件是 gemini。",),
+    ),
+    CliInstall(
+        harness_id="qwen-code",
+        display_name="Qwen Code",
+        provider="Alibaba",
+        command="qwen",
+        official_url="https://github.com/QwenLM/qwen-code",
+        install={
+            "windows": "npm install -g @qwen-code/qwen-code",
+            "macos": "npm install -g @qwen-code/qwen-code",
+            "linux": "npm install -g @qwen-code/qwen-code",
+        },
+        login_note="首次运行会提示登录方式，或让你填写兼容 OpenAI 的端点与 API key。",
+        notes=("包名 @qwen-code/qwen-code，可执行文件是 qwen。",),
+    ),
+    CliInstall(
+        harness_id="copilot-cli",
+        display_name="GitHub Copilot CLI",
+        provider="GitHub",
+        command="copilot",
+        official_url="https://github.com/github/copilot-cli",
+        install={
+            "windows": "npm install -g @github/copilot",
+            "macos": "npm install -g @github/copilot",
+            "linux": "npm install -g @github/copilot",
+        },
+        login_note="需要 GitHub Copilot 订阅；首次运行会提示用 GitHub 账号登录。",
+        notes=("包名 @github/copilot，可执行文件是 copilot。",),
+    ),
+    CliInstall(
+        harness_id="amp",
+        display_name="Amp",
+        provider="Sourcegraph",
+        command="amp",
+        official_url="https://ampcode.com/",
+        install={
+            "windows": "npm install -g @sourcegraph/amp",
+            "macos": "npm install -g @sourcegraph/amp",
+            "linux": "npm install -g @sourcegraph/amp",
+        },
+        login_note="首次运行会提示登录 Amp 账号。",
+        notes=("包名 @sourcegraph/amp，可执行文件是 amp。",),
+    ),
+    CliInstall(
+        harness_id="crush",
+        display_name="Crush",
+        provider="Charm",
+        command="crush",
+        official_url="https://charm.sh/crush",
+        install={
+            "windows": "npm install -g @charmland/crush",
+            "macos": "npm install -g @charmland/crush",
+            "linux": "npm install -g @charmland/crush",
+        },
+        login_note="需要模型 provider（各家 API key），首次运行会让你选择。",
+        notes=("包名 @charmland/crush，可执行文件是 crush。",),
+    ),
+    CliInstall(
+        harness_id="iflow",
+        display_name="iFlow CLI",
+        provider="iFlow",
+        command="iflow",
+        official_url="https://github.com/iflow-ai/iflow-cli",
+        install={
+            "windows": "npm install -g @iflow-ai/iflow-cli",
+            "macos": "npm install -g @iflow-ai/iflow-cli",
+            "linux": "npm install -g @iflow-ai/iflow-cli",
+        },
+        login_note="首次运行会提示登录 iFlow 账号。",
+        notes=("包名 @iflow-ai/iflow-cli，可执行文件是 iflow。",),
+    ),
+    CliInstall(
+        harness_id="cursor-cli",
+        display_name="Cursor CLI",
+        provider="Cursor",
+        command="agent",
+        aliases=("cursor-agent",),
+        official_url="https://cursor.com/docs/cli",
+        install={
+            "windows": "irm 'https://cursor.com/install?win32=true' | iex",
+            "macos": "curl https://cursor.com/install -fsS | bash",
+            "linux": "curl https://cursor.com/install -fsS | bash",
+        },
+        login_note="首次运行会提示用 Cursor 账号登录。",
+        notes=(
+            "装好后的命令是 agent（旧版本叫 cursor-agent）。",
+            "macOS / Linux / WSL 用 curl 安装，Windows 用 PowerShell 那一条。",
+        ),
+    ),
+    CliInstall(
+        harness_id="continue-cli",
+        display_name="Continue CLI",
+        provider="Continue",
+        command="cn",
+        official_url="https://continue.dev",
+        install={
+            "windows": "npm install -g @continuedev/cli",
+            "macos": "npm install -g @continuedev/cli",
+            "linux": "npm install -g @continuedev/cli",
+        },
+        login_note="首次运行会让你登录 Continue 账号或配置模型端点。",
+        notes=("包名 @continuedev/cli，可执行文件是 cn。",),
+    ),
+    CliInstall(
+        harness_id="aider",
+        display_name="Aider",
+        provider="Aider",
+        command="aider",
+        official_url="https://github.com/Aider-AI/aider",
+        install={
+            "windows": "python -m pip install aider-install",
+            "macos": "python -m pip install aider-install",
+            "linux": "python -m pip install aider-install",
+        },
+        login_note="没有账号体系：直接配置模型 provider 的 API key 使用。",
+        notes=(
+            "安装包装好后还要再运行一次 aider-install，才会装好 aider 本体。",
+            "这是 Python 工具，机器上要有 Python 3.10 以上。",
+        ),
+    ),
+    CliInstall(
+        harness_id="mistral-vibe",
+        display_name="Mistral Vibe",
+        provider="Mistral",
+        command="vibe",
+        official_url="https://github.com/mistralai/mistral-vibe",
+        install={
+            "windows": "pip install mistral-vibe",
+            "macos": "uv tool install mistral-vibe",
+            "linux": "uv tool install mistral-vibe",
+        },
+        login_note="需要 Mistral 的 API key，首次运行会让你填写。",
+        notes=("同一条命令也可以写成 pip install mistral-vibe；可执行文件是 vibe。",),
+    ),
 )
 
 
@@ -182,6 +347,23 @@ SELF_HOSTED_BASES: dict[str, str] = {
 def host_os() -> str:
     """This machine's OS in the catalog's vocabulary."""
     return {"nt": "windows", "darwin": "macos"}.get(os.name, "linux")
+
+
+#: Which ``harness_id`` values this build can actually drive.  Read from
+#: ``ADAPTER_TYPES`` (the worker's own table) instead of being copied here: a
+#: second hand-maintained list would drift the first time an adapter is added,
+#: and the office would then promise a window the worker cannot start.
+_DRIVEN_IDS: set[str] | None = None
+
+
+def driven_ids() -> set[str]:
+    """Harness ids that have an adapter in this build."""
+    global _DRIVEN_IDS
+    if _DRIVEN_IDS is None:
+        from app.adapter.formal_worker import ADAPTER_TYPES
+
+        _DRIVEN_IDS = set(ADAPTER_TYPES)
+    return _DRIVEN_IDS
 
 
 def host_arch() -> str:
@@ -224,6 +406,8 @@ def _installer_payload(entry: CliInstall, target_os: str, arch: str | None) -> d
         "aliases": list(entry.aliases),
         "official_url": entry.official_url,
         "platform": target_os,
+        # 「装上它能不能在这个平台上接活」：由适配器表决定，不由这一份清单决定。
+        "driven": entry.harness_id in driven_ids(),
         "supported": supported,
         "unsupported_reason": why_not,
         "install_command": command,

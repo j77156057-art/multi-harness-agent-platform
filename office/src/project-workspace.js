@@ -1,5 +1,7 @@
 import './project-workspace.css';
 import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+// 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
+import { drivenLine, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
 
 const clone = value => structuredClone(value);
 
@@ -73,6 +75,12 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
             <div class="project-section-head"><div><h2 id="projectPlatformTitle">平台上已有的项目</h2><p>来自正式平台的协作项目。</p></div><span data-platform-count></span></div>
             <p class="project-platform-note">直接打开已有项目，无需重新创建。</p>
             <div class="project-platform-list" data-platform-list></div>
+          </section>
+          <section class="project-tools" aria-labelledby="projectToolsTitle">
+            <div class="project-section-head"><div><h2 id="projectToolsTitle">本机可用的工具</h2><p>平台通过各家 CLI 执行任务。缺少的 CLI 在这里按官方方式安装，登录后即可使用。</p></div><span data-tools-count></span></div>
+            <p class="project-tools-summary" data-tools-summary role="status">正在读取各 CLI 的官方安装方式…</p>
+            <div class="project-tools-list" data-tools-list></div>
+            <div class="project-tools-actions"><button type="button" data-probe-tools>重新探测这台机器</button><span data-tools-host></span></div>
           </section>
         </div>
         <aside class="project-onboarding" aria-labelledby="projectOnboardingTitle">
@@ -283,6 +291,69 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 名册要在大厅打开时就读一次：「已经有几个能干活的了」这句话依赖它。
   // 以前只有注册之后才刷新，所以大厅里从来没人看到过这句提示。
   void loadFormalStatus();
+
+  // ---------------------------------------------------------- 本机可用的工具
+  //
+  // 大厅是第一次用的人打开办公室看到的**第一屏**（这时本地还没有任何项目）。
+  // 他在这里要回答的第一个问题不是「建哪个项目」，而是**这台电脑上有哪个 CLI**
+  // —— 一个都没有的话，项目建了也派不出活。
+  //
+  // 所以这一段：官方安装方式来自平台（`/installers`），探测结果来自平台对**它自己
+  // 那台机器**的检查；命令只是摆给人复制，平台不下载、不执行安装脚本。
+  const toolsList = root.querySelector('[data-tools-list]');
+  const toolsSummary = root.querySelector('[data-tools-summary]');
+  const toolsHost = root.querySelector('[data-tools-host]');
+  const toolsCount = root.querySelector('[data-tools-count]');
+  const toolsProbeButton = root.querySelector('[data-probe-tools]');
+  let toolsChecking = false;
+
+  function paintTools(payload) {
+    if (!payload) return;
+    toolsSummary.textContent = [summaryLine(payload), drivenLine(payload)].filter(Boolean).join(' ');
+    // 「还没探测」这一组也展开：大厅里的这一段本来就是给人看"官方从哪装"的，
+    // 全都收起等于只留一行字，第一次用的人还是不知道点什么。
+    toolsList.innerHTML = installGroupsHtml(payload, {
+      openStatuses: ['missing', 'version_failed', 'unknown'],
+    });
+    toolsHost.textContent = hostLine(payload);
+    const counts = payload.summary || {};
+    const ready = Number(counts.ready || 0);
+    const unknown = Number(counts.unknown || 0);
+    const total = (payload.installers || []).length;
+    // 没探过就说没探过：`0 / 6 个已找到` 是在替这台机器断言一件没查过的事。
+    toolsCount.textContent = !total
+      ? ''
+      : unknown
+        ? '还没探测'
+        : `${ready} / ${total} 个已找到`;
+  }
+
+  async function loadTools({ probe = false } = {}) {
+    if (probe) {
+      toolsChecking = true;
+      toolsProbeButton.disabled = true;
+      toolsProbeButton.textContent = '正在探测…';
+      toolsSummary.textContent = '正在探测这台机器上的命令…';
+    }
+    try {
+      const response = await fetch(`/api/formal/installers${probe ? '' : '?probe_local=false'}`, {cache: 'no-store'});
+      if (!response.ok) throw new Error(`读取安装清单失败（HTTP ${response.status}）`);
+      paintTools(await response.json());
+    } catch (error) {
+      // 读不到就说读不到：不假装成"这台机器没装"。
+      toolsSummary.textContent = `读不到安装清单：${error.message}。正式平台未连接时看不到这一段。`;
+    } finally {
+      toolsChecking = false;
+      toolsProbeButton.disabled = false;
+      toolsProbeButton.textContent = '重新探测这台机器';
+    }
+    return toolsChecking;
+  }
+
+  toolsProbeButton.addEventListener('click', () => void loadTools({probe: true}));
+  // 先出清单（很快，纯数据），再在后台探一次：探测要跑每个 CLI 的 `--version`，
+  // 几秒。等它回来才出第一屏，看着就像大厅加载不动。
+  void loadTools().then(() => loadTools({probe: true}));
 
   function renderFormalRegistration(state) {
     formalState = state;

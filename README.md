@@ -192,16 +192,34 @@ npm run verify
 .\start-demo.ps1
 ```
 
-它按顺序做四件事：
+**不想开终端就双击 `start-demo.bat`**：缺依赖时它先跑 `setup.ps1`，然后做下面四件事，等界面能应答之后自动打开浏览器。跑第二次不会起第二个界面（端口上已经有界面就直接复用）。
+
+`.bat` / `.ps1` 一律保持纯 ASCII：Windows 按当前代码页解析这两种文件，非 ASCII 字节会被读成别的东西，曾经因此让一个 `.ps1` 在 `param()` 里解析失败。仓库自带检查：
+
+```powershell
+.\checks-ascii.ps1      # 逐个文件数非 ASCII 字节，并用 PowerShell 解析器验一遍语法
+```
+
+`start-demo.ps1` 按顺序做四件事：
 
 1. 以 `AP_AUTH_MODE=enforce` + `AP_ADMIN_SUBJECTS=codex-window-admin` 起后端（端口 `AP_PORT`，默认 8848）
 2. 签发两个令牌文件：`data\office-operator.key`（人）与 `data\codex-window-admin.key`（管理员窗口）
 3. 登记管理员窗口，并建一个演示项目 `demo-project` 与分组 `demo-group`（已存在就复用）
 4. 带着 `OFFICE_FORMAL_UPSTREAM` / `TOKEN_FILE` / `ADMIN_TOKEN_FILE` / `PROJECT` / `GROUP` 起 Agent Office
 
-跑完窗口里会打印两个地址与启动 worker 的命令。界面端口用 `OFFICE_PORT` 改（默认 4174）。
+跑完窗口里会打印两个地址与启动 worker 的命令。界面端口用 `OFFICE_PORT` 改（默认 4174）。加 `-NoBrowser` 可以不起浏览器。
 
 **已经跑过 `start.bat` 的话**：它会以 `auth_mode=off` 占着 8848，脚本会明确报错让你先停掉，而不是偷偷连上去。
+
+### 第一次打开界面看到什么
+
+大厅（以及空项目里的办公室）有一段**「本机可用的工具」**：这台机器上装了哪个 CLI、官方从哪装、装什么命令、装完怎么自检、装完还差什么（登录或 provider）。三件事说清楚：
+
+- **平台能驱动的**（有适配器：Codex / Claude Code / OpenCode / Pi / Qoder / CodeBuddy）—— 装上并登录，就能在平台上接任务；
+- **市面上其他常见 CLI**（Gemini CLI / Qwen Code / Copilot CLI / Amp / Crush / iFlow / Cursor CLI / Continue / Aider / Mistral Vibe）—— 官方装法照给，但平台还没接上它们，装上也不会在这里接任务。这一句在界面上明写；
+- 「能驱动」由 `ADAPTER_TYPES` 推导，不是另写一张表：加适配器不用记得改第二处（`tests/test_harness_installers.py` 钉住了这一点）。
+
+命令全部来自各家自己的渠道（npm registry 元数据、PyPI 元数据、厂商文档页），平台不下载、不执行安装脚本，也不猜地址。
 
 ### 空白机器实测
 

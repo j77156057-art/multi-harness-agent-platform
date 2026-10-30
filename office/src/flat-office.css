@@ -1531,6 +1531,49 @@
 
 .flat-start:hover { background: #27507a; }
 
+/* ---------------------------------------------------------------- 开始使用
+   空项目里那一屏：装 CLI → 登录 → 配置目标，三步竖着排。
+
+   它住在任务表的位置，因为一个任务都没有时那里本来就是一整块空白 —— 空着不如
+   把第一步说清楚。左侧那条竖线是「按顺序来」的唯一提示，比再加一层卡片容器省地。
+*/
+.flat-firstrun { display: grid; gap: 14px; padding: 2px 0 18px; }
+.flat-firstrun h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ao-ink); }
+.flat-firstrun .flat-note { margin: 0; }
+.flat-firstrun-step {
+  display: grid;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--ao-line);
+}
+.flat-firstrun-step h3 {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ao-ink);
+}
+.flat-firstrun-step h3 span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+/* 安装命令是给人复制走的：放在这一屏里也要能换行，不能把中间那栏撑宽。 */
+.flat-firstrun .flat-cmd { max-width: 100%; }
+.flat-firstrun .flat-inline-actions { margin: 2px 0 0; justify-self: start; }
+/* 按钮在这一屏里住在**网格**里：网格子项默认横向拉满，所以除了 flex 那边要
+   align-self，这里还得 justify-self 才收得回内容宽度（否则一个"配置目标"会横贯整栏）。 */
+.flat-firstrun .flat-start { justify-self: start; margin-top: 4px; }
+
 /* ---------------------------------------------------------------- 布局（收口）
 
    放在文件最后：一处说清三列怎么排，媒体查询里也只改列数。
