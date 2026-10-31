@@ -284,4 +284,32 @@ await check('the gateway sends the cancelling move to human.cancel', async () =>
   assert.equal(lastCall().body.reason, '方向不对');
 });
 
+// 合入主树：二次确认是**手抄要合的那个 commit**（§17「需二次确认」）。
+await check('the gateway sends a confirmed merge with the operator as the decider', async () => {
+  const commit = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+  const { status } = await exchange('/human/merge', {
+    task_id: 'FD-0123456789abcdef',
+    confirm_commit: commit,
+  });
+  assert.equal(status, 200);
+  assert.equal(lastCall().path, '/api/v1/human/merge');
+  assert.equal(lastCall().body.confirm_commit, commit);
+  // 身份由服务端填（令牌的主体），浏览器不能自称是谁。
+  assert.equal(lastCall().body.decided_by, 'office-operator');
+});
+
+await check('the gateway refuses a merge without a commit-shaped confirmation', async () => {
+  const before = seen.length;
+  const missing = await exchange('/human/merge', { task_id: 'FD-0123456789abcdef' });
+  assert.equal(missing.status, 400);
+  const junk = await exchange('/human/merge', {
+    task_id: 'FD-0123456789abcdef',
+    confirm_commit: 'HEAD',
+  });
+  assert.equal(junk.status, 400);
+  // 拒绝时不能把请求转发给平台 —— 否则"没确认"这一步等于没有。
+  // 用调用条数判断，不看 lastCall：上一次成功的合并还留在记录里。
+  assert.equal(seen.length, before, 'a refused confirmation must not reach the platform');
+});
+
 console.log(`office human actions: ${checks.length}/${checks.length} PASS`);

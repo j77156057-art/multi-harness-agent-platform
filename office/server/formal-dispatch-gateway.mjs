@@ -786,16 +786,21 @@ export function createFormalGateway(config={}){
         const result=await call('/groups/'+encodeURIComponent(config.group)+'/messages?since_seq='+since+'&limit='+limit);
         json(res,200,result);return true;
       }
-      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/release','/human/cancel','/human/adjudicate'].includes(route)){
+      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
         const action=route.slice('/human'.length);
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         const allowed=action==='/cancel'?['task_id','reason']
           :action==='/release'?['task_id','reason','budget_override']
           :action==='/adjudicate'?['task_id','question','options']
+          // 合入：二次确认是**手抄要合的那个 commit**（§17「需二次确认」）。
+          // reason 可留空；平台会把人是谁记进事件。
+          :action==='/merge'?['task_id','confirm_commit','reason']
           :['task_id','answer'];
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!allowed.includes(k))||
           typeof body.task_id!=='string'||!ident(body.task_id))throw fail(400,'invalid_task_action');
+        if(body.confirm_commit!==undefined&&(typeof body.confirm_commit!=='string'||!/^[0-9a-f]{7,40}$/.test(body.confirm_commit.trim())))throw fail(400,'invalid_task_action');
+        if(action==='/merge'&&typeof body.confirm_commit!=='string')throw fail(400,'invalid_task_action');
         if(body.answer!==undefined&&typeof body.answer!=='string')throw fail(400,'invalid_task_action');
         if(body.reason!==undefined&&typeof body.reason!=='string')throw fail(400,'invalid_task_action');
         if(body.budget_override!==undefined&&typeof body.budget_override!=='boolean')throw fail(400,'invalid_task_action');
@@ -804,6 +809,7 @@ export function createFormalGateway(config={}){
         if(action==='/adjudicate'&&(typeof body.question!=='string'||!body.question.trim()))throw fail(400,'invalid_task_action');
         const payload={task_id:body.task_id,decided_by:operator,
           ...(body.answer!==undefined?{answer:body.answer}:{}),...(body.reason!==undefined?{reason:body.reason}:{}),
+          ...(body.confirm_commit!==undefined?{confirm_commit:body.confirm_commit.trim()}:{}),
           ...(body.budget_override!==undefined?{budget_override:body.budget_override}:{}),
           ...(body.question!==undefined?{question:body.question}:{}),...(body.options!==undefined?{options:body.options}:{})};
         const result=await call(route,payload);

@@ -4523,6 +4523,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         `<button type="button" data-act="decide-${action}" title="${escape(hint)}">${escape(label)}</button>`,
       );
     }
+    // 审批通过 = **可以合**，不是已经合。合入主树不可撤销（只能 revert），所以
+    // 这一步由人亲手按，并且要**把手要合的那个 commit 抄一遍**（§17 的二次确认）。
+    //
+    // 本地样例（demo）不摆这个按钮：那里没有真仓库，按下去只会得到"读不到提交信息"。
+    if (task.status === 'approved' && state.source !== 'demo') {
+      buttons.push(
+        `<button type="button" data-act="merge-confirm" title="会要求你把要合进主树的那一版 commit 抄一遍；抄对了才会合">确认合入</button>`,
+      );
+    }
     return buttons.join('');
   }
 
@@ -6078,6 +6087,52 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const decision = button.dataset.act && button.dataset.act.startsWith('decide-')
       ? button.dataset.act.slice('decide-'.length)
       : '';
+    if (button.dataset.act === 'merge-confirm' && task) {
+      // 二次确认：先把**要合的那一版**读出来给人看，再让他抄一遍。
+      //
+      // 为什么不让人凭记忆填：合进主树之后只能靠 revert 撤回，而"抄错一位"在
+      // 40 位哈希上几乎必然发生。所以界面把真值摆出来，人只需要照着敲 —— 这一步
+      // 的价值不是校验知识，而是**逼人看清自己要合的是哪一版**。
+      void (async () => {
+        state.error = null;
+        let detail = null;
+        try {
+          detail = await api(`/tasks/${encodeURIComponent(task.task_id)}`);
+        } catch (error) {
+          state.error = `读不到这条活的提交信息：${error.message}`;
+          render();
+          return;
+        }
+        const diff = (detail && detail.diff) || {};
+        const commit = String(diff.head_commit || '');
+        const branch = String(diff.branch || '');
+        if (!commit) {
+          state.error = '平台还没有这条活的提交（没有可合的内容）。';
+          render();
+          return;
+        }
+        const answer = await askDecision({
+          title: '确认合入主树',
+          note:
+            `要合进主树的是 ${commit}${branch ? `（分支 ${branch}）` : ''}。`
+            + '合入之后只能靠 revert 撤回，所以请把这串 commit 抄一遍再确认。',
+          label: '要合入的 commit（照上面抄）',
+          placeholder: commit,
+        });
+        if (!answer) return;
+        const typed = String(answer.text || '').trim().toLowerCase();
+        if (typed.length < 7 || !commit.toLowerCase().startsWith(typed)) {
+          state.error = `确认串与要合的那一版不一致（要合的是 ${commit}）。没有合入任何东西。`;
+          render();
+          return;
+        }
+        await doAction('/human/merge', {
+          route: '/human/merge',
+          body: { task_id: task.task_id, confirm_commit: typed },
+        });
+      })();
+      return;
+    }
     if (decision && task) {
       void (async () => {
         const spec = {
