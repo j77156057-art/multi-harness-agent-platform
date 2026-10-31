@@ -74,6 +74,26 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 - `/api/formal/plan` —— 方案定稿（任务书的原文）；
 - `/api/formal/installers` —— 这台机器上装了哪些 Harness CLI、官方从哪装（见下）。
 
+## 刷新之后还该在的东西
+
+平台的状态以服务端为准，重载自己会重读；但有两类东西只存在浏览器里，丢了就是
+"人正干到一半被清空"。分开存，因为它们的"该活多久"不一样：
+
+| 存哪 | 存什么 | 为什么是这个范围 |
+|---|---|---|
+| `localStorage` | 项目历史与当前项目；CLI 探测结果（带探测时间） | 它们是**这台机器的事实**，跨标签页、跨天都成立 |
+| `sessionStorage` | 表单草稿；视图状态（筛选 / 排序 / 每页 / 页码 / 看的是哪个会话 / 开合过的卡片） | 它们是**这一次在看什么、填到哪**，关掉标签页就该清 |
+
+草稿由 `src/session-state.js` 管，**凭据一格都不落盘**：`data-draft` 的名字按词匹配
+`key / token / secret / password / credential / auth / cookie` 就整格跳过（所以
+`userkey-key` 永远不写），值里出现 `sk-…`、`ghp_…`、`AKIA…`、PEM 头、`Bearer …`
+也跳过那一格 —— 有人把 key 贴进群聊时不会被存下来。新加输入框时照这条起名就行，
+不用另写过滤。
+
+视图状态在 `render()` 末尾写一次（换筛选、翻页、点会话都走它）；折叠卡片的开合是
+唯一不经过 render 的变化，在 toggle 里单独写一次。恢复出来的会话若已经不存在
+（窗口撤了、换了项目），退回任务表，不画半空的「未知」页。
+
 ## 装 CLI（新电脑的第一步）
 
 右栏有一张「Harness CLI」卡，来源是平台的 `GET /harnesses/installers`

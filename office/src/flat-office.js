@@ -36,6 +36,8 @@ import {
   summaryLine,
 } from './harness-install.js';
 import { readInstallCache, writeInstallCache } from './install-cache.js';
+// 刷新之后还该在的：没提交完的草稿、刚才看到哪一页（凭据一格都不落盘）。
+import { forgetDraft, readDrafts, readViewState, writeDrafts, writeViewState } from './session-state.js';
 
 const escape = escapeHtml;
 
@@ -224,6 +226,9 @@ function countBy(tasks) {
 }
 
 export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, onAddMember }) {
+  // 「刚才看到哪一页」在重载之后接上：筛选、排序、每页条数、第几页、看的哪个
+  // 会话、哪些折叠卡片开着。没存过就是 `{}`，下面每一项各自的默认值原样生效。
+  const restoredView = readViewState();
   const state = {
     tasks: [],
     selected: null,
@@ -232,7 +237,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     availability: [],
     // 当前看的是哪个会话：tasks=项目任务、group=项目群聊、assistant=平台助手、
     // window=某个窗口（id 是它的 harness_id）。
-    view: { kind: 'tasks', id: null },
+    view: restoredView.view || { kind: 'tasks', id: null },
     // 第二批数据（窗口名单、群消息、额度池）到了没有：没到的时候左栏要说
     // 「正在读取…」，不能让它看起来像"这个项目里没有窗口"。
     loaded: false,
@@ -259,9 +264,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     plan: null,
     status: null,
     scope: null,
-    filter: 'all',
+    filter: restoredView.filter || 'all',
     // 列表的看法：'person' = 按窗口归堆（谁忙谁闲），'time' = 平铺按时间排。
-    groupBy: 'person',
+    groupBy: restoredView.groupBy || 'person',
     error: null,
     // 上一件「成功了但还没说完」的事（比如刚给某个窗口开好新成员）。
     // 与 error 分开：成功和失败摆同一个框里，人会以为是失败。
@@ -292,12 +297,12 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 「额度池」，下一轮刷新就"啪"地合上了 —— 正在看的东西会从手里跑掉。
     // 人点开过 / 点收起的折叠块。**两个都要记**：只记"点开"的话，默认展开的
     // 那一组被人收起后会在下一次重画里自己弹开 —— 那也是一种"页面自己动"。
-    openFolds: new Set(),
-    closedFolds: new Set(),
+    openFolds: new Set(restoredView.openFolds || []),
+    closedFolds: new Set(restoredView.closedFolds || []),
     source: 'platform',
-    sort: 'updated',
-    page: 1,
-    pageSize: 20,
+    sort: restoredView.sort || 'updated',
+    page: restoredView.page || 1,
+    pageSize: restoredView.pageSize || 20,
     failureOutput: null,
     allEvents: false,
     events: [],
@@ -317,7 +322,32 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   // 重画之前存下来（值、光标、焦点），重画之后放回去。
   //
   // 输入框只要带 `data-draft="名字"`，就会被记住；名字自己起，别重复。
-  const drafts = { fields: {}, focus: '', start: 0, end: 0 };
+  //
+  // 这份记忆现在是**两层**：内存里的这份管 15 秒重画，sessionStorage 里的那份管
+  // 整页重载（刷新、换标签页、开发时热重载）。所以重画不丢只是下限，重载不丢才是
+  // "能正常填完"。
+  //
+  // 落盘的只有**不是凭据**的那几格（`session-state.js` 里按字段名和内容双档过滤）：
+  // `userkey-key` 永远不写。刷新之后地址还在、只补 key 就够了。
+  const drafts = { fields: readDrafts(), focus: '', start: 0, end: 0 };
+
+  // 打一封字就落一次盘太浪费；攒 250 毫秒。落盘写的是**整份**记忆，所以删掉的那格
+  // 自然跟着消失（不需要单独的删除路径）。
+  let draftSaveTimer = null;
+
+  function persistDraftsSoon() {
+    if (draftSaveTimer) return;
+    draftSaveTimer = setTimeout(() => {
+      draftSaveTimer = null;
+      writeDrafts(drafts.fields);
+    }, 250);
+  }
+
+  /** 提交成功后把这一格真正忘掉：内存 + 存储。 */
+  function dropDraft(name) {
+    delete drafts.fields[name];
+    forgetDraft(name);
+  }
 
   /** 重画之前：把用户填过的东西存下来（值 + 光标位置）。 */
   function captureDrafts() {
@@ -330,6 +360,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
       drafts.start = active.selectionStart ?? null;
       drafts.end = active.selectionEnd ?? null;
     }
+    // 重画顺手落一次盘：万一在这之后立刻整页重载，最后敲的那几个字也在。
+    persistDraftsSoon();
   }
 
   /** 重画之后：把值、光标和焦点放回去。 */
@@ -372,6 +404,41 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
       pane.scrollTop = position.top;
       pane.scrollLeft = position.left;
     }
+  }
+
+  /**
+   * 把「刚才看到哪一页」落进 sessionStorage。
+   *
+   * 放在 `render()` 末尾，而不是每个事件处理器里各写一次：换筛选、改排序、翻页、
+   * 点开某个会话、开合折叠卡片**最终都会走 render()** —— 只在一个地方写，就不会
+   * 因为漏了某条路径而出现"这一种状态不跨刷新"。代价是每次重画多一次
+   * `JSON.stringify`（对象只有十来个短字段），可以忽略。
+   */
+  function persistViewState() {
+    writeViewState({
+      filter: state.filter,
+      sort: state.sort,
+      groupBy: state.groupBy,
+      pageSize: Number(state.pageSize) || 20,
+      page: Number(state.page) || 1,
+      view: state.view,
+      openFolds: [...state.openFolds],
+      closedFolds: [...state.closedFolds],
+    });
+  }
+
+  /**
+   * 恢复出来的窗口页要先确认**那个窗口还在**。
+   *
+   * 换了项目、或者那个窗口被撤掉之后，存下来的 harness_id 会指着一个不存在的人：
+   * 画出来是半空一页（标题是机器 id，事实全是「未知」），比回到任务表更难懂。
+   * 名单还没读到时不动 —— 那会儿"找不到"不说明它不在了。
+   */
+  function ensureViewStillExists() {
+    if (state.view.kind !== 'window' || !state.loaded) return;
+    const id = state.view.id;
+    const known = (state.availability || []).some((item) => item && item.harness_id === id);
+    if (!known) state.view = { kind: 'tasks', id: null };
   }
   // 本地样例（不连平台）：给没有平台的人看界面用。
   const demoRuntime = createOfficeReadRuntime();
@@ -1169,6 +1236,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 不存的话，正在填的表单（"加一个 key"）会被抹掉半截。
     captureDrafts();
     captureScroll();
+    // 恢复出来的会话如果已经不存在了，先退回任务表再画。
+    ensureViewStillExists();
     const scope = state.scope;
     const counts = countBy(state.tasks);
     const filtered = state.tasks.filter((task) => {
@@ -1213,6 +1282,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     root.dataset.flatRenders = String(Number(root.dataset.flatRenders || 0) + 1);
     if (adminDialog.open) syncAdminDialog();
     syncBriefDialog();
+    // 这一屏的状态记下来：刷新回来还是这一页（页码已在上面夹进有效范围）。
+    persistViewState();
     // 需要人处理的事**不再弹**：左栏那一行带红点，点进去是一页。浮层以前压在
     // 内容上（正好盖住模型清单），而且"关掉"不等于有结论。
   }
@@ -5524,7 +5595,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const body = String(input.value || '').trim();
       if (!body) return;
       input.value = '';
-      delete drafts.fields.chat;
+      dropDraft('chat');
       try {
         // 在群里手动 @ 了管理员，就真的建一条 mention（不只是文字）：
         // 平台靠 mention 建投递记录，管理员才收得到。
@@ -5626,8 +5697,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       form.querySelector('[data-userkey-key]').value = '';
       form.querySelector('[data-userkey-models]').value = '';
       // 加过了：草稿清掉（否则重画会把刚加过的 key 又填回表单里）。
-      delete drafts.fields['userkey-key'];
-      delete drafts.fields['userkey-models'];
+      dropDraft('userkey-key');
+      dropDraft('userkey-models');
       await refresh();
     } catch (problem) {
       if (error) error.textContent = String(problem.message || problem);
@@ -5677,6 +5748,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     openMemberMenuAt(event);
   });
 
+  // 有人正在打字：立刻记进内存，并攒着落盘（`persistDraftsSoon` 自己节流）。
+  // `input` 与 `change` 都听：文本框走 input，下拉框在老浏览器上只发 change。
+  const noteDraft = (event) => {
+    const field = event.target.closest?.('[data-draft]');
+    if (!field) return;
+    drafts.fields[field.dataset.draft] = field.value;
+    persistDraftsSoon();
+  };
+  root.addEventListener('input', noteDraft);
+  root.addEventListener('change', noteDraft);
+
   // 记住哪些折叠卡片是开着的（右栏每 15 秒重画一次，不记住就会"啪"地合上）。
   // 两种键都认：`data-fold`（整张卡）与 `data-fold-key`（卡里面的分组，例如
   // 「装 CLI」按状态分的那几组）—— 只认前者时，卡里的分组一重画就合上。
@@ -5692,6 +5774,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       state.openFolds.delete(key);
       state.closedFolds.add(key);
     }
+    // 开合卡片是**唯一不经过 render()** 的视图变化：不在这里立刻写一次，就得等
+    // 下一轮 15 秒重画才落盘 —— 这中间刷新一下就白开了。
+    persistViewState();
   }, true);
 
   root.addEventListener('change', (event) => {
