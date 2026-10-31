@@ -416,6 +416,15 @@ class RuntimeDriver:
                     Skipped(task_id, "no workspace row records the attempt branch")
                 )
                 continue
+            if not settings.runtime_auto_merge:
+                # R10-fix-16：默认**不自动合**。审批通过只是"可以合"，不是"已经合"；
+                # 合并由人（`POST /human/merge`）或管理员 harness 在 approve 之后亲自
+                # 发起，仍要过同一个闸门。这里把它记成跳过而不是悄悄跳过：每一轮都要
+                # 看得见"有几条等着人确认"，否则活会静静地躺在 approved 里没人知道。
+                merge_skipped.append(
+                    Skipped(task_id, "approved, waiting for a person or the administrator to confirm the merge")
+                )
+                continue
             merge_candidates.append(
                 MergeCandidate(
                     task_id=task_id,

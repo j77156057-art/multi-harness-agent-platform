@@ -157,10 +157,13 @@ foreach ($member in $members) {
 $adminToken = Join-Path $PSScriptRoot 'data\codex-window-admin.key'
 Start-Python 'administrator' @('-m', 'app.admin.worker', '--url', $Url, '--group', $Group, '--admin-harness-id', $AdminHarnessId, '--token-file', $adminToken, '--review-rounds', $ReviewRounds)
 
-# The verify/merge runtime: after a review approves an attempt, it merges the
-# deliverable into the canonical repository's integration branch.  Without it
-# the task stops at "approved" -- the work is done and reviewed, but it never
-# reaches the repository.
+# The verify/merge runtime. It runs the verification profile and the integration
+# health check. It does NOT merge on its own since R10-fix-16: an approval means
+# "may be merged", not "has been merged". The administrator harness confirms the
+# merge right after it approves (it calls POST /api/v1/human/merge with the commit
+# it just reviewed), and a person can confirm one by hand at the same route.
+# Set AP_RUNTIME_AUTO_MERGE=1 to go back to the old behaviour (the runtime merges
+# whatever is approved, and nobody can say who let it into the main tree).
 Start-Python 'runtime' @('-m', 'app.runtime', '--loop', '--interval', '15')
 
 # The sweeper family (app.scheduler): it is the only thing that recycles the

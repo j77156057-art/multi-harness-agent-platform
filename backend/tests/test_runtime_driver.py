@@ -42,6 +42,16 @@ PASSING = ["python", "-c", "import sys; sys.exit(0)"]
 FAILING = ["python", "-c", "import sys; sys.exit(1)"]
 
 
+@pytest.fixture(autouse=True)
+def _auto_merge_on(monkeypatch):
+    """这个文件测的是**运行环的合并机制**。
+
+    R10-fix-16 之后自动合默认关闭（审批 ≠ 已合，要人/管理员确认）。要测"运行环怎么合"
+    就必须把开关打开；"默认关闭时它会跳过并说明原因"另有一条专门的用例。
+    """
+    monkeypatch.setattr(settings, "runtime_auto_merge", True)
+
+
 def runtime_policy(*, integration_profile: str | None = PROFILE) -> RuntimePolicy:
     policy = VerifyPolicy.from_mapping(
         {
@@ -356,6 +366,26 @@ def test_merge_run_reaches_merged(tmp_path):
     assert integration_after != integration_before
     # The boundary in the card: the runtime never drives review.
     assert review_count(chain.database) == reviews_before
+
+
+def test_without_the_switch_the_runtime_leaves_approved_work_for_a_person(tmp_path, monkeypatch):
+    """默认不自动合：审批通过只是"可以合"，合并要人（或管理员）确认。
+
+    R10-fix-16 的行为：运行环不再替人按下合并键。它**不能静悄悄什么都不做** —— 每轮
+    都要把"有几条等着确认"写进跳过原因，否则活会躺在 approved 里没人知道。
+    """
+    monkeypatch.setattr(settings, "runtime_auto_merge", False)
+    chain = build_chain(tmp_path, task_id="T-1", auto_verify=True)
+    approve(chain)
+    integration_before = chain.repo.ref_commit(chain.repo.integration_ref)
+
+    report = driver_for(chain).run_once()
+
+    assert status_of(chain) == "approved", "没人确认就不许合"
+    assert report.merge == ()
+    assert chain.repo.ref_commit(chain.repo.integration_ref) == integration_before
+    skipped = {item.task_id: item.reason for item in report.scan.merge_skipped}
+    assert "waiting for a person" in skipped["T-1"]
 
 
 def test_merge_gate_refusal_is_reported_not_raised(tmp_path):

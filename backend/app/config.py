@@ -156,6 +156,18 @@ class Settings:
             else None
         )
         self.runtime_interval_seconds: int = int(os.environ.get("AP_RUNTIME_INTERVAL", "10"))
+        #: 运行环要不要**自动**把 `approved` 的活合进集成分支。
+        #:
+        #: 默认**关**（R10-fix-16）：审批通过只说明"可以合"。合并这一步由人
+        #: （`POST /human/merge`，二次确认=手敲 commit）或管理员 harness 在 approve 之后
+        #: 亲自发起；运行环只负责校验（verify）与体检。关掉自动合并不会让队列停摆 ——
+        #: 管理员 worker 审批通过时会自己按下这一下。
+        #:
+        #: 设成 1 回到旧行为（审批一过、下一轮就合）。那条路上"谁让它进的主树"没人可答，
+        #: 所以默认不再是它。
+        self.runtime_auto_merge: bool = os.environ.get(
+            "AP_RUNTIME_AUTO_MERGE", "0"
+        ).strip().lower() not in {"0", "false", "no", "off", ""}
 
         # --- Git（R10 §13）---
         self.canonical_repo: Path = Path(
