@@ -49,7 +49,7 @@ class OverlayManager:
         self, repo: CanonicalRepo, root: Path | None = None, *, objects_dir: Path | None = None
     ) -> None:
         self.repo = repo
-        self.root = Path(root) if root is not None else Path(settings.data_dir) / "verify"
+        self.root = Path(root) if root is not None else Path(settings.overlay_root)
         self.objects_dir = objects_dir if objects_dir is not None else repo.objects_dir
 
     def create(self, *, commit: str, job_id: str) -> Overlay:
@@ -63,7 +63,11 @@ class OverlayManager:
         run_git("init", "--separate-git-dir", str(gitdir), str(path))
         alternates = gitdir / "objects" / "info" / "alternates"
         alternates.parent.mkdir(parents=True, exist_ok=True)
-        alternates.write_text(str(self.objects_dir) + "\n", encoding="utf-8")
+        # `newline="\n"` 是必须的：Windows 上默认会把行尾翻成 CRLF，而 git 读这个文件
+        # 时按 LF 切行 —— 于是路径末尾多一个 `\r`，变成
+        # `…\objects\r does not exist`，随后 fetch 静默失败、merge 拿着空对象库报冲突。
+        # 这段排查花了两轮：报出来的是「冲突在别人的文件里」，实际是对象没取到。
+        alternates.write_text(str(self.objects_dir) + "\n", encoding="utf-8", newline="\n")
         run_git("fetch", "--no-tags", str(self.repo.path), commit, cwd=path)
         run_git("checkout", "--detach", "FETCH_HEAD", cwd=path)
 

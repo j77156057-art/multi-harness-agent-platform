@@ -238,6 +238,23 @@ class HumanAttemptBudgetOverrideRequest(BaseModel):
     reason: str = ""
 
 
+class HumanMergeRequest(BaseModel):
+    """人确认合入这条活（§17 的「merge/integration write：需二次确认」）。
+
+    二次确认 = **手敲一遍要合的 commit**，不是点一下按钮。理由：合入主树不可撤销
+    （只能靠 revert），而"点错一条任务"在列表里是很容易发生的。确认串与分支头不一致
+    时请求被拒，人得先看清自己要合的是哪个 commit。
+
+    真正写集成分支的仍然是平台自己的 Merge Worker —— 这里只决定"这一下是不是人
+    明确要求的"，闸门（回执/审批/分支头/集成健康/密钥扫描）一条都不跳过。
+    """
+
+    task_id: str = Field(min_length=1)
+    decided_by: str = Field(min_length=1)
+    confirm_commit: str = Field(min_length=7)
+    reason: str = ""
+
+
 class HumanReviewSameProviderRequest(BaseModel):
     """A human opens the same-provider review channel for one task.
 

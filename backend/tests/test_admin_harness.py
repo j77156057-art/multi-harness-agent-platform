@@ -881,7 +881,11 @@ def test_review_normalizes_string_findings(tmp_path):
         task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
     )
     assert result["verdict"] == "request_changes"
-    assert result["findings"] == [{"severity": "note", "message": "没有写到指定文件"}]
+    # R10-fix-15：纯文本意见也要带上分类（默认 defect），否则发还回执里这一条
+    # 就没法归到"问题 / 需要改进 / 冲突 / bug"里的任何一格。
+    assert result["findings"] == [
+        {"severity": "note", "kind": "defect", "message": "没有写到指定文件"}
+    ]
 
 
 def _revise_service(tmp_path, payload):

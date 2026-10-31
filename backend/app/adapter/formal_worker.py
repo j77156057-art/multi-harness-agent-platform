@@ -39,6 +39,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeCapacityExceeded, WorktreeManager
+from app.review_kinds import REVIEW_FINDING_HEADINGS, REVIEW_FINDING_KINDS, group_findings
 from app.tasks.service import SchedulerService
 from app.verify.profile import VerifyPolicy
 from app.verify.worker import VerifyWorker
@@ -831,11 +832,22 @@ def build_goal(
     findings = (review or {}).get("findings") or []
     extras: list[str] = []
     if (review or {}).get("verdict") == "request_changes" and findings:
+        # 回执按四类摊开（R10-fix-15）：问题、需要改进、会造成冲突、可能的 bug。
+        # 原样保留每条意见的措辞（那是评审方的原话），只是分门别类 —— 成员拿到
+        # "critical" 三个字不知道是该修逻辑还是该去查冲突，分类之后一眼就知道。
+        grouped = group_findings(findings)
+        sections: list[str] = []
+        for kind in REVIEW_FINDING_KINDS:
+            items = grouped.get(kind) or []
+            if not items:
+                continue
+            heading = REVIEW_FINDING_HEADINGS[kind]
+            sections.append(heading + ":\n" + "\n".join(f"  - {text}" for text in items))
         extras.append(
             "\n[1] REWORK — a reviewer requested changes on the previous submission.\n"
             "Address every finding below; do not resubmit the previous deliverable unchanged.\n"
-            f"Reviewer findings (verbatim, from review {(review or {}).get('review_id')}): "
-            + json.dumps(findings, ensure_ascii=False)
+            f"Reviewer findings (verbatim, from review {(review or {}).get('review_id')}),"
+            " grouped by what kind of thing they are:\n" + "\n".join(sections)
         )
     if handoff:
         extras.append(

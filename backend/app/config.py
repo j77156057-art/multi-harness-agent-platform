@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 #: 项目根（含 docs/ tools/ backend/ 的那一层）
@@ -164,6 +165,19 @@ class Settings:
         self.worktree_root: Path = Path(
             os.environ.get("AP_WORKTREE_ROOT", str(PROJECT_ROOT / "wt"))
         )
+        #: Verify / Merge 用的 overlay（一次校验/合并一个临时检出，用完即回收）。
+        #:
+        #: **默认放在系统临时目录，不再放在 `<repo>/data/verify`**。原因是一处实测：
+        #: overlay 落在项目工作树里时，`git merge` 在这台机器上会间歇性写不了
+        #: `ORIG_HEAD`（`fatal: update_ref failed ... couldn't set 'ORIG_HEAD'`），同一份
+        #: 代码换成临时目录就正常；而路径里有没有空格、在哪个盘都不影响。overlay 本来
+        #: 就是临时物，放到临时目录既符合它的生命期，也躲开了这个坑。
+        self.overlay_root: Path = Path(
+            os.environ.get(
+                "AP_OVERLAY_ROOT",
+                str(Path(tempfile.gettempdir()) / "agent-office-overlays"),
+            )
+        )
 
         # --- 人类等待（R10 §18）---
         self.human_reminder_minutes: int = int(os.environ.get("AP_HUMAN_REMINDER", "30"))
@@ -245,7 +259,13 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         """创建运行期目录。幂等。"""
-        for d in (self.data_dir, self.worktree_root, self.export_dir, self.admin_scratch_dir):
+        for d in (
+            self.data_dir,
+            self.worktree_root,
+            self.export_dir,
+            self.admin_scratch_dir,
+            self.overlay_root,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
     def summary(self) -> dict[str, object]:

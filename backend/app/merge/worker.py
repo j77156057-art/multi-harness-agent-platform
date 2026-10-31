@@ -19,6 +19,7 @@ actually undo the merge" is not something a human should have to notice.
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,26 @@ HEALTH_ESCALATED = "escalated"
 
 class MergeError(RuntimeError):
     """The merge could not be completed."""
+
+
+#: 这台机器上 git 偶发写不了 ref（`fatal: couldn't set 'ORIG_HEAD'` /
+#: `update_ref failed` / `cannot lock ref`）。与仓库好坏无关：隔一下再来就过。
+#:
+#: 判据只看「写 ref 失败」这一族，**不含**真正的合并冲突（那会带 unmerged 文件）。
+_TRANSIENT_GIT_FAILURES = (
+    "couldn't set",
+    "update_ref failed",
+    "cannot lock ref",
+    "unable to write",
+    "index.lock",
+    "failed to write",
+    "could not read from remote",
+)
+
+
+def _is_transient_git_failure(stderr: str) -> bool:
+    text = (stderr or "").lower()
+    return any(marker in text for marker in _TRANSIENT_GIT_FAILURES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,17 +155,15 @@ class MergeWorker:
 
         try:
             run_git("fetch", "--no-tags", str(self.repo.path), commit, cwd=overlay.path)
-            merged = run_git(
-                "merge",
-                "--no-ff",
-                "--no-edit",
-                "-m",
-                f"merge {task_id} attempt {attempt_id}",
-                "FETCH_HEAD",
-                cwd=overlay.path,
-                check=False,
-            )
+            merged = self._merge_with_retry(overlay, task_id=task_id, attempt_id=attempt_id)
             if merged.returncode != 0:
+                # 重试用尽还是失败：先分清是**机器抖**还是**真冲突**。把 ref 写失败
+                # 记成冲突是最坏的一种错 —— 任务被退回返工，人会以为交付物撞车了。
+                if _is_transient_git_failure(merged.stderr):
+                    raise MergeError(
+                        "git could not write the merge ref on this machine"
+                        f" (transient); nothing was merged: {merged.stderr.strip()[:200]}"
+                    )
                 return self._handle_conflict(
                     overlay, task_id=task_id, attempt_id=attempt_id, commit=commit
                 )
@@ -173,6 +192,45 @@ class MergeWorker:
         finally:
             if overlay.path.exists():
                 self.overlays.recycle(overlay)
+
+    def _merge_with_retry(
+        self, overlay: Overlay, *, task_id: str, attempt_id: str, attempts: int = 10
+    ):
+        """`git merge` 在这台机器上偶发写不了 ref（实测：`couldn't set 'ORIG_HEAD'`）。
+
+        这与仓库好坏无关：结构、磁盘、其它 ref 都正常，隔一下再来就过（`formal_worker`
+        的提交、mergeguard 早就这么处理了）。不重试的后果很具体：merge 返回非 0、
+        `--diff-filter=U` 又拿不到冲突文件，于是**一次机器抖动被记成"交付物撞车"**，
+        任务被退回返工 —— 人会以为是自己改错了。
+
+        所以只对"ref 写失败"这类瞬时错误重试；真冲突（有 unmerged 文件）不重试。
+        """
+        merged = run_git(
+            "merge",
+            "--no-ff",
+            "--no-edit",
+            "-m",
+            f"merge {task_id} attempt {attempt_id}",
+            "FETCH_HEAD",
+            cwd=overlay.path,
+            check=False,
+        )
+        for _ in range(max(0, attempts - 1)):
+            if merged.returncode == 0 or not _is_transient_git_failure(merged.stderr):
+                return merged
+            run_git("merge", "--abort", cwd=overlay.path, check=False)
+            time.sleep(1.0)
+            merged = run_git(
+                "merge",
+                "--no-ff",
+                "--no-edit",
+                "-m",
+                f"merge {task_id} attempt {attempt_id}",
+                "FETCH_HEAD",
+                cwd=overlay.path,
+                check=False,
+            )
+        return merged
 
     def _handle_conflict(
         self, overlay: Overlay, *, task_id: str, attempt_id: str, commit: str

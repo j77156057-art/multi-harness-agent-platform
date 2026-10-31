@@ -30,6 +30,8 @@ from app.claim.service import IdempotencyConflict
 from app.claim.transitions import ConcurrentStateChange, IllegalTransition
 from app.git.publish import PublishRejected
 from app.lease.service import LeaseExpired, LeaseNotFound, LeaseTokenMismatch
+from app.merge.gate import MergeGateRejected
+from app.merge.worker import MergeError
 from app.security.scan import SecretScanBlocked
 from app.tasks.service import Conflict, InvalidInput, NotFound
 
@@ -135,6 +137,17 @@ def _from_exception(exc: Exception) -> ApiError:
     if isinstance(exc, Conflict):
         code = getattr(exc, "code", None) or "request.conflict"
         return ApiError(code, 409, str(exc))
+    if isinstance(exc, MergeGateRejected):
+        # 合入被闸门挡住：把每一条失败原因都带回去，人才能知道该先处理哪一件。
+        return ApiError(
+            exc.code,
+            409,
+            str(exc),
+            details={"failures": list(exc.failures)},
+            task_id=None,
+        )
+    if isinstance(exc, MergeError):
+        return ApiError("merge.refused", 409, str(exc))
     if isinstance(exc, ValueError):
         return ApiError("request.invalid", 400, str(exc))
     return ApiError("internal.error", 500, "internal error", retryable=False)

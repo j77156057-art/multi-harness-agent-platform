@@ -45,6 +45,9 @@ from app.claim.service import ClaimRequest, ClaimService
 from app.config import settings
 from app.db.connection import Database
 from app.git.publish import PublishProxy
+from app.git.repo import CanonicalRepo
+from app.merge.worker import MergeWorker
+from app.runtime.driver import load_runtime_policy
 from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
 from app.review_doc import build_document
@@ -1305,6 +1308,83 @@ def human_review_same_provider(
         decided_by=body.decided_by,
         reason=body.reason,
     )
+
+
+@human.post("/merge")
+def human_merge(
+    body: schemas.HumanMergeRequest,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("merge:confirm"),
+) -> dict[str, Any]:
+    """人明确确认之后合入主树（§17「merge/integration write：需二次确认」）。
+
+    平台此前没有给合并留 HTTP 面：审批通过之后由运行环自动合。那等于"谁都没按这个
+    键" —— 出问题时说不清是谁让它进的主树。这个路由把这一步变成**人的明确动作**：
+
+    * 只认人类令牌（`merge:confirm`），管理员 harness 与成员都拿不到；
+    * 二次确认是手敲 commit：与分支头不一致直接拒，逼人看清要合的是哪一版；
+    * 真正写集成分支的仍是 Merge Worker（单写者不变），闸门一条都不跳。
+
+    也就是说：**决定权回到了人手里，写权限没有散出去。**
+    """
+    bind_declared(
+        principal,
+        body.decided_by,
+        key="merge:confirm",
+        database=database,
+        request=request,
+    )
+    rows = database.read(
+        "SELECT status, current_attempt_id, group_id FROM tasks WHERE task_id = ?",
+        (body.task_id,),
+    )
+    if not rows:
+        raise ApiError("resource.not_found", 404, f"unknown task: {body.task_id}")
+    task = dict(rows[0])
+    if str(task["status"]) != TaskStatus.APPROVED.value:
+        raise ApiError(
+            "merge.not_approved",
+            409,
+            f"{body.task_id} is {task['status']}, not approved;"
+            " review must pass before anything is merged",
+        )
+    attempt_id = task["current_attempt_id"]
+    if not attempt_id:
+        raise ApiError("merge.no_attempt", 409, f"{body.task_id} has no current attempt")
+    workspace = database.read(
+        "SELECT branch FROM workspaces WHERE attempt_id = ? AND status = 'active'"
+        " ORDER BY rowid DESC LIMIT 1",
+        (str(attempt_id),),
+    )
+    if not workspace:
+        raise ApiError("merge.no_branch", 409, f"no active workspace for {attempt_id}")
+    branch = str(workspace[0]["branch"])
+
+    repo = getattr(request.app.state, "canonical_repo", None) or CanonicalRepo.from_settings()
+    commit = repo.ref_commit(f"refs/heads/{branch}")
+    if commit is None:
+        raise ApiError("merge.no_branch", 409, f"branch {branch} does not exist in canonical")
+    # 二次确认：人要敲的是**现在真的会被合的那个 commit**。
+    confirmed = body.confirm_commit.strip()
+    if not (commit == confirmed or commit.startswith(confirmed)):
+        raise ApiError(
+            "merge.confirm_mismatch",
+            400,
+            f"commit to merge is {commit}; the confirmation said {confirmed}."
+            " Type the commit you are merging.",
+            details={"commit": commit, "branch": branch},
+        )
+
+    policy = load_runtime_policy(settings.runtime_policy_file, repo=repo).merge_policy()
+    worker = MergeWorker(database, repo, policy=policy)
+    outcome = worker.merge(
+        task_id=body.task_id,
+        attempt_id=str(attempt_id),
+        commit=commit,
+        branch=branch,
+    )
+    return {**outcome.as_json(), "confirmed_by": body.decided_by, "branch": branch}
 
 
 @human.post("/release")

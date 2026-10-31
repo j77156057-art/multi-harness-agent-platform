@@ -47,6 +47,12 @@ _INSTANCE_RE = re.compile(
 #: assigned to it even when an API caller omits the project member list.
 PLATFORM_ASSISTANT_HARNESS_ID = "office-admin"
 
+#: 四类意见（定义在 `app.review_kinds`，这里再导出一次：`admin.service` 是对外
+#: 的门面，调用方不必知道它落在哪个模块）。
+from app.review_kinds import REVIEW_FINDING_KINDS, REVIEW_FINDING_LABELS  # noqa: E402,F401
+
+_FINDING_KINDS = REVIEW_FINDING_KINDS
+
 
 class AdminHarnessError(RuntimeError):
     """细化失败。调用方必须把它当失败，不能当"空规格"。"""
@@ -698,12 +704,22 @@ class AdminService:
         findings: list[dict[str, Any]] = []
         for index, item in enumerate(raw_findings, start=1):
             contract_id = ""
+            kind = "defect"
             if isinstance(item, str):
                 message = item.strip()
                 severity = "note"
             elif isinstance(item, dict):
                 message = str(item.get("message") or "").strip()
                 severity = str(item.get("severity") or "note").strip()
+                # 这条意见属于哪一类（R10-fix-15）：问题本身 / 需要改进 / 冲突风险 /
+                # 可能的 bug。主人要的是「发还回执照着这四类说清楚」，光有 severity
+                # 只能说明有多严重，说不清"这是什么性质的事"，成员照着改也不对路。
+                kind = str(item.get("kind") or "defect").strip() or "defect"
+                if kind not in _FINDING_KINDS:
+                    raise AdminHarnessError(
+                        f"review finding {index} has an unknown kind {kind!r};"
+                        f" use one of {', '.join(_FINDING_KINDS)}"
+                    )
                 # The acceptance contract a finding addresses: the platform
                 # checks that an approve verdict covers **every** contract, and
                 # it can only check that if the finding still carries the id.
@@ -714,7 +730,7 @@ class AdminService:
                 raise AdminHarnessError(f"review finding {index} is not text or an object")
             if not message:
                 raise AdminHarnessError(f"review finding {index} has no message")
-            finding: dict[str, Any] = {"severity": severity, "message": message}
+            finding: dict[str, Any] = {"severity": severity, "kind": kind, "message": message}
             if contract_id:
                 finding["contract_id"] = contract_id
             findings.append(finding)
@@ -775,12 +791,17 @@ class AdminService:
         numbered: list[str] = [
             "1. Answer with ONE JSON object and nothing else.",
             '2. Shape: {"verdict":"approve"|"request_changes","findings":['
-            '{"severity":"note|minor|major|critical","message":"...",'
+            '{"kind":"defect|improvement|conflict_risk|bug_risk",'
+            '"severity":"note|minor|major|critical","message":"...",'
             '"contract_id":"..."}]}',
+            "3. Tag every finding: defect = it is wrong now; improvement = it works but"
+            " should be better; conflict_risk = it will clash with work already on the"
+            " integration branch or with a path another task owns; bug_risk = it is likely"
+            " to fail at runtime even if it looks right.",
         ]
-        for offset, criterion in enumerate(criteria, start=3):
+        for offset, criterion in enumerate(criteria, start=4):
             numbered.append(f"{offset}. {criterion}")
-        next_index = 3 + len(criteria)
+        next_index = 4 + len(criteria)
         numbered.extend(
             [
                 f"{next_index}. request_changes must name every concrete defect a reworking"

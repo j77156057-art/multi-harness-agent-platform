@@ -102,7 +102,11 @@ POLICY: dict[str, frozenset[str]] = {
     "task:release_escalated": frozenset({HUMAN}),
     "task:adjudicate": frozenset({HUMAN}),
     "task:cancel": frozenset({HUMAN}),
-    # --- R10 §17 分配与传阅面（R10-fix-13）---
+    # §17「merge/integration write」那一行写的是「人类管理员/负责人：**需二次确认**」。
+    # 这是它的 HTTP 面：人明确确认之后，由平台自己的 Merge Worker 执行写入 ——
+    # 单写者没有被拆掉，闸门照旧逐条判（回执/审批/分支头/集成健康/密钥扫描）。
+    # 二次确认就是**手动敲一遍要合的 commit**：一个按钮点下去不算确认。
+    "merge:confirm": frozenset({HUMAN}),
     # 传阅（方案互审）。`circulation:start` 是 §39 的创建边（管理员发布草案+名单+轮数）。
     "circulation:start": frozenset({HUMAN}),
     "circulation:close": frozenset({HUMAN}),
