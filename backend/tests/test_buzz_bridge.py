@@ -296,9 +296,9 @@ def test_publish_set_is_derived_from_the_frozen_allowlist():
     observable = observable_events()
     recovery = recovery_events()
     published = publish_events()
-    # §37.7 冻结计数（M/O/R = 74/14/1，并集 89）
-    assert (len(migration), len(observable), len(recovery)) == (74, 14, 1)
-    assert len(migration | observable | recovery) == 89
+    # §37.7 冻结计数（M/O/R = 75/14/1，并集 90）；R10-fix-14 新增 lease_uncertain。
+    assert (len(migration), len(observable), len(recovery)) == (75, 14, 1)
+    assert len(migration | observable | recovery) == 90
     # 发布集 = M − {escalation_reminder} + {permission_denied, secret_scan_blocked}
     assert migration - published == {"escalation_reminder"}
     assert published - migration == {"permission_denied", "secret_scan_blocked"}

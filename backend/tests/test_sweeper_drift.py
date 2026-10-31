@@ -163,6 +163,14 @@ def test_drift_states_have_a_recovery_exit(tmp_path):
         names.index("drift") < len(names) - 3
     ), "drift runs before the trailing group (budget + the two reminders)"
     assert names[-2:] == ["human_wait_timeout", "escalation_reminder"]
+    # R10-fix-14：drift 状态也是 owner 状态，到期先停在「等人确认」，不直接判失联。
+    assert _status(database) == "awaiting_human"
+    assert _event_count(database, "lease_uncertain") == 1
+
+    from app.config import settings
+
+    later = NOW + timedelta(minutes=settings.lease_uncertain_grace_minutes + 1)
+    run_all_sweeps(database, now=later)
     assert _status(database) == "stale"
     assert _event_count(database, "lease_expire") == 1
 

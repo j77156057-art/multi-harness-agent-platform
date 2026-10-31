@@ -28,6 +28,7 @@ from app.claim.transitions import apply_transition
 from app.db.connection import Database
 from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, GitError, run_git
+from app.human.decisions import open_decision
 from app.merge.gate import evaluate_merge_gate
 from app.spec import EventKind, TaskStatus
 from app.verify.overlay import Overlay, OverlayError, OverlayManager
@@ -221,13 +222,32 @@ class MergeWorker:
                 ),
             },
         )
+        if owner_must_resolve:
+            # R10-fix-14：冲突落在自己的文件里时，**先把问题交给人**，不再直接
+            # 把任务塞回 changes_requested。原因：两边都是真改动，谁该让步要人看着
+            # 落点决定；平台替人拍这一下，最容易产出"改回来了又被冲突一次"的空转。
+            # 人答完之后走 human.reopen → ready，由人挑执行方重新领。
+            with self.database.transaction() as conn:
+                open_decision(
+                    conn,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    actor="scheduler",
+                    question=(
+                        f"「{task_id}」的交付合不进去："
+                        + "、".join(conflict_files[:3])
+                        + " 这些文件在集成分支上已经有别的改动。要覆盖它、给它换落点，还是让人重做？"
+                    ),
+                    options=["覆盖集成分支上的这份", "给它换落点后重做", "取消这条活"],
+                    scope="merge_conflict",
+                )
         return MergeOutcome(
             status="conflict",
             task_status=next_status,
             merge_commit=None,
             event=event.value,
             conflicts=conflicts,
-            detail="conflict is inside the task's own files"
+            detail="conflict is inside the task's own files; a person decides who reworks it"
             if owner_must_resolve
             else "conflict is outside the task's files",
         )

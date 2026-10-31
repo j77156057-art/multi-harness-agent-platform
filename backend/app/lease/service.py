@@ -21,6 +21,7 @@ from app.claim.transitions import apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
+from app.human.decisions import open_decision
 from app.spec import OWNER_STATES, EventKind, TaskStatus
 
 #: Process-unique boot id for the R10 §13 double anchor.
@@ -217,16 +218,20 @@ def expire_stale_leases(
     now: datetime | None = None,
     escalated_out: list[str] | None = None,
 ) -> list[str]:
-    """Sweep expired development leases.
+    """Sweep expired development leases — **ask a person before declaring a task lost**.
 
-    For each expired lease the lease and its resources are always released; the
-    task additionally moves to ``stale`` **only if** its status is one of the
-    six owner states (R10 §10 ``lease_expire`` edge). A task already past the
-    owner states keeps its status -- releasing the stale lease is bookkeeping,
-    not a transition.
+    R10-fix-14 把这个清扫器改成了两段（原来是"到期即判失联"）：
 
-    Returns the task ids that actually transitioned by lease expiry. Budget
-    escalations are separate state changes; pass ``escalated_out`` to receive
+    1. **到期**：租约一定释放（`_released` 是机械事实 —— 那个进程不能再续期），
+       但任务**不**直接转 `stale`，而是走 `lease_uncertain` 停在 `awaiting_human`，
+       并在「需要你处理」里留一条：这条活的执行方断线了，等它回来还是现在换人。
+       停一下的代价是这条活多等一会儿；判错的代价是**把还在干的活判死**，
+       而且人会以为它没了 —— 前者小得多。
+    2. **宽限期过**（`lease_uncertain_grace_minutes`）：人一直没答，才走
+       `lease_expire` → `stale` 兜底。队列因此不会被无人值守的机器卡死。
+
+    Returns the task ids that actually transitioned by lease expiry（两段都算）。
+    Budget escalations are separate state changes; pass ``escalated_out`` to receive
     them too (the scheduler reports them without conflating the two lists).
     """
     moment = now or utc_now()
@@ -267,27 +272,79 @@ def expire_stale_leases(
             if status not in OWNER_STATES:
                 continue
 
+            # 第一段：到期先问人，不判失联。
+            event = store.append(
+                event_name=EventKind.LEASE_UNCERTAIN.value,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="scheduler",
+                actor_id="lease-sweeper",
+                payload={
+                    "previous_status": status.value,
+                    "boot_id": BOOT_ID,
+                    "grace_minutes": settings.lease_uncertain_grace_minutes,
+                },
+                connection=conn,
+            )
+            open_decision(
+                conn,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                actor="scheduler",
+                question=(
+                    f"「{task_id}」的执行方断线了（租约到期没续）。"
+                    "要等它回来，还是现在换人？"
+                ),
+                options=["等它回来", "现在换人", "取消这条活"],
+                scope="lease_uncertain",
+            )
+            apply_transition(
+                conn,
+                task_id=task_id,
+                current=status,
+                event=EventKind.LEASE_UNCERTAIN,
+                expected_epoch=int(row["fencing_epoch"]),
+                extra_sets={"waiting_since": iso(moment)},
+                state_seq=event.seq,
+            )
+            transitioned.append(task_id)
+
+        # 第二段：宽限期过了还没人回答，才按失联兜底。
+        cutoff_grace = iso(moment - timedelta(minutes=settings.lease_uncertain_grace_minutes))
+        for row in conn.execute(
+            "SELECT t.task_id, t.current_epoch, d.decision_id FROM tasks t"
+            "  JOIN task_decisions d ON d.task_id = t.task_id"
+            " WHERE t.status = ? AND d.scope = 'lease_uncertain' AND d.answer IS NULL"
+            "   AND d.decided_seq IS NULL AND t.waiting_since IS NOT NULL"
+            "   AND t.waiting_since <= ?",
+            (TaskStatus.AWAITING_HUMAN.value, cutoff_grace),
+        ).fetchall():
+            task_id = str(row["task_id"])
             event = store.append(
                 event_name=EventKind.LEASE_EXPIRE.value,
                 aggregate_type="task",
                 aggregate_id=task_id,
                 actor_type="scheduler",
                 actor_id="lease-sweeper",
-                payload={"previous_status": status.value, "boot_id": BOOT_ID},
+                payload={"reason": "uncertain grace elapsed", "boot_id": BOOT_ID},
                 connection=conn,
             )
             apply_transition(
                 conn,
                 task_id=task_id,
-                current=status,
+                current=TaskStatus.AWAITING_HUMAN,
                 event=EventKind.LEASE_EXPIRE,
-                expected_epoch=int(row["fencing_epoch"]),
+                expected_epoch=int(row["current_epoch"]),
                 extra_sets={
                     "owner": None,
                     "current_attempt_id": None,
                     "waiting_since": iso(moment),
                 },
                 state_seq=event.seq,
+            )
+            conn.execute(
+                "UPDATE task_decisions SET answer = ?, decided_seq = ? WHERE decision_id = ?",
+                ("超时未确认，平台按失联处理", event.seq, str(row["decision_id"])),
             )
             transitioned.append(task_id)
 

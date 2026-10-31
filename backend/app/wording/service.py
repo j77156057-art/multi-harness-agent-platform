@@ -114,6 +114,9 @@ EVENT_TEXT: dict[str, str] = {
     "merge_conflict_needs_owner": "合并冲突，需你决定",
     "merge_post_commit_failure_escalated": "合并后发生异常，已提交给你",
     "lease_expire": "工位已过期",
+    # R10-fix-14：到期先问人。事件名照平台说，人话照人看 —— 这一条进的是
+    # 「这条活现在怎么样了」，写成"工位已过期"人会以为执行方没了，其实还在等确认。
+    "lease_uncertain": "执行方断线了，等你决定",
     "attempt_budget_exhausted": "尝试次数已用尽",
     "stuck_threshold_reached": "已触及停滞阈值",
     "escalation_reminder": "已提醒管理员",

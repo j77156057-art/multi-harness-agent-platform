@@ -92,6 +92,11 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+#: 决策写入在 `app.human.decisions`（避免 lease ↔ human 循环 import），这里再导出
+#: 一次，老的调用点不用改。
+from app.human.decisions import open_decision  # noqa: E402
+
+
 class HumanOpsService:
     def __init__(self, database: Database) -> None:
         self.database = database
@@ -700,22 +705,15 @@ class HumanOpsService:
         options: list[str],
         scope: str,
     ) -> str:
-        decision_id = f"dec-{uuid.uuid4().hex}"
-        conn.execute(
-            "INSERT INTO task_decisions(decision_id, task_id, attempt_id, actor, question,"
-            " options_json, answer, scope, expires_at, decided_seq, superseded_by)"
-            " VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL)",
-            (
-                decision_id,
-                task_id,
-                None if attempt_id is None else str(attempt_id),
-                actor,
-                question,
-                json.dumps(options, ensure_ascii=False),
-                scope,
-            ),
+        return open_decision(
+            conn,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            actor=actor,
+            question=question,
+            options=options,
+            scope=scope,
         )
-        return decision_id
 
     @staticmethod
     def _answer_decisions(

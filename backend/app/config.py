@@ -58,6 +58,12 @@ class Settings:
         # 在这段时间内重跑 worker 会拿回同一个 worktree。900 → 1800 是 2026-10-19
         # 的现场决定（30 分钟续跑窗口）；可用 AP_LEASE_SECONDS 覆盖。
         self.heartbeat_seconds: int = int(os.environ.get("AP_HEARTBEAT_SECONDS", "300"))  # 5 min
+        # R10-fix-14：租约到期**先问人**，这段是等人回答的宽限期。过了没人答才按
+        # 失联兜底（转 stale），队列不会因为人不在而卡死。默认一天：误判的代价
+        # （把还在干的活判成死的）远大于多等一会儿。
+        self.lease_uncertain_grace_minutes: int = int(
+            os.environ.get("AP_LEASE_UNCERTAIN_GRACE", "1440")
+        )
         # 成员 CLI 单次运行的上限。真实代码任务的返修会超过 30 分钟（codebuddy 实测两次
         # 1800s 超时），这里放宽到 60 分钟；超时语义不变（R10 §25：失联即 abandon），
         # 只是不再因为默认值过短而丢掉一次已经跑了半小时的尝试。可用环境变量或

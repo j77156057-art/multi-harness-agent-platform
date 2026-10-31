@@ -134,6 +134,24 @@ def count(database: Database, sql: str, parameters: tuple[object, ...] = ()) -> 
     return int(rows[0][0])
 
 
+def sweep_to_stale(database: Database, *, at: datetime) -> list[str]:
+    """把租约清扫的两段都跑完（先问人 → 宽限期过 → 判失联）。
+
+    R10-fix-14 之后**一次**清扫不再产生 `stale`：第一段只把任务停在
+    `awaiting_human` 等人确认执行方是不是真的断了。任何想构造 stale 现场
+    （reclaim / take_over / 回收）的测试都必须走完第二段，不能只扫一次。
+    """
+    from datetime import timedelta
+
+    from app.config import settings
+    from app.lease.service import expire_stale_leases
+
+    first = expire_stale_leases(database, now=at)
+    later = at + timedelta(minutes=settings.lease_uncertain_grace_minutes + 1)
+    second = expire_stale_leases(database, now=later)
+    return first + second
+
+
 def event_names(database: Database, *, aggregate_id: str) -> list[str]:
     rows = database.read(
         "SELECT event_name FROM task_events WHERE aggregate_id = ? ORDER BY seq",

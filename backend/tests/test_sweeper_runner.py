@@ -62,9 +62,10 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
     ]
     assert reports[0].actions == 1
     assert reports[0].detail["tasks"] == ["T-1"]
-    assert _status(database) == "stale"
+    # R10-fix-14：到期先停在「等人确认执行方是不是真的断了」。
+    assert _status(database) == "awaiting_human"
     events = database.read(
-        "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_expire'"
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_uncertain'"
     )
     assert events[0]["n"] == 1
 
@@ -114,7 +115,7 @@ def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
 
     assert [report.actions for report in second] == [0] * 15
     events = database.read(
-        "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_expire'"
+        "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_uncertain'"
     )
     assert events[0]["n"] == 1, "no duplicate transition may be written"
 

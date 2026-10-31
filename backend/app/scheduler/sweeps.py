@@ -71,11 +71,13 @@ _DEAD_UPSTREAM_STATES = frozenset(
 def sweep_expired_leases(
     database: Database, now: datetime, repo: CanonicalRepo | None = None
 ) -> SweepReport:
-    """Owner leases past their deadline: lease freed, owners' tasks → ``stale``.
+    """Owner leases past their deadline: lease freed, the owner is **asked about**, not declared lost.
 
-    R10 §10's ``lease_expire`` edge and R10 §13's "renewal rejection means out
-    of contact". The transition logic stays in ``app/lease`` — this function
-    only adapts it to the runner's report shape.
+    R10-fix-14（2026-10-31）起，`lease_expire` 不再直接从 owner 状态跳到 `stale`：
+    到期先写 `lease_uncertain` 让任务停在 `awaiting_human`，并在「需要你处理」里留
+    一条问题；宽限期（`lease_uncertain_grace_minutes`）过后没人回答，才走
+    `lease_expire` 兜底转 `stale`。判错的代价（把还在干的活判死）比多等一会儿大得多。
+    迁移逻辑仍在 ``app/lease`` 里，这里只把结果适配成 runner 的报告形状。
     """
     budget_escalated: list[str] = []
     transitioned = expire_stale_leases(database, now=now, escalated_out=budget_escalated)

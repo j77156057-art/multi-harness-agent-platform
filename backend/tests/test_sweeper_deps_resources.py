@@ -217,7 +217,16 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "escalation_reminder",
     ]
 
+    # R10-fix-14：先停在 awaiting_human 问人……
     run_all_sweeps(database, now=NOW + timedelta(hours=1))
+    assert _status(database, "T-1") == "awaiting_human"
+    assert _event_count(database, "T-1", "lease_uncertain") == 1
+
+    # ……宽限期过、没人回答，才按失联兜底。
+    from app.config import settings
+
+    later = NOW + timedelta(hours=1, minutes=settings.lease_uncertain_grace_minutes + 1)
+    run_all_sweeps(database, now=later)
     assert _status(database, "T-1") == "stale"
     assert _event_count(database, "T-1", "lease_expire") == 1
 

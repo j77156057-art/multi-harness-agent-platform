@@ -127,8 +127,9 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "tests.test_adapter::test_release_returns_the_task_to_the_pool",
         ),
         (
-            "lease_expire",
-            "stale",
+            # R10-fix-14：到期先停在「等人确认」，不再直接判失联。
+            "lease_uncertain",
+            "awaiting_human",
             "tests.test_adapter::test_a_stale_attempt_can_be_taken_over",
         ),
     ],
@@ -226,8 +227,9 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "tests.test_merge::test_rename_rename_conflict_belongs_to_the_merge_worker",
         ),
         (
+            # R10-fix-14：冲突要 owner 返修时先停线问人（谁该让步由人定）。
             "merge_conflict_needs_owner",
-            "changes_requested",
+            "awaiting_human",
             "tests.test_merge::test_conflict_in_the_tasks_own_files_needs_the_owner",
         ),
         (
@@ -266,18 +268,25 @@ RECOVERY: dict[str, list[tuple[str, str, str]]] = {
             "awaiting_human",
             "tests.test_human_ops::test_the_first_reminder_fires_after_the_window",
         ),
+        (
+            # R10-fix-14：人一直不答，宽限期过后才按失联兜底。
+            "lease_expire",
+            "stale",
+            "tests.test_lease::test_the_grace_window_falls_back_to_stale_when_nobody_answers",
+        ),
     ],
     "plan_drift": [
         (
-            "lease_expire",
-            "stale",
+            # R10-fix-14：drift 也是 owner 状态 → 到期先停线问人。
+            "lease_uncertain",
+            "awaiting_human",
             "tests.test_sweeper_drift::test_drift_states_have_a_recovery_exit",
         ),
     ],
     "impl_drift": [
         (
-            "lease_expire",
-            "stale",
+            "lease_uncertain",
+            "awaiting_human",
             "tests.test_sweeper_drift::test_drift_states_have_a_recovery_exit",
         ),
     ],

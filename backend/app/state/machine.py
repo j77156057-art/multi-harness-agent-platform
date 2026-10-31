@@ -319,9 +319,17 @@ def default_transition_table() -> TransitionTable:
         ),
         _t(
             owner,
+            EventKind.LEASE_UNCERTAIN,
+            TaskStatus.AWAITING_HUMAN,
+            "owner lease_until passed; a person confirms before the task is ownerless",
+            "event",
+            "human_todo",
+        ),
+        _t(
+            TaskStatus.AWAITING_HUMAN,
             EventKind.LEASE_EXPIRE,
             TaskStatus.STALE,
-            "owner lease_until passed",
+            "nobody confirmed within the uncertainty grace window",
             "event",
             "lease_released",
             "stale_scan",
@@ -893,8 +901,12 @@ def default_transition_table() -> TransitionTable:
         _t(
             TaskStatus.MERGING,
             EventKind.MERGE_CONFLICT_NEEDS_OWNER,
-            TaskStatus.CHANGES_REQUESTED,
-            "pre-commit conflict requires the task owner to produce new code",
+            # R10-fix-14：冲突要 owner 重新产出代码时，**先停线问人**再交回。
+            # 原来的去向是 changes_requested —— 平台替人决定了「这条活归谁改」，
+            # 而两边的改动都是真的、谁该让步要看人的判断。人确认后再走
+            # human.reopen → ready，由人挑执行方重新领取。
+            TaskStatus.AWAITING_HUMAN,
+            "pre-commit conflict needs a person to decide who reworks it",
             "event",
             "human_todo",
         ),

@@ -74,13 +74,16 @@ def test_event_kind_subset_of_r10_allowlist(spec_path):
     """EventKind 的每个值都必须在 R10 §37.7 的 M 集合内。
 
     这是封闭性检查的代码侧：不允许出现规范里没有的事件名。
+
+    用 docstate 自己的解析器取 M 集合，**不在这里另写一份正则** —— 以前这里硬编码
+    `迁移事件（M，74 项）`，规范一改计数（R10-fix-14 增到 75 项）这条断言就会因为
+    「找不到标题」而报成「代码里出现了规范外的事件名」，指错方向。
     """
 
-    with open(spec_path, encoding="utf-8") as f:
-        text = f.read()
-    m = re.search(r"迁移事件（M，74 项）：\n\n~~~text\n(.*?)\n~~~", text, re.S)
-    assert m, "无法从 R10 提取 M 集合，请检查 §37.7 格式"
-    m_set = set(m.group(1).split())
+    from docstate.docstate import extract_allowlist, load_spec
+
+    m_set = extract_allowlist(load_spec(str(spec_path)))["M"]
+    assert m_set, "无法从 R10 提取 M 集合，请检查 §37.7 格式"
 
     code_events = {e.value for e in EventKind}
     escape = sorted(code_events - m_set)
@@ -137,7 +140,9 @@ def test_recorded_counts_match_r10(spec_path):
     ), f"spec.py 常量与 §37.7 实际集合不一致：常量={dict(R10_ALLOWLIST_COUNTS)} 文档={actual}"
     assert {key: EXPECTED_COUNTS[key] for key in ("M", "O", "R", "A", "UNION")} == actual
     assert EXPECTED_COUNTS["LOOPS"] == R10_ALLOWLIST_COUNTS["LOOPS"] == 10
-    assert R10_TRANSITION_EDGE_COUNT == 87
+    # 规范文本里的迁移表行数（R10-fix-14：lease_uncertain 新增一行 → 88）。
+    # 这个字面量是刻意的：改规范就必须在这里再确认一次边数，不能悄悄漂。
+    assert R10_TRANSITION_EDGE_COUNT == 88
 
 
 def test_mirror_detects_a_drifted_constant(spec_path, monkeypatch):

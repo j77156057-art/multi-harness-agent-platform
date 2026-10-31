@@ -1079,14 +1079,15 @@ def test_a_stale_epoch_is_refused_through_a_real_adapter(tmp_path):
     from datetime import UTC, datetime, timedelta
 
     from app.claim.service import ClaimService
-    from app.lease.service import expire_stale_leases
+    from tests.claim_support import sweep_to_stale
 
     rig = build_rig(tmp_path, CODEX_CASE)
     adapter = adapter_for(rig)
     adapter.claim(claim_request_id="cr-stale", task_ids=["T-1"])
     old = adapter.attempts["T-1"]
 
-    expire_stale_leases(rig.database, now=datetime.now(UTC) + timedelta(hours=1))
+    # R10-fix-14：到期先问人、宽限期过才判失联，所以要跑两段。
+    sweep_to_stale(rig.database, at=datetime.now(UTC) + timedelta(hours=1))
     recovery = ClaimService(rig.database)
     recovery.reclaim("T-1", grace_elapsed=True)
     epoch = rig.database.read("SELECT current_epoch FROM tasks WHERE task_id = 'T-1'")[0][

@@ -14,9 +14,11 @@ from docstate.docstate import extract_transitions
 from app.spec import PSEUDO_STATES, EventKind, TaskStatus
 from app.state.machine import default_transition_table
 
-# R10 §10 迁移表展开后的三元组总数（87 行，含 1 个 child_created 伪状态出口）。
+# R10 §10 迁移表展开后的三元组总数（88 行，含 1 个 child_created 伪状态出口）。
 # 这是规范事实而非实现选择：R10 正文改动时必须显式更新本断言并经评审。
-EXPECTED_EXPANDED_TRIPLES = 140
+# R10-fix-14（2026-10-31）：`lease_expire` 的源从 6 个 owner 状态改成 1 个
+# `awaiting_human`（−5），新增 `lease_uncertain`（6 个 owner 状态，+6）⇒ 140 → 141。
+EXPECTED_EXPANDED_TRIPLES = 141
 
 
 def _spec_triples(spec_path) -> set[tuple[str, str, str]]:

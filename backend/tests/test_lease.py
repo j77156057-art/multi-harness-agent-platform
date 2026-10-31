@@ -41,6 +41,21 @@ def claimed(tmp_path):
     return database, result.items[0]
 
 
+def sweep_to_stale(database, *, at: datetime) -> list[str]:
+    """把「到期 → 先问人 → 宽限期过 → 判失联」两段跑完，返回转过的任务。
+
+    R10-fix-14 之后，**一次**清扫不再产生 stale：第一段只把任务停到
+    `awaiting_human` 等人确认，第二段（过了 `lease_uncertain_grace_minutes`）
+    才按失联兜底。要构造 stale 的测试都得走完这两段，不能只扫一次。
+    """
+    from app.config import settings
+
+    first = expire_stale_leases(database, now=at)
+    later = at + timedelta(minutes=settings.lease_uncertain_grace_minutes + 1)
+    second = expire_stale_leases(database, now=later)
+    return first + second
+
+
 def test_renew_extends_the_lease(claimed):
     database, item = claimed
     later = datetime.now(UTC) + timedelta(seconds=60)
@@ -115,7 +130,12 @@ def test_guarded_write_refuses_a_stale_epoch_outside_the_lease_path(claimed):
     assert guard.owner == "harness-1"
 
 
-def test_expiry_moves_an_owner_state_to_stale_and_frees_everything(claimed):
+def test_expiry_asks_a_person_before_declaring_the_task_lost(claimed):
+    """到期先问人：任务停在 awaiting_human，租约释放，但**不判失联**。
+
+    R10-fix-14 把原来「到期即 stale」改成两段。理由写在清扫器的 docstring 里：
+    判错的代价（把还在干的活判死、人以为它没了）比多等一会儿大得多。
+    """
     database, item = claimed
     later = datetime.now(UTC) + timedelta(hours=1)
 
@@ -123,20 +143,65 @@ def test_expiry_moves_an_owner_state_to_stale_and_frees_everything(claimed):
 
     assert transitioned == ["T-1"]
     row = task_row(database, "T-1")
-    assert row["status"] == "stale"
-    assert row["owner"] is None
-    assert row["current_attempt_id"] is None
+    assert row["status"] == "awaiting_human", "到期不再直接判失联"
+    # 仍然记着是谁、哪一次尝试 —— 人要在界面上看到"是谁那次断的"。
+    assert row["owner"] == "harness-1"
+    assert row["current_attempt_id"] == item.attempt_id
     assert row["current_epoch"] == item.fencing_epoch, "expiry must not bump the epoch"
     assert row["waiting_since"] is not None
 
+    # 租约一定释放：那个进程不能再续期（这是机械事实，不是判断）。
     assert count(database, "SELECT COUNT(*) FROM leases WHERE released_at IS NULL") == 0
     lease_row = database.read("SELECT released_at FROM leases WHERE task_id='T-1'")[0]
     assert lease_row["released_at"] is not None, "leases has no release_reason column"
-    assert event_names(database, aggregate_id="T-1") == ["claim", "lease_expire"]
+    assert event_names(database, aggregate_id="T-1") == ["claim", "lease_uncertain"]
+
+    # 而且要在「需要你处理」里留一条 —— 停线不提问等于把人蒙在鼓里。
+    decisions = database.read(
+        "SELECT question, options_json, answer, scope FROM task_decisions WHERE task_id='T-1'"
+    )
+    assert len(decisions) == 1
+    assert decisions[0]["scope"] == "lease_uncertain"
+    assert "换人" in decisions[0]["question"]
+    assert decisions[0]["answer"] is None
 
     claim_row = database.read("SELECT * FROM task_claims WHERE task_id='T-1'")[0]
     assert claim_row["released_at"] is not None
     assert claim_row["release_reason"] == "lease_expire"
+
+
+def test_the_grace_window_falls_back_to_stale_when_nobody_answers(claimed):
+    """人一直不答 → 宽限期过后才按失联兜底，队列不会被人不在卡死。"""
+    from app.config import settings
+
+    database, item = claimed
+    later = datetime.now(UTC) + timedelta(hours=1)
+    expire_stale_leases(database, now=later)
+    assert task_row(database, "T-1")["status"] == "awaiting_human"
+
+    # 宽限期未到：什么都不做（否则"先问人"就又变回"到期即判"）。
+    within = later + timedelta(minutes=max(0, settings.lease_uncertain_grace_minutes - 1))
+    assert expire_stale_leases(database, now=within) == []
+    assert task_row(database, "T-1")["status"] == "awaiting_human"
+
+    after = later + timedelta(minutes=settings.lease_uncertain_grace_minutes + 1)
+    assert expire_stale_leases(database, now=after) == ["T-1"]
+    row = task_row(database, "T-1")
+    assert row["status"] == "stale"
+    assert row["owner"] is None
+    assert row["current_attempt_id"] is None
+    assert row["current_epoch"] == item.fencing_epoch
+    assert event_names(database, aggregate_id="T-1") == [
+        "claim",
+        "lease_uncertain",
+        "lease_expire",
+    ]
+    # 兜底这件事本身也要在决策记录里写清，别让人以为是自己答的。
+    decided = database.read(
+        "SELECT answer, decided_seq FROM task_decisions WHERE task_id='T-1'"
+    )[0]
+    assert decided["answer"] and "超时" in decided["answer"]
+    assert decided["decided_seq"] is not None
 
 
 def test_expiry_releases_resources_even_when_the_status_is_past_the_owner_states(tmp_path):
@@ -159,8 +224,10 @@ def test_a_second_sweep_is_a_no_op(claimed):
     database, _ = claimed
     later = datetime.now(UTC) + timedelta(hours=1)
     assert expire_stale_leases(database, now=later) == ["T-1"]
+    # 第二遍：租约已经释放、任务已经停在等人确认，不该再产生第二个事件。
     assert expire_stale_leases(database, now=later) == []
-    assert count(database, "SELECT COUNT(*) FROM task_events WHERE event_name='lease_expire'") == 1
+    assert count(database, "SELECT COUNT(*) FROM task_events WHERE event_name='lease_uncertain'") == 1
+    assert count(database, "SELECT COUNT(*) FROM task_decisions WHERE task_id='T-1'") == 1
 
 
 def test_budget_exhaustion_escalates_from_stale(tmp_path):
@@ -172,12 +239,14 @@ def test_budget_exhaustion_escalates_from_stale(tmp_path):
     )
 
     later = datetime.now(UTC) + timedelta(hours=1)
-    expire_stale_leases(database, now=later)
+    # 两段走完才算失联（先问人、宽限期过），预算耗尽在变成 stale 的那一轮就升级。
+    sweep_to_stale(database, at=later)
 
     row = task_row(database, "T-1")
     assert row["status"] == "escalated", "1/1 attempts used, so stale escalates immediately"
     assert event_names(database, aggregate_id="T-1") == [
         "claim",
+        "lease_uncertain",
         "lease_expire",
         "attempt_budget_exhausted",
     ]
@@ -217,7 +286,7 @@ def test_stale_task_can_be_reclaimed_and_taken_over(claimed):
     database, item = claimed
     service = ClaimService(database)
     later = datetime.now(UTC) + timedelta(hours=1)
-    expire_stale_leases(database, now=later)
+    sweep_to_stale(database, at=later)
 
     assert service.reclaim("T-1", grace_elapsed=True).value == "reclaiming"
 
@@ -236,6 +305,7 @@ def test_stale_task_can_be_reclaimed_and_taken_over(claimed):
     assert count(database, "SELECT COUNT(*) FROM task_attempts WHERE task_id='T-1'") == 2
     assert event_names(database, aggregate_id="T-1") == [
         "claim",
+        "lease_uncertain",
         "lease_expire",
         "reclaim",
         "take_over",
@@ -246,7 +316,7 @@ def test_take_over_with_a_stale_epoch_is_refused(claimed):
     database, item = claimed
     service = ClaimService(database)
     later = datetime.now(UTC) + timedelta(hours=1)
-    expire_stale_leases(database, now=later)
+    sweep_to_stale(database, at=later)
     service.reclaim("T-1", grace_elapsed=True)
 
     with pytest.raises(Exception) as caught:

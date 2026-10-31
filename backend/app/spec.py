@@ -146,6 +146,9 @@ class EventKind(StrEnum):
     SUBMIT_RESULT = "submit_result"
     SUBMIT_REJECTED_VERIFY_CAPACITY = "submit_rejected_verify_capacity"
     LEASE_EXPIRE = "lease_expire"
+    #: R10-fix-14：租约到期**不再由平台直接判失联**。owner 状态先走这条边停线问人
+    #: （→ awaiting_human），人没确认才由 `lease_expire` 在宽限期后兜底（→ stale）。
+    LEASE_UNCERTAIN = "lease_uncertain"
 
     # verify
     VERIFY_PASSED = "verify_passed"
@@ -218,12 +221,15 @@ class EventKind(StrEnum):
     CANCEL = "cancel"
 
 
-#: 迁移表边数（R10 §10 关键迁移表）。MVP 阶段实现子集，但必须记录总数以便核对
-R10_TRANSITION_EDGE_COUNT = 87
+#: 迁移表边数（R10 §10 关键迁移表）。MVP 阶段实现子集，但必须记录总数以便核对。
+#: R10-fix-14：+1（`lease_uncertain` 新增一条 owner → awaiting_human 的边；
+#: `lease_expire` 改从 awaiting_human 出发，行数不变；`merge_conflict_needs_owner`
+#: 只换去向，也不改行数）。
+R10_TRANSITION_EDGE_COUNT = 88
 
 #: R10 §37.7 集合大小。docstate 会核对规范侧，本处用于代码侧交叉验证；
 #: test_spec_mirror.py（DOC-MIRROR-001）逐键比对本常量与规范实际解析值。
-R10_ALLOWLIST_COUNTS = {"M": 74, "O": 14, "R": 1, "A": 18, "UNION": 107, "LOOPS": 10}
+R10_ALLOWLIST_COUNTS = {"M": 75, "O": 14, "R": 1, "A": 18, "UNION": 108, "LOOPS": 10}
 
 
 class AllocationEvent(StrEnum):

@@ -43,13 +43,13 @@ merged cancelled""".split()
 )
 
 ALLOWLIST_HEADINGS = [
-    ("M", "迁移事件（M，74 项）："),
+    ("M", "迁移事件（M，75 项）："),
     ("O", "观测事件（O，14 项）："),
     ("R", "恢复事件（R，1 项）："),
     ("A", "分配事件（A，18 项）："),
 ]
 
-EXPECTED_COUNTS = {"M": 74, "O": 14, "R": 1, "A": 18, "UNION": 107, "LOOPS": 10}
+EXPECTED_COUNTS = {"M": 75, "O": 14, "R": 1, "A": 18, "UNION": 108, "LOOPS": 10}
 
 #: §39 分配与传阅迁移表的标题前缀（R10-fix-13）
 ALLOCATION_TABLE_MARKER = "分配与传阅迁移表"

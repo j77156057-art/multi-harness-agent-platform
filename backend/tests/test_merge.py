@@ -221,8 +221,19 @@ def test_conflict_in_the_tasks_own_files_needs_the_owner(tmp_path):
 
     assert outcome.status == "conflict"
     assert outcome.event == "merge_conflict_needs_owner"
-    assert status_of(chain) == "changes_requested"
+    # R10-fix-14：冲突落在自己的文件里时先停线问人，不再直接塞回 changes_requested。
+    # 两边都是真改动，谁该让步要人看着落点决定；平台替人拍这一下，最容易产出
+    # 「改回来了又被冲突一次」的空转。
+    assert status_of(chain) == "awaiting_human"
     assert outcome.conflicts
+    decisions = chain.database.read(
+        "SELECT question, options_json, scope FROM task_decisions WHERE task_id = ?",
+        (chain.task_id,),
+    )
+    assert len(decisions) == 1, "停线必须留一条待决事项，否则人不知道要处理什么"
+    assert decisions[0]["scope"] == "merge_conflict"
+    assert "README.md" in decisions[0]["question"]
+    assert "换落点" in decisions[0]["question"]
     # 事件里要带上**冲在哪些文件上**：光说「冲突」，主人不知道要看哪儿，
     # 也就没法裁决（界面上这一条是从事件 payload 里读的）。
     events = chain.database.read(

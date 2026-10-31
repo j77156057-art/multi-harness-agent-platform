@@ -305,9 +305,10 @@ def test_a_stale_attempt_can_be_taken_over(tmp_path):
     from datetime import UTC, datetime, timedelta
 
     from app.claim.service import ClaimService
-    from app.lease.service import expire_stale_leases
+    from tests.claim_support import sweep_to_stale
 
-    expire_stale_leases(rig.database, now=datetime.now(UTC) + timedelta(hours=1))
+    # R10-fix-14：到期先停在 awaiting_human 问人，宽限期过后才判失联。
+    sweep_to_stale(rig.database, at=datetime.now(UTC) + timedelta(hours=1))
     assert status_of(rig) == "stale"
 
     recovery = ClaimService(rig.database)
@@ -332,9 +333,9 @@ def test_a_stale_harness_cannot_keep_working(tmp_path):
     from datetime import UTC, datetime, timedelta
 
     from app.claim.service import ClaimService
-    from app.lease.service import expire_stale_leases
+    from tests.claim_support import sweep_to_stale
 
-    expire_stale_leases(rig.database, now=datetime.now(UTC) + timedelta(hours=1))
+    sweep_to_stale(rig.database, at=datetime.now(UTC) + timedelta(hours=1))
     recovery = ClaimService(rig.database)
     recovery.reclaim(rig.task_id, grace_elapsed=True)
     epoch = rig.database.read("SELECT current_epoch FROM tasks WHERE task_id = ?", (rig.task_id,))[
