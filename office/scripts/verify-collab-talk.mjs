@@ -1,12 +1,13 @@
 // 私聊与平台助手：真发一句、真等回话，把回话原文记下来。
 //
-// 用法：$env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-collab-talk.mjs
+// 用法：$env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-collab-talk.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-collab-talk.mjs');
 const outFile = process.env.OFFICE_TALK_OUT || path.join(process.env.TEMP || '.', 'collab-talk.json');
 const assistantQuestion =
   process.env.TALK_ASSISTANT_QUESTION ||

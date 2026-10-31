@@ -10,8 +10,9 @@
 // "simplifies" the panel back to iterating status.harnesses, the load table
 // silently regains other projects again. This script fails then.
 import { isAdministratorHarness } from '../src/harness-roles.js';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = process.env.OFFICE_UI_URL || 'http://127.0.0.1:4174';
+const base = await requireOffice('verify-project-scope.mjs', process.env.OFFICE_UI_URL);
 const res = await fetch(`${base}/api/formal/status`, { cache: 'no-store' });
 if (!res.ok) throw new Error(`status ${res.status}`);
 const status = await res.json();

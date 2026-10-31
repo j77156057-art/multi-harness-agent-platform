@@ -6,9 +6,10 @@
 //   2. 没人接的条数也跟着变；
 //   3. 刷新不打断阅读：滚动位置不被拉回顶部。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.OFFICE_URL || 'http://127.0.0.1:4174';
+const BASE = await requireOffice('verify-office-brief-live.mjs', process.env.OFFICE_URL);
 const ADMIN = 'codex-window-admin';
 
 const task = (id, title, extra = {}) => ({

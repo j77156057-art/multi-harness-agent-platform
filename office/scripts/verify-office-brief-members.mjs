@@ -10,9 +10,10 @@
 //
 // 只读脚本：API 全部拦截，不往正式平台写任何东西。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.OFFICE_URL || 'http://127.0.0.1:4174';
+const BASE = await requireOffice('verify-office-brief-members.mjs', process.env.OFFICE_URL);
 const ADMIN = 'codex-window-admin';
 
 const browser = await chromium.launch({ headless: true });

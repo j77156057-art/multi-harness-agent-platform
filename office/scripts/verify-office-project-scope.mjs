@@ -8,9 +8,10 @@
 //   1. 打开一个名字与群里某个项目一致的项目 → 任务表里只有那个项目的任务；
 //   2. 打开一个与谁都不匹配的项目 → 0 条任务（不泄漏别处的历史）。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.OFFICE_URL || 'http://127.0.0.1:4174';
+const BASE = await requireOffice('verify-office-project-scope.mjs', process.env.OFFICE_URL);
 
 const browser = await chromium.launch({ headless: true });
 try {

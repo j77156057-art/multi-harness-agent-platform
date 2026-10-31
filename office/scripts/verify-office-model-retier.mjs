@@ -9,7 +9,7 @@
 // 跑完池子与开始时一致（内置档位撤不没，所以这条链是无痕的）。
 //
 // 用法：
-//   $env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-office-model-retier.mjs
+//   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-model-retier.mjs
 //   可选：OFFICE_RETIER_HARNESS=<窗口 id>、OFFICE_RETIER_CLI=<CLI>、
 //        OFFICE_RETIER_MODEL=<CLI 自己的模型名>、OFFICE_RETIER_SHOTS=<截图目录>
 import assert from 'node:assert/strict';
@@ -17,8 +17,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-office-model-retier.mjs');
 const harness = process.env.OFFICE_RETIER_HARNESS || 'codex';
 const cli = process.env.OFFICE_RETIER_CLI || 'opencode-cli';
 const cliModel = process.env.OFFICE_RETIER_MODEL || 'opencode/beam-free';

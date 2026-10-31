@@ -1,8 +1,9 @@
 // 注册窗口表单的可达性：用户必须能真的看到并点到它，而不是「下拉永远为空」。
 // 这里只做只读检查：不提交注册，不写正式注册表。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = process.env.OFFICE_UI_URL || 'http://127.0.0.1:4174/';
+const base = await requireOffice('verify-window-registration.mjs', process.env.OFFICE_UI_URL);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
 const errors = [];

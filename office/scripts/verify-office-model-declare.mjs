@@ -15,15 +15,16 @@
 //   4. 恢复成「窗口自带模型」也成功（证明前一步不是碰巧）。
 //
 // 用法：
-//   $env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-office-model-declare.mjs
+//   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-model-declare.mjs
 //   可选：OFFICE_DECLARE_HARNESS=<窗口 id>、OFFICE_DECLARE_SHOTS=<截图目录>
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-office-model-declare.mjs');
 const harness = process.env.OFFICE_DECLARE_HARNESS || 'codex';
 const shotDir = process.env.OFFICE_DECLARE_SHOTS || path.join(process.env.TEMP || '.', 'office-declare');
 fs.mkdirSync(shotDir, {recursive: true});

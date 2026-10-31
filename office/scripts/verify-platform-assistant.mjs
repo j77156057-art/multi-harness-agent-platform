@@ -6,8 +6,9 @@
 //   3. 上报按钮在没有指定管理员 Harness 时是禁用的（不自动挑人顶替）。
 // 只读：不写正式平台。真写过请用 OFFICE_FORMAL_LIVE=1 的脚本。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const url = process.env.OFFICE_UI_URL || 'http://127.0.0.1:4174/';
+const url = await requireOffice('verify-platform-assistant.mjs', process.env.OFFICE_UI_URL);
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const errors = [];

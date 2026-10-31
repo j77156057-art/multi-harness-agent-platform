@@ -10,7 +10,7 @@
 // 默认挑 codebuddy 家的第一个 —— 本机上它是能通的那家）。要不要测别的，人自己点。
 //
 // 用法：
-//   $env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-office-model-test.mjs
+//   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-model-test.mjs
 //   $env:OFFICE_MT_MODEL='codebuddy/hy3'      指定要测的模型（默认自动挑）
 //   $env:OFFICE_MT_SHOTS='D:\Temp\shots'      截图目录
 import assert from 'node:assert/strict';
@@ -18,8 +18,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-office-model-test.mjs');
 const wanted = process.env.OFFICE_MT_MODEL || '';
 const shotDir = process.env.OFFICE_MT_SHOTS || path.join(process.env.TEMP || '.', 'office-model-test');
 fs.mkdirSync(shotDir, {recursive: true});

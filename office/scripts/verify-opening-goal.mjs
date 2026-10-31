@@ -5,8 +5,9 @@
 // 什么。宿主把组件自己的输入框搬到表单最前（见 opening-host.js 的
 // promoteGoalField）—— 这条检查钉住两件事：位置，以及搬动没有把它弄坏。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = process.env.OFFICE_UI_URL || 'http://127.0.0.1:4174/';
+const base = await requireOffice('verify-opening-goal.mjs', process.env.OFFICE_UI_URL);
 const GOAL = '为本期活动写一页说明';
 
 const browser = await chromium.launch();

@@ -9,9 +9,10 @@
 //
 // 只读脚本：不建任务、不发消息、不做审核。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const base = process.env.OFFICE_PREVIEW_URL || 'http://127.0.0.1:4174';
+const base = await requireOffice('verify-office-task-view.mjs', process.env.OFFICE_PREVIEW_URL);
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });

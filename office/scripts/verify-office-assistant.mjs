@@ -1,8 +1,9 @@
 // 平台助手：工作区域里常驻的入口 + 速览 + 提问。
 // 只读检查：不代替用户发问（那会写一条定向私聊），只断言界面与数据摆对了。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = process.env.OFFICE_UI_URL || 'http://127.0.0.1:4174/';
+const base = await requireOffice('verify-office-assistant.mjs', process.env.OFFICE_UI_URL);
 
 const browser = await chromium.launch();
 try {

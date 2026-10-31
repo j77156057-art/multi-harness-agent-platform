@@ -1,7 +1,8 @@
 import {chromium} from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const base = process.env.OFFICE_PREVIEW_BASE || 'http://127.0.0.1:4174';
+const base = await requireOffice('verify-harness-connections.mjs', process.env.OFFICE_PREVIEW_BASE);
 const status = await (await fetch(`${base}/api/harnesses/status`)).json();
 assert.equal(Array.isArray(status.catalog), true);
 assert(status.catalog.some(item => item.id === 'codex'));

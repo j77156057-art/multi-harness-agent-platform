@@ -5,10 +5,11 @@
 // worker's input), not N task dispatches. The browser must never author task
 // content, exclusive paths or acceptance.
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
-const base = process.env.OFFICE_PREVIEW_URL || 'http://127.0.0.1:4174';
+const base = await requireOffice('verify-opening-host.mjs', process.env.OFFICE_PREVIEW_URL);
 const output = 'screenshots/opening-host';
 await fs.mkdir(output, { recursive: true });
 

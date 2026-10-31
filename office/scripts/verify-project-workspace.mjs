@@ -1,6 +1,8 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
+import { requireOffice } from './lib/office-url.mjs';
 
+const base = await requireOffice('verify-project-workspace.mjs');
 const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
@@ -8,7 +10,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   const projectName = `E2E-PROJECT-${Date.now()}`;
 
-  await page.goto('http://127.0.0.1:4174/');
+  await page.goto(`${base}/`);
   await page.waitForSelector('#aoLobby:not([hidden])');
   assert.equal(await page.locator('#aoWorkspace').getAttribute('hidden'), '');
   assert.equal(await page.locator('[data-empty]').isVisible(), true);

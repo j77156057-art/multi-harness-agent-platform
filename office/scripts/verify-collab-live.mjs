@@ -3,13 +3,14 @@
 // 每一张截图都等到**真有内容**再拍 —— 之前拍到空屏，是因为界面第二次重绘
 // （消息、窗口名单是第二批才到的）还没落地就按了快门。
 //
-// 用法：$env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-collab-live.mjs
+// 用法：$env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-collab-live.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-collab-live.mjs');
 const dir = process.env.OFFICE_SHOTS || path.join(process.env.TEMP || '.', 'collab-shots');
 const outFile = process.env.OFFICE_LIVE_OUT || path.join(process.env.TEMP || '.', 'collab-live.json');
 fs.mkdirSync(dir, {recursive: true});

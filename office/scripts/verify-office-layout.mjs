@@ -9,9 +9,10 @@
 //
 // 只读脚本：不建任务、不发消息。
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.OFFICE_URL || 'http://127.0.0.1:4174';
+const BASE = await requireOffice('verify-office-layout.mjs', process.env.OFFICE_URL);
 const WIDTHS = [1600, 1200, 900];
 
 const browser = await chromium.launch({ headless: true });

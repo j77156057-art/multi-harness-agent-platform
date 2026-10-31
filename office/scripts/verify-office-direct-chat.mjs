@@ -11,9 +11,10 @@
 //
 // \u53ea\u8bfb\u811a\u672c\uff1aAPI \u5168\u90e8\u62e6\u622a\uff0c\u4e0d\u5f80\u6b63\u5f0f\u5e73\u53f0\u5199\u4efb\u4f55\u4e1c\u897f\u3002
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.OFFICE_URL || 'http://127.0.0.1:4174';
+const BASE = await requireOffice('verify-office-direct-chat.mjs', process.env.OFFICE_URL);
 const ADMIN = 'codex-window-admin';
 
 const browser = await chromium.launch({ headless: true });

@@ -11,7 +11,7 @@
 //   4. 用户自己的 key 那一组不给「改档」（那一档不是价格，是"这笔钱是用户的"）。
 //
 // 用法：
-//   $env:OFFICE_URL='http://127.0.0.1:5173'; node scripts/verify-office-upstream-tier.mjs
+//   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-upstream-tier.mjs
 //   可选：OFFICE_UTIER_HARNESS、OFFICE_UTIER_GROUP（默认 opencode）、
 //        OFFICE_UTIER_MODEL（默认组内第一个模型 id）、OFFICE_UTIER_SHOTS
 import assert from 'node:assert/strict';
@@ -19,8 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
+import { requireOffice } from './lib/office-url.mjs';
 
-const base = (process.env.OFFICE_URL || 'http://127.0.0.1:5173').replace(/\/+$/, '');
+const base = await requireOffice('verify-office-upstream-tier.mjs');
 const harness = process.env.OFFICE_UTIER_HARNESS || 'codex';
 const groupName = process.env.OFFICE_UTIER_GROUP || 'opencode';
 const shotDir = process.env.OFFICE_UTIER_SHOTS || path.join(process.env.TEMP || '.', 'office-upstream-tier');
