@@ -981,6 +981,53 @@ def test_a_revision_keeps_a_valid_narrower_path(tmp_path):
     assert revised[0]["exclusive_paths"] == ["portfolio/index.html", "portfolio/assets"]
 
 
+def test_review_approve_defaults_a_finding_to_acceptance_met(tmp_path):
+    """批准时那条"我核过了"的意见不能记成"问题"。
+
+    批准必须为**每条验收条款**留一条意见（否则平台回 `review.contract_missing`），
+    而意见原来只有四类，全是"有问题" —— 唯一能过门槛的写法是把"满足验收"记成
+    ``defect``/``improvement``，记录里于是多出一条不存在的问题（2026-11-01 完整
+    流程自检实测）。默认值改成 ``acceptance_met``：不填类别的批准意见就是"核过了"。
+    """
+    service, _ = _review_service(
+        tmp_path,
+        {
+            "verdict": "approve",
+            "findings": [{"contract_id": "FLOW-1", "message": "docs/demo.md 已按工单写出"}],
+        },
+    )
+    task, spec, diff, verification = _review_inputs()
+    result = service.review(
+        task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+    )
+    assert result["findings"] == [
+        {
+            "severity": "note",
+            "kind": "acceptance_met",
+            "message": "docs/demo.md 已按工单写出",
+            "contract_id": "FLOW-1",
+        }
+    ]
+
+
+def test_review_keeps_an_explicit_kind_on_approve(tmp_path):
+    """显式写了类别就照写 —— 批准时也可以顺手留一条改进建议。"""
+    service, _ = _review_service(
+        tmp_path,
+        {
+            "verdict": "approve",
+            "findings": [
+                {"contract_id": "FLOW-1", "kind": "improvement", "message": "下次把索引也更新"}
+            ],
+        },
+    )
+    task, spec, diff, verification = _review_inputs()
+    result = service.review(
+        task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+    )
+    assert result["findings"][0]["kind"] == "improvement"
+
+
 def test_review_refuses_an_unknown_verdict(tmp_path):
     service, _ = _review_service(tmp_path, {"verdict": "lgtm", "findings": []})
     task, spec, diff, verification = _review_inputs()

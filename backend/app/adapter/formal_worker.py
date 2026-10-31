@@ -897,6 +897,86 @@ _NOT_MODEL_TROUBLE = re.compile(
 )
 
 
+def _cli_error_text(result: object) -> str:
+    """CLI 自己说的那句错误：**先看 stderr，再看 stdout**。
+
+    只看 stderr 是不够的 —— 2026-11-01 完整流程自检里，opencode 把真正的原因写在
+    stdout 的事件流里（`{"type":"error","error":{"message":"this model is served by
+    a CLI slot, which can only return text and never tool_calls …"}}`），stderr 是空的。
+    于是事件里只剩一句 `retryable failure (CliFailed): the harness CLI failed before
+    it could deliver` —— 人看不到 502、也不知道该换模型。
+
+    顺序：stderr 最后一行有用的 → stdout 里最后一个 JSON 事件的 error.message →
+    stdout 里最后一行带 error/failed 的文本。
+    """
+    stderr = str(getattr(result, "stderr", "") or "")
+    lines = [
+        line.strip()
+        for line in stderr.splitlines()
+        if line.strip() and not line.strip().startswith("[")
+    ]
+    if lines:
+        return lines[-1]
+    stdout = str(getattr(result, "stdout", "") or "")
+    fallback = ""
+    for raw in stdout.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("{"):
+            try:
+                payload = json.loads(line)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                error = payload.get("error")
+                if isinstance(error, dict):
+                    message = str(error.get("message") or "").strip()
+                    if message:
+                        fallback = message
+                elif isinstance(error, str) and error.strip():
+                    fallback = error.strip()
+            continue
+        lowered = line.lower()
+        if any(word in lowered for word in _ERROR_LINE_WORDS):
+            fallback = line
+    return fallback
+
+
+#: 没有 JSON 包装时，靠这些词认出"这句是错误"。`fatal` 一定要在：
+#: `Fatal: no space left on device` 这类说法里没有 error/failed 两个字。
+_ERROR_LINE_WORDS: tuple[str, ...] = (
+    "error",
+    "failed",
+    "refused",
+    "fatal",
+    "cannot",
+    "can't",
+    "denied",
+    "not found",
+    "unavailable",
+)
+
+
+#: 平台自己的检查已经说得很清楚、但说的是英文码 —— 翻成一句人能照着做的话。
+#: 键是上游/中继给的错误码，值是「为什么 + 该怎么办」。
+_RELAY_REFUSAL_HINTS: dict[str, str] = {
+    "relay_cli_cannot_use_tools": (
+        "这个模型是「CLI 名额」：它只能回文字、不能调工具，编程窗口用不了它。"
+        "给这个窗口换一个真实 provider 的模型（不是 CLI 名额那一档）"
+    ),
+}
+
+
+def _relay_refusal_hint(text: str) -> str:
+    """文本里带了已知的上游拒绝码时，补一句中文的"为什么 + 怎么办"。"""
+    lowered = text.lower()
+    for code, hint in _RELAY_REFUSAL_HINTS.items():
+        if code in lowered:
+            return f"（{hint}）"
+    return ""
+
+
 def human_failure_reason(exc: BaseException) -> str:
     """把失败写成**人能读懂的一句**：发生了什么 + CLI 自己说的那一句。
 
@@ -904,16 +984,18 @@ def human_failure_reason(exc: BaseException) -> str:
     —— 人看不出到底为什么。而 CLI 的 stderr 里往往已经把原因说尽了
     （`Refused: no committed change against base db8340…` = 它只把内容说出来了、
     没真的落到工作树里）。异常类名是给开发者看的，这一句才是给干活的人看的。
+
+    stderr 空的时候去看 stdout（见 ``_cli_error_text``）：有的 CLI 把错误当事件流写
+    在 stdout 里。
     """
     name = type(exc).__name__
     detail = ""
+    raw = ""
     if isinstance(exc, CliFailed):
-        lines = [
-            line.strip()
-            for line in str(exc.result.stderr or "").splitlines()
-            if line.strip() and not line.strip().startswith("[")
-        ]
-        detail = lines[-1] if lines else ""
+        detail = _cli_error_text(exc.result)
+        # 拒绝码可能只在这段输出的**别处**（例如 opencode 把它放在 error.response.body
+        # 里，而 error.message 只写了现象）。所以整段原文都留着找线索。
+        raw = f"{exc.result.stderr or ''}\n{exc.result.stdout or ''}"
         if detail.lower().startswith("refused:"):
             # 平台自己的拒收：说清它拒的是什么，别让人以为模型坏了。
             return (
@@ -925,7 +1007,8 @@ def human_failure_reason(exc: BaseException) -> str:
         detail = str(exc)
     one_line = detail.strip().splitlines()[0] if detail.strip() else ""
     one_line = one_line[:200]
-    return f"{name}：{one_line}" if one_line else name
+    hint = _relay_refusal_hint(raw or detail)
+    return f"{name}：{one_line}{hint}" if one_line else name
 
 
 def _provider_outage_hint(exc: BaseException) -> str:
@@ -937,7 +1020,8 @@ def _provider_outage_hint(exc: BaseException) -> str:
     """
     text = ""
     if isinstance(exc, CliFailed):
-        text = str(exc.result.stderr or "")
+        # stderr 空、原因在 stdout 的情况也要能补一句（见 `_cli_error_text`）。
+        text = _cli_error_text(exc.result)
     if not text:
         text = str(exc)
     if _NOT_MODEL_TROUBLE.search(text):
@@ -1458,9 +1542,12 @@ def main():
     if settings.auth_mode != "enforce":
         raise SystemExit("formal worker requires enforce authentication")
     if args.canonical_repo is not None:
-        settings.canonical_repo = args.canonical_repo
+        # 立刻转成绝对路径：这个值会被当成 git 的远端传给 `git fetch`，而 fetch 是在
+        # **工作树里**跑的 —— 相对路径于是相对工作树解析，报「does not appear to be
+        # a git repository」，人根本看不出是自己传错了路径（2026-11-01 实测）。
+        settings.canonical_repo = Path(args.canonical_repo).expanduser().resolve()
     if args.worktree_root is not None:
-        settings.worktree_root = args.worktree_root
+        settings.worktree_root = Path(args.worktree_root).expanduser().resolve()
     database, repo = Database(), CanonicalRepo.from_settings()
     repo.ensure()
     last_no_ready_report = 0.0

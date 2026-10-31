@@ -19,6 +19,7 @@ from __future__ import annotations
 from app.adapter.formal_worker import (
     _classify_failure,
     build_goal,
+    human_failure_reason,
     read_handoff_report,
     write_handoff_report,
 )
@@ -235,3 +236,46 @@ def test_a_first_attempt_has_no_breakpoint_report():
 
     assert "Breakpoint report" not in goal
     assert "assembled by the platform" not in goal
+
+
+# --------------------------------------------------------------- 失败原因说人话
+
+
+def test_the_reason_falls_back_to_stdout_when_stderr_is_empty():
+    """opencode 把真正的原因写在 stdout 的事件流里，stderr 是空的。
+
+    2026-11-01 完整流程自检实测：窗口被指到一个「CLI 名额」模型上，中继回 502 +
+    `relay_cli_cannot_use_tools`，整条信息只出现在 stdout 的那一行 JSON 里。原来的
+    实现只看 stderr ⇒ 事件里只剩 `retryable failure (CliFailed): the harness CLI
+    failed before it could deliver`，人既看不到 502，也不知道该换模型。
+    """
+    stdout = "\n".join(
+        [
+            '{"type":"step_start","timestamp":1}',
+            '{"type":"error","error":{"type":"provider.internal",'
+            '"message":"this model is served by a CLI slot, which can only return text"'
+            ',"status":502,"response":{"body":"{\\"error\\":{\\"code\\":\\"relay_cli_cannot_use_tools\\"}}"}}}',
+        ]
+    )
+    reason = human_failure_reason(_cli_failed(stderr="", stdout=stdout))
+
+    assert "CLI slot" in reason, reason
+    # 已知的中继拒绝码要翻成「为什么 + 怎么办」，否则人还是不知道该动哪里。
+    assert "CLI 名额" in reason, reason
+    assert "换一个真实 provider 的模型" in reason, reason
+
+
+def test_stderr_still_wins_when_it_has_something():
+    reason = human_failure_reason(
+        _cli_failed(stderr="boom: real reason here", stdout='{"type":"error"}')
+    )
+
+    assert "real reason here" in reason
+
+
+def test_a_plain_error_line_in_stdout_is_used_too():
+    reason = human_failure_reason(
+        _cli_failed(stderr="", stdout="step 1 ok\nFatal: no space left on device\n")
+    )
+
+    assert "no space left" in reason

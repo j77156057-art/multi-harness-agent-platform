@@ -821,6 +821,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
   function whoWord(task, holds) {
     const status = String(task.status || '');
+    const by = holds.before ? `（此前由 ${holds.before} 执行）` : '';
+    // 「交上去了」和「做完了」不是一件事：平台把 awaiting_review / approved 也算进
+    // DONE_STATES（意思是"这一轮有产出"），但人这会儿还要审、还要确认合入 —— 一句
+    // 「已完成」会和同一屏的「待处理 1 / 完成了 0」打架，详情里也会把一条还没审的活
+    // 说成做完了（2026-11-01 完整流程自检实测）。所以按状态分开说。
+    if (status === 'awaiting_review') return `已提交，等待审核${by}`;
+    if (status === 'approved') return `审核通过，等待确认合入${by}`;
     if (DONE_STATES.has(status)) {
       return holds.before ? `已完成（此前由 ${holds.before} 执行）` : '已完成';
     }
@@ -897,6 +904,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           tasks: [],
           active: 0,
           done: 0,
+          submitted: 0,
           failed: 0,
           waiting: 0,
         };
@@ -905,6 +913,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       group.tasks.push(task);
       const status = String(task.status || '');
       if (['claimed', 'in_progress', 'verifying'].includes(status)) group.active += 1;
+      // 「交上去了」不等于「做完了」：在这个窗口手上交出去、还在等审核的活，
+      // 记成「已完成」会让这一堆的数字和顶部的「待处理」对不上（2026-11-01 实测）。
+      else if (status === 'awaiting_review' || status === 'approved') group.submitted += 1;
       else if (DONE_STATES.has(status)) group.done += 1;
       else if (FAILED_STATES.has(status) || REJECTED_STATES.has(status)) group.failed += 1;
       // 「待领取」只算真等在那儿的（ready/queued）。草案与被驳回的草稿不在里面 ——
@@ -929,11 +940,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return { text: '空闲', kind: 'is-idle' };
   }
 
-  /** 这一堆的数：手上几条、已完成几条、未完成几条。 */
+  /** 这一堆的数：手上几条、交上去等审几条、已完成几条、未完成几条。 */
   function groupFacts(group) {
     const bits = [];
     if (group.active) bits.push(`进行中 ${group.active} 条`);
     if (group.waiting) bits.push(`待领取 ${group.waiting} 条`);
+    if (group.submitted) bits.push(`已交、等审核 ${group.submitted} 条`);
     if (group.done) bits.push(`已完成 ${group.done} 条`);
     if (group.failed) bits.push(`未完成 ${group.failed} 条`);
     // 什么数都没有（全是领不了的草案）时也得说一句，否则标题下面空着。
@@ -1383,13 +1395,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 一个任务都没有的项目：顶部这句话就是**唯一的路标** —— 说清现在是什么，
     // 再说清第一步点哪里。空项目下还说「左边是所有正在做的事」是骗人的：那里一条都没有。
     const emptyProject = !(state.tasks || []).length;
+    // 「等你审」和「等你答」是两件事，但都是**现在真的有人在等**：`counts.review` 里
+    // 除了审的（awaiting_review / changes_requested）还有等你回答的（awaiting_human /
+    // escalated），后者已经算进 waitingOnMe，所以我减掉它，剩下的才是"只有审核在等你"。
+    // 以前这一档没写，同一屏就会出现「待处理 1」配「本项目暂无需要你处理的任务」——
+    // 自相矛盾（2026-11-01 完整流程自检实测）。
+    const toReview = Math.max(0, Number(counts.review || 0) - waitingOnMe);
     const guide = waitingOnMe
-      ? `有 <b>${waitingOnMe}</b> 条任务需要你处理${working ? `，另有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
-      : working
-        ? `有 <b>${working}</b> 条任务正在执行${counts.done ? `，其中 ${counts.done} 条已完成` : ''}。暂无需要你处理的任务。`
-        : emptyProject
-          ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
-          : '本项目暂无需要你处理的任务。可选择一条任务查看详情，或在左侧选择窗口查看其当前状态。';
+      ? `有 <b>${waitingOnMe}</b> 条任务需要你处理${
+          toReview ? `，另有 ${toReview} 条已提交、等待审核` : ''
+        }${working ? `，还有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
+      : toReview
+        ? `有 <b>${toReview}</b> 条任务已提交、等待审核${working ? `，另有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
+        : working
+          ? `有 <b>${working}</b> 条任务正在执行${counts.done ? `，其中 ${counts.done} 条已完成` : ''}。暂无需要你处理的任务。`
+          : emptyProject
+            ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
+            : '本项目暂无需要你处理的任务。可选择一条任务查看详情，或在左侧选择窗口查看其当前状态。';
     wrap.innerHTML = `
       <div class="flat-head-main">
         <span class="flat-eyebrow">这个项目的办公室</span>
@@ -4484,8 +4506,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       : '';
     if (transcript.isJson && transcript.texts.length) {
       const tools = foldRepeats(transcript.tools.slice(-6).reverse(), (tool) => tool.label);
+      // 「（当前这一轮）」只在**还在跑**的时候说：一条已经合入的活也说"当前这一轮"，
+      // 人会把历史输出当成正在发生的事（2026-11-01 实测）。
+      const currentNote = running && state.output?.output?.current ? '（当前这一轮）' : '';
       return `<section class="flat-spec flat-live" id="flatLive">${stamp}
-        <h3>${title}${state.output?.output?.current ? '（当前这一轮）' : ''}</h3>
+        <h3>${title}${currentNote}</h3>
         <p class="flat-note">它最后说了</p>
         <pre class="flat-output">${escape(readableText(headlineText(transcript)) || '（这段里没有可读的文字）')}</pre>
         ${tools.length ? `<p class="flat-note">它做了什么（最近 ${tools.length} 步）</p><ul class="flat-list outputs-tools">${tools.map((tool) => `<li><span>${escape(tool.text)}${tool.count > 1 ? ` <em>×${tool.count}</em>` : ''}</span></li>`).join('')}</ul>` : ''}

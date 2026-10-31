@@ -211,6 +211,41 @@ function collect(event, texts, tools) {
 }
 
 /**
+ * 「一个标签 + 一段 JSON」这种一行输出：`PLATFORM-TOOLS-RESULT {"ok":true,"summary":"…"}`。
+ *
+ * 平台自带的工具基座（`platform-tools`）收尾就是这样一行：JSON 前面顶着一个大写的
+ * 信封名。它既不是纯文本（直接摆出来是一坨结构体，人读不懂），也不是上面那几种
+ * CLI 的事件流（不以 `{` 开头，`parseTranscript` 会跳过它）—— 于是界面把整行原样
+ * 当"它刚做的一步"摆出来（2026-11-01 完整流程自检实测）。
+ *
+ * 这里只做一件事：把这行拆成「信封名 + JSON」，并从 JSON 里取出**一句人话**
+ * （summary / text / message / result 里第一个非空字符串）。取不到就返回 null ——
+ * 宁可原样显示，也不要编一句话。
+ */
+const LABELED_JSON = /^([A-Za-z][A-Za-z0-9_.-]{0,40})\s+(\{[\s\S]*\})$/;
+
+function labeledJson(line) {
+  const match = LABELED_JSON.exec(String(line ?? '').trim());
+  if (!match) return null;
+  let value = null;
+  try {
+    value = JSON.parse(match[2]);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  let text = '';
+  for (const key of ['summary', 'text', 'message', 'result']) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      text = candidate.trim();
+      break;
+    }
+  }
+  return { label: match[1], value, text };
+}
+
+/**
  * 解析一段 CLI 输出。
  *
  * @param {string} raw stdout/stderr 原文
@@ -223,7 +258,16 @@ export function parseTranscript(raw) {
   let parsed = 0;
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
-    if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) continue;
+    if (!trimmed) continue;
+    // 先认「标签 + JSON」：它不以 `{` 开头，下面那段 JSON 扫描会直接跳过它。
+    if (trimmed[0] !== '{' && trimmed[0] !== '[') {
+      const envelope = labeledJson(trimmed);
+      if (envelope) {
+        parsed += 1;
+        if (envelope.text) pushText(texts, envelope.text, '结论');
+      }
+      continue;
+    }
     let value = null;
     try {
       value = JSON.parse(trimmed);

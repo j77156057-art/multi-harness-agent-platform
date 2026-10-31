@@ -248,6 +248,41 @@ def test_an_approving_review_asks_for_no_rework(tmp_path):
     assert "REWORK" not in goal, "approval must not be turned into a rework instruction"
 
 
+def test_an_approve_finding_is_recorded_as_acceptance_met_not_as_a_defect(tmp_path):
+    """人点「批准」时写的那句"我核过了"，不能在下游被读成"有人报了个问题"。
+
+    批准必须为每条验收条款留一条意见（否则 `review.contract_missing`），而意见原来
+    只有四类、全是"有问题"。人审这条路又什么都不补 —— 存下来的就只有 message，
+    `group_findings` 按默认值当 `defect` 读（2026-11-01 完整流程自检实测）。
+    """
+    chain = build_chain(tmp_path)
+    claimed = chain.service.review_claim(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        reviewer_harness_id=REVIEWER,
+    )
+    chain.service.submit_review(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        reviewer_harness_id=REVIEWER,
+        verdict="approve",
+        reviewed_commit=chain.head_commit,
+        review_revision=1,
+        findings=[{"severity": "note", "message": "这篇文章核过了"}],
+        review_id=str(claimed["review_id"]),
+    )
+
+    stored = _context(chain)["review"]["findings"]
+    assert stored == [{"severity": "note", "message": "这篇文章核过了", "kind": "acceptance_met"}]
+
+
+def test_a_request_changes_finding_keeps_its_shape(tmp_path):
+    """要求返工的意见**不改写**：`group_findings` 本来就把它当 defect，那是对的。"""
+    chain = build_chain(tmp_path)
+    _request_changes(chain, FINDINGS)
+    assert _context(chain)["review"]["findings"] == FINDINGS
+
+
 def test_approval_requires_each_acceptance_contract_to_be_addressed(tmp_path):
     chain = build_chain(
         tmp_path,

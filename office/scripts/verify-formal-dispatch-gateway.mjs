@@ -29,6 +29,12 @@ const upstream=http.createServer((req,res)=>{
   if(req.url==='/api/v1/groups/G/tasks')data={tasks:[]};
   if(req.url==='/api/v1/tasks/FD-0123456789abcdef')data={task_id:'FD-0123456789abcdef',group_id:'G'};
   if(req.url==='/api/v1/tasks/FD-0123456789abcdef/diff?include_patch=true')data={available:true,patch:'verified patch'};
+  // 任务 id 的形状不是网关定的：平台的派单允许任意 id（`plan-create --task T-1`、
+  // 演示用的 `FLOW-1101-2`）。这条桩就是那种形状 —— 网关以前一律 404，
+  // 界面于是显示「动作记录 暂无记录」。
+  if(req.url==='/api/v1/tasks/FLOW-1101-2')data={task_id:'FLOW-1101-2',group_id:'G'};
+  if(req.url==='/api/v1/tasks/FLOW-1101-2/diff?include_patch=true')data={available:true,patch:'flow patch'};
+  if(req.url==='/api/v1/tasks/FLOW-1101-2/events?limit=200')data={events:[{seq:1,event_name:'claim'}]};
   if(req.url==='/api/v1/human/review/claim'&&req.method==='POST')data={review_id:'rv-1',reviewed_commit:'a'.repeat(40),status:'claimed'};
   if(req.url==='/api/v1/human/review/submit'&&req.method==='POST')data={event:'approve',status:'approved',review_id:'rv-1'};
   if(req.url==='/api/v1/review/claim'&&req.method==='POST')data={review_id:'rv-1',reviewed_commit:'a'.repeat(40),status:'claimed'};
@@ -60,6 +66,14 @@ try{
   // 不认识的查询串不放行：这条面只有「探不探」一个开关，多塞参数说明调用方搞错了。
   const bogusQuery=await fetch(base+'/api/formal/installers?token=leak');assert.equal(bogusQuery.status,400);
   const detail=await fetch(base+'/api/formal/tasks/FD-0123456789abcdef');assert.equal(detail.status,200);assert.equal((await detail.json()).diff.patch,'verified patch');
+  // 非 FD- 形状的 id 也要能点开：越权由 group_id 比对挡，不由 id 形状挡。
+  const otherShape=await fetch(base+'/api/formal/tasks/FLOW-1101-2');assert.equal(otherShape.status,200);
+  const otherShapeBody=await otherShape.json();
+  assert.equal(otherShapeBody.task.task_id,'FLOW-1101-2');
+  assert.equal(otherShapeBody.diff.patch,'flow patch');
+  assert.equal(otherShapeBody.events.events.length,1);
+  const otherShapeOutput=await fetch(base+'/api/formal/tasks/FLOW-1101-2/output?attempt_id=FLOW-1101-2.a1');
+  assert(otherShapeOutput.status===200||otherShapeOutput.status===502,`output route must be routed, got ${otherShapeOutput.status}`);
   const reviewClaim=await fetch(base+'/api/formal/review/claim',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({task_id:'FD-0123456789abcdef',attempt_id:'FD-0123456789abcdef.a1'})});assert.equal(reviewClaim.status,200);assert.equal((await reviewClaim.json()).review_id,'rv-1');
   // 管理员动作必须用管理员自己的凭据：人的 token 不能借到 harness 的权限。
   const adminCall=calls.find(c=>c.path==='/api/v1/review/claim');assert(adminCall&&adminCall.authorization==='Bearer '+ADMIN_TOKEN);
@@ -74,6 +88,6 @@ try{
   await close(upstream);
   const offline=await fetch(base+'/api/formal/status');assert.equal(offline.status,503);
   assert.throws(()=>createFormalGateway({upstream:'http://external.example',tokenFile:'x',project:'P',group:'G'}));
-  const result={checks:21,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
+  const result={checks:26,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
   await fs.mkdir('handoff/codex-formal-dispatch-2026-10-14',{recursive:true});await fs.writeFile('handoff/codex-formal-dispatch-2026-10-14/gateway-check-final.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await close(server);if(upstream.listening)await close(upstream);await fs.rm(tmp,{recursive:true,force:true});}

@@ -41,6 +41,7 @@ from app.git.repo import CanonicalRepo
 from app.git.worktree import WorktreeManager
 from app.lease.service import iso, parse_iso, release_lease
 from app.plan.validator import PlanError, PlanSpec, PlanValidator
+from app.review_kinds import with_finding_kinds
 from app.security.scan import MESSAGE_CODE, SECURITY_CODE, SecretScanBlocked, scan_for_block
 from app.spec import EventKind, TaskStatus
 from app.usage.cli_reported import record_reported_usage
@@ -1386,6 +1387,9 @@ class SchedulerService:
         """
         if verdict not in {"approve", "request_changes"}:
             raise InvalidInput("verdict must be approve or request_changes")
+        # 意见没写类别时补一个说得通的（批准 → 已核对、满足验收）：人审走的是这条路，
+        # 不补的话人点"批准"写的那句「我核过了」会被下游读成 `defect`（见 review_kinds）。
+        findings = with_finding_kinds(list(findings), verdict=verdict)
         blocked = scan_for_block(findings, surface="findings")
         if blocked is not None:
             scan_id, scan_findings = blocked

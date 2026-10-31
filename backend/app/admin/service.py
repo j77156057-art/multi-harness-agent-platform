@@ -704,7 +704,11 @@ class AdminService:
         findings: list[dict[str, Any]] = []
         for index, item in enumerate(raw_findings, start=1):
             contract_id = ""
-            kind = "defect"
+            # 批准时**默认**是「已核对，满足验收」：批准要为每条验收条款留一条意见，
+            # 而原来的默认值 `defect` 等于逼着人说"这条验收有问题"才叫批准 ——
+            # 记录里于是留下一条假问题（2026-11-01 完整流程自检实测）。要求返工时
+            # 默认仍是 `defect`：那本来就是"哪有问题"。
+            kind = "acceptance_met" if verdict == "approve" else "defect"
             if isinstance(item, str):
                 message = item.strip()
                 severity = "note"
@@ -714,7 +718,7 @@ class AdminService:
                 # 这条意见属于哪一类（R10-fix-15）：问题本身 / 需要改进 / 冲突风险 /
                 # 可能的 bug。主人要的是「发还回执照着这四类说清楚」，光有 severity
                 # 只能说明有多严重，说不清"这是什么性质的事"，成员照着改也不对路。
-                kind = str(item.get("kind") or "defect").strip() or "defect"
+                kind = str(item.get("kind") or kind).strip() or kind
                 if kind not in _FINDING_KINDS:
                     raise AdminHarnessError(
                         f"review finding {index} has an unknown kind {kind!r};"

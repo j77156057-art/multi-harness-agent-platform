@@ -287,7 +287,7 @@ export function createFormalGateway(config={}){
       // Which routes may carry a query string. `/tasks/{id}/output` also accepts
    // `attempt_id`: "the real log of *this* failure" is the failed attempt, not
    // whatever attempt happens to be running now.
-   const outputRoute=/^\/tasks\/FD-[a-f0-9]{16}\/output$/.test(route);
+   const outputRoute=/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route);
    // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
    // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
    if(url.search&&!['/messages','/tasks','/events','/installers'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
@@ -885,7 +885,13 @@ export function createFormalGateway(config={}){
         if(task.group_id!==config.group)throw fail(502,'task_scope_mismatch');
         json(res,200,{...result,task:safeTask(task)});return true;
       }
-      if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}$/.test(route)){
+      // 任务 id 的形状**不由这条网关决定**：平台的派单允许任意 id（`plan-create --task T-1`、
+      // 开工时生成的 `FD-<hex>`、演示用的 `FLOW-1101-2` 都合法）。这里以前写死成
+      // `FD-[a-f0-9]{16}`，后果是别的形状一律 404 —— 界面点开一条活看到的是
+      // 「动作记录 暂无记录」「没有 CLI 原话」，像那条活什么都没发生过（2026-11-01
+      // 完整流程自检实测）。认形状没有收益：越权由下面的 `task.group_id` 比对来挡，
+      // 这里只需要挡掉明显不是 id 的东西（斜杠、空白、控制字符、超长）。
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(route)){
         const id=route.split('/').at(-1),task=await call('/tasks/'+id);
         if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
         // 改动与事件是**锦上添花**：平台那边算不出 diff（提交不在正式仓库里、
@@ -901,7 +907,7 @@ export function createFormalGateway(config={}){
         const spec=await humanizeHandoff(splitHandoff(task.spec||{}));
         json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events});return true;
       }
-      if(req.method==='GET'&&/^\/tasks\/FD-[a-f0-9]{16}\/output$/.test(route)){
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route)){
         // The harness CLI's own output, as it streams. Read-only, and scoped to
         // this group exactly like the task route above.
         const id=route.split('/')[2],task=await call('/tasks/'+id);

@@ -182,4 +182,21 @@ check('the reasoning noise is not treated as something it said', () => {
   assert.equal(parsed.texts.length, 0);
 });
 
+check('a labeled JSON envelope is read as its sentence, not as a struct', () => {
+  // 平台自带工具基座收尾就是这样一行。以前它既不是纯 JSON 也不是纯文本，
+  // 界面把整行原样当"它刚做的一步"摆出来（2026-11-01 实测）。
+  const raw = 'PLATFORM-TOOLS-RESULT {"ok": true, "steps": 3, "summary": "在授权落点新建了说明文件"}';
+  const parsed = parseTranscript(raw);
+  assert.equal(parsed.isJson, true);
+  assert.equal(parsed.texts.length, 1);
+  assert.equal(parsed.texts[0].text, '在授权落点新建了说明文件');
+  assert.equal(headlineText(parsed), '在授权落点新建了说明文件');
+});
+
+check('a labeled envelope with no sentence field stays unrecognised', () => {
+  // 没有一句人话可摘时不许编：认不出来就当没解析到。
+  const parsed = parseTranscript('PLATFORM-TOOLS-RESULT {"ok": true, "steps": 3}');
+  assert.equal(parsed.texts.length, 0);
+});
+
 console.log(`cli transcript: ${checks.length}/${checks.length} PASS`);
