@@ -1,7 +1,7 @@
 import './project-workspace.css';
 import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 // 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
-import { drivenLine, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
+import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
 
 const clone = value => structuredClone(value);
 
@@ -80,7 +80,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
             <div class="project-section-head"><div><h2 id="projectToolsTitle">本机可用的工具</h2><p>平台通过各家 CLI 执行任务。缺少的 CLI 在这里按官方方式安装，登录后即可使用。</p></div><span data-tools-count></span></div>
             <p class="project-tools-summary" data-tools-summary role="status">正在读取各 CLI 的官方安装方式…</p>
             <div class="project-tools-list" data-tools-list></div>
-            <div class="project-tools-actions"><button type="button" data-probe-tools>重新探测这台机器</button><span data-tools-host></span></div>
+            <div class="project-tools-actions"><button type="button" data-probe-tools>探测这台机器</button><span data-tools-host></span></div>
           </section>
         </div>
         <aside class="project-onboarding" aria-labelledby="projectOnboardingTitle">
@@ -306,6 +306,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   const toolsCount = root.querySelector('[data-tools-count]');
   const toolsProbeButton = root.querySelector('[data-probe-tools]');
   let toolsChecking = false;
+  // 按钮上一次该显示的字：「探测」还是「重新探测」由**有没有探过**决定，
+  // 探测过程中它被换成「正在探测…」，结束时按这个变量还原。
+  let toolsProbeLabel = '探测这台机器';
 
   function paintTools(payload) {
     if (!payload) return;
@@ -338,6 +341,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       : unknown
         ? '还没探测'
         : `${ready} / ${total} 个已找到`;
+    // 按钮上的动词跟着事实走：一次都没探过时写「重新」是凭空多出来的一个"次"。
+    toolsProbeLabel = guidanceOnly(payload) ? '探测这台机器' : '重新探测这台机器';
+    toolsProbeButton.textContent = toolsProbeLabel;
   }
 
   async function loadTools({ probe = false } = {}) {
@@ -357,15 +363,19 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     } finally {
       toolsChecking = false;
       toolsProbeButton.disabled = false;
-      toolsProbeButton.textContent = '重新探测这台机器';
+      toolsProbeButton.textContent = toolsProbeLabel;
     }
     return toolsChecking;
   }
 
   toolsProbeButton.addEventListener('click', () => void loadTools({probe: true}));
-  // 先出清单（很快，纯数据），再在后台探一次：探测要跑每个 CLI 的 `--version`，
-  // 几秒。等它回来才出第一屏，看着就像大厅加载不动。
-  void loadTools().then(() => loadTools({probe: true}));
+  // **只读安装方式，不自动探测。**
+  //
+  // 以前这里连着探一次（探一次要跑十六个 `--version` 子进程），于是页面刚打开、
+  // 人正在看清单，结果一回来就整块重画一遍 —— 看着就是"页面自己刷新了"。
+  // 探测改成**只由人点**：先给官方装法（纯数据、很快），人想看这台机器缺什么，
+  // 点「探测这台机器」。
+  void loadTools();
 
   function renderFormalRegistration(state) {
     formalState = state;

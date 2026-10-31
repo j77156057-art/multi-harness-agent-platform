@@ -4590,6 +4590,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     });
     const open = state.openFolds.has('installs');
     const missing = Number((payload.summary && payload.summary.missing) || 0);
+    // 同上：没探过就不写「重新」。这一块与「开始使用」那一屏用同一套说法。
+    const probeLabel = state.installsChecking
+      ? '正在探测…'
+      : guidanceOnly(payload)
+        ? '探测这台机器'
+        : '重新探测这台机器';
     return `<section class="flat-card flat-card-fold">
       <details data-fold="installs"${open ? ' open' : ''}>
         <summary>Harness CLI · ${escape(summaryLine(payload))}</summary>
@@ -4599,9 +4605,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-note">安装命令给人在自己的终端里执行；平台不会替你下载或运行安装脚本。</p>
         ${lists}
         <p class="flat-inline-actions">
-          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${
-            state.installsChecking ? '正在探测…' : '探测这台机器'
-          }</button>
+          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${probeLabel}</button>
         </p>
         ${
           missing
@@ -4643,6 +4647,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           closedKeys: state.closedFolds,
         })
       : '';
+    // 按钮上的动词跟着事实走：还没探过就不该写「重新」。
+    // （`guidance_only` = 只有官方安装方式、这台机器还没被探测过。）
+    const probed = Boolean(payload) && !guidanceOnly(payload);
+    const probeLabel = state.installsChecking
+      ? '正在探测…'
+      : probed
+        ? '重新探测这台机器'
+        : '探测这台机器';
     wrap.innerHTML = `
       <h2>开始使用</h2>
       <p class="flat-note">这个项目还没有任务。下面三步把运行环境准备好，已经具备的步骤可以跳过。</p>
@@ -4652,10 +4664,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-note">${escape(guide)}</p>
         ${payload ? `<p class="flat-note">${escape(drivenLine(payload))}</p>` : ''}
         ${lists}
+        ${
+          probed
+            ? ''
+            : `<p class="flat-note">本机是否已安装需要探测才能知道。探测会在这台机器上运行多条版本命令，结果回来后这份清单会被重新绘制，因此不在进入页面时自动执行。</p>`
+        }
         <p class="flat-inline-actions">
-          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${
-            state.installsChecking ? '正在探测…' : '重新探测这台机器'
-          }</button>
+          <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${probeLabel}</button>
         </p>
       </section>
       <section class="flat-firstrun-step">
@@ -6263,11 +6278,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 上游）才跟着出现。没读到就让它自己说没读到，别一直挂着「正在读取」。
       // 读到的安装方式不会每 15 秒变，所以只取一次；失败时等人点「探测」再重试。
       //
-      // 空项目例外：那时屏幕上摆的就是「开始使用」，人等着知道的正是**这台机器
-      // 缺哪个 CLI**。只给安装方式让他自己比对，等于把第一步推回给他。所以这种
-      // 情形下进页面就探一次（几个版本命令，几秒），而且只探这一次。
+      // 探测（跑每条 CLI 的 `--version`）**只由人点**，进页面不探。
+      // 以前空项目会顺带探一次，理由是「人正等着知道缺哪个 CLI」。但探测是六个子进程，
+      // 回来之后这块要整块重画 —— 人正在看的清单被自己换掉，看到的就是「页面又自己
+      // 刷了一下」。清单里缺哪个，人点一下「探测」就能知道；页面不替他决定。
       if (!state.installs && !state.installsError) {
-        void loadInstalls({ probe: (state.tasks || []).length === 0 });
+        void loadInstalls();
       }
       state.loaded = true;
       // 顶栏的状态：平台连不连得上、几个窗口**在跑**（平台上的在场事实，不猜）。
