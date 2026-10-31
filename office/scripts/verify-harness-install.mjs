@@ -4,8 +4,11 @@
 // 看它被读成人话之后有没有变形。
 import assert from 'node:assert/strict';
 import {
+  ROW_FOLD_PREFIX,
   groupByStatus,
   hostLine,
+  installGroupsHtml,
+  installRowHtml,
   leftoverHint,
   rowView,
   rowsView,
@@ -91,5 +94,24 @@ assert(summaryLine({}).includes('没有登记'));
 // 8. 地址只搬不造：没有官方地址就留空，界面那边会说「平台不猜」。
 assert.equal(rowView(row({ official_url: '' })).officialUrl, '');
 
-const result = { checks: 8, result: 'PASS', scope: 'pure rendering rules for harness CLI install status' };
+// 9. **过长的文字要收起来**：一行 CLI 默认只占一行（名字 + 归属 + 状态），
+//    安装命令、自检命令、备注都在收起的那部分里 —— 但一个字都不能少。
+const rowHtml = installRowHtml(rowView(row({ login_note: '运行 codex 登录', notes: ['备注甲'] })));
+assert(rowHtml.includes('<details'), '一条 CLI 没有折叠外壳');
+assert(!/<details[^>]*\bopen\b/.test(rowHtml), '一条 CLI 默认就展开了');
+for (const must of ['npm install -g @openai/codex', '装完自检', '运行 codex 登录', '备注甲', '官方页面']) {
+  assert(rowHtml.includes(must), `收起之后丢了内容：${must}`);
+}
+// 人点开过的那一条，重画之后还得是开着的（否则"刚点开就被合上"）。
+const keptOpen = installRowHtml(rowView(row({})), { openKeys: new Set([`${ROW_FOLD_PREFIX}codex`]) });
+assert(/<details[^>]*\bopen\b/.test(keptOpen), '记过的展开状态没有被还原');
+
+// 10. 分组默认展开的只有「要人动手的」两组；「还没探测」不收进默认展开，
+//     否则一台没探过的机器上十六个 CLI 全摊开 —— 那就是一整屏文字。
+const unknownGroup = installGroupsHtml({ guidance_only: true, installers: [row({ status: 'unknown' })] });
+assert(!/<details[^>]*installs:unknown[^>]*\bopen\b/.test(unknownGroup), '「还没探测」默认就展开了');
+const missingGroup = installGroupsHtml({ installers: [row({ status: 'missing' })] });
+assert(/<details[^>]*installs:missing[^>]*\bopen\b/.test(missingGroup), '「未安装」应该默认展开（那是人要动的事）');
+
+const result = { checks: 10, result: 'PASS', scope: 'pure rendering rules for harness CLI install status' };
 console.log(JSON.stringify(result));

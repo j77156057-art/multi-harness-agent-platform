@@ -4638,11 +4638,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     } else {
       guide = summaryLine(payload);
     }
-    // 这一屏问的是「我现在该装哪个」，所以连「还没探测」那一组也展开 ——
-    // 收起一组人就得自己再点一次才知道里面是什么。
+    // 分组默认收起，只有「装了但读不到版本」「未安装」这两组默认展开 —— 那才是
+    // 人现在要动的事。「还没探测」那一组是"十六个全没查过"，展开就是一整屏文字，
+    // 而它指向的动作是点「探测这台机器」，不是逐条读命令。
     const lists = payload
       ? installGroupsHtml(payload, {
-          openStatuses: ['missing', 'version_failed', 'unknown'],
           openKeys: state.openFolds,
           closedKeys: state.closedFolds,
         })
@@ -4661,13 +4661,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <section class="flat-firstrun-step">
         <h3><span>1</span>安装 Harness CLI</h3>
         <p class="flat-note">平台通过各家 CLI 执行任务；缺少 CLI 就没有可用的执行成员。安装命令请在你自己打开的终端里执行，平台不会替你下载或运行安装脚本。</p>
-        <p class="flat-note">${escape(guide)}</p>
-        ${payload ? `<p class="flat-note">${escape(drivenLine(payload))}</p>` : ''}
+        <p class="flat-note">${escape(guide)}${payload ? ` ${escape(drivenLine(payload))}` : ''}</p>
         ${lists}
         ${
           probed
             ? ''
-            : `<p class="flat-note">本机是否已安装需要探测才能知道。探测会在这台机器上运行多条版本命令，结果回来后这份清单会被重新绘制，因此不在进入页面时自动执行。</p>`
+            : `<p class="flat-note">本机是否已安装需要探测；探测会运行多条版本命令并重绘这份清单，因此不自动执行。</p>`
         }
         <p class="flat-inline-actions">
           <button type="button" data-act="installs-probe" ${state.installsChecking ? 'disabled' : ''}>${probeLabel}</button>

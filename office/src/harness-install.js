@@ -150,42 +150,74 @@ export function leftoverHint(view) {
 }
 
 /**
- * 一条 CLI 的完整说明（HTML 片段）。
+ * 一条 CLI 的完整说明（HTML 片段），**默认收起**。
  *
  * 顺序就是人要做的事的顺序：**这是什么 → 官方从哪拿 → 装什么命令 → 怎么自检 →
  * 装完还差什么**。「装完还差什么」放最后，因为那一步平台查不到，只能提醒。
  *
- * 这段 HTML 给两处共用（大厅的「快速开始」与办公室的「开始使用」）—— 一处改、
- * 两处一样，免得同一台机器在两屏里有两种说法。
+ * 折起来的那一行只留「装哪个 · 谁家的 · 什么状态」。十六个 CLI 全摊开是一面墙，
+ * 人看到的第一反应是"这些都要读吗"；收起来之后一眼是清单，要装哪条点哪条。
+ *
+ * 这段 HTML 给两处共用（大厅的「本机可用的工具」与办公室的「开始使用」「Harness
+ * CLI」卡）—— 一处改、处处一样，免得同一台机器在三屏里有三种说法。
  */
-export function installRowHtml(view, { showStatus = false } = {}) {
+export function installRowHtml(
+  view,
+  { showStatus = false, openKeys = null, closedKeys = null } = {},
+) {
   const bits = [];
   if (view.version) bits.push(`版本 ${view.version}`);
   if (view.foundCommand) bits.push(`命令 ${view.foundCommand}`);
   if (view.path) bits.push(shortenPath(view.path));
   const hint = leftoverHint(view);
+  // **每条自己收起。**
+  //
+  // 摊开时一行要六到七段文字（官方地址、安装命令、自检命令、装完还差什么、
+  // 备注若干），十六个 CLI 就是一千多像素的墙 —— 人要么直接滚过去，要么以为
+  // 这里全是必读的。收起之后每个 CLI 只占一行：装哪个、谁家的、什么状态；
+  // 真要装的那一刻点开，命令还在原位（一个字都没少，只是收起来了）。
+  //
+  // 收起状态同样要记住（`openKeys` / `closedKeys` 与分组共用一套）：这一块会被
+  // 重画（探测回来、右栏每轮刷新），不记的话人刚点开要看命令，下一笔就合上了。
+  const key = rowFoldKey(view.id);
+  const opened = openKeys instanceof Set ? openKeys : new Set();
+  const closed = closedKeys instanceof Set ? closedKeys : new Set();
+  const open = opened.has(key) ? true : closed.has(key) ? false : false;
   return `<li>
-      <b>${escape(view.name)}${showStatus ? ` <span class="flat-tier">${escape(view.statusLabel)}</span>` : ''}</b>
-      <span>${escape(bits.join(' · ') || view.provider || '')}</span>
-      ${view.detail ? `<span class="flat-note">${escape(view.detail)}</span>` : ''}
-      ${
-        view.officialUrl
-          ? `<a href="${escape(view.officialUrl)}" target="_blank" rel="noreferrer noopener">官方页面</a>`
-          : '<span class="flat-note">官方地址未核实，平台不猜。</span>'
-      }
-      ${
-        view.installCommand
-          ? `<code class="flat-cmd">${escape(view.installCommand)}</code>`
-          : '<span class="flat-note">这个系统没有官方安装命令。</span>'
-      }
-      ${view.verifyCommand ? `<span class="flat-note">装完自检：${escape(view.verifyCommand)}</span>` : ''}
-      ${hint ? `<span class="flat-note">${escape(hint)}</span>` : ''}
-      ${view.notes.length ? `<span class="flat-note">${escape(view.notes.join(' '))}</span>` : ''}
+      <details class="flat-install-row" data-fold-key="${key}"${open ? ' open' : ''}>
+        <summary>
+          <b>${escape(view.name)}</b>
+          ${showStatus ? `<span class="flat-tier">${escape(view.statusLabel)}</span>` : ''}
+          <span class="flat-install-meta">${escape(bits.join(' · ') || view.provider || '')}</span>
+        </summary>
+        ${view.detail ? `<span class="flat-note">${escape(view.detail)}</span>` : ''}
+        ${
+          view.officialUrl
+            ? `<a href="${escape(view.officialUrl)}" target="_blank" rel="noreferrer noopener">官方页面</a>`
+            : '<span class="flat-note">官方地址未核实，平台不猜。</span>'
+        }
+        ${
+          view.installCommand
+            ? `<code class="flat-cmd">${escape(view.installCommand)}</code>`
+            : '<span class="flat-note">这个系统没有官方安装命令。</span>'
+        }
+        ${view.verifyCommand ? `<span class="flat-note">装完自检：${escape(view.verifyCommand)}</span>` : ''}
+        ${hint ? `<span class="flat-note">${escape(hint)}</span>` : ''}
+        ${view.notes.length ? `<span class="flat-note">${escape(view.notes.join(' '))}</span>` : ''}
+      </details>
     </li>`;
 }
 
-/** 默认哪几组是展开的：缺的与装了但读不到版本的 —— 那才是人现在要动的事。 */
+/** 默认哪几组是展开的：缺的与装了但读不到版本的 —— 那才是人现在要动的事。
+ *
+ * 特别注意**不要**把 `unknown`（还没探测）加进来：那是"一台机器上十六个 CLI
+ * 全都没查过"的一组，展开就是一整屏文字，而它并不指向任何动作 —— 要动的事是
+ * 点「探测这台机器」，不是逐条读十六个安装命令。 */
 export const OPEN_STATUSES = ['missing', 'version_failed'];
+
+/** 折叠键：分组用 `installs:<状态>`，每一行用 `installs:row:<harness_id>`。 */
+export const ROW_FOLD_PREFIX = 'installs:row:';
+const rowFoldKey = (id) => `${ROW_FOLD_PREFIX}${String(id || '')}`;
 
 /**
  * 一句话说清「装上它能不能在这里接活」。
@@ -234,7 +266,9 @@ export function installGroupsHtml(
       const open = isOpen(key, defaultOpen.has(group.status));
       return `<details class="flat-pool-item" data-fold-key="${key}"${open ? ' open' : ''}>
         <summary><b>${escape(statusOf({ status: group.status }).label)}</b><span>${group.rows.length} 个</span></summary>
-        <ul class="flat-list">${group.rows.map((row) => installRowHtml(row)).join('')}</ul>
+        <ul class="flat-list">${group.rows
+          .map((row) => installRowHtml(row, { openKeys: opened, closedKeys: closed }))
+          .join('')}</ul>
       </details>`;
     })
     .join('');
@@ -245,7 +279,9 @@ export function installGroupsHtml(
     ? `<details class="flat-pool-item" data-fold-key="${referenceKey}"${referenceOpen ? ' open' : ''}>
         <summary><b>市面上其他 CLI</b><span>${reference.length} 个</span></summary>
         <p class="flat-note">这些 CLI 可以单独使用；本平台还没有把它们接上，装上也不会在这里接任务。安装方式同样来自各家官方渠道。</p>
-        <ul class="flat-list">${reference.map((row) => installRowHtml(row, { showStatus: true })).join('')}</ul>
+        <ul class="flat-list">${reference
+          .map((row) => installRowHtml(row, { showStatus: true, openKeys: opened, closedKeys: closed }))
+          .join('')}</ul>
       </details>`
     : '';
   return driven + others;

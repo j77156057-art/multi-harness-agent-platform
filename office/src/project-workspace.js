@@ -325,8 +325,10 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       else closed.add(key);
     }
     toolsSummary.textContent = [summaryLine(payload), drivenLine(payload)].filter(Boolean).join(' ');
+    // 分组默认收起（`OPEN_STATUSES` = 未安装、装了但读不到版本）；「还没探测」
+    // 那一组不展开 —— 十六个 CLI 全没查过的时候，展开就是一整屏文字，而人现在
+    // 该做的是点「探测这台机器」，不是逐条读安装命令。
     toolsList.innerHTML = installGroupsHtml(payload, {
-      openStatuses: ['missing', 'version_failed', 'unknown'],
       openKeys: opened,
       closedKeys: closed,
     });

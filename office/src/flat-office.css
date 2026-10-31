@@ -931,6 +931,24 @@
 
 .flat-inventory { border: 1px solid var(--ao-line-soft); border-radius: 6px; padding: 9px 10px; background: #fff; }
 
+/* 清单里每一条 CLI（`installRowHtml`）：默认收起。
+   一行放得下的时候，清单是"十六个名字"而不是"一千多像素的命令墙"；点开才是
+   官方地址、安装命令、自检命令与备注。收起的三角由浏览器画，颜色跟着正文走。 */
+.flat-install-row > summary {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.flat-install-row > summary::marker,
+.flat-install-row > summary::-webkit-details-marker { color: var(--ao-ink-faint); }
+.flat-install-meta { color: var(--ao-ink-faint); font-size: 11px; }
+/* 展开后的内容与 summary 的文字对齐（不跟三角挤在一条竖线上）。 */
+.flat-install-row > *:not(summary) { margin: 4px 0 0 14px; }
+.flat-install-row > a { display: inline-block; }
+
 /* 「装 CLI」那张卡：安装命令是给人复制走的，必须能换行、不撑破右栏。 */
 .flat-cmd {
   display: block;
