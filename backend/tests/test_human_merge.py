@@ -112,19 +112,47 @@ def test_a_human_confirms_and_the_platform_merges(tmp_path, monkeypatch):
     assert status_of(chain) == "merged"
 
 
-def test_a_harness_cannot_merge_even_the_administrator(tmp_path, monkeypatch):
-    """§17 那一行对开发 Harness 一律拒绝 —— 管理员 harness 也是 harness。"""
+def test_the_administrator_harness_may_merge_when_delegated(tmp_path, monkeypatch):
+    """管理员 harness 经 `AP_ADMIN_SUBJECTS` 委托可以发起合入（仍需二次确认）。
+
+    主人 2026-10-31 的要求：审核通过之后由管理员把改动送进主树。授权范围没有变宽 ——
+    写集成分支的仍只有 MergeWorker，闸门一条都不跳；这里放行的只是"能不能发起这一下"。
+    """
     monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({"admin-window"}))
     chain = approve(build_chain(tmp_path))
-    # 管理员窗口在注册表里是真实存在的：拒绝不是因为"没登记"，而是因为权限。
     register_harness(chain.database, "admin-window", provider="anthropic")
     token = _harness(chain, "admin-window")
+
+    response = _post_merge(
+        _client(chain),
+        token,
+        {
+            "task_id": chain.task_id,
+            "decided_by": "admin-window",
+            "confirm_commit": chain.head_commit,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "merged"
+    assert response.json()["confirmed_by"] == "admin-window"
+    assert status_of(chain) == "merged"
+
+
+def test_a_member_harness_still_cannot_merge(tmp_path, monkeypatch):
+    """没被列入委托白名单的成员 harness，照样是 403。"""
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({"admin-window"}))
+    chain = approve(build_chain(tmp_path))
+    register_harness(chain.database, "harness-9", provider="anthropic")
+    token = _harness(chain, "harness-9")
 
     response = _client(chain).post(
         "/api/v1/human/merge",
         json={
             "task_id": chain.task_id,
-            "decided_by": "admin-window",
+            "decided_by": "harness-9",
             "confirm_commit": chain.head_commit,
         },
         headers={"Authorization": f"Bearer {token}"},

@@ -2045,6 +2045,64 @@ class AdminWorker:
             ),
             flush=True,
         )
+        if verdict["verdict"] == "approve":
+            self._merge_after_approval(task_id=task_id, commit=str(claim["reviewed_commit"]))
+
+    def _merge_after_approval(self, *, task_id: str, commit: str) -> None:
+        """审核通过之后，**管理员自己**把这条活送进主树。
+
+        主人 2026-10-31 的要求：审核通过的话管理员负责合并到主树。此前审批一过就由
+        运行环自动合 —— 谁都没按这个键，出问题时说不清是谁让它进的主树。
+
+        这里的调用带**二次确认**：把刚审过的那个 commit 原样交给平台，与分支头不一致
+        平台会拒（那说明审查期间分支又动了，需要重审）。真正写集成分支的仍是
+        MergeWorker，闸门一条都不跳；管理员只是"发起这一下"。
+
+        失败不重试、不掩盖：把平台的拒绝原样打出来，由人或下一轮处理 ——
+        合并被闸门挡住是**结论**（缺回执、集成红了、冲突要人定），不是可以重试的抖动。
+        """
+        if self.dry_run:
+            return
+        try:
+            result = self.client.post(
+                "/human/merge",
+                {
+                    "task_id": task_id,
+                    "decided_by": self.admin_harness_id,
+                    "confirm_commit": commit,
+                    "reason": "administrator approved the review and merges the deliverable",
+                },
+            )
+        except httpx.HTTPStatusError as exc:
+            # 把平台的拒绝原话带出来（"缺回执"/"集成红了"/"冲突要人定"/"confirm 不符"），
+            # 不要只说一个状态码 —— 那是让人去猜。
+            detail: object = exc.response.text[:300]
+            with contextlib.suppress(ValueError):
+                payload = exc.response.json()
+                detail = payload.get("error") or detail
+            print(
+                json.dumps(
+                    {
+                        "merge_refused": task_id,
+                        "status": exc.response.status_code,
+                        "detail": detail,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+        print(
+            json.dumps(
+                {
+                    "merged": task_id,
+                    "status": result.get("status"),
+                    "merge_commit": result.get("merge_commit"),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
 
     # ------------------------------------------------------------------ misc
 

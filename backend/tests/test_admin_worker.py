@@ -110,6 +110,7 @@ class FakeClient:
         self.submissions = []
         self.messages = []
         self.cancels = []
+        self.merges = []
 
     def get(self, path, **params):
         if path.startswith("/allocation/circulation/"):
@@ -175,6 +176,10 @@ class FakeClient:
         if path.endswith("/review/submit"):
             self.submissions.append(body)
             return {"status": "approved"}
+        # 审核通过后管理员自己发起合入（R10-fix-15）。
+        if path.endswith("/human/merge"):
+            self.merges.append(body)
+            return {"status": "merged", "merge_commit": "c0ffee"}
         if path.endswith("/messages"):
             self.messages.append(body)
             return {"message_id": "m-1"}

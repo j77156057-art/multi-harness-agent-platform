@@ -196,6 +196,15 @@ ADMIN_HARNESS_KEYS: dict[str, frozenset[str]] = {
     # 路由 `/tasks/{id}/cancel` 用 `_actor_type(principal)` 记录真实主体，
     # 所以管理员取消会记成 `harness/<管理员id>`，不会伪装成人类。
     "task:cancel": frozenset({HARNESS}),
+    # 合入主树（§17「merge/integration write」）。矩阵把这一格给了「人类管理员/负责人：
+    # 需二次确认」；现实里管理员就是一个 harness 主体，没有这条委托，管理员只能审、
+    # 不能把审过的活送进主树 —— 那正是主人 2026-10-31 指出的缺口（"审核通过的话管理员
+    # 负责将改动合并到主树"）。
+    #
+    # 授权范围**没有变宽**：写集成分支的仍然只有 MergeWorker，闸门（回执/审批/分支头/
+    # 集成健康/密钥扫描）一条都不跳；这里放行的只是"能不能发起这一下"。二次确认照旧
+    # 是手敲要合的 commit —— 管理员也不能凭一句"合吧"把活推进去。
+    "merge:confirm": frozenset({HARNESS}),
 }
 
 
