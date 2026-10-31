@@ -3971,11 +3971,42 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 平台够不着时用本地兜底。兜底认不出的**原样留着**（宁可原样，也不要编一个
    * 错的说法）。
    */
+  //: 成员 worker 写进事件里的那几句固定英文 → 人话。认不出的照原样（不猜）。
+  const FAILURE_DETAIL_TEXT = {
+    'the harness cli failed before it could deliver': '编程工具自己退出了，没交出改动',
+    'the platform refused the submission (out of scope)': '平台拒收：改动超出了工单允许的范围',
+  };
+
+  //: 失败类名 → 人话（`human_failure_reason` 会写成 `CliFailed：<工具原话>`）。
+  const FAILURE_CLASS_TEXT = {
+    CliFailed: '编程工具报错',
+    HarnessTimeout: '执行超时',
+    GitError: '仓库操作失败',
+    WorktreeCapacityExceeded: '没有空闲工位',
+    HarnessLeaseLost: '租约已失效',
+  };
+
   function reasonText(reason) {
     const text = String(reason || '').trim();
     if (!text) return '';
     const fromPlatform = translated(text);
     if (fromPlatform) return fromPlatform;
+    // 成员 worker 包过的失败原因：`retryable failure (CliFailed): the harness CLI
+    // failed before it could deliver`。整句是给日志看的，人只关心"这一轮成没成、
+    // 还有没有下一次"。里面那几句固定英文按意思说，认不出的照原样留着（别编）。
+    const retry = /^retryable failure\s*\(([^)]+)\)\s*[:：]\s*(.*)$/i.exec(text);
+    if (retry) {
+      const raw = retry[2].trim();
+      const why = FAILURE_DETAIL_TEXT[raw.toLowerCase()] || raw;
+      return why ? `这一轮没跑成（可重试）：${why}` : '这一轮没跑成（可重试）';
+    }
+    // `human_failure_reason` 的写法：`CliFailed：<工具自己说的那句>`。
+    const named = /^(CliFailed|HarnessTimeout|GitError|WorktreeCapacityExceeded|HarnessLeaseLost)\s*[:：]\s*(.*)$/.exec(text);
+    if (named) {
+      const label = FAILURE_CLASS_TEXT[named[1]] || '执行失败';
+      const detail = named[2].trim();
+      return detail ? `${label}：${detail}` : label;
+    }
     const worker = /^formal worker error:\s*(\w+)/i.exec(text);
     if (worker) return `平台内部出错了（${worker[1]}）`;
     const exit = /^harness CLI exited (\d+)$/.exec(text);
