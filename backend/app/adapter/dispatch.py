@@ -119,7 +119,10 @@ def dispatch(
             # work order, next to the breakpoint report of the attempt it
             # continues.
             spec["supersedes"] = supersedes
-        snapshot_id, plan_hash = service._store_plan(
+        # 第三个返回值是这个方案的内容提示（平台看得见、但不由平台拍板的那一类）。
+        # 单条派发这条路上没有人会去读它们，所以显式丢掉 —— 但**不能**当成没有：
+        # 丢掉是决定，不是疏忽。
+        snapshot_id, plan_hash, _warnings = service._store_plan(
             conn,
             plan_id=plan_id,
             group_id=group_id,

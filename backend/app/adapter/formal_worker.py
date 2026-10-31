@@ -829,19 +829,30 @@ def build_goal(
         + json.dumps(spec, ensure_ascii=False)
     )
     findings = (review or {}).get("findings") or []
+    extras: list[str] = []
     if (review or {}).get("verdict") == "request_changes" and findings:
-        goal += (
-            "\nThis attempt is a REWORK: a reviewer requested changes on the previous submission. "
-            "Address every finding below; do not resubmit the previous deliverable unchanged. "
+        extras.append(
+            "\n[1] REWORK — a reviewer requested changes on the previous submission.\n"
+            "Address every finding below; do not resubmit the previous deliverable unchanged.\n"
             f"Reviewer findings (verbatim, from review {(review or {}).get('review_id')}): "
             + json.dumps(findings, ensure_ascii=False)
         )
     if handoff:
-        goal += (
-            "\nThe previous attempt did NOT finish; here is its breakpoint report. "
-            "Continue from it instead of starting over: keep what is already written, "
-            "fix what it says is broken, and do not repeat the steps it already did. "
+        extras.append(
+            "\n[2] BREAKPOINT — the previous attempt did NOT finish.\n"
+            "Continue from the report below instead of starting over: keep what is already "
+            "written, fix what it says is broken, and do not repeat the steps it already did.\n"
             "Breakpoint report (verbatim): " + json.dumps(handoff, ensure_ascii=False)
+        )
+    if extras:
+        # 这两段是**平台**从上一轮整理出来的，不是派活的人写的。标清楚来源，
+        # 免得读的人把它们当成方案的一部分（也免得一出问题就看错是谁的决定）。
+        goal += (
+            "\n\n=== The sections below were assembled by the platform from the previous round;"
+            " they are NOT part of the task specification. ===\n"
+            "The specification above is the authoritative contract. If anything below contradicts"
+            " it, follow the specification and say so in your hand-off note.\n"
+            + "\n".join(extras)
         )
     return goal
 

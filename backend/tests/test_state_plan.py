@@ -283,12 +283,15 @@ def test_plan_validator_rejects_limits_resources_globs_and_acceptance():
 
 
 def test_the_acceptance_may_not_require_a_file_outside_the_landing_scope():
-    """验收条款要求交出的文件，必须在工单的落点范围里。
+    """验收条款要求交出的文件越界：**提示，但不拦方案**。
 
     2026-10-29 的真实演练：管理员在第 2 轮把「提交 SHA 往哪儿交」折成了
     「另写一个 portfolio/lanes/<lane>/receipt.txt」，而 exclusive_paths 只允许
     retro-round2.md。成员照做写了回执，平台按范围规则正确地拒收了 —— 但错的是
     方案：它要求人交一样东西，又不让那样东西进仓库。
+
+    2026-10-31 改成提示：这是内容判断（「这句话是不是要求交出那个文件」要靠读语义），
+    平台按字符串猜得出一半，猜错就把人写的方案判成错的。方案照存，提示随结果回给人。
     """
     contradictory = PlanSpec.from_mapping(
         {
@@ -312,8 +315,12 @@ def test_the_acceptance_may_not_require_a_file_outside_the_landing_scope():
         }
     )
     result = PlanValidator().validate(contradictory)
-    assert not result.ok
-    assert any("receipt.txt" in error for error in result.errors)
+    # 方案照过 —— 平台不在内容层面替人否决方案。
+    assert result.ok
+    assert result.errors == ()
+    # 但这条矛盾要交回给人看，且说清「平台没有拦」。
+    assert any("receipt.txt" in note for note in result.warnings), result.warnings
+    assert any("平台没有拦" in note for note in result.warnings), result.warnings
 
 
 def test_the_acceptance_may_still_say_which_file_it_must_not_touch():

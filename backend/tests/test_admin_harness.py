@@ -720,8 +720,12 @@ def test_route_refuses_an_admin_subject_that_is_not_registered(tmp_path, monkeyp
 # ----------------------------------------------------- self-loop worker inputs
 
 
-def test_refine_uses_only_selected_members_and_prefixes_the_project(tmp_path):
-    """A project goal names its members; the admin must not assign outsiders."""
+def test_refine_uses_only_selected_members_and_keeps_the_title_verbatim(tmp_path):
+    """A project goal names its members; the admin must not assign outsiders.
+
+    2026-10-31：项目归属不再靠改写标题（平台为了自己分堆去改人写的字）。标题
+    原样保留，归属进 `project_label`；办公室先读那一格，读不到才回退到老前缀。
+    """
     chain = _admin_chain(tmp_path)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
     result = _refine_service(chain, runner).refine(
@@ -733,7 +737,13 @@ def test_refine_uses_only_selected_members_and_prefixes_the_project(tmp_path):
     assert result["status"] == "ok"
     assert result["project_name"] == "DEMO"
     assert result["tasks"][0]["harness_id"] == MEMBER
-    assert result["tasks"][0]["title"].startswith("DEMO · ")
+    # 标题是人的字：一个前缀都不许加。
+    assert not result["tasks"][0]["title"].startswith("DEMO · ")
+    # 归属另有去处。
+    spec = result["tasks"][0]
+    assert ("project_label" in spec and spec["project_label"] == "DEMO") or (
+        spec.get("as_spec", lambda: {})().get("project_label") == "DEMO"
+    )
 
 
 def test_refine_excludes_every_configured_admin_window_from_members(tmp_path, monkeypatch):

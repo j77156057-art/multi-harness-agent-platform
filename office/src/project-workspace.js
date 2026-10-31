@@ -167,18 +167,19 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   let platformProjects = [];
 
   /**
-   * 任务标题是「项目名 · 任务名」，所以项目名就是前缀。
+   * 平台上已有的项目：先读平台单独给的 `project_label`，读不到才回退到标题前缀。
    *
-   * 这不是平台给的项目列表（平台那边项目名常常就是编号），但它是**真实存在**
-   * 的活——按前缀归堆，人才知道自己有几个项目在跑。
+   * 以前归属只靠标题前缀「项目名 · 」，因为任务行上没有项目字段 —— 而那意味着
+   * 平台为了自己分堆在改人写的标题。现在归属有自己的字段；老的活还带着前缀，
+   * 所以两种都认，否则升级后旧任务会在大厅里突然"不属于任何项目"。
    */
   function platformProjectsFrom(tasks) {
     const groups = new Map();
     for (const task of tasks) {
+      const label = typeof task.project_label === 'string' ? task.project_label.trim() : '';
       const title = typeof task.title === 'string' ? task.title : '';
       const cut = title.indexOf(' · ');
-      if (cut <= 0) continue;
-      const name = title.slice(0, cut).trim();
+      const name = label || (cut > 0 ? title.slice(0, cut).trim() : '');
       if (!name) continue;
       if (!groups.has(name)) groups.set(name, { name, taskIds: [], count: 0, latest: 0 });
       const group = groups.get(name);
@@ -272,14 +273,24 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       platformProjects = platformProjectsFrom(tasks);
       renderPlatformProjects();
       if (projects.length) return;
-      const candidates = tasks.filter(task => typeof task.title === 'string' && task.title.includes(' · '));
+      // 归属的两种写法都要认：新任务带 `project_label`（平台单独给的一格），
+      // 升级前的任务只有标题前缀「项目名 · 」。只认前缀的话，新派下来的活
+      // 在这台机器的 localStorage 清掉之后就再也「找不回来」了。
+      const labelOf = task => {
+        const label = typeof task.project_label === 'string' ? task.project_label.trim() : '';
+        if (label) return label;
+        return typeof task.title === 'string' && task.title.includes(' · ')
+          ? task.title.split(' · ')[0].trim()
+          : '';
+      };
+      const candidates = tasks.filter(task => labelOf(task));
       if (!candidates.length) return;
       const latest = candidates.reduce((best, task) =>
         Number(task.state_changed_seq || 0) > Number(best.state_changed_seq || 0) ? task : best, candidates[0]);
-      const name = latest.title.split(' · ')[0].trim();
+      const name = labelOf(latest);
       if (!name) return;
       const taskIds = candidates
-        .filter(task => String(task.title).startsWith(`${name} · `))
+        .filter(task => labelOf(task) === name)
         .map(task => task.task_id).filter(Boolean);
       recoverable = {name, taskIds};
       // 说人话：以前写「恢复最近项目：xxx」，读的人不知道"恢复"是什么。

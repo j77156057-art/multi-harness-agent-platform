@@ -114,6 +114,11 @@ class PlanSpec:
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
     errors: tuple[str, ...] = ()
+    #: 不拦方案、只提醒人的判断（例如「验收提到了你无权写的文件」）。
+    #:
+    #: 这一格存在的原因：那类判断是**内容层面**的 —— 平台不该替人认定"这条验收
+    #: 写错了"。它能看见矛盾，但拍板的人是人，所以只留一条提示，方案照存。
+    warnings: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -129,6 +134,7 @@ class PlanValidator:
 
     def validate(self, plan: PlanSpec) -> ValidationResult:
         errors: list[str] = []
+        warnings: list[str] = []
         if not plan.plan_id:
             errors.append("plan_id is required")
         if len(plan.tasks) > plan.max_tasks:
@@ -172,7 +178,7 @@ class PlanValidator:
                 errors.append(
                     f"task {task.task_id} uses unregistered verify profile {task.verify_profile}"
                 )
-            errors.extend(self._validate_acceptance_scope(task, plan))
+            warnings.extend(self._acceptance_scope_warnings(task, plan))
             # R10 section 9: a dependency edge declared twice is a malformed
             # plan, not a no-op. De-duplicate before graph construction so the
             # repeated edge cannot inflate indegree and fake a Kahn cycle.
@@ -205,7 +211,7 @@ class PlanValidator:
             errors.append("path globs contain duplicates")
         if self._has_cycle(graph, indegree):
             errors.append("task dependency graph contains a cycle")
-        return ValidationResult(tuple(dict.fromkeys(errors)))
+        return ValidationResult(tuple(dict.fromkeys(errors)), tuple(dict.fromkeys(warnings)))
 
     @staticmethod
     def _validate_contract(
@@ -247,29 +253,25 @@ class PlanValidator:
                 errors.append(f"task {task.task_id} uses an unregistered evidence source {source}")
 
     @staticmethod
-    def _validate_acceptance_scope(task: TaskSpec, plan: PlanSpec) -> list[str]:
-        """验收条款提到的文件，必须落在这条工单允许改的范围里。
+    def _acceptance_scope_warnings(task: TaskSpec, plan: PlanSpec) -> list[str]:
+        """验收条款提到的文件，落在这条工单允许改的范围之外 —— **提示，不拦**。
 
         2026-10-29 的真实演练撞到过：管理员在第 2 轮把成员的「提交 SHA 往哪儿交」
         折成了「另写一个 ``portfolio/lanes/<lane>/receipt.txt``」，而工单的
         ``exclusive_paths`` 只允许 ``retro-round2.md``。成员照做写了回执 —— 平台
-        按范围规则正确地拒收了（越界文件没提交，工作树脏），但**错的是方案**：
-        它要求人交一样东西，又不让那样东西进仓库。
+        按范围规则正确地拒收了（越界文件没提交，工作树脏）。
 
-        所以这条要**在计划入库前**就拦住：验收条款提到的路径越界，方案本身就不成立。
-
-        判据收紧到只抓真正的矛盾（两条，避免误伤把方案也拒了）：
-
-        * 越界的路径得是**落点旁边的兄弟文件**（同一个目录）—— 验收条款顺口提到
-          另一个目录里的文件，多半是「参考一下」，不是「交出它」；
-        * 那句话得是在**要求**它，而不是在**禁止**它（「该提交未改动 X」是禁止）。
+        以前这一条会**拒掉整份方案**。改成提示的原因：这是**内容判断** ——「这句
+        验收是不是要求交出那个文件」要靠读语义来定，平台按字符串猜得出一半，猜错
+        就是把对的东西判成错的，而且错的一方是**人写的方案**。平台能看见这个矛盾，
+        但拍板的是人：方案照存，提示随方案一起回去，人自己决定改不改。
         """
-        errors: list[str] = []
+        notes: list[str] = []
         patterns = [str(item) for item in task.exclusive_paths if str(item).strip()]
         if not patterns:
             # 没有落点范围的任务不判这条：范围由别的层负责（没有范围时，
             # 「提到某个文件」不构成矛盾）。
-            return errors
+            return notes
         directories = {
             pattern.rsplit("/", 1)[0] + "/" if "/" in pattern else "" for pattern in patterns
         }
@@ -291,11 +293,12 @@ class PlanValidator:
                 if any(marker in before for marker in _NEGATION_MARKERS):
                     # 这句话在说「别动它」，不是「交出它」。
                     continue
-                errors.append(
-                    f"task {task.task_id} acceptance requires {path!r},"
+                notes.append(
+                    f"task {task.task_id}: acceptance mentions {path!r},"
                     f" which is outside its exclusive_paths {patterns}"
+                    " —— 平台没有拦（这是内容判断）；请人确认这条验收是不是要求交出那个文件"
                 )
-        return errors
+        return notes
 
     @staticmethod
     def _normalize_glob(glob: str, errors: list[str]) -> str:

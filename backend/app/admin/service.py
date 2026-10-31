@@ -20,6 +20,7 @@ from typing import Any
 
 from app.adapter import cli_output
 from app.adapter.formal_worker import base_harness_id, build_adapter, known_bases
+from app.admin.review_rules import load_review_rules
 from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
@@ -58,15 +59,25 @@ class RefinedTask:
     exclusive_paths: list[str]
     acceptance: str
     harness_id: str
+    #: 这条活属于哪个前端项目（人给的字，原样存，不改）。
+    #:
+    #: 以前这件事靠**改写标题**（加「项目名 · 」前缀）来完成，因为任务行上没有
+    #: 项目字段，而办公室要按项目分堆。为了自己好分堆去改人写的标题，是平台越界：
+    #: 标题会出现在每一处界面、每一条群消息、每一份交接里，人看到的不再是自己写的那句。
+    #: 现在单独存一列，标题原样保留；办公室先读这一列，读不到才回退到老的前缀。
+    project_label: str | None = None
 
     def as_spec(self) -> dict[str, Any]:
-        return {
+        spec: dict[str, Any] = {
             "title": self.title,
             "goal": self.goal,
             "exclusive_paths": list(self.exclusive_paths),
             "acceptance": self.acceptance,
             "harness_id": self.harness_id,
         }
+        if self.project_label:
+            spec["project_label"] = self.project_label
+        return spec
 
 
 def _valid_exclusive_path(raw: str) -> bool:
@@ -757,6 +768,32 @@ class AdminService:
             if contracts
             else 'Every finding must carry "contract_id" when the specification names one.'
         )
+        # 评审的**标准**从 `review-rules.json` 读（人可改），协议部分留在代码里：
+        # 答案必须是那个 JSON、每条意见要带 contract_id —— 平台要解析这些，
+        # 改坏了只会产生平台必须拒收的结论。
+        criteria, rules_problem = load_review_rules()
+        numbered: list[str] = [
+            "1. Answer with ONE JSON object and nothing else.",
+            '2. Shape: {"verdict":"approve"|"request_changes","findings":['
+            '{"severity":"note|minor|major|critical","message":"...",'
+            '"contract_id":"..."}]}',
+        ]
+        for offset, criterion in enumerate(criteria, start=3):
+            numbered.append(f"{offset}. {criterion}")
+        next_index = 3 + len(criteria)
+        numbered.extend(
+            [
+                f"{next_index}. request_changes must name every concrete defect a reworking"
+                " member can act on; do not write a general complaint.",
+                f"{next_index + 1}. If the diff is missing or unreadable, request_changes"
+                " and say so.",
+                f"{next_index + 2}. Never claim to have run tests or read files you were"
+                " not given.",
+                f"{next_index + 3}. {contract_rule}",
+            ]
+        )
+        if rules_problem:
+            numbered.append(f"Note for the operator (not for the verdict): {rules_problem}")
         return "\n".join(
             [
                 "You are the ADMINISTRATOR harness reviewing a member's submitted attempt.",
@@ -776,17 +813,7 @@ class AdminService:
                 patch,
                 "",
                 "Rules:",
-                "1. Answer with ONE JSON object and nothing else.",
-                '2. Shape: {"verdict":"approve"|"request_changes","findings":['
-                '{"severity":"note|minor|major|critical","message":"...",'
-                '"contract_id":"..."}]}',
-                "3. approve only when the diff satisfies the acceptance and stays",
-                "   inside exclusive_paths. Otherwise request_changes.",
-                "4. request_changes must name every concrete defect a reworking member",
-                "   can act on; do not write a general complaint.",
-                "5. If the diff is missing or unreadable, request_changes and say so.",
-                "6. Never claim to have run tests or read files you were not given.",
-                f"7. {contract_rule}",
+                *numbered,
             ]
         )
 
@@ -947,12 +974,9 @@ class AdminService:
             paths = raw.get("exclusive_paths")
             if not title or not goal or not acceptance:
                 raise AdminHarnessError(f"task {index} is missing title/goal/acceptance")
-            # Titles are the only project scope marker on a task row (tasks
-            # carry group_id, not a local project id). The office reads the
-            # prefix to separate projects that share one formal group, so make
-            # it deterministic instead of trusting the model to remember.
-            if project_name and not title.startswith(f"{project_name} · "):
-                title = f"{project_name} · {title}"
+            # 项目归属单独存，**不改标题**（见 `RefinedTask.project_label`）。
+            # 以前这里给标题加「项目名 · 」前缀；那等于平台为了自己分堆去改人写的字。
+            project_label = (project_name or "").strip() or None
             if not isinstance(paths, list) or not paths:
                 raise AdminHarnessError(f"task {index} has no exclusive_paths")
             cleaned = [str(item).strip() for item in paths]
@@ -975,6 +999,7 @@ class AdminService:
                     exclusive_paths=cleaned,
                     acceptance=acceptance,
                     harness_id=harness_id,
+                    project_label=project_label,
                 )
             )
         return tasks

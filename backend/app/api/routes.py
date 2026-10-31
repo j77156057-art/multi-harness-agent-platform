@@ -129,6 +129,9 @@ def create_plan(
     return {
         "plan_id": outcome.plan_id,
         "snapshot_id": outcome.snapshot_id,
+        # 平台看得见、但不该替人拍的内容问题。方案已经存下了 —— 这些只是把
+        # 「你可能想看一眼」交回给人，不是拒绝理由。
+        "warnings": list(outcome.warnings),
         "plan_hash": outcome.plan_hash,
     }
 

@@ -169,7 +169,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     if (!scope) return false;
     const ids = new Set((scope.taskIds || []).map(String));
     const name = String(scope.name || '').trim();
+    // 先读平台单独给的归属字段，再回退到老标题前缀（升级前的活只有前缀）。
+    const label = String(task.project_label || '').trim();
     return (ids.size > 0 && ids.has(String(task.task_id))) ||
+      (Boolean(name) && label === name) ||
       (Boolean(name) && String(task.title || '').startsWith(`${name} · `));
   };
   // 摘要里同时给出「本项目 / 本群」两个数，避免再次把整群负担说成本项目的。

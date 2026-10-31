@@ -190,9 +190,17 @@ function projectScope() {
     return {
       id: project.id,
       name,
-      matches: (task) =>
-        ids.has(String(task.task_id)) ||
-        (Boolean(name) && String(task.title || '').startsWith(`${name} · `)),
+      // 归属先看平台**单独给的那一格**（`project_label`），读不到才回退到老前缀。
+      //
+      // 以前平台靠改写标题（加「项目名 · 」前缀）来表达归属 —— 那是平台为了自己
+      // 分堆去改人写的字。现在归属有自己的字段，标题原样；老的活还带着前缀，
+      // 所以这一段回退要留着，否则升级后旧任务的归属会全部消失。
+      matches: (task) => {
+        if (ids.has(String(task.task_id))) return true;
+        const label = String(task.project_label || '').trim();
+        if (label && label === name) return true;
+        return Boolean(name) && String(task.title || '').startsWith(`${name} · `);
+      },
     };
   } catch {
     return null;

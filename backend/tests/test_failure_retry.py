@@ -223,12 +223,15 @@ def test_the_next_attempt_gets_the_breakpoint_report_in_its_work_order(tmp_path)
         handoff=handoff,
     )
 
-    assert "breakpoint report" in goal
+    assert "Breakpoint report" in goal
     assert "402" in goal
-    assert "Continue from it" in goal
+    assert "Continue from the report below" in goal
+    # 这一段是平台整理的，不是派活的人写的 —— 必须标出来。
+    assert "assembled by the platform" in goal
 
 
 def test_a_first_attempt_has_no_breakpoint_report():
     goal = build_goal({"id": "T-1"}, harness_id="opencode")
 
-    assert "breakpoint report" not in goal
+    assert "Breakpoint report" not in goal
+    assert "assembled by the platform" not in goal

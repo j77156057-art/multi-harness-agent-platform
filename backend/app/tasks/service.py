@@ -156,6 +156,9 @@ class PlanOutcome:
     plan_hash: str
     ready: tuple[str, ...]
     waiting: tuple[str, ...]
+    #: 校验器看得见、但**不该由平台拍板**的内容问题（见 `plan/validator.py`
+    #: 的 `_acceptance_scope_warnings`）。方案照存，这些提示随结果回给人。
+    warnings: tuple[str, ...] = ()
 
 
 class SchedulerService:
@@ -219,7 +222,7 @@ class SchedulerService:
             if exists is not None:
                 raise Conflict(f"plan {plan_id} already exists")
 
-            snapshot_id, plan_hash = self._store_plan(
+            snapshot_id, plan_hash, warnings = self._store_plan(
                 conn, plan_id=plan_id, group_id=group_id, raw=snapshot
             )
         return PlanOutcome(
@@ -228,6 +231,7 @@ class SchedulerService:
             plan_hash=plan_hash,
             ready=(),
             waiting=(),
+            warnings=warnings,
         )
 
     def _store_plan(
@@ -237,14 +241,14 @@ class SchedulerService:
         plan_id: str,
         group_id: str,
         raw: dict[str, object],
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, tuple[str, ...]]:
         """Validate and store a plan snapshot, materialising its tasks in draft.
 
         Shared by ``create_plan`` and ``split_task`` (a split hands its children
         to the same plan-approval path -- R10 §10's only ``draft -> ready``
         entry). The caller owns the transaction and the group/plan-id checks.
-        Returns ``(snapshot_id, plan_hash)``.
-        """
+        Returns ``(snapshot_id, plan_hash, warnings)``; warnings are内容层面的
+        提示，不拦方案（见 ``PlanValidator``）。"""
         raw = dict(raw)
         raw.setdefault("plan_id", plan_id)
         try:
@@ -307,7 +311,7 @@ class SchedulerService:
                     task.task_id,
                 ),
             )
-        return snapshot_id, plan_hash
+        return snapshot_id, plan_hash, validation.warnings
 
     # ---------------------------------------------------------------- plans
 
@@ -380,6 +384,7 @@ class SchedulerService:
             plan_hash=plan_hash,
             ready=(),
             waiting=(),
+            warnings=validation.warnings,
         )
 
     def approve_plan(
@@ -920,7 +925,7 @@ class SchedulerService:
                         f" {task_id} remaining {remaining}"
                     )
             child_plan_id = f"plan-split-{uuid.uuid4().hex}"
-            child_snapshot_id, _child_plan_hash = self._store_plan(
+            child_snapshot_id, _child_plan_hash, _child_warnings = self._store_plan(
                 conn,
                 plan_id=child_plan_id,
                 group_id=str(parent["group_id"]),
@@ -1527,14 +1532,17 @@ class SchedulerService:
                     ),
                 )
             event = EventKind.APPROVE if verdict == "approve" else EventKind.REQUEST_CHANGES
+            exhausted = False
             if event is EventKind.REQUEST_CHANGES:
                 round_no = int(task["review_round"]) + 1
-                if round_no > settings.max_review_rounds:
-                    raise Conflict(
-                        f"review rounds exhausted for {task_id} "
-                        f"(max {settings.max_review_rounds})",
-                        code="review.round_exhausted",
-                    )
+                # 返修轮次用完了：**不拒收这次评审**，也不假装还能再返修。
+                #
+                # 以前这里直接 409（`review.round_exhausted`），后果是评审方的结论
+                # 根本落不下来 —— 平台把一个已经做出的判断挡在门外，还要求人自己
+                # 去猜发生了什么。轮次是预算，用完了该做的是**停下来问人**：结论照
+                # 记，任务转 escalated（R10 §10 的 `review_round_exhausted` 边），
+                # 人从「需要你处理」里决定继续、换人还是收兵。
+                exhausted = round_no > settings.max_review_rounds
                 extra: dict[str, object] = {"review_round": round_no}
             else:
                 extra = {"last_review_id": review_id}
@@ -1573,12 +1581,44 @@ class SchedulerService:
                 extra_sets=extra,
                 state_seq=record.seq,
             )
+            if exhausted:
+                # 评审结论已经落库（上面），这里再做第二步：轮次用完 → 停线交给人。
+                # 用规范里本来就有的 `review_round_exhausted` 边，不新造事件名。
+                stop = self.store.append(
+                    event_name=EventKind.REVIEW_ROUND_EXHAUSTED.value,
+                    aggregate_type="task",
+                    aggregate_id=task_id,
+                    actor_type="scheduler",
+                    actor_id="review-round-guard",
+                    payload={
+                        "review_id": review_id,
+                        "review_round": int(extra["review_round"]),
+                        "max_review_rounds": settings.max_review_rounds,
+                    },
+                    connection=conn,
+                )
+                apply_transition(
+                    conn,
+                    task_id=task_id,
+                    current=TaskStatus.CHANGES_REQUESTED,
+                    event=EventKind.REVIEW_ROUND_EXHAUSTED,
+                    expected_epoch=int(task["current_epoch"]),
+                    extra_sets={"waiting_since": _now()},
+                    state_seq=stop.seq,
+                )
             return {
                 "review_id": review_id,
                 "task_id": task_id,
                 "verdict": verdict,
                 "event": event.value,
                 "seq": record.seq,
+                # 轮次用完时把「下一步是人」说清楚，别让调用方以为还能再返修。
+                "review_rounds_exhausted": exhausted,
+                "next": (
+                    "escalated"
+                    if exhausted
+                    else (TaskStatus.APPROVED.value if verdict == "approve" else TaskStatus.CHANGES_REQUESTED.value)
+                ),
             }
 
     def start_task(
@@ -2098,6 +2138,10 @@ class SchedulerService:
                 supersedes = fields.get("supersedes")
                 if supersedes:
                     task["supersedes"] = supersedes
+                # 项目归属走独立一格：标题是人的字，平台不往里塞东西。
+                project_label = fields.get("project_label")
+                if project_label:
+                    task["project_label"] = project_label
             # Why the task fell over.  The office's「失败与接手」panel has to
             # say *why*, not just "abandoned": the reason is the last
             # abandon/release event, read in one query for the whole list.
@@ -2174,11 +2218,19 @@ class SchedulerService:
                     and str(task_id) not in titles
                 ):
                     supersedes = spec.get("supersedes")
+                    # 项目归属（人给的字，平台原样带回）。以前它藏在标题前缀里，
+                    # 现在单独一格：办公室先读这一格，读不到才回退到老前缀。
+                    project_label = spec.get("project_label")
                     titles[str(task_id)] = {
                         "title": title,
                         "supersedes": (
                             str(supersedes)
                             if isinstance(supersedes, str) and supersedes.strip()
+                            else None
+                        ),
+                        "project_label": (
+                            str(project_label).strip()
+                            if isinstance(project_label, str) and project_label.strip()
                             else None
                         ),
                     }
