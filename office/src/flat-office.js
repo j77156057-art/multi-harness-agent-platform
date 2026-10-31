@@ -35,6 +35,7 @@ import {
   installGroupsHtml,
   summaryLine,
 } from './harness-install.js';
+import { readInstallCache, writeInstallCache } from './install-cache.js';
 
 const escape = escapeHtml;
 
@@ -4571,6 +4572,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (data && Array.isArray(data.installers)) {
         state.installs = data;
         state.installsError = null;
+        // 探过就存下来：页面重载不该让「已探到 7 个」退回「还没探测」。
+        if (probe) writeInstallCache(data);
       }
     } catch (error) {
       // 读不到就说读不到（可能是旧后端没有这条路），不假装成"没装"。
@@ -6344,8 +6347,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 以前空项目会顺带探一次，理由是「人正等着知道缺哪个 CLI」。但探测是六个子进程，
       // 回来之后这块要整块重画 —— 人正在看的清单被自己换掉，看到的就是「页面又自己
       // 刷了一下」。清单里缺哪个，人点一下「探测」就能知道；页面不替他决定。
+      //
+      // 探过的结果存了一份在浏览器里（`install-cache`）：页面重载不该让它退回
+      // 「还没探测」，否则人看到的是「探完了过一会又变回去」。
       if (!state.installs && !state.installsError) {
-        void loadInstalls();
+        const cachedInstalls = readInstallCache();
+        state.installs = cachedInstalls ? cachedInstalls.payload : null;
+        if (!state.installs) void loadInstalls();
       }
       state.loaded = true;
       // 顶栏的状态：平台连不连得上、几个窗口**在跑**（平台上的在场事实，不猜）。

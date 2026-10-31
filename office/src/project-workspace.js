@@ -2,6 +2,7 @@ import './project-workspace.css';
 import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 // 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
 import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
+import { probedAtLine, readInstallCache, writeInstallCache } from './install-cache.js';
 
 const clone = value => structuredClone(value);
 
@@ -321,7 +322,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 探测过程中它被换成「正在探测…」，结束时按这个变量还原。
   let toolsProbeLabel = '探测这台机器';
 
-  function paintTools(payload) {
+  function paintTools(payload, { at = '' } = {}) {
     if (!payload) return;
     // **先记住人点开/收起了哪几组，再重画。**
     //
@@ -343,7 +344,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       openKeys: opened,
       closedKeys: closed,
     });
-    toolsHost.textContent = hostLine(payload);
+    toolsHost.textContent = [hostLine(payload), probedAtLine(at)].filter(Boolean).join(' ');
     const counts = payload.summary || {};
     const ready = Number(counts.ready || 0);
     const unknown = Number(counts.unknown || 0);
@@ -369,7 +370,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     try {
       const response = await fetch(`/api/formal/installers${probe ? '' : '?probe_local=false'}`, {cache: 'no-store'});
       if (!response.ok) throw new Error(`读取安装清单失败（HTTP ${response.status}）`);
-      paintTools(await response.json());
+      const payload = await response.json();
+      const at = probe ? writeInstallCache(payload) && readInstallCache()?.at : '';
+      paintTools(payload, { at: at || '' });
     } catch (error) {
       // 读不到就说读不到：不假装成"这台机器没装"。
       toolsSummary.textContent = `读不到安装清单：${error.message}。正式平台未连接时看不到这一段。`;
@@ -388,7 +391,17 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 人正在看清单，结果一回来就整块重画一遍 —— 看着就是"页面自己刷新了"。
   // 探测改成**只由人点**：先给官方装法（纯数据、很快），人想看这台机器缺什么，
   // 点「探测这台机器」。
-  void loadTools();
+  //
+  // 但"只由人点"还有一个后果要接住：探测结果原来只活在 DOM 里，页面一重载
+  // （刷新、换标签页、开发时整页热重载）就退回「这台机器还没探测」—— 人看到的是
+  // 「探完了过一会又变回去」。所以结果写进 localStorage，进来先摆缓存（带探测时间），
+  // 人想刷新就点按钮。
+  const cached = readInstallCache();
+  if (cached) {
+    paintTools(cached.payload, { at: cached.at });
+  } else {
+    void loadTools();
+  }
 
   function renderFormalRegistration(state) {
     formalState = state;
