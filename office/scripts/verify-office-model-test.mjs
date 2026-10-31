@@ -18,9 +18,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-model-test.mjs');
+await requireProjectGroups(base, 'verify-office-model-test.mjs');
 const wanted = process.env.OFFICE_MT_MODEL || '';
 const shotDir = process.env.OFFICE_MT_SHOTS || path.join(process.env.TEMP || '.', 'office-model-test');
 fs.mkdirSync(shotDir, {recursive: true});

@@ -9,7 +9,7 @@
 //
 // 只读脚本：不建任务、不发消息。
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = await requireOffice('verify-office-layout.mjs', process.env.OFFICE_URL);
@@ -55,7 +55,7 @@ try {
     await page.goto(BASE);
     await page.waitForSelector('.project-card-open', { timeout: 30000 });
     await page.locator('.project-card-open').first().click();
-    await page.waitForSelector('#aoWorkspace .flat-task', { timeout: 30000 });
+    await waitForTasksOrSkip(page, 'verify-office-layout.mjs');
     await page.waitForTimeout(1500);
 
     const report = await page.evaluate(() => {

@@ -17,9 +17,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-model-retier.mjs');
+await requireProjectGroups(base, 'verify-office-model-retier.mjs');
 const harness = process.env.OFFICE_RETIER_HARNESS || 'codex';
 const cli = process.env.OFFICE_RETIER_CLI || 'opencode-cli';
 const cliModel = process.env.OFFICE_RETIER_MODEL || 'opencode/beam-free';

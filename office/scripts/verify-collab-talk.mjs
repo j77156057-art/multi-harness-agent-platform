@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireTasks } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-collab-talk.mjs');
 const outFile = process.env.OFFICE_TALK_OUT || path.join(process.env.TEMP || '.', 'collab-talk.json');
@@ -30,7 +30,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function openProject() {
   await page.goto(base, {waitUntil: 'domcontentloaded'});
-  await page.waitForSelector('.project-platform-open', {timeout: 30000});
+  await requireTasks(base, 'verify-collab-talk.mjs');
+  await page.waitForSelector('.project-platform-open', { timeout: 30000 });
   const total = await page.locator('.project-platform-open').count();
   for (let i = 0; i < total; i += 1) {
     await page.locator('.project-platform-open').nth(i).click();

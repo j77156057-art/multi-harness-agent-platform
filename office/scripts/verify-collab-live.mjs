@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireTasks } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-collab-live.mjs');
 const dir = process.env.OFFICE_SHOTS || path.join(process.env.TEMP || '.', 'collab-shots');
@@ -43,7 +43,8 @@ async function until(fn, {timeout = 60000, step = 1000} = {}) {
 
 async function openProject() {
   await page.goto(base, {waitUntil: 'domcontentloaded'});
-  await page.waitForSelector('.project-platform-open', {timeout: 30000});
+  await requireTasks(base, 'verify-collab-live.mjs');
+  await page.waitForSelector('.project-platform-open', { timeout: 30000 });
   const total = await page.locator('.project-platform-open').count();
   for (let i = 0; i < total; i += 1) {
     await page.locator('.project-platform-open').nth(i).click();

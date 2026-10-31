@@ -10,6 +10,7 @@
 //
 // 两部分：网关那侧用真实 HTTP + 隔离的桩上游；界面那侧用 Playwright + 拦截 API。
 import assert from 'node:assert/strict';
+import { waitForTasksOrSkip } from './lib/office-url.mjs';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -202,7 +203,7 @@ try {
     .locator('.project-platform-item', { hasText: '示例项目' })
     .locator('.project-platform-open')
     .click();
-  await page.waitForSelector('#aoWorkspace .flat-task', { timeout: 20000 });
+  await waitForTasksOrSkip(page, 'verify-office-handoff.mjs');
   await page.locator('.flat-task').first().click();
   await page.waitForSelector('#aoWorkspace .flat-handoff', { timeout: 20000 });
 

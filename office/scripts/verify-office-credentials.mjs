@@ -20,9 +20,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-credentials.mjs');
+await requireProjectGroups(base, 'verify-office-credentials.mjs');
 const harness = process.env.OFFICE_CRED_HARNESS || 'codex';
 const shotDir = process.env.OFFICE_CRED_SHOTS || path.join(process.env.TEMP || '.', 'office-credentials');
 fs.mkdirSync(shotDir, {recursive: true});

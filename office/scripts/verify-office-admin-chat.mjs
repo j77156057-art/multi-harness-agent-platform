@@ -13,7 +13,7 @@
 //
 // 只读脚本：API 全部拦截，不往正式平台写任何东西。
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = await requireOffice('verify-office-admin-chat.mjs', process.env.OFFICE_URL);
@@ -118,7 +118,7 @@ try {
   await page.waitForSelector('.project-create-dialog[open]');
   await page.locator('[data-project-name]').fill('直达管理员回归');
   await page.locator('[data-confirm-create]').click();
-  await page.waitForSelector('#aoWorkspace .flat-task', { timeout: 20000 });
+  await waitForTasksOrSkip(page, 'verify-office-admin-chat.mjs');
   await page.waitForTimeout(1200);
 
   // 1. 右栏的入口

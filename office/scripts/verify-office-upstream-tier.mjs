@@ -19,9 +19,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-upstream-tier.mjs');
+await requireProjectGroups(base, 'verify-office-upstream-tier.mjs');
 const harness = process.env.OFFICE_UTIER_HARNESS || 'codex';
 const groupName = process.env.OFFICE_UTIER_GROUP || 'opencode';
 const shotDir = process.env.OFFICE_UTIER_SHOTS || path.join(process.env.TEMP || '.', 'office-upstream-tier');

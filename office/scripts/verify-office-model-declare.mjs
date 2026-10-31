@@ -22,9 +22,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-model-declare.mjs');
+await requireProjectGroups(base, 'verify-office-model-declare.mjs');
 const harness = process.env.OFFICE_DECLARE_HARNESS || 'codex';
 const shotDir = process.env.OFFICE_DECLARE_SHOTS || path.join(process.env.TEMP || '.', 'office-declare');
 fs.mkdirSync(shotDir, {recursive: true});
