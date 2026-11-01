@@ -46,3 +46,6 @@ docs/prototypes/office-anim/
 
 # 运行时锁文件（不是源码）
 canonical.git.ensure.lock
+
+# 转接模式的信箱（运行时产物：outbox/inbox/archive/returned）
+/relay/

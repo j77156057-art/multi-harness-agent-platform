@@ -169,6 +169,15 @@ class Settings:
             "AP_RUNTIME_AUTO_MERGE", "0"
         ).strip().lower() not in {"0", "false", "no", "off", ""}
 
+        #: 转接模式（docs/notes/relay-mode.md）：一条以 `给<收件人>：` 开头的消息会被拆成
+        #: 多条定向消息，平台只负责把话送到 —— 不拆任务、不管工作树、不做校验与合并。
+        #:
+        #: 默认关闭：关着时消息完全按今天的样子走，"以给某某：开头的普通消息"不会被悄悄
+        #: 拆开（拆错比不拆更坏）。要用的人自己打开这一步。
+        self.relay_mode: bool = os.environ.get(
+            "AP_RELAY_MODE", "0"
+        ).strip().lower() not in {"0", "false", "no", "off", ""}
+
         # --- Git（R10 §13）---
         self.canonical_repo: Path = Path(
             os.environ.get("AP_CANONICAL_REPO", str(PROJECT_ROOT / "canonical.git"))

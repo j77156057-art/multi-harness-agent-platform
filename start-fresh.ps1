@@ -481,7 +481,51 @@ function Start-AssistantWorker {
 }
 Start-AssistantWorker
 
-# -- 7. the office ----------------------------------------------------------
+# -- 6c. relay mode (mailbox) ------------------------------------------------
+# Off unless AP_RELAY_MODE says otherwise: it changes how harnesses talk (they write
+# letters into relay/outbox instead of calling the message API). The worker only
+# delivers letters -- it does not dispatch, open worktrees, or judge content.
+# See docs/notes/relay-mode.md.
+$relayFlag = if ($env:AP_RELAY_MODE) { $env:AP_RELAY_MODE.Trim().ToLower() } else { '' }
+if (@('1', 'true', 'yes', 'on') -contains $relayFlag) {
+    $Relay = 'relay'
+    $relayBody = @{
+        registered_by = $operatorId
+        harness_id = $Relay
+        name = 'Relay (mailbox)'
+        provider = 'relay'
+        adapter = 'relay'
+        adapter_version = '1.0.0'
+        capabilities = @()
+        max_parallel_tasks = 1
+        status = 'online'
+        registration_version = 'reg-001'
+    }
+    $relayRegistered = Post-Json -path '/api/v1/harnesses' -body $relayBody -token $operatorToken
+    if ($relayRegistered -and $relayRegistered.__status -and $relayRegistered.__status -ge 400 -and $relayRegistered.__status -ne 409) {
+        Write-Step "WARNING: could not register the relay window: $($relayRegistered.__error)"
+    }
+    if (-not (Read-Key $Relay)) {
+        $relayToken = Issue-Token 'harness' $Relay
+        if ($relayToken) {
+            Save-Key $Relay $relayToken
+            Write-Step "relay token issued -> data\$Relay.key"
+        } else {
+            Write-Step 'WARNING: could not issue a token for the relay window; letters will not be delivered.'
+        }
+    }
+    New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot 'relay\outbox') | Out-Null
+    if (-not (Test-Worker $Relay)) {
+        $relayArgs = @('-m', 'app.relay.worker', '--url', $Url, '--group', $Group, '--relay-id', $Relay,
+            '--token-file', (Join-Path $dataDir "$Relay.key"), '--root', (Join-Path $PSScriptRoot 'relay'),
+            '--db', (Join-Path $dataDir 'state.db'), '--admin', $Admin, '--interval', '5')
+        Start-Python 'relay' $relayArgs | Out-Null
+    }
+    Write-Step 'relay mode on: letters go to relay\outbox; delivery lands in relay\inbox and the message feed'
+} else {
+    Write-Step 'relay mode off (set AP_RELAY_MODE=1 to turn the mailbox on)'
+}
+
 if (Test-Http "$OfficeUrl/api/formal/status") {
     Write-Step "office already running on $OfficeUrl"
 } else {
