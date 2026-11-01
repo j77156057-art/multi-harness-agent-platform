@@ -18,6 +18,8 @@ import path from 'node:path';
 
 /** worker 每次轮询碰一下这个文件；界面据此判断"平台侧到底有没有在转接"。 */
 export const HEARTBEAT_FILE = '.worker-heartbeat';
+/** 转接项目自己那份说明：仓库是转接的事实源，项目不该只活在浏览器记忆里。 */
+export const PROJECT_FILE = 'project.json';
 /** 心跳超过这个时间就当没在跑（worker 默认每 5 秒轮询一次）。 */
 export const RUNNING_WINDOW_MS = 5 * 60 * 1000;
 
@@ -78,6 +80,61 @@ function threadRow(file, name) {
 }
 
 /**
+ * 仓库里写明的那个转接项目（`relay/project.json`）。
+ *
+ * 为什么项目要落在仓库里：转接的信就在仓库里。换一台机器 clone 下来，浏览器历史是空的，
+ * 但信箱里有 9 条线程 —— 这时候界面说"还没有项目"就是在撒谎。所以项目名与创建时间跟着
+ * 信箱走，界面认仓库。**只认这一份文件，不扫全仓库**；也**不记成员、不记凭据**。
+ */
+export function readRelayProject(base) {
+  const text = readText(path.join(base, PROJECT_FILE));
+  if (text === null) return { project: null, project_note: '' };
+  try {
+    const payload = JSON.parse(text);
+    const name = String(payload.name || '').trim();
+    if (!name) return { project: null, project_note: '项目说明里没有名字' };
+    return {
+      project: {
+        name,
+        created_at: String(payload.created_at || ''),
+        updated_at: String(payload.updated_at || ''),
+      },
+      project_note: '',
+    };
+  } catch {
+    // 读不出来就说读不出来：静默当成"没有项目"会让人以为记录丢了。
+    return { project: null, project_note: `${PROJECT_FILE} 读不出来（内容不是合法 JSON）` };
+  }
+}
+
+/**
+ * 把项目名写进仓库（`relay/project.json`）。只在人新建转接项目时调一次。
+ *
+ * 幂等：已经有这份文件时保留 `created_at`，只更新名字与 `updated_at` —— 改名不该把
+ * "什么时候建的"改掉。
+ */
+export function writeRelayProject({ root, name, now = new Date() } = {}) {
+  const base = path.resolve(String(root || '.'));
+  const clean = String(name || '').trim().slice(0, 80);
+  if (!clean) throw new Error('relay_project_name_required');
+  fs.mkdirSync(base, { recursive: true });
+  const file = path.join(base, PROJECT_FILE);
+  let created = now.toISOString();
+  const existing = readText(file);
+  if (existing !== null) {
+    try {
+      const payload = JSON.parse(existing);
+      if (payload.created_at) created = String(payload.created_at);
+    } catch {
+      // 旧文件坏了就当没有：现在这份是新的。
+    }
+  }
+  const payload = { name: clean, created_at: created, updated_at: now.toISOString() };
+  fs.writeFileSync(file, JSON.stringify(payload, null, 1) + '\n', { encoding: 'utf8' });
+  return payload;
+}
+
+/**
  * 读一份转接概况。
  *
  * @param {{root: string, now?: number}} options `root` 是信箱根目录（`relay/`）。
@@ -99,6 +156,8 @@ export function readRelayOverview({ root, now = Date.now() } = {}) {
       threads: [],
       returned: [],
       pending: 0,
+      project: null,
+      project_note: '',
       note: '这台机器上还没有转接信箱（relay/），说明平台侧没在跑转接。',
     };
   }
@@ -135,6 +194,8 @@ export function readRelayOverview({ root, now = Date.now() } = {}) {
     running = false;
   }
 
+  const { project, project_note } = readRelayProject(base);
+
   return {
     running,
     heartbeat_at: heartbeatAt,
@@ -142,6 +203,8 @@ export function readRelayOverview({ root, now = Date.now() } = {}) {
     threads,
     returned,
     pending,
+    project,
+    project_note,
     note: '',
   };
 }

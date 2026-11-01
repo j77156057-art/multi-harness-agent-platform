@@ -166,6 +166,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   let recoverable = null;
   // 平台上已有的项目（按任务标题的「项目名 · 」前缀归堆）。
   let platformProjects = [];
+  // 仓库里写明的转接项目（`relay/project.json`）。为什么大厅要认它：转接的信在仓库里，
+  // 项目只活在浏览器 localStorage 里的话，换一台机器 clone 下来就是"这台浏览器没记录"，
+  // 而信箱里明明有线程和退回 —— 界面说"还没有项目"就是撒谎。
+  let repoRelayProject = null;
+  let repoRelayNote = '';
 
   /**
    * 平台上已有的项目：先读平台单独给的 `project_label`，读不到才回退到标题前缀。
@@ -300,6 +305,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     } catch {}
   }
   void loadRecoverableProject();
+  // 仓库里的转接项目（`relay/project.json`）：本机没有记忆也要列出来 —— 信在仓库里，
+  // 项目就该跟着仓库走（换机器 clone 下来照样看得见）。
+  void loadRepoRelayProject();
   // 名册要在大厅打开时就读一次：「已经有几个能干活的了」这句话依赖它。
   // 以前只有注册之后才刷新，所以大厅里从来没人看到过这句提示。
   void loadFormalStatus();
@@ -722,8 +730,10 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   function render() {
     history.replaceChildren();
-    empty.hidden = projects.length > 0;
-    if (!projects.length) history.append(empty);
+    const repoName = repoRelayProject && repoRelayProject.name ? repoRelayProject.name : '';
+    const hasRepoCard = Boolean(repoName) && !projects.some(item => item.mode === 'relay' && item.name === repoName);
+    empty.hidden = projects.length > 0 || hasRepoCard;
+    if (!projects.length && !hasRepoCard) history.append(empty);
     for (const project of projects) {
       const card = document.createElement('article');
       card.className = 'project-card';
@@ -744,7 +754,72 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       });
       history.append(card);
     }
-    count.textContent = `${projects.length} 个项目`;
+    if (hasRepoCard) {
+      // 仓库里的转接项目：本机没有这条记录也列出来，并标明来源与它自己的时间。
+      const card = document.createElement('article');
+      card.className = 'project-card project-card-repo';
+      card.innerHTML = `<div class="project-card-icon">信</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status scene">来自仓库</span><button type="button" class="project-card-open">打开</button>`;
+      card.querySelector('strong').textContent = repoName;
+      const stamp = String(repoRelayProject.created_at || '').slice(0, 10);
+      card.querySelector('.project-card-main span').textContent = stamp
+        ? `${stamp} 建 · 本机没有这个项目的记录，按信箱打开`
+        : '按信箱打开';
+      card.querySelector('button').addEventListener('click', () => openRepoRelayProject());
+      history.append(card);
+    }
+    const total = projects.length + (hasRepoCard ? 1 : 0);
+    count.textContent = `${total} 个项目`;
+  }
+
+  /** 从仓库里认领一个转接项目：本地建一条入口，之后走的就是同一个转接视图。 */
+  function openRepoRelayProject() {
+    if (!repoRelayProject || !repoRelayProject.name) return;
+    sequence += 1;
+    const project = {
+      id: `project-${String(sequence).padStart(3, '0')}`,
+      index: String(sequence).padStart(2, '0'),
+      name: repoRelayProject.name,
+      createdAt: new Date(repoRelayProject.created_at || Date.now()).toLocaleString('zh-CN', { hour12: false }),
+      // 信箱里有东西，就说明这个项目已经在跑了 —— 不装成"待开工"。
+      phase: 'scene',
+      source: 'platform',
+      mode: 'relay',
+      members: [],
+    };
+    projects.push(project);
+    activeId = project.id;
+    persistProjects();
+    persistActive();
+    render();
+    onOpenProject(clone(project));
+  }
+
+  /** 转接项目写进仓库：仓库是转接的事实源，写不进去要当场说，别假装成功了。 */
+  async function rememberRelayProject(name) {
+    const response = await fetch('/api/formal/relay/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
+      body: JSON.stringify({ name }),
+      cache: 'no-store',
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    repoRelayProject = { name: data.name, created_at: data.created_at, updated_at: data.updated_at };
+    return data;
+  }
+
+  /** 读仓库里那个转接项目（只读；失败就当没有，不在大厅里刷红）。 */
+  async function loadRepoRelayProject() {
+    try {
+      const response = await fetch('/api/formal/relay/overview', { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      repoRelayProject = data.project || null;
+      repoRelayNote = data.project_note || '';
+      render();
+    } catch {
+      // 读不到就说没有：大厅不该因为一次网络抖动整块报错。
+    }
   }
 
   /**
@@ -784,13 +859,28 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     if (scope) scope.hidden = relay;
   }
 
-  function createProject() {
-    sequence += 1;
+  async function createProject() {
     const mode = pickedMode();
+    const name = projectName.value.trim() || `新项目 ${String(sequence + 1).padStart(2, '0')}`;
+    // 转接项目先写进仓库再往下走：写不进去就当场说，别让"项目在仓库里"只是嘴上说说。
+    if (mode === 'relay') {
+      const hint = createDialog.querySelector('[data-create-hint]');
+      const confirm = createDialog.querySelector('[data-confirm-create]');
+      if (confirm) confirm.disabled = true;
+      try {
+        await rememberRelayProject(name);
+      } catch (error) {
+        if (hint) hint.textContent = `没能把项目写进仓库：${error.message}；先修好再建。`;
+        if (confirm) confirm.disabled = false;
+        return;
+      }
+      if (confirm) confirm.disabled = false;
+    }
+    sequence += 1;
     const project = {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
-      name: projectName.value.trim() || `新项目 ${String(sequence).padStart(2, '0')}`,
+      name,
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
       phase: 'phone',
       source: projectSource.value,
@@ -821,7 +911,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     radio.addEventListener('change', syncMode);
   }
   createDialog.querySelector('[data-close-create]').addEventListener('click', () => createDialog.close());
-  createDialog.querySelector('[data-confirm-create]').addEventListener('click', createProject);
+  createDialog.querySelector('[data-confirm-create]').addEventListener('click', () => void createProject());
   createDialog.addEventListener('cancel', event => { event.preventDefault(); createDialog.close(); });
 
   recoverButton.addEventListener('click', () => {

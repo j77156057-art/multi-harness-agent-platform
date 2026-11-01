@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createWindowProvisioner } from './window-provisioner.mjs';
 import { createTerminalSessions } from './terminal-session.mjs';
-import { readRelayOverview } from './relay-overview.mjs';
+import { readRelayOverview, writeRelayProject } from './relay-overview.mjs';
 import { WebSocketServer } from 'ws';
 
 import { parseTranscript } from '../src/cli-transcript.js';
@@ -580,6 +580,16 @@ export function createFormalGateway(config={}){
         // 为什么不在群聊面板里看：转接消息带 direct 签名，群聊面板按 §19 过滤掉它们，
         // 所以转接得有自己的地方；这里只读磁盘，不碰平台、不写文件。
         json(res,200,readRelayOverview({root:relayRoot}));return true;
+      }
+      if(req.method==='POST'&&route==='/relay/project'){
+        // 转接项目名写进仓库：信在哪，项目就在哪。只写名字与时间，不记成员、不记凭据。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        const name=String((body&&body.name)||'').trim();
+        if(!name||name.length>80)throw fail(400,'invalid_relay_project');
+        try{ json(res,200,writeRelayProject({root:relayRoot,name})); }
+        catch(error){ throw fail(500, String(error&&error.message||'relay_project_write_failed')); }
+        return true;
       }
       if(req.method==='GET'&&route==='/terminal/availability'){
         // 这台机器上终端到底能不能用。不能就照实说原因（多半是 node-pty 没装上），

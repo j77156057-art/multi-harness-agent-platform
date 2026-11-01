@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { HEARTBEAT_FILE, RUNNING_WINDOW_MS, readRelayOverview } from '../server/relay-overview.mjs';
+import { HEARTBEAT_FILE, PROJECT_FILE, RUNNING_WINDOW_MS, readRelayOverview, readRelayProject, writeRelayProject } from '../server/relay-overview.mjs';
 
 const checks = [];
 const check = (name, fn) => {
@@ -84,6 +84,35 @@ check('only letters count as pending', () => {
   write('outbox/hello.md', '来自 a\n\n给 b：\n喂\n');
   write('outbox/notes.txt', 'not a letter');
   assert.equal(readRelayOverview({ root }).pending, 1);
+});
+
+// ---------------------------------------------------------- 项目跟着仓库走
+
+check('a relay project is written to the repo and read back', () => {
+  const written = writeRelayProject({ root, name: '  仓库里的转接项目  ' });
+  assert.equal(written.name, '仓库里的转接项目', '名字要去掉首尾空格');
+  assert.ok(fs.existsSync(path.join(root, PROJECT_FILE)));
+  const overview = readRelayOverview({ root });
+  assert.equal(overview.project.name, '仓库里的转接项目');
+});
+
+check('renaming keeps the original created_at', () => {
+  const first = readRelayProject(root).project;
+  const second = writeRelayProject({ root, name: '改过名字的项目' });
+  // 改名不该把"什么时候建的"改掉 —— 那是这个项目在仓库里的出生时间。
+  assert.equal(second.created_at, first.created_at);
+  assert.equal(readRelayProject(root).project.name, '改过名字的项目');
+});
+
+check('a broken project file is reported, not silently treated as missing', () => {
+  write(PROJECT_FILE, '{ 这不是 json');
+  const result = readRelayProject(root);
+  assert.equal(result.project, null);
+  assert.ok(result.project_note.includes('读不出来'), result.project_note);
+});
+
+check('an empty project name is refused', () => {
+  assert.throws(() => writeRelayProject({ root, name: '   ' }), /relay_project_name_required/);
 });
 
 console.log(`relay overview: ${checks.length}/${checks.length} PASS`);
