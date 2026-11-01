@@ -126,7 +126,7 @@ try {
   // 2. 项目配置表单：机器词不许出现在第一次用的人眼前。
   await page.locator('[data-new-project]').click();
   await page.waitForSelector('dialog[open]', { timeout: 10000 });
-  const legend = await page.locator('dialog[open] legend').innerText();
+  const legend = await page.locator('dialog[open] [data-dispatch-only] legend').innerText();
   assert.ok(!legend.includes('Harness'), '成员栏不说 Harness');
   assert.ok(legend.includes('执行成员'), '成员栏说的是人话');
   const scope = await page.locator('.project-create-scope').innerText();

@@ -128,8 +128,8 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   createDialog.className = 'project-create-dialog';
   createDialog.setAttribute('aria-labelledby', 'projectCreateTitle');
   createDialog.innerHTML = `
-    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p>填写后直接进入开工配置，无需再次点击。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
-    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
+    <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p data-create-lead>填写后直接进入开工配置，无需再次点击。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
+    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset class="project-create-modes"><legend>协作方式</legend><div data-project-modes><label class="project-create-mode"><input type="radio" name="project-mode" value="dispatch" checked><span><b>派单协作</b><small>平台拆解任务、分派、校验并合入。目标与成员在开工配置里指定。</small></span></label><label class="project-create-mode"><input type="radio" name="project-mode" value="relay"><span><b>转接</b><small>平台只当邮局：成员之间写信转达，不建任务、不开工作树、不判内容。</small></span></label></div></fieldset><fieldset data-dispatch-only><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
     <footer class="project-create-foot"><span data-create-hint>创建后将直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
   root.append(createDialog);
 
@@ -747,8 +747,46 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     count.textContent = `${projects.length} 个项目`;
   }
 
+  /**
+   * 「协作方式」两个选项：派单 / 转接。
+   *
+   * 它们决定这个项目**走哪条路**，不只是显示差别：
+   *   · 派单——平台拆解任务、分派、校验、合入（原来那条路，默认）；
+   *   · 转接——平台只当邮局，成员之间写信转达，不建任务、不开工作树。
+   * 所以选了转接之后，成员那一栏与「开工配置」都不再适用（转接没有任务目标），
+   * 表单里当场把它们收起来，别让人填一份用不上的东西。
+   */
+  function pickedMode() {
+    const picked = createDialog.querySelector('input[name="project-mode"]:checked');
+    return picked && picked.value === 'relay' ? 'relay' : 'dispatch';
+  }
+
+  function syncMode() {
+    const relay = pickedMode() === 'relay';
+    const dispatchOnly = createDialog.querySelector('[data-dispatch-only]');
+    if (dispatchOnly) dispatchOnly.hidden = relay;
+    const hint = createDialog.querySelector('[data-create-hint]');
+    const confirm = createDialog.querySelector('[data-confirm-create]');
+    const scope = createDialog.querySelector('[data-project-scope]');
+    const lead = createDialog.querySelector('[data-create-lead]');
+    if (lead) {
+      lead.textContent = relay
+        ? '填写后直接进入转接视图：写信、看线程与退回，无需再次点击。'
+        : '填写后直接进入开工配置，无需再次点击。';
+    }
+    if (hint) {
+      hint.textContent = relay
+        ? '创建后直接进入转接视图：写信、看线程与退回。'
+        : '创建后将直接打开该项目的开工配置。';
+    }
+    if (confirm) confirm.textContent = relay ? '创建并进入转接视图' : '创建并进入开工配置';
+    // 转接不走正式平台的任务接口，也就不该显示"正在读取正式项目范围"。
+    if (scope) scope.hidden = relay;
+  }
+
   function createProject() {
     sequence += 1;
+    const mode = pickedMode();
     const project = {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
@@ -756,7 +794,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
       phase: 'phone',
       source: projectSource.value,
-      members: [...projectMembers.querySelectorAll('input:checked')].map(input => input.value),
+      // 走哪条路由这个字段决定（见 syncMode）：'dispatch' 是老路，'relay' 是转接。
+      mode,
+      members: mode === 'relay'
+        ? []
+        : [...projectMembers.querySelectorAll('input:checked')].map(input => input.value),
     };
     projects.push(project);
     activeId = project.id;
@@ -766,13 +808,18 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     render();
     // `openAfterCreate` tells the host to jump straight into the opening
     // wizard; the lobby no longer round-trips through the project phone.
-    onOpenProject(clone(project), { openAfterCreate: true });
+    // 转接项目没有"开工配置"这一步，所以不带这个标记。
+    onOpenProject(clone(project), { openAfterCreate: mode !== 'relay' });
   }
 
   root.querySelector('[data-new-project]').addEventListener('click', () => {
     createDialog.showModal();
+    syncMode();
     projectName.focus();
   });
+  for (const radio of createDialog.querySelectorAll('input[name="project-mode"]')) {
+    radio.addEventListener('change', syncMode);
+  }
   createDialog.querySelector('[data-close-create]').addEventListener('click', () => createDialog.close());
   createDialog.querySelector('[data-confirm-create]').addEventListener('click', createProject);
   createDialog.addEventListener('cancel', event => { event.preventDefault(); createDialog.close(); });

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createWindowProvisioner } from './window-provisioner.mjs';
 import { createTerminalSessions } from './terminal-session.mjs';
+import { readRelayOverview } from './relay-overview.mjs';
 import { WebSocketServer } from 'ws';
 
 import { parseTranscript } from '../src/cli-transcript.js';
@@ -574,6 +575,12 @@ export function createFormalGateway(config={}){
         const events=(page.events||[]).filter(e=>taskIds.has(e.aggregate_id));
         json(res,200,{events,next_seq:page.next_seq,has_more:page.has_more});return true;
       }
+      if(req.method==='GET'&&route==='/relay/overview'){
+        // 转接的信箱概况（只读）：线程几跳、谁在里面、哪封退回、为什么。
+        // 为什么不在群聊面板里看：转接消息带 direct 签名，群聊面板按 §19 过滤掉它们，
+        // 所以转接得有自己的地方；这里只读磁盘，不碰平台、不写文件。
+        json(res,200,readRelayOverview({root:relayRoot}));return true;
+      }
       if(req.method==='GET'&&route==='/terminal/availability'){
         // 这台机器上终端到底能不能用。不能就照实说原因（多半是 node-pty 没装上），
         // 界面据此显示「终端不可用」，而不是给一个点了没反应的按钮。
@@ -947,6 +954,12 @@ export function createFormalGateway(config={}){
   // 只给**平台上已经注册**的窗口开：先问注册表，注册表里没有就是 404 —— 浏览器
   // 给什么 id 都不能让本机去跑一个没登记的东西。
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  // 转接信箱的位置：默认 <repo>/relay。换目录时用 OFFICE_RELAY_ROOT 指过去 ——
+  // 必须和 relay worker 的 `--root` 指同一个地方，否则界面读的是另一份信箱
+  // （会显示"没有线程"，而信其实在别处）。
+  const relayRoot = process.env.OFFICE_RELAY_ROOT
+    ? path.resolve(process.env.OFFICE_RELAY_ROOT)
+    : path.join(repoRoot, 'relay');
   const provisioner=createWindowProvisioner({
     repoRoot,
     python:config.pythonPath,

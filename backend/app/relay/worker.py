@@ -277,6 +277,8 @@ class RelayWorker:
 
     def sweep(self) -> list[dict[str, object]]:
         self.mailbox.ensure()
+        # 心跳先打：界面上「转接在不在跑」只看这个文件，不看进程表，也不靠猜。
+        self.mailbox.beat()
         return [self.deliver_letter(letter) for letter in self.mailbox.pending()]
 
 

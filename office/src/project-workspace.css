@@ -96,6 +96,15 @@ dialog:not([open]) { display: none !important; }
 .project-member-option input { min-height: 0; width: 16px; height: 16px; accent-color: var(--ao-accent); }
 .project-member-option small { color: var(--ao-text-faint); font-size: 12px; }
 .project-member-option:has(input:checked) span { color: var(--ao-accent); font-weight: 600; }
+/* 「协作方式」两个选项：单选钮不能再吃上面那条 100%/44px 的输入框样式，
+   否则会画成一个巨大的圆圈，选项文字被挤到下面去。 */
+.project-create-modes > div { display: grid; gap: 2px; }
+.project-create-mode { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; align-items: start; padding: 8px 0; color: var(--ao-text); font-size: 13px; cursor: pointer; }
+.project-create-mode input[type="radio"] { width: 16px; height: 16px; min-height: 0; margin: 3px 0 0; accent-color: var(--ao-accent); }
+.project-create-mode span { display: grid; gap: 3px; }
+.project-create-mode b { font-weight: 600; }
+.project-create-mode small { color: var(--ao-text-faint); font-size: 12px; line-height: 1.7; }
+.project-create-mode:has(input:checked) b { color: var(--ao-accent); }
 .project-create-scope { margin: 0; color: var(--ao-text-faint); font-size: 12px; line-height: 1.7; }
 .project-create-foot { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-top: 1px solid var(--ao-border); background: var(--ao-bg); }
 .project-create-foot span { color: var(--ao-text-faint); font-size: 12px; line-height: 1.7; }

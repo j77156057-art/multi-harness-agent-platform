@@ -1,0 +1,233 @@
+/* 转接视图的样式。
+ *
+ * 只有三块内容（在不在跑 / 线程 / 退回），所以配色只承担一件事：让人一眼看出
+ * 「平台侧停了」和「这条线快到上限了」—— 这两种情况不显眼就等于没说。
+ */
+
+.relay-workspace {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px 28px;
+  max-width: 980px;
+  color: #1c2430;
+  font-size: 14px;
+}
+
+.relay-head h1 {
+  margin: 2px 0 6px;
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.relay-eyebrow {
+  margin: 0;
+  color: #6b7684;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+
+.relay-lead {
+  margin: 0 0 8px;
+  color: #47525f;
+  line-height: 1.65;
+}
+
+.relay-state {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #e3e6ea;
+  background: #fafbfc;
+  color: #47525f;
+}
+
+.relay-state-running {
+  border-color: #b6dfc4;
+  background: #f2fbf5;
+  color: #1f6b3a;
+}
+
+.relay-state-stale,
+.relay-state-stopped {
+  border-color: #f0c8a8;
+  background: #fdf5ee;
+  color: #8a4b12;
+}
+
+.relay-actions button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid #cdd3da;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.relay-actions button:hover {
+  border-color: #9aa4b0;
+}
+
+.relay-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #e5b4b4;
+  border-radius: 6px;
+  background: #fdf2f2;
+  color: #8c2b2b;
+}
+
+.relay-card {
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px 16px;
+}
+
+.relay-card h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.relay-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.relay-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.relay-card summary h2 {
+  display: inline-block;
+  margin: 0;
+}
+
+.relay-card summary::after {
+  content: "展开";
+  margin-left: 8px;
+  color: #6b7684;
+  font-size: 12px;
+}
+
+.relay-card details[open] summary::after {
+  content: "收起";
+}
+
+.relay-count {
+  margin-left: 6px;
+  color: #6b7684;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.relay-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.relay-thread,
+.relay-returned {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  background: #fcfcfd;
+}
+
+.relay-thread-near-ceiling {
+  border-color: #f0dcb4;
+  background: #fdfaf2;
+}
+
+.relay-thread-at-ceiling {
+  border-color: #f0c8a8;
+  background: #fdf5ee;
+}
+
+.relay-thread-broken {
+  border-color: #e5b4b4;
+  background: #fdf2f2;
+}
+
+.relay-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid #dfe3e8;
+  background: #fff;
+  color: #47525f;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.relay-thread-near-ceiling .relay-badge {
+  border-color: #e8cf9c;
+  color: #7a5610;
+}
+
+.relay-thread-at-ceiling .relay-badge,
+.relay-thread-broken .relay-badge {
+  border-color: #ddb0b0;
+  color: #8c2b2b;
+}
+
+.relay-when {
+  color: #6b7684;
+  font-size: 12px;
+}
+
+.relay-id {
+  margin-left: auto;
+  color: #8b95a1;
+  font-size: 12px;
+}
+
+.relay-reason {
+  color: #6b3a12;
+  line-height: 1.6;
+}
+
+.relay-hint {
+  flex-basis: 100%;
+  color: #8c2b2b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.relay-steps {
+  margin: 0 0 8px;
+  padding-left: 20px;
+  color: #47525f;
+  line-height: 1.75;
+}
+
+.relay-steps code,
+.relay-note code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f3f6;
+  font-size: 12.5px;
+}
+
+.relay-note {
+  margin: 0;
+  color: #6b7684;
+  line-height: 1.7;
+}
+
+.relay-empty {
+  margin: 0;
+  color: #8b95a1;
+}
+
+.relay-foot {
+  margin: 0;
+  color: #8b95a1;
+  font-size: 12px;
+}

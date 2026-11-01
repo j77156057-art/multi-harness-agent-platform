@@ -22,6 +22,7 @@ import { mountOpeningHost, OPENING_GOAL_MAX, openingProjectName } from './openin
 import { mountFlatOffice } from './flat-office.js';
 import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
+import { mountRelayWorkspace } from './relay-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
@@ -77,6 +78,7 @@ app.innerHTML = `
   <main class="ao-main">
     <section class="ao-lobby" id="aoLobby"></section>
     <section class="ao-workspace flat-office" id="aoWorkspace" hidden></section>
+    <section class="ao-workspace" id="aoRelay" hidden></section>
   </main>
   <div id="aoOpening"></div>
 `;
@@ -85,6 +87,8 @@ app.innerHTML = `
 // 新增的免费额度、变成收费的额度，都要人知道。
 $('#aoRefreshBtn')?.addEventListener('click', () => {
   void office?.refresh?.({ probe: true });
+  // 转接项目看的是信箱，不是平台数据：两页都叫「刷新」，各刷各的。
+  void relayView?.refresh?.();
 });
 
 const connection = $('#aoConn');
@@ -112,6 +116,8 @@ paintConnection({ connected: Boolean(status?.connected) });
 let activeProject = null;
 let openingHost = null;
 let office = null;
+// 转接项目用的那一页（与办公室互斥：项目选了走哪条路，只有一个视图在跑）。
+let relayView = null;
 
 // ---------------------------------------------------------------- 开工配置
 
@@ -228,12 +234,18 @@ const projectWorkspace = mountProjectWorkspace({
   })),
   onOpenProject(project, { openAfterCreate = false } = {}) {
     activeProject = project;
+    // 转接项目：没有任务、没有方案、没有开工配置。走另一页（只讲"在不在跑 / 几条线 /
+    // 哪封没投出去"），而不是把派单那套界面摆给一个不走派单的项目看。
+    const relayProject = project && project.mode === 'relay';
     openingHost?.setProjectContext(project.name);
     openingHost?.setProjectMembers(project.members || []);
     $('#aoScope').textContent = project.name || '协作控制台';
     $('#aoLobby').hidden = true;
-    $('#aoWorkspace').hidden = false;
-    $('#aoStartBtn').hidden = false;
+    $('#aoWorkspace').hidden = relayProject;
+    $('#aoRelay').hidden = !relayProject;
+    // 转接没有「开工配置」（没有任务目标可写），所以这个按钮不放出来 ——
+    // 留一个点了没事干的按钮比没有按钮更糟。
+    $('#aoStartBtn').hidden = relayProject;
     // 页面所处的阶段（大厅 / 进场）：样式与冒烟脚本都看这个标记。
     document.body.dataset.projectPhase = project.phase || 'scene';
     adminAgent.setAdminHarness?.(ADMIN_IDENTITY);
@@ -250,7 +262,11 @@ const projectWorkspace = mountProjectWorkspace({
         ].filter(Boolean),
       ),
     ]);
-    if (!office) {
+    if (relayProject) {
+      // 换项目时先把上一份转接视图收掉：它自己挂着 15 秒轮询，留着会一直读信箱。
+      relayView?.destroy?.();
+      relayView = mountRelayWorkspace({ root: $('#aoRelay'), project: () => activeProject });
+    } else if (!office) {
       office = mountFlatOffice({
         root: $('#aoWorkspace'),
         project: () => activeProject,
@@ -270,7 +286,7 @@ const projectWorkspace = mountProjectWorkspace({
     } else {
       void office.refresh();
     }
-    if (openAfterCreate) openingHost.open();
+    if (openAfterCreate && !relayProject) openingHost.open();
   },
 });
 

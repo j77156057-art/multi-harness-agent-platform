@@ -60,6 +60,23 @@ class Mailbox:
     def threads(self) -> Path:
         return self.root / "threads"
 
+    @property
+    def heartbeat(self) -> Path:
+        """worker 每次轮询碰一下的时间戳文件。
+
+        为什么要它：界面要说清"平台侧到底有没有在转接"，而不是让人猜。心跳文件是
+        唯一不会撒谎的证据 —— 没跑 worker，信放进去就一直躺在 outbox 里。
+        """
+        return self.root / ".worker-heartbeat"
+
+    def beat(self) -> Path:
+        """记一次心跳。只写时间，不记别的（它只是"我还活着"）。"""
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.heartbeat.write_text(
+            datetime.now(timezone.utc).isoformat(timespec="seconds"), encoding="utf-8", newline="\n"
+        )
+        return self.heartbeat
+
     def inbox(self, recipient: str) -> Path:
         return self.root / "inbox" / _safe(recipient)
 
