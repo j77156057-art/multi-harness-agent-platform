@@ -112,6 +112,37 @@ npm run verify         # 跑 scripts/verify-*.mjs 全部冒烟脚本
 探测的是**运行后端的那台机器**，卡片里写明了这一点：人在自己笔记本上看办公室时，
 看到的不是自己笔记本的安装状态。
 
+## 内置终端（顶栏「终端」）
+
+装 CLI 与登录原来是两步都要人自己开终端。登录还几乎都是**交互式**的（清单里
+`login_note` 写着「运行 codex 并选择 Sign in with ChatGPT」「运行 claude 按浏览器提示
+登录」），所以"点一下替你跑命令"的面板解决不了问题 —— 给的是一台**真 PTY**
+（`node-pty` + `@xterm/xterm`），人能在里面跟着 CLI 自己的提示走。
+
+- 顶栏「终端」打开；面板顶部三个按钮由 CLI 清单生成：**安装**（`install_command`）、
+  **重探版本**（`verify_command`）、**登录**（运行该 CLI 本身 —— 清单里只有一句
+  `login_note`，没有登录子命令原文，所以**不猜**子命令）；
+- 按钮只是**把命令打进终端**，按回车仍由人自己按；面板里也能自由键入；
+- 边界：**只有人能开**（harness / 管理员窗口 / 助手都拿不到这条路），不代跑任何命令；
+- 会话留痕：输入输出脱敏后落 `data/terminals/<session>.log`（`apt_…`、`sk-…`、PEM 头
+  都替换成 `<hidden>`），面板上明写这件事；
+- 上限 2 个会话、空闲 15 分钟回收；关掉面板即结束会话。
+
+实现要点（踩过的坑，别再重复）：
+
+- Windows 上用 **ConPTY**，但 teardown **一律走 `taskkill /PID <pid> /T /F`**：
+  `node-pty` 的 `kill()` 会去 spawn 一个枚举控制台进程表的 helper，服务端进程通常
+  没有控制台，那个 helper 直接崩 `AttachConsole failed`（2026-11-01 实测）；
+- 浏览器给 websocket 加不了自定义头，所以先 `POST /api/formal/terminal/ticket`
+  换一张**一次性、60 秒**的票据，ws 只凭票建连；同源写校验仍在同一个位置；
+- 面板按需 `import()`：xterm 是把首屏包撑大一倍的量级，不点它就不下载。
+
+`node-pty` 装不上（少见，通常是缺编译工具链）时，`GET /api/formal/terminal/availability`
+会回 `available:false` 并带原因，面板照实显示，其它功能不受影响。
+
+设计稿：`docs/notes/terminal-design.md`。校验：`node scripts/verify-terminal-session.mjs`
+（票据一次性/过期、日志脱敏、会话上限、空闲回收，以及一条真起 shell 的回显与 teardown）。
+
 ## 人自己的动作
 
 这些按钮**按后端的状态守卫给出**（`src/human-actions.js` 与

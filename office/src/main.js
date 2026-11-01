@@ -23,6 +23,7 @@ import { mountFlatOffice } from './flat-office.js';
 import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+// 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
 
 const $ = (selector) => document.querySelector(selector);
@@ -68,6 +69,7 @@ app.innerHTML = `
       <button class="ao-btn" id="aoStartBtn" type="button" hidden>开工配置</button>
       <button class="ao-btn" id="aoRefreshBtn" type="button" aria-label="刷新" title="重新读平台的数据，并重新探一遍额度池"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.2a8 8 0 0 1 13 3.3M4.9 14.5a8 8 0 0 0 13 3.3"/></svg><span>刷新</span></button>
       <span id="aoTopActions" class="ao-topbar-actions"></span>
+      <button class="ao-btn" id="aoTerminalBtn" type="button" title="在本机开一个真终端：装 CLI、登录都要用到它">终端</button>
       <button class="ao-btn" id="aoLobbyBtn" type="button">项目列表</button>
       <span class="ao-user" title="你就是群主：项目里的事都由你拍板">群主</span>
     </div>
@@ -276,6 +278,27 @@ const projectWorkspace = mountProjectWorkspace({
 // 现在由顶栏的「开工配置」进入对话框。
 openingHost.hideWelcome();
 $('#aoStartBtn').addEventListener('click', () => openingHost.open());
+// 顶栏的「终端」：装 CLI 与登录都要用它（登录是交互式的，按钮面板替代不了，
+// 所以给的是一台真本机 shell，见 docs/notes/terminal-design.md）。
+// `sent` 记住这次页面停留里打过的命令：关掉再开，人还看得到自己点过什么。
+//
+// 按需加载：xterm 是把首屏包撑大一倍的量级，而大多数时候人不点这个按钮 ——
+// 所以它只在第一次点「终端」时才下载（`npm run build` 会把它拆成独立 chunk）。
+const sentCommands = [];
+let mountPanel = null;
+$('#aoTerminalBtn').addEventListener('click', () => {
+  if (mountPanel) { mountPanel({ sent: sentCommands }); return; }
+  void import('./terminal-panel.js')
+    .then((module) => {
+      mountPanel = module.mountTerminalPanel;
+      mountPanel({ sent: sentCommands });
+    })
+    .catch(() => {
+      // 加载失败要说清楚，不能让人点了没反应。
+      window.alert('终端面板加载失败：刷新页面再试一次。');
+    });
+});
+
 $('#aoLobbyBtn').addEventListener('click', () => {
   $('#aoLobby').hidden = false;
   $('#aoWorkspace').hidden = true;

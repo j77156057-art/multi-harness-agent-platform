@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createWindowProvisioner } from './window-provisioner.mjs';
+import { createTerminalSessions } from './terminal-session.mjs';
+import { WebSocketServer } from 'ws';
 
 import { parseTranscript } from '../src/cli-transcript.js';
 
@@ -572,6 +574,20 @@ export function createFormalGateway(config={}){
         const events=(page.events||[]).filter(e=>taskIds.has(e.aggregate_id));
         json(res,200,{events,next_seq:page.next_seq,has_more:page.has_more});return true;
       }
+      if(req.method==='GET'&&route==='/terminal/availability'){
+        // 这台机器上终端到底能不能用。不能就照实说原因（多半是 node-pty 没装上），
+        // 界面据此显示「终端不可用」，而不是给一个点了没反应的按钮。
+        json(res,200,terminal.availability());return true;
+      }
+      if(req.method==='POST'&&route==='/terminal/ticket'){
+        // 浏览器给 websocket 加不了自定义头，所以先用一次正常的同源写换一张
+        // **一次性、60 秒**的票据；ws 只凭票建连。上面那道同源校验仍是这扇门的门闩。
+        const availability=terminal.availability();
+        if(!availability.available){
+          json(res,503,{error:'terminal_unavailable',message:availability.reason});return true;
+        }
+        json(res,200,{...terminal.issueTicket(),shell:availability.shell});return true;
+      }
       if(req.method==='POST'&&route==='/harnesses/provision'){
         // 让人在办公室点一下就把新窗口变成**能干活**：发凭据、写 key、起 worker。
         // 人只给一个 harness_id；要跑什么命令全由服务端拼（见 window-provisioner）。
@@ -930,14 +946,21 @@ export function createFormalGateway(config={}){
   //
   // 只给**平台上已经注册**的窗口开：先问注册表，注册表里没有就是 404 —— 浏览器
   // 给什么 id 都不能让本机去跑一个没登记的东西。
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
   const provisioner=createWindowProvisioner({
-    repoRoot:path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..','..'),
+    repoRoot,
     python:config.pythonPath,
     canonicalRepo:config.canonicalRepo,
     worktreeRoot:config.worktreeRoot,
     group:config.group,
     upstream:config.upstream,
     tokenFile:config.tokenFile,
+  });
+  // 内置终端：只在人点开时起一个本机 shell（见 docs/notes/terminal-design.md）。
+  // 它不给 harness 开，也不代跑任何清单里的命令 —— 命令要么人点按钮、要么人自己敲。
+  const terminal = createTerminalSessions({
+    repoRoot,
+    dataDir: path.join(repoRoot, 'data'),
   });
   async function provisionRoute(harnessId,res){
     const registered=await call('/harnesses');
@@ -950,11 +973,119 @@ export function createFormalGateway(config={}){
       throw fail(error.status||503,error.message||'window_provision_failed');
     }
   }
-  return {handle};
+  // ---------------------------------------------------------------- 内置终端
+  //
+  // 走 websocket，所以它不在 handle() 里：vite 的 http server 会先到 upgrade 事件。
+  // 三重门（与 HTTP 那一侧同一套口径）：只认 loopback、Origin 必须是本站、票据一次性。
+  const terminalServer = new WebSocketServer({ noServer: true });
+
+  function refuseSocket(socket, status, code) {
+    try {
+      socket.write(`HTTP/1.1 ${status} ${code}\r\nConnection: close\r\n\r\n`);
+    } catch {
+      // 对端已经走了。
+    }
+    try { socket.destroy(); } catch {}
+  }
+
+  function sendJson(ws, payload) {
+    if (ws.readyState !== 1) return false;
+    try { ws.send(JSON.stringify(payload)); return true; } catch { return false; }
+  }
+
+  function attachSession(ws, cols, rows) {
+    const opened = terminal.openSession({ cols, rows });
+    if (!opened.ok) {
+      sendJson(ws, { type: 'exit', reason: opened.reason, message: opened.message });
+      try { ws.close(); } catch {}
+      return;
+    }
+    const session = opened.session;
+    sendJson(ws, {
+      type: 'ready',
+      session_id: session.id,
+      shell: opened.shell,
+      log: path.relative(repoRoot, opened.logPath),
+      max_sessions: 2,
+    });
+    session.term.onData((data) => sendJson(ws, { type: 'data', data }));
+    session.term.onExit(({ exitCode }) => {
+      terminal.close(session.id, 'exit');
+      sendJson(ws, { type: 'exit', code: exitCode, reason: 'exit' });
+      try { ws.close(); } catch {}
+    });
+    ws.on('message', (raw) => {
+      let message = null;
+      try { message = JSON.parse(String(raw)); } catch { return; }
+      if (!message || typeof message !== 'object') return;
+      if (message.type === 'input' && typeof message.data === 'string') {
+        terminal.write(session.id, message.data.slice(0, 4096));
+        return;
+      }
+      if (message.type === 'resize') {
+        terminal.resize(session.id, message.cols, message.rows);
+        return;
+      }
+      if (message.type === 'close') {
+        terminal.close(session.id, 'closed');
+        sendJson(ws, { type: 'exit', reason: 'closed' });
+        try { ws.close(); } catch {}
+      }
+    });
+    ws.on('close', () => terminal.close(session.id, 'closed'));
+    // 空闲回收：终端是救急用的，占着不放会一直挂一个 shell。
+    const sweeper = setInterval(() => {
+      terminal.sweepIdle();
+      if (!terminal._sessions.has(session.id)) {
+        sendJson(ws, { type: 'exit', reason: 'idle', message: 'terminal closed after being idle' });
+        try { ws.close(); } catch {}
+        clearInterval(sweeper);
+      }
+    }, 30000);
+    if (typeof sweeper.unref === 'function') sweeper.unref();
+    ws.on('close', () => clearInterval(sweeper));
+  }
+
+  /** @returns {boolean} 这条 upgrade 请求是不是我们的（不是就交回给 vite 自己的 HMR）。 */
+  function handleUpgrade(req, socket, head) {
+    let url;
+    try { url = new URL(req.url, 'http://localhost'); } catch { return false; }
+    if (url.pathname !== PREFIX + '/terminal') return false;
+    const remote = req.socket.remoteAddress;
+    if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remote)) {
+      refuseSocket(socket, 403, 'loopback_only');
+      return true;
+    }
+    if (req.headers.origin && req.headers.origin !== `http://${req.headers.host || ''}`) {
+      refuseSocket(socket, 403, 'invalid_origin');
+      return true;
+    }
+    if (!terminal.consumeTicket(url.searchParams.get('ticket') || '')) {
+      refuseSocket(socket, 403, 'invalid_ticket');
+      return true;
+    }
+    const cols = Number(url.searchParams.get('cols')) || 100;
+    const rows = Number(url.searchParams.get('rows')) || 30;
+    terminalServer.handleUpgrade(req, socket, head, (ws) => attachSession(ws, cols, rows));
+    return true;
+  }
+
+  return {handle, handleUpgrade};
 }
 
 export function formalGatewayPlugin(config){
-  const configure=server=>{const gateway=createFormalGateway(config);
-    server.middlewares.use((req,res,next)=>void gateway.handle(req,res).then(handled=>{if(!handled)next();}));};
+  const configure=server=>{
+    const gateway=createFormalGateway(config);
+    server.middlewares.use((req,res,next)=>void gateway.handle(req,res).then(handled=>{if(!handled)next();}));
+    // 内置终端是 websocket，走的是 http server 的 upgrade 事件（不是中间件）。
+    // 认不出来的路径一律交回去，vite 自己的 HMR 还要用同一台服务器。
+    if(server.httpServer)server.httpServer.on('upgrade',(req,socket,head)=>{
+      try{ if(gateway.handleUpgrade(req,socket,head))return; }
+      catch(error){
+        try{socket.write('HTTP/1.1 500 terminal_failed\r\nConnection: close\r\n\r\n');socket.destroy();}catch{}
+      }
+      // vite 的 HMR 自己会处理剩下的 upgrade；这里不碰。
+    });
+  };
   return {name:'local-formal-dispatch',configureServer:configure,configurePreviewServer:configure};
 }
