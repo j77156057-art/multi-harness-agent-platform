@@ -159,3 +159,8 @@ if (realPty) {
 }
 
 console.log(`terminal session: ${checks.length}/${checks.length} PASS`);
+
+// 真 PTY 会留下一个不随 shell 退出而释放的 conpty 句柄，事件循环因此不肯结束 ——
+// 脚本会「9/9 PASS 但永远不退出」，在自动化里表现为超时（2026-11-02 实测：shell 已经
+// 被收掉、PASS 也印了，node 进程仍活着）。验完就明确退出，别让通过看起来像卡住。
+process.exit(0);
