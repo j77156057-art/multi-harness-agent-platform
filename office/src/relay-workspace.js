@@ -45,16 +45,16 @@ function stateLine(overview) {
   if (!overview || !overview.heartbeat_at) {
     return {
       tone: 'stopped',
-      text: '平台侧没有在跑转接：信放进信箱不会有人投。',
+      text: '平台侧还没有在跑转接：信放进信箱不会有人投。转接由管理员窗口负责拉起 —— 长期如此说明管理员窗口也没在跑。',
     };
   }
   if (!overview.running) {
     return {
       tone: 'stale',
-      text: `平台侧已经停了（最后一次工作 ${when(overview.heartbeat_at)}）。这段时间放进去的信不会被投递。`,
+      text: `平台侧已经停了（最后一次工作 ${when(overview.heartbeat_at)}）。这段时间放进去的信不会被投递；管理员窗口下一次巡检会把它拉回来。`,
     };
   }
-  return { tone: 'running', text: `平台侧正在转接（最后一次工作 ${when(overview.heartbeat_at)}）。` };
+  return { tone: 'running', text: `平台侧正在转接（最后一次工作 ${when(overview.heartbeat_at)}），由管理员窗口保持运行。` };
 }
 
 function threadStatus(thread) {

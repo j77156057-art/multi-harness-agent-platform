@@ -37,6 +37,7 @@ import httpx
 from app.adapter import presence
 from app.adapter.harnesses.cli import ProviderRoute
 from app.admin.service import AdminHarnessError, AdminService
+from app.relay.supervisor import ensure_relay_worker, relay_enabled
 from app.config import settings
 from app.db.connection import Database
 from app.tasks.service import (
@@ -2256,7 +2257,34 @@ def main() -> None:
         lambda body: client.post("/adapter/presence", body), role="admin"
     )
     try:
+        next_relay_check = 0.0
+        last_relay_note = ""
         while True:
+            # 转接由管理员负责保持运行（见 app/relay/supervisor.py 的说明：管理员只开关，
+            # 不代笔）。已经在跑时这一步只 stat 一个心跳文件，几乎不花钱；起不来也不该让
+            # 管理员停摆，所以整体包在 try 里，失败只说一句。
+            if relay_enabled() and time.time() >= next_relay_check:
+                next_relay_check = time.time() + 60.0
+                try:
+                    relay_state = ensure_relay_worker(
+                        url=args.url,
+                        group=args.group,
+                        admins=[args.admin_harness_id],
+                        token_file=args.token_file,
+                    )
+                    note = str(relay_state.get("note") or "")
+                    # 只在"启动了"或"说法变了"时说一句，别每 60 秒刷一行同样的失败。
+                    if relay_state.get("started") or (not relay_state.get("running") and note != last_relay_note):
+                        last_relay_note = note
+                        print(json.dumps({"relay": relay_state}, ensure_ascii=False), flush=True)
+                except Exception as exc:  # noqa: BLE001 - 转接的问题不该拖垮管理员
+                    print(
+                        json.dumps(
+                            {"relay_error": type(exc).__name__, "detail": str(exc)[:200]},
+                            ensure_ascii=False,
+                        ),
+                        flush=True,
+                    )
             try:
                 run_once(worker)
             except httpx.HTTPError as exc:
