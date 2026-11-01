@@ -27,6 +27,7 @@ from app.allocation.service import AllocationService
 from app.api import schemas
 from app.api.auth_deps import (
     Principal,
+    _refuse,
     bearer_token,
     bind_branch_subject,
     bind_declared,
@@ -3013,8 +3014,54 @@ def _event_page(
     return {"events": rows, "next_seq": last, "has_more": has_more}
 
 
+def _bind_message_author(request: Request, database: DatabaseDep, body: schemas.PostMessage) -> None:
+    """发消息的人必须就是令牌主体 —— 与 §17 其他写路由同一个口径。
+
+    以前这条路由既没有鉴权、`author_id` 也直接取自请求体：任何持有有效令牌的人都能
+    以别人的名义发消息（2026-11-01 实测：拿人的令牌以 `operator` 的名义发一条，结果
+    **本人反而读不到自己那条**，因为定向消息按观看人过滤）。而平台上"谁说的"是分发
+    与审批的依据 —— 冒用管理员发一句话，管理员 worker 会把它当成自己的口吻处理。
+
+    认证关闭（单机演示）时没有主体可绑，照旧放行：那条路径上本来也没有令牌可言。
+    """
+    if settings.auth_mode != "enforce":
+        return
+    try:
+        principal = TokenService(database).verify(bearer_token(request))
+    except TokenInvalid as exc:
+        _refuse(
+            database=database,
+            request=request,
+            principal=None,
+            key="message:post",
+            reason=getattr(exc, "reason", "token_invalid"),
+            status=401,
+            code="auth.token_invalid",
+        )
+    bind_declared(principal, body.author_id, key="message:post", database=database, request=request)
+    # 类型也要对得上：人不能以 harness 的身份说话，反之亦然。
+    expected = "human" if principal.subject_type == "human" else "harness"
+    if str(body.author_kind) != expected:
+        _refuse(
+            database=database,
+            request=request,
+            principal=principal,
+            key="message:post",
+            reason="author_kind_mismatch",
+            status=403,
+            code="auth.permission_denied",
+        )
+
+
 @read.post("/groups/{group_id}/messages")
-def post_message(group_id: str, body: schemas.PostMessage, service: SchedulerDep) -> dict[str, Any]:
+def post_message(
+    group_id: str,
+    body: schemas.PostMessage,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+) -> dict[str, Any]:
+    _bind_message_author(request, database, body)
     return service.post_message(
         group_id=group_id,
         author_kind=body.author_kind,
