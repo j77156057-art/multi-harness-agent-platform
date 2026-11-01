@@ -141,6 +141,36 @@ def test_a_letter_is_delivered_to_every_named_block(tmp_path):
     assert worker.sweep() == []
 
 
+def test_blocks_are_told_who_else_got_the_same_letter_but_not_their_text(tmp_path):
+    """一封信分块发几个人：别人那一段不该读到，但"这封还发给了谁"要说 —— 否则会重复转达。"""
+    worker, client, mailbox = _worker(tmp_path)
+    _letter(mailbox, "codex-3.md", "来自 codex\n\n给管理员：\n定个方向\n\n给 opencode：\n接着写\n")
+
+    worker.sweep()
+
+    for recipient, mine, theirs in (
+        ("codex-window-admin", "定个方向", "接着写"),
+        ("opencode", "接着写", "定个方向"),
+    ):
+        text = next(iter(mailbox.inbox(recipient).glob("*.md"))).read_text(encoding="utf-8")
+        assert "这封同时发给了：" in text, recipient
+        # 只报名字，不给别人那一段的正文。
+        assert mine in text, recipient
+        assert theirs not in text, f"{recipient} 读到了写给别人的那一段"
+
+
+def test_a_single_recipient_letter_says_nothing_about_others(tmp_path):
+    """只有一个人收的信，写"还发给了谁"是噪音。"""
+    worker, client, mailbox = _worker(tmp_path)
+    _letter(mailbox, "codex-4.md", "来自 codex\n\n给 opencode：\n只有你\n")
+
+    worker.sweep()
+
+    text = next(iter(mailbox.inbox("opencode").glob("*.md"))).read_text(encoding="utf-8")
+    assert "这封同时发给了：" not in text
+    assert "只有你" in text
+
+
 def test_the_owner_is_copied_so_a_person_can_see_the_exchange(tmp_path):
     """定向消息只有发送方与收件方看得到；不抄送群主，人在界面里永远看不到转接内容。"""
     worker, client, mailbox = _worker(tmp_path)

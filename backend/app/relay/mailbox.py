@@ -129,14 +129,28 @@ def _safe(name: str) -> str:
     return cleaned or "letter"
 
 
-def envelope_for_delivery(*, sender: str, text: str, thread_id: str = "", hop: int = 0) -> str:
-    """投进收件箱的那份文件长什么样：写明谁说的、第几跳，再接正文。
+def envelope_for_delivery(
+    *,
+    sender: str,
+    text: str,
+    thread_id: str = "",
+    hop: int = 0,
+    also_to: tuple[str, ...] | list[str] = (),
+) -> str:
+    """投进收件箱的那份文件长什么样：写明谁说的、第几跳、这封还发给了谁，再接正文。
 
-    这一步不做"润色"：正文一个字不改，只在前面加两行来源。**跳数与线程写在最上面**，
+    这一步不做"润色"：正文一个字不改，只在前面加几行来源。**跳数与线程写在最上面**，
     因为收信方要照着它回信（`回复 <thread id>`）—— 那正是跳数能算准的前提。
+
+    `also_to` 是"同一封信里的其他收件人"：一封信可以分块发给几个窗口，**正文仍然各看
+    各的**（谁也不该读到写给别人的那段），但"这封还发给了谁"是同一件事的一部分 ——
+    不说，收信方会以为这事只有自己知道，重复转达或干脆漏掉。所以只报名字，不给内容。
     """
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     trace = f"来自 {sender}（转接于 {stamp}）"
     if thread_id:
         trace += f"\n线程 {thread_id} · 第 {hop} 跳（回信请写：回复 {thread_id}）"
+    others = [str(name).strip() for name in also_to if str(name).strip()]
+    if others:
+        trace += f"\n这封同时发给了：{'、'.join(others)}（各看各的那一段）"
     return f"{trace}\n\n{text.strip()}\n"

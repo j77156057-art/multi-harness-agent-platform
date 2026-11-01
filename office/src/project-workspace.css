@@ -26,7 +26,7 @@ dialog:not([open]) { display: none !important; }
 .project-empty-icon svg { width: 40px; height: 40px; }
 .project-recover { margin-top: 4px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--ao-border-strong); border-radius: var(--ao-radius); background: var(--ao-surface); color: var(--ao-accent); font: inherit; font-size: 13px; cursor: pointer; }
 .project-recover:hover { background: var(--ao-accent-soft); }
-.project-card { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 16px; align-items: center; min-height: 88px; padding: 16px 8px; border-bottom: 1px solid var(--ao-line-soft); border-radius: 6px; }
+.project-card { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 88px; padding: 16px 8px; border-bottom: 1px solid var(--ao-line-soft); border-radius: 6px; }
 .project-card:last-child { border-bottom: 0; }
 .project-card:hover { background: var(--ao-bg); }
 .project-card[data-active="1"] { background: var(--ao-accent-soft); }
@@ -41,6 +41,15 @@ dialog:not([open]) { display: none !important; }
 .project-card-status.phone { background: var(--ao-bg); color: var(--ao-text-soft); }
 .project-card-open { border: 1px solid var(--ao-border); border-radius: 6px; padding: 8px 12px; min-height: 36px; background: var(--ao-surface); color: var(--ao-accent); font-size: 13px; white-space: nowrap; cursor: pointer; }
 .project-card-open:hover { background: var(--ao-accent-soft); border-color: var(--ao-border-strong); }
+/* 「移除」与它展开的那一小块确认：只去掉列表里的入口，不删任务、不删信，
+   所以用次要样式，别做成红色危险按钮误导人。 */
+.project-card-side { display: flex; align-items: center; gap: 12px; }
+.project-card-actions { display: flex; align-items: center; gap: 8px; }
+.project-card-remove { border: 1px solid transparent; border-radius: 6px; padding: 8px 10px; min-height: 36px; background: transparent; color: var(--ao-text-faint); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.project-card-remove:hover { border-color: var(--ao-border); color: var(--ao-text-soft); }
+.project-card-confirm { grid-column: 1 / -1; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--ao-border); border-radius: 8px; background: var(--ao-surface); }.project-card-confirm p { margin: 0 0 2px; color: var(--ao-text-soft); font-size: 12px; line-height: 1.6; }
+.project-card-confirm button { justify-self: start; border: 1px solid var(--ao-border); border-radius: 6px; padding: 6px 10px; background: var(--ao-bg); color: var(--ao-text-soft); font-size: 12px; cursor: pointer; }
+.project-card-confirm button:hover { border-color: var(--ao-border-strong); color: var(--ao-text); }
 .project-platform-note { margin: 16px 0 4px; font-size: 13px; color: var(--ao-text-soft); line-height: 1.6; }.project-platform-list { display: grid; gap: 0; padding-top: 4px; }
 .project-platform-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 76px; padding: 14px 8px; border-bottom: 1px solid var(--ao-line-soft); border-radius: 6px; }
 .project-platform-item:last-child { border-bottom: 0; }

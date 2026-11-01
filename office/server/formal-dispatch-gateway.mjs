@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { createWindowProvisioner } from './window-provisioner.mjs';
 import { createTerminalSessions } from './terminal-session.mjs';
-import { readRelayOverview, writeRelayProject } from './relay-overview.mjs';
+import { clearRelayProject, readRelayOverview, writeRelayProject } from './relay-overview.mjs';
 import { WebSocketServer } from 'ws';
 
 import { parseTranscript } from '../src/cli-transcript.js';
@@ -589,6 +589,12 @@ export function createFormalGateway(config={}){
         if(!name||name.length>80)throw fail(400,'invalid_relay_project');
         try{ json(res,200,writeRelayProject({root:relayRoot,name})); }
         catch(error){ throw fail(500, String(error&&error.message||'relay_project_write_failed')); }
+        return true;
+      }
+      if(req.method==='DELETE'&&route==='/relay/project'){
+        // 只清仓库里那份项目说明，信箱里的信一封都不动 —— 那些是真发生过的事。
+        try{ json(res,200,clearRelayProject({root:relayRoot})); }
+        catch(error){ throw fail(500, String(error&&error.message||'relay_project_clear_failed')); }
         return true;
       }
       if(req.method==='GET'&&route==='/terminal/availability'){

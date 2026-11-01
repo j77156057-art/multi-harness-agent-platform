@@ -135,6 +135,23 @@ export function writeRelayProject({ root, name, now = new Date() } = {}) {
 }
 
 /**
+ * 清掉仓库里那份项目说明（`relay/project.json`）。
+ *
+ * **只删这一份说明，不碰信箱里任何东西**：线程、信、退回、账本都留着 —— 那些是真发生过
+ * 的事，不该因为"项目从列表里移除"就一起消失。要连信一起删，那是人来动手的事。
+ */
+export function clearRelayProject({ root } = {}) {
+  const file = path.join(path.resolve(String(root || '.')), PROJECT_FILE);
+  try {
+    fs.unlinkSync(file);
+    return { removed: true };
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return { removed: false };
+    throw error;
+  }
+}
+
+/**
  * 读一份转接概况。
  *
  * @param {{root: string, now?: number}} options `root` 是信箱根目录（`relay/`）。

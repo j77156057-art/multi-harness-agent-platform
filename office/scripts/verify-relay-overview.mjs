@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { HEARTBEAT_FILE, PROJECT_FILE, RUNNING_WINDOW_MS, readRelayOverview, readRelayProject, writeRelayProject } from '../server/relay-overview.mjs';
+import { HEARTBEAT_FILE, PROJECT_FILE, RUNNING_WINDOW_MS, clearRelayProject, readRelayOverview, readRelayProject, writeRelayProject } from '../server/relay-overview.mjs';
 
 const checks = [];
 const check = (name, fn) => {
@@ -113,6 +113,26 @@ check('a broken project file is reported, not silently treated as missing', () =
 
 check('an empty project name is refused', () => {
   assert.throws(() => writeRelayProject({ root, name: '   ' }), /relay_project_name_required/);
+});
+
+check('clearing the project note leaves every letter alone', () => {
+  writeRelayProject({ root, name: '要清掉的项目' });
+  const before = readRelayOverview({ root });
+  assert.ok(before.threads.length > 0, 'precondition: the mailbox has threads');
+
+  const result = clearRelayProject({ root });
+
+  assert.equal(result.removed, true);
+  const after = readRelayOverview({ root });
+  assert.equal(after.project, null);
+  // 「移除项目」不该删掉真发生过的事：线程、退回、待投都要原样在。
+  assert.deepEqual(after.threads, before.threads);
+  assert.deepEqual(after.returned, before.returned);
+  assert.equal(after.pending, before.pending);
+});
+
+check('clearing a project note that is not there is not an error', () => {
+  assert.equal(clearRelayProject({ root }).removed, false);
 });
 
 console.log(`relay overview: ${checks.length}/${checks.length} PASS`);

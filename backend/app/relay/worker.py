@@ -245,12 +245,19 @@ class RelayWorker:
         delivered: list[str] = []
         for block in plan.blocks:
             delivered.append(block.recipient)
+            # 同一封信里的其他人：只报名字。正文仍然各看各的（下面 text 只给这一段），
+            # 不写"还发给了谁"的话，收信方会以为这事只有自己知道。
+            also_to = [name for name in recipients if name != block.recipient]
             # 收件箱放一份文件：没有 HTTP 能力的 CLI 也能读到，并把线程与跳数写在最上面。
             self.mailbox.deliver(
                 block.recipient,
                 name=letter.name,
                 text=envelope_for_delivery(
-                    sender=sender, text=block.body, thread_id=thread_id, hop=hop
+                    sender=sender,
+                    text=block.body,
+                    thread_id=thread_id,
+                    hop=hop,
+                    also_to=also_to,
                 ),
             )
             # 消息面记一条：界面里看得见，有投递记录，作者是 relay 自己。

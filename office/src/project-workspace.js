@@ -741,34 +741,119 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
       const action = project.phase === 'scene' ? '进入办公室' : '去配置';
-      card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status ${project.phase}">${status}</span><button type="button" class="project-card-open">${action}</button>`;
+      card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status ${project.phase}">${status}</span><div class="project-card-actions"><button type="button" class="project-card-open">${action}</button><button type="button" class="project-card-remove" title="只从项目列表里去掉；平台上的任务与信箱里的信都不会被删">移除</button></div></div>`;
       card.querySelector('strong').textContent = project.name;
       // 卡的副行只说"什么时候建的"：项目编号是给查问题的人看的，不该占着这一行
       // （完整的编号留在 title 里，鼠标悬上去能看到）。
       card.querySelector('.project-card-main span').textContent = `${project.createdAt.split(' ')[0]} 建`;
       card.querySelector('.project-card-main span').title = project.id;
-      card.querySelector('button').addEventListener('click', () => {
+      card.querySelector('.project-card-open').addEventListener('click', () => {
         activeId = project.id;
         persistActive();
         onOpenProject(clone(project));
       });
+      card.querySelector('.project-card-remove').addEventListener('click', () => askRemove(project, card));
       history.append(card);
     }
     if (hasRepoCard) {
       // 仓库里的转接项目：本机没有这条记录也列出来，并标明来源与它自己的时间。
       const card = document.createElement('article');
       card.className = 'project-card project-card-repo';
-      card.innerHTML = `<div class="project-card-icon">信</div><div class="project-card-main"><strong></strong><span></span></div><span class="project-card-status scene">来自仓库</span><button type="button" class="project-card-open">打开</button>`;
+      card.innerHTML = `<div class="project-card-icon">信</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status scene">来自仓库</span><div class="project-card-actions"><button type="button" class="project-card-open">打开</button><button type="button" class="project-card-remove" title="清掉仓库里的项目说明；信箱里的信不会被删">移除</button></div></div>`;
       card.querySelector('strong').textContent = repoName;
       const stamp = String(repoRelayProject.created_at || '').slice(0, 10);
       card.querySelector('.project-card-main span').textContent = stamp
         ? `${stamp} 建 · 本机没有这个项目的记录，按信箱打开`
         : '按信箱打开';
-      card.querySelector('button').addEventListener('click', () => openRepoRelayProject());
+      card.querySelector('.project-card-open').addEventListener('click', () => openRepoRelayProject());
+      card.querySelector('.project-card-remove').addEventListener('click', () => askRemoveRepo(card));
       history.append(card);
     }
     const total = projects.length + (hasRepoCard ? 1 : 0);
     count.textContent = `${total} 个项目`;
+  }
+
+  /**
+   * 「移除」：把项目从列表里去掉。**不删任何真东西** —— 平台上的任务还在，信箱里的信
+   * 还在。所以这里问的是"去掉哪一层"，不是"要不要删"。
+   *
+   * 转接项目多一层：项目名还写在仓库的 `relay/project.json` 里。只移出列表的话，
+   * 下一次打开大厅它会以「来自仓库」再出现 —— 那不是 bug，是仓库本来就是事实源。
+   * 要它彻底不再出现，得连仓库那份说明一起清（信仍然不动）。
+   */
+  function askRemove(project, card) {
+    if (card.querySelector('.project-card-confirm')) return;
+    const actions = card.querySelector('.project-card-side');
+    if (!actions) return;
+    const relay = project.mode === 'relay';
+    const box = document.createElement('div');
+    box.className = 'project-card-confirm';
+    box.innerHTML = relay
+      ? `<p>只移出列表的话，下次它会从仓库里再出现（信还在那儿）。</p>
+         <button type="button" data-act="list-only">只移出列表</button>
+         <button type="button" data-act="with-repo">移出并清掉仓库说明</button>
+         <button type="button" data-act="cancel">取消</button>`
+      : `<p>只从列表里去掉；平台上的任务不受影响。</p>
+         <button type="button" data-act="list-only">移出列表</button>
+         <button type="button" data-act="cancel">取消</button>`;
+    actions.replaceWith(box);
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => render());
+    box.querySelector('[data-act="list-only"]').addEventListener('click', () => removeLocalProject(project.id));
+    box.querySelector('[data-act="with-repo"]')?.addEventListener('click', async () => {
+      try {
+        await clearRepoRelayProject();
+      } catch (error) {
+        box.querySelector('p').textContent = `没能清掉仓库里的项目说明：${error.message}`;
+        return;
+      }
+      removeLocalProject(project.id);
+    });
+  }
+
+  /** 仓库里那张卡的移除：没有本地记录，要它消失只能清仓库那份说明。 */
+  function askRemoveRepo(card) {
+    if (card.querySelector('.project-card-confirm')) return;
+    const actions = card.querySelector('.project-card-side');
+    if (!actions) return;
+    const box = document.createElement('div');
+    box.className = 'project-card-confirm';
+    box.innerHTML = `<p>这个项目只写在仓库里。清掉说明后它就再也不出现了；信箱里的信不会被删。</p>
+      <button type="button" data-act="with-repo">清掉仓库说明</button>
+      <button type="button" data-act="cancel">取消</button>`;
+    actions.replaceWith(box);
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => render());
+    box.querySelector('[data-act="with-repo"]').addEventListener('click', async () => {
+      try {
+        await clearRepoRelayProject();
+      } catch (error) {
+        box.querySelector('p').textContent = `没能清掉仓库里的项目说明：${error.message}`;
+      }
+    });
+  }
+
+  function removeLocalProject(id) {
+    const index = projects.findIndex(item => item.id === id);
+    if (index < 0) return;
+    projects.splice(index, 1);
+    if (activeId === id) activeId = projects.length ? projects[projects.length - 1].id : null;
+    persistProjects();
+    persistActive();
+    render();
+  }
+
+  async function clearRepoRelayProject() {
+    const response = await fetch('/api/formal/relay/project', {
+      method: 'DELETE',
+      headers: { 'X-Office-Formal': '1' },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+    repoRelayProject = null;
+    repoRelayNote = '';
+    render();
   }
 
   /** 从仓库里认领一个转接项目：本地建一条入口，之后走的就是同一个转接视图。 */
