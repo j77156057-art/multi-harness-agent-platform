@@ -56,11 +56,15 @@ class Mailbox:
     def returned(self) -> Path:
         return self.root / "returned"
 
+    @property
+    def threads(self) -> Path:
+        return self.root / "threads"
+
     def inbox(self, recipient: str) -> Path:
         return self.root / "inbox" / _safe(recipient)
 
     def ensure(self) -> None:
-        for path in (self.outbox, self.archive, self.returned):
+        for path in (self.outbox, self.archive, self.returned, self.threads):
             path.mkdir(parents=True, exist_ok=True)
 
     def pending(self) -> list[Path]:
@@ -108,11 +112,14 @@ def _safe(name: str) -> str:
     return cleaned or "letter"
 
 
-def envelope_for_delivery(*, sender: str, text: str) -> str:
-    """投进收件箱的那份文件长什么样：写明谁说的、什么时候投的，再接正文。
+def envelope_for_delivery(*, sender: str, text: str, thread_id: str = "", hop: int = 0) -> str:
+    """投进收件箱的那份文件长什么样：写明谁说的、第几跳，再接正文。
 
-    这一步不做"润色"：正文一个字不改，只在前面加一行来源，收信的人（或 CLI）读到的
-    仍是作者原话。
+    这一步不做"润色"：正文一个字不改，只在前面加两行来源。**跳数与线程写在最上面**，
+    因为收信方要照着它回信（`回复 <thread id>`）—— 那正是跳数能算准的前提。
     """
     stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    return f"来自 {sender}（转接于 {stamp}）\n\n{text.strip()}\n"
+    trace = f"来自 {sender}（转接于 {stamp}）"
+    if thread_id:
+        trace += f"\n线程 {thread_id} · 第 {hop} 跳（回信请写：回复 {thread_id}）"
+    return f"{trace}\n\n{text.strip()}\n"

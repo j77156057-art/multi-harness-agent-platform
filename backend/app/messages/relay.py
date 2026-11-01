@@ -29,6 +29,9 @@ _HEADER = re.compile(r"^给\s*(?P<who>[^\s:：]{1,64})\s*[:：]\s*$")
 #: 信件的作者行：`来自<窗口 id>`。只认第一行非空内容。
 _AUTHOR_LINE = re.compile(r"^来自\s*(?P<who>[^\s:：]{1,64})\s*$")
 
+#: 回信行：`回复 thr-1a2b3c4d`。有它才谈得上"这是第几跳"。
+_THREAD_LINE = re.compile(r"^回复\s*(?P<id>thr-[0-9a-f]{8,16})\s*$")
+
 #: 指向"管理员窗口"的别名。管理员身份由 `AP_ADMIN_SUBJECTS` 决定，不在这里写死谁。
 ADMIN_ALIASES = frozenset({"管理员", "admin"})
 
@@ -112,29 +115,50 @@ def parse(body: str, *, known: set[str], admins: set[str], sender: str) -> Relay
     return RelayPlan(blocks=tuple(blocks))
 
 
-def parse_letter(body: str) -> tuple[str, str]:
-    """把一封"文件信"拆成（作者, 信的正文）。
+def parse_letter(body: str) -> tuple[str, str, str]:
+    """把一封"文件信"拆成（作者, 回复的线程 id, 信的正文）。
 
     为什么信里要写作者：文件名不可信（谁都能起名叫 `codex-1.md`），而平台又**不能**
     冒充任何人去说话。所以作者由信自己声明，平台验它是已登记的窗口；验不过就退回，
     不猜。
 
+    为什么回信要写线程：跳数是回路唯一的刹车，而"这是第几跳"只能靠回信自己认领
+    （`回复 thr-xxxx`）。不写就当新线程 —— 但那样回路闸门（同一对窗口来回次数）就是
+    唯一的兜底，所以信里没写时平台不会假装知道。
+
     开头的 BOM 要容忍：Windows 上的编辑器/PowerShell 写 UTF-8 常常带 BOM，而 BOM 会让
     `来自` 不再是行首（2026-11-01 实测踩到：`Set-Content -Encoding UTF8` 写出来的信
     被当成"没有作者行"退回去了）。这里剥掉它，而不是让人去猜为什么没投出去。
 
-    返回的正文后续交给 :func:`parse` 拆块。作者行缺失 ⇒ 返回 ``("", 全文)``，由调用方
-    按"格式不合规"处理。
+    返回的正文后续交给 :func:`parse` 拆块。作者行缺失 ⇒ 返回 ``("", "", 全文)``，
+    由调用方按"格式不合规"处理。
     """
     text = str(body or "").lstrip("\ufeff")
     lines = text.splitlines()
+    author = ""
+    thread = ""
+    consumed = 0
     for index, line in enumerate(lines):
         if not line.strip():
+            consumed = index + 1
             continue
         matched = _AUTHOR_LINE.match(line.strip())
         if not matched:
-            return "", text
+            return "", "", text
         author = matched.group("who")
-        rest = "\n".join(lines[index + 1 :])
-        return author, rest
-    return "", text
+        consumed = index + 1
+        break
+    if not author:
+        return "", "", text
+    # 作者行之后紧跟（中间允许空行）的一行 `回复 thr-xxxx` 是线程认领。
+    for index in range(consumed, len(lines)):
+        stripped = lines[index].strip()
+        if not stripped:
+            continue
+        claimed = _THREAD_LINE.match(stripped)
+        if claimed:
+            thread = claimed.group("id")
+            consumed = index + 1
+        break
+    rest = "\n".join(lines[consumed:])
+    return author, thread, rest

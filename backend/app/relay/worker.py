@@ -16,11 +16,20 @@ from __future__ import annotations
 
 import argparse
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from app.messages.relay import ADMIN_ALIASES, parse, parse_letter
 from app.relay.mailbox import Mailbox, envelope_for_delivery
+from app.relay.threads import (
+    EXCHANGE_WINDOW_SECONDS,
+    MAX_EXCHANGES,
+    MAX_HOPS,
+    ExchangeLedger,
+    ThreadLedgerError,
+    ThreadStore,
+)
 
 
 def _roster_from_db(path: Path) -> set[str]:
@@ -111,6 +120,9 @@ class RelayWorker:
         #: 群主（人的主体）：转接出来的消息抄送给他们，否则界面里谁也看不到。
         self.owners = set(owners or ())
         self._owner_source = owner_source
+        #: 线程账本与回路闸门：跳数要跨进程重启仍然准确，所以落在 relay/threads/。
+        self.threads = ThreadStore(mailbox.root / "threads")
+        self.exchanges = ExchangeLedger(mailbox.root / "exchanges")
 
     def _load_owners(self) -> None:
         if self.owners or self._owner_source is None:
@@ -133,7 +145,7 @@ class RelayWorker:
         return self._known
 
     # ------------------------------------------------------------- deliver
-    def _post_message(self, recipient: str, body: str) -> None:
+    def _post_message(self, recipient: str, body: str, *, thread_id: str = "", hop: int = 0) -> None:
         """把这块内容记成一条定向消息。
 
         作者是 **relay 自己**（作者必须等于令牌主体这条规矩），正文首行写「来自 X」——
@@ -143,6 +155,9 @@ class RelayWorker:
         永远看不到 harness 之间约了什么 —— 那正是"转接模式"要给人看的那部分。
         """
         audience = [recipient, *[owner for owner in sorted(self.owners) if owner != recipient]]
+        refs = ["relay"]
+        if thread_id:
+            refs += [f"thread:{thread_id}", f"hop:{hop}"]
         response = self.client.post(
             f"/api/v1/groups/{self.group}/messages",
             json={
@@ -150,7 +165,7 @@ class RelayWorker:
                 "author_id": self.relay_id,
                 "body": body,
                 "mentions": audience,
-                "refs": ["relay"],
+                "refs": refs,
                 "direct": True,
             },
         )
@@ -164,7 +179,7 @@ class RelayWorker:
         self._load_owners()
         # utf-8-sig：Windows 上写 UTF-8 常常带 BOM，带 BOM 的文件不该被判成"没作者"。
         text = letter.read_text(encoding="utf-8-sig", errors="replace")
-        sender, body = parse_letter(text)
+        sender, claimed_thread, body = parse_letter(text)
         if not sender:
             reason = "第一行缺少「来自 <窗口 id>」，看不出是谁写的"
             self.mailbox.return_letter(letter, reason)
@@ -183,18 +198,66 @@ class RelayWorker:
             self.mailbox.return_letter(letter, f"格式不合规（{detail}）")
             return {"letter": letter.name, "status": "returned", "reason": detail}
 
+        # ---- 线程与跳数：回路的刹车 -------------------------------------
+        # 显式认领优先；认不出的 thread id **退回**，不悄悄当新线程（那会把跳数清零）。
+        if claimed_thread:
+            try:
+                state = self.threads.get(claimed_thread)
+            except ThreadLedgerError as problem:
+                # 账本坏了 ≠ 线程不存在：说清楚是谁的问题，别让人反复改 id。
+                reason = f"{problem}（先别回信，请平台方看一眼 relay/threads/ 里的这份账本）"
+                self.mailbox.return_letter(letter, reason)
+                return {"letter": letter.name, "status": "returned", "reason": reason}
+            if state is None:
+                reason = f"回复的线程「{claimed_thread}」不存在（抄错了？）"
+                self.mailbox.return_letter(letter, reason)
+                return {"letter": letter.name, "status": "returned", "reason": reason}
+            thread_id = claimed_thread
+            hop = state.hops + 1
+        else:
+            thread_id = "thr-" + uuid.uuid4().hex[:8]
+            hop = 1
+        if hop > MAX_HOPS:
+            reason = (
+                f"这条对话已经转了 {hop - 1} 跳（上限 {MAX_HOPS}），先停下让人看一眼再继续"
+                f"；要接着谈，请把它当成一件新的事重新起一封"
+            )
+            self.mailbox.return_letter(letter, reason)
+            return {"letter": letter.name, "status": "returned", "reason": reason, "thread": thread_id}
+
+        # 不依赖协议的回路闸门：同一对窗口在窗口期内来回太多次就停（模型会忘记写线程）。
+        recipients = [block.recipient for block in plan.blocks]
+        for recipient in recipients:
+            # 只"预看"，先不记账：整封被退回时，前面那些收件窗口根本没收到信，不该背这次
+            # 来回 —— 否则反复改格式重发会把额度耗光，改对了也进不来。
+            projected = len(self.exchanges.recent(sender, recipient)) + 1
+            if projected > MAX_EXCHANGES:
+                reason = (
+                    f"和「{recipient}」在 {EXCHANGE_WINDOW_SECONDS // 60} 分钟内已经来回 {projected} 次"
+                    f"（上限 {MAX_EXCHANGES}），停下来让人看看是不是绕住了"
+                )
+                self.mailbox.return_letter(letter, reason)
+                return {"letter": letter.name, "status": "returned", "reason": reason, "thread": thread_id}
+        # 闸门都过了才记账：这封信确实要投给这几个窗口。
+        for recipient in recipients:
+            self.exchanges.record(sender, recipient)
+
         delivered: list[str] = []
         for block in plan.blocks:
             delivered.append(block.recipient)
-            # 收件箱放一份文件：没有 HTTP 能力的 CLI 也能读到。
+            # 收件箱放一份文件：没有 HTTP 能力的 CLI 也能读到，并把线程与跳数写在最上面。
             self.mailbox.deliver(
                 block.recipient,
                 name=letter.name,
-                text=envelope_for_delivery(sender=sender, text=block.body),
+                text=envelope_for_delivery(
+                    sender=sender, text=block.body, thread_id=thread_id, hop=hop
+                ),
             )
             # 消息面记一条：界面里看得见，有投递记录，作者是 relay 自己。
             try:
-                self._post_message(block.recipient, f"来自 {sender}：\n\n{block.body}")
+                self._post_message(
+                    block.recipient, f"来自 {sender}：\n\n{block.body}", thread_id=thread_id, hop=hop
+                )
             except Exception as problem:  # noqa: BLE001 - 一次投递失败不该吃掉整封信
                 return {
                     "letter": letter.name,
@@ -202,8 +265,15 @@ class RelayWorker:
                     "delivered": delivered,
                     "error": f"{type(problem).__name__}: {problem}"[:200],
                 }
+        self.threads.record_hop(thread_id, sender=sender, recipients=delivered)
         self.mailbox.archive_letter(letter)
-        return {"letter": letter.name, "status": "delivered", "to": delivered}
+        return {
+            "letter": letter.name,
+            "status": "delivered",
+            "to": delivered,
+            "thread": thread_id,
+            "hop": hop,
+        }
 
     def sweep(self) -> list[dict[str, object]]:
         self.mailbox.ensure()

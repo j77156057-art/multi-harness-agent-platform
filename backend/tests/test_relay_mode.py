@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.messages.relay import looks_like_envelope, parse, parse_letter
 from app.relay.mailbox import Mailbox
+from app.relay.threads import MAX_EXCHANGES
 from app.relay.worker import RelayWorker
 
 ADMINS = {"codex-window-admin"}
@@ -58,16 +59,17 @@ def test_an_empty_block_or_a_self_block_is_refused():
 
 
 def test_a_letter_declares_its_author_on_the_first_line():
-    author, body = parse_letter("来自 codex\n\n给 opencode：\n接着干\n")
+    author, thread, body = parse_letter("来自 codex\n\n给 opencode：\n接着干\n")
     assert author == "codex"
+    assert thread == ""
     assert body.strip().startswith("给 opencode：")
     # 没有作者行的，作者为空 —— 交给调用方当作"格式不合规"退回，不猜。
-    assert parse_letter("给 opencode：\n接着干\n") == ("", "给 opencode：\n接着干\n")
+    assert parse_letter("给 opencode：\n接着干\n") == ("", "", "给 opencode：\n接着干\n")
 
 
 def test_a_bom_before_the_author_line_is_tolerated():
     """Windows 上写 UTF-8 常带 BOM：带 BOM 的信不该被判成"没作者"（实测踩到过）。"""
-    author, body = parse_letter("\ufeff来自 codex\n\n给 opencode：\n接着干\n")
+    author, thread, body = parse_letter("\ufeff来自 codex\n\n给 opencode：\n接着干\n")
     assert author == "codex"
     assert body.strip().startswith("给 opencode：")
 
@@ -118,7 +120,11 @@ def test_a_letter_is_delivered_to_every_named_block(tmp_path):
 
     results = worker.sweep()
 
-    assert results == [{"letter": "codex-1.md", "status": "delivered", "to": ["codex-window-admin", "opencode"]}]
+    assert results[0]["status"] == "delivered"
+    assert results[0]["to"] == ["codex-window-admin", "opencode"]
+    # 新信开一条新线程，第 1 跳
+    assert results[0]["hop"] == 1
+    assert str(results[0]["thread"]).startswith("thr-")
     # 收件箱各拿到一份文件（没有 HTTP 能力的 CLI 也能读）
     for recipient, expected in (("codex-window-admin", "定个方向"), ("opencode", "接着写")):
         files = list(mailbox.inbox(recipient).glob("*.md"))
@@ -170,3 +176,106 @@ def test_a_malformed_letter_is_returned_with_a_reason_file(tmp_path):
     assert "nobody" in reasons[0].read_text(encoding="utf-8")
     assert client.posts == []
     assert mailbox.pending() == []
+
+
+# ------------------------------------------------------------------ 线程与跳数
+
+
+def test_a_reply_on_the_same_thread_bumps_the_hop(tmp_path):
+    worker, client, mailbox = _worker(tmp_path)
+    _letter(mailbox, "first.md", "来自 codex\n\n给 opencode：\n第一跳\n")
+    first = worker.sweep()[0]
+    thread = str(first["thread"])
+
+    # 收信方按收件箱里那行提示回信（`回复 <thread>`）
+    _letter(mailbox, "reply.md", f"来自 opencode\n回复 {thread}\n\n给 codex：\n第二跳\n")
+    second = worker.sweep()[0]
+
+    assert second["status"] == "delivered"
+    assert second["thread"] == thread
+    assert second["hop"] == 2
+    # 跳数落在账本里，进程重启也读得到
+    assert worker.threads.get(thread).hops == 2
+
+
+def test_the_hop_ceiling_stops_the_conversation(tmp_path):
+    worker, client, mailbox = _worker(tmp_path)
+    _letter(mailbox, "first.md", "来自 codex\n\n给 opencode：\n起头\n")
+    thread = str(worker.sweep()[0]["thread"])
+    # 把账本直接推到上限：再回一封就该停
+    state = worker.threads.open(thread)
+    state.hops = 6
+    worker.threads.save(state)
+
+    _letter(mailbox, "again.md", f"来自 codex\n回复 {thread}\n\n给 opencode：\n第七跳\n")
+    result = worker.sweep()[0]
+
+    assert result["status"] == "returned"
+    assert "跳" in result["reason"] and "上限" in result["reason"]
+    assert result["thread"] == thread
+    assert list(mailbox.returned.glob("*.reason.md"))
+
+
+def test_an_unknown_thread_is_returned_not_silently_restarted(tmp_path):
+    """抄错 thread id 要退回来：悄悄当新线程等于把回路刹车清零。"""
+    worker, client, mailbox = _worker(tmp_path)
+    _letter(mailbox, "typo.md", "来自 codex\n回复 thr-deadbeef\n\n给 opencode：\n喂\n")
+
+    result = worker.sweep()[0]
+
+    assert result["status"] == "returned"
+    assert "不存在" in result["reason"]
+    assert client.posts == []
+
+
+def test_the_loop_guard_stops_windows_that_keep_answering_each_other(tmp_path):
+    """模型会忘记写线程，所以另有一道不依赖协议的闸门：同一对窗口来回太多次就停。"""
+    worker, client, mailbox = _worker(tmp_path)
+    for index in range(MAX_EXCHANGES):
+        _letter(mailbox, f"round-{index}.md", "来自 codex\n\n给 opencode：\n又来一条\n")
+        result = worker.sweep()[0]
+        assert result["status"] == "delivered", result
+
+    _letter(mailbox, "one-too-many.md", "来自 codex\n\n给 opencode：\n再来一条\n")
+    result = worker.sweep()[0]
+
+    assert result["status"] == "returned"
+    assert "来回" in result["reason"]
+    assert len(list(mailbox.returned.glob("*.reason.md"))) == 1
+
+
+def test_a_broken_ledger_is_reported_as_a_platform_problem(tmp_path):
+    """账本坏了 ≠ 线程不存在：合成一句"不存在"会让人反复改 id 也改不对。"""
+    worker, client, mailbox = _worker(tmp_path)
+    thread = "thr-0badf00d"
+    (mailbox.threads / f"{thread}.json").write_text("{ 不是 json", encoding="utf-8")
+
+    _letter(mailbox, "reply.md", f"来自 codex\n回复 {thread}\n\n给 opencode：\n接着\n")
+
+    result = worker.sweep()[0]
+
+    assert result["status"] == "returned"
+    assert "账本" in result["reason"] and "平台方" in result["reason"]
+    assert "不存在" not in result["reason"]
+    assert client.posts == []
+
+
+def test_a_returned_letter_does_not_burn_the_windows_it_never_reached(tmp_path):
+    """闸门挡下整封信时，前面那些收件窗口没收到信，就不该被记一次来回。
+
+    否则反复改格式重发会把额度耗光 —— 改对了也进不来（这就是"退回"必须干净的原因）。
+    """
+    worker, client, mailbox = _worker(tmp_path)
+    for _ in range(MAX_EXCHANGES):
+        worker.exchanges.record("codex", "codex-window-admin")
+
+    # 先写给还能收信的 opencode，再写给已经满了的管理员：整封退回。
+    _letter(mailbox, "two-blocks.md", "来自 codex\n\n给 opencode：\n接着写\n\n给管理员：\n定方向\n")
+    result = worker.sweep()[0]
+
+    assert result["status"] == "returned"
+    assert "来回" in result["reason"]
+    assert client.posts == []
+    # opencode 那份额度一次都没动过
+    assert worker.exchanges.recent("codex", "opencode") == []
+
