@@ -189,8 +189,12 @@ class AssistantWorker:
             answer_payload = result.get("answer") or {}
             text = f"{answer_payload.get('text', '')}".strip()
             cites = answer_payload.get("cites") or []
-            provenance = f"（依据：{' '.join(str(c) for c in cites)}；run {loop.run_id}）"
-            self._deliver(sender, f"{text}\n{provenance}")
+            # 人读的是这段话。以前尾巴上挂着 `run run-20261101-134005-75e823` —— 那是
+            # 机器 id：对人没有意义，只会让人以为自己漏看了一个编号（2026-11-01 实测
+            # 真实问答）。运行记录本来就在 run 收据与 /harnesses/{id}/runs 里，不需要
+            # 塞进这句话。**依据**要留：它说明这段话是拿哪几条事实说的。
+            provenance = f"（依据：{' '.join(str(c) for c in cites)}）" if cites else ""
+            self._deliver(sender, f"{text}\n{provenance}".strip() if provenance else text)
             status = "done"
         else:
             reason = str(result.get("reason") or "unknown")

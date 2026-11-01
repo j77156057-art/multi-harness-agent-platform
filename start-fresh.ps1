@@ -423,6 +423,64 @@ if ($readyIds -contains $adminEntry.Id) {
     Write-Step "administrator window stays idle until $($adminEntry.Id) is installed (until then approve submitted work by hand in the office)"
 }
 
+# -- 6b. the platform assistant ---------------------------------------------
+# It answers private questions in the group from the pool's FREE tier -- no
+# administrator CLI and no account needed. The free tier comes from CLI slots,
+# which exist only when a CLI is installed here, so it is started once the pool
+# actually offers a free model (checked below, and again in the watch loop).
+$Assistant = 'office-assistant'
+$assistantBody = @{
+    registered_by = $operatorId
+    harness_id = $Assistant
+    name = 'Platform assistant'
+    provider = 'pool'
+    adapter = 'assistant'
+    adapter_version = '1.0.0'
+    capabilities = @('coding')
+    max_parallel_tasks = 1
+    status = 'online'
+    registration_version = 'reg-001'
+}
+$assistantRegistered = Post-Json -path '/api/v1/harnesses' -body $assistantBody -token $operatorToken
+if ($assistantRegistered -and $assistantRegistered.__status -and $assistantRegistered.__status -ge 400 -and $assistantRegistered.__status -ne 409) {
+    Write-Step "WARNING: could not register the assistant window: $($assistantRegistered.__error)"
+}
+$assistantToken = Read-Key $Assistant
+if (-not $assistantToken) {
+    $assistantToken = Issue-Token 'harness' $Assistant
+    if ($assistantToken) {
+        Save-Key $Assistant $assistantToken
+        Write-Step "assistant token issued -> data\$Assistant.key"
+    } else {
+        Write-Step "WARNING: could not issue a token for $Assistant; it will not answer questions."
+    }
+}
+
+function Test-FreeModel([string]$token) {
+    $models = Get-Json -path '/api/v1/pool/v1/models' -token $token -timeoutSec 60
+    if (-not $models -or -not $models.data) { return $false }
+    foreach ($model in $models.data) {
+        if ([string]$model.tier -eq 'free') { return $true }
+    }
+    return $false
+}
+
+$script:assistantStarted = $false
+function Start-AssistantWorker {
+    if ($script:assistantStarted) { return }
+    if (Test-Worker $Assistant) { $script:assistantStarted = $true; return }
+    if (-not $assistantToken) { return }
+    if (-not (Test-FreeModel $assistantToken)) {
+        Write-Step 'assistant stays idle: the pool has no free model yet (install any CLI and it starts)'
+        return
+    }
+    $args = @('-m', 'app.assistant.worker', '--url', $Url, '--group', $Group, '--assistant-id', $Assistant,
+        '--token-file', (Join-Path $dataDir "$Assistant.key"), '--interval', '5')
+    Start-Python 'assistant' $args | Out-Null
+    $script:assistantStarted = $true
+}
+Start-AssistantWorker
+
 # -- 7. the office ----------------------------------------------------------
 if (Test-Http "$OfficeUrl/api/formal/status") {
     Write-Step "office already running on $OfficeUrl"
@@ -465,6 +523,11 @@ function Find-NewWork {
         Write-Host "[fresh] $((Get-Date).ToString('HH:mm:ss')) $($adminEntry.Id) is in; starting the administrator worker"
         Start-AdminWorker
     }
+    # A CLI is installed now, so the pool has a free model -- the assistant can answer.
+    if (-not $script:assistantStarted -and $ready.Count -gt 0) {
+        Write-Host "[fresh] $((Get-Date).ToString('HH:mm:ss')) free models are available; starting the assistant"
+        Start-AssistantWorker
+    }
 }
 
 Write-Host ''
@@ -480,6 +543,10 @@ Write-Host '    Sign in before you dispatch. "Installed" only proves the command
 Write-Host '    its --version: a window whose CLI is not signed in still claims the task'
 Write-Host '    and then fails it, and the attempts are gone. If that happens, sign in'
 Write-Host '    and reopen the task from its detail page.'
+Write-Host ''
+Write-Host '    Asking questions: the left rail "platform assistant" answers private questions'
+Write-Host '    from the free tier of the pool (no account needed). The administrator window'
+Write-Host "    answers with its own CLI ($($adminEntry.Id)) once that CLI is signed in."
 Write-Host ''
 
 if (-not $NoBrowser) { Start-Process $OfficeUrl | Out-Null }
