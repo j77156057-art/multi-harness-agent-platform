@@ -60,6 +60,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 回收站：移除了但还能找回的平台项目（7 天）。读不到就是空，不编。
   let trashed = [];
   let state_trashError = '';
+  let platformError = '';
+  let formalStatusError = '';
+  let repoRelayError = '';
   if (!projects.some(project => project.id === activeId)) activeId = null;
   const persistProjects = () => {
     try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch {}
@@ -76,6 +79,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       <div class="project-lobby-body">
         <header class="project-lobby-copy">
           <p class="project-instance-note" data-instance-note hidden></p>
+          <p class="project-instance-note" data-lobby-error role="alert" hidden></p>
           <div class="project-lobby-heading"><div><p class="eyebrow">AGENT OFFICE / PROJECTS</p><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">从目标到合入，让每个 Agent 的交付都有据可查。</p><div class="project-lobby-ledger" aria-label="交付流程"><span>目标</span><i></i><span>执行</span><i></i><span>验证</span><i></i><span>合入</span></div></div>
             <div class="project-lobby-actions"><button type="button" class="project-connect" data-open-connections><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>连接工作窗口</button><button type="button" class="project-new primary" data-new-project><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建项目</span></button></div>
           </div>
@@ -106,6 +110,12 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 4176 是跨提供方评审实例，和 4174 不同源，项目历史本来就不共享。这里把
   // 事实写明，避免用户看到「0 个项目」以为项目被平台弄丢了。
   const instanceNote = root.querySelector('[data-instance-note]');
+  const lobbyError = root.querySelector('[data-lobby-error]');
+  function renderLobbyError() {
+    const errors = [platformError, formalStatusError, state_trashError, repoRelayError].filter(Boolean);
+    lobbyError.hidden = errors.length === 0;
+    lobbyError.textContent = errors.join('；');
+  }
   const reviewInstance = location.port === '4176' || new URLSearchParams(location.search).get('mode') === 'review';
   if (reviewInstance) {
     instanceNote.hidden = false;
@@ -283,8 +293,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   async function loadRecoverableProject() {
     try {
       const response = await formal('/api/formal/tasks', {cache: 'no-store'});
-      if (!response.ok) return;
+      if (!response.ok) throw new Error(`平台项目读取失败（HTTP ${response.status}）`);
       const data = await response.json();
+      platformError = '';
       const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
       platformProjects = platformProjectsFrom(tasks);
       renderPlatformProjects();
@@ -312,7 +323,12 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       // 说人话：以前写「恢复最近项目：xxx」，读的人不知道"恢复"是什么。
       recoverButton.textContent = `打开这个项目（已有 ${taskIds.length} 件事）`;
       recoverButton.hidden = false;
-    } catch {}
+    } catch (error) {
+      // 保留现有平台项目与恢复入口，只把最新读取失败说清楚。
+      platformError = `平台项目读取失败：${String((error && error.message) || error)}；已保留当前列表`;
+    } finally {
+      renderLobbyError();
+    }
   }
   void loadRecoverableProject();
   // 仓库里的转接项目（`relay/project.json`）：本机没有记忆也要列出来 —— 信在仓库里，
@@ -474,6 +490,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   function renderWorkerHint() {
     const hint = root.querySelector('[data-worker-hint]');
     if (!hint) return;
+    if (formalStatusError) {
+      hint.textContent = `${formalStatusError}；已保留当前窗口信息，可点顶部「刷新」重试。`;
+      hint.hidden = false;
+      return;
+    }
     const roster = formalState?.harnesses || [];
     const admin = actingAdministratorId(formalState);
     const workers = roster.filter(
@@ -511,13 +532,18 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   async function loadFormalStatus() {
     try {
       const response = await formal('/api/formal/status', {cache: 'no-store'});
-      const state = response.ok ? await response.json() : null;
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const state = await response.json();
+      formalStatusError = '';
       renderFormalRegistration(state);
       renderWorkerHint();
+      renderLobbyError();
       return state;
-    } catch {
-      renderFormalRegistration(null);
+    } catch (error) {
+      // 不用 null 覆盖旧名册；失败和“平台没有窗口”是两件事。
+      formalStatusError = `窗口名册读取失败：${String((error && error.message) || error)}`;
       renderWorkerHint();
+      renderLobbyError();
       return null;
     }
   }
@@ -791,6 +817,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     const total = projects.length + (hasRepoCard ? 1 : 0);
     count.textContent = `${total} 个项目`;
     history.append(trashSection());
+    renderLobbyError();
   }
 
   /**
@@ -803,6 +830,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   function trashSection() {
     const box = document.createElement('section');
     box.className = 'project-trash';
+    if (state_trashError) {
+      const error = document.createElement('p');
+      error.textContent = state_trashError;
+      box.append(error);
+    }
     if (!trashed.length) return box;
     const title = document.createElement('h3');
     title.textContent = `回收站（${trashed.length} 个，一周内可找回）`;
@@ -894,9 +926,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
       trashed = (data.projects || []).filter((row) => row && row.trashed_at);
+      state_trashError = '';
       render();
     } catch (error) {
-      state_trashError = String((error && error.message) || error);
+      state_trashError = `回收站读取失败：${String((error && error.message) || error)}；已保留当前记录`;
+      render();
     }
   }
 
@@ -1080,17 +1114,19 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     return data;
   }
 
-  /** 读仓库里那个转接项目（只读；失败就当没有，不在大厅里刷红）。 */
+  /** 读仓库里那个转接项目；失败保留旧入口，不把网络问题当成项目不存在。 */
   async function loadRepoRelayProject() {
     try {
       const response = await formal('/api/formal/relay/overview', { cache: 'no-store' });
-      if (!response.ok) return;
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       repoRelayProject = data.project || null;
       repoRelayNote = data.project_note || '';
+      repoRelayError = '';
       render();
-    } catch {
-      // 读不到就说没有：大厅不该因为一次网络抖动整块报错。
+    } catch (error) {
+      repoRelayError = `转接项目读取失败：${String((error && error.message) || error)}；已保留当前记录`;
+      render();
     }
   }
 
@@ -1247,6 +1283,21 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   render();
 
   return {
+    async refresh() {
+      // 项目历史也会跨标签页变化；刷新先重读本地事实，再并行更新平台各数据域。
+      projects = readStoredProjects();
+      sequence = nextSequence(projects);
+      if (!projects.some(project => project.id === activeId)) activeId = null;
+      render();
+      await Promise.allSettled([
+        loadRecoverableProject(),
+        loadFormalStatus(),
+        loadTrash(),
+        loadRepoRelayProject(),
+        loadTools({ probe: true }),
+      ]);
+      render();
+    },
     showLobby(project = null) {
       // 回到大厅时不能把上一轮开工/连接的模态框留在打开状态：它们会在
       // 大厅或场景上留下一个看不见的 backdrop，页面看起来就像卡死。

@@ -304,21 +304,19 @@ function activeProject() {
 }
 
 async function refresh() {
-  try {
-    const [status, outputs] = await Promise.all([
-      api('/status').catch(() => null),
-      api('/outputs').catch((error) => {
-        state.error = String(error.message || error);
-        return { outputs: [] };
-      }),
-    ]);
-    state.status = status;
-    state.scope = activeProject();
-    state.outputs = outputs.outputs || [];
-    state.group = outputs.group_id || null;
-    if (!state.error) state.error = null;
-  } catch (error) {
-    state.error = String(error.message || error);
+  const [statusResult, outputsResult] = await Promise.allSettled([
+    api('/status'),
+    api('/outputs'),
+  ]);
+  if (statusResult.status === 'fulfilled') state.status = statusResult.value;
+  state.scope = activeProject();
+  if (outputsResult.status === 'fulfilled') {
+    state.outputs = outputsResult.value.outputs || [];
+    state.group = outputsResult.value.group_id || null;
+    state.error = null;
+  } else {
+    // 保留最后成功的输出；失败既不能清空列表，也不能在下一次成功后继续显示旧错误。
+    state.error = String(outputsResult.reason?.message || outputsResult.reason);
   }
   render();
 }

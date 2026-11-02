@@ -437,6 +437,12 @@ dialog::backdrop, #openingDialog::backdrop { background: #17201bb3; backdrop-fil
 .ao-workspace .flat-error button { border-color: #a66c63; border-radius: 2px; background: transparent; color: #ffe6df; }
 .ao-workspace .flat-error-actions { display: flex; gap: 8px; margin-left: auto; }
 .ao-workspace .flat-error-actions button { margin-left: 0; }
+.ao-workspace .flat-head .flat-domain-error { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-left: 3px solid #ff9679; background: #392824; color: #ffe0d5; font-size: 12px; line-height: 1.6; }
+.ao-workspace .flat-head .flat-domain-error b { flex: none; }
+.ao-workspace .flat-head .flat-domain-error span { min-width: 0; overflow-wrap: anywhere; }
+.ao-workspace .flat-domain-error button { margin-left: auto; flex: none; padding: 3px 10px; border: 1px solid currentColor; border-radius: 2px; background: transparent; color: inherit; font: inherit; }
+.ao-workspace .flat-wtask-body .flat-domain-error { display: flex; gap: 8px; margin-bottom: 12px; padding: 10px 12px; border-left: 3px solid var(--ao-accent); background: var(--ao-accent-soft); color: #71311f; font-size: 12px; line-height: 1.65; }
+.ao-workspace .flat-wtask-body .flat-domain-error b { flex: none; }
 .ao-workspace .flat-body { grid-template-columns: 232px minmax(0, 1fr); background: var(--ao-bg); }
 .ao-workspace .flat-convs { padding: 22px 12px; border-right: 1px solid #101713; border-radius: 0; background: var(--ao-sidebar); }
 .ao-workspace .flat-convs-head { padding: 0 12px 14px; color: #8f9c92; font-family: var(--ao-mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }

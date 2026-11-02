@@ -90,10 +90,26 @@ app.innerHTML = `
 
 // 顶栏的「刷新」：重读平台的数据，**并**重新探一遍额度池 ——
 // 新增的免费额度、变成收费的额度，都要人知道。
-$('#aoRefreshBtn')?.addEventListener('click', () => {
-  void office?.refresh?.({ probe: true });
-  // 转接项目看的是信箱，不是平台数据：两页都叫「刷新」，各刷各的。
-  void relayView?.refresh?.();
+$('#aoRefreshBtn')?.addEventListener('click', async () => {
+  const button = $('#aoRefreshBtn');
+  const label = button.querySelector('span');
+  button.disabled = true;
+  label.textContent = '刷新中…';
+  try {
+    if (!$('#aoLobby').hidden) {
+      // 大厅有自己的数据：项目历史、平台项目、窗口名册、回收站与 CLI。
+      await projectWorkspace.refresh();
+    } else {
+      await Promise.all([
+        office?.refresh?.({ probe: true }),
+        // 转接项目看的是信箱，不是平台任务：两页都叫「刷新」，各刷各的。
+        relayView?.refresh?.(),
+      ]);
+    }
+  } finally {
+    button.disabled = false;
+    label.textContent = '刷新';
+  }
 });
 
 const connection = $('#aoConn');

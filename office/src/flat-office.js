@@ -7080,7 +7080,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const tasks = tasksResult.value;
       const events = eventsResult.status === 'fulfilled' ? eventsResult.value : { events: state.events };
       if (statusResult.status === 'rejected') state.error = '平台状态读取失败，任务数据可能不是最新；请重试。';
-      else state.status = status;
+      else {
+        state.status = status;
+        if (String(state.error || '').startsWith('平台状态读取失败') || String(state.error || '').startsWith('任务读取失败：')) {
+          state.error = null;
+        }
+      }
       if (eventsResult.status === 'fulfilled') {
         state.events = events.events || [];
         state.errors.events = '';

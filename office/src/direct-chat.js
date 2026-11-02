@@ -30,7 +30,7 @@ const api = async (route, body_) => {
   return data;
 };
 
-const state = { status: null, messages: [], error: null };
+const state = { status: null, messages: [], error: null, sending: false };
 
 /** \u7ba1\u7406\u5458\u7a97\u53e3\uff08\u5e73\u53f0\u914d\u7f6e\u7684\u90a3\u4e2a\uff09\u3002 */
 function adminId() {
@@ -103,14 +103,14 @@ function render() {
                   </article>`;
                 })
                 .join('')
-            : '<p class="direct-empty">暂无对话记录。发送的消息仅您与管理员可见。</p>'
+            : `<p class="direct-empty">${state.error ? '暂时无法确认对话记录；读取恢复前不会把失败当成空对话。' : '暂无对话记录。发送的消息仅您与管理员可见。'}</p>`
         }
       </div>
       ${waitingForReply ? '<p class="direct-waiting">消息已送达，正在等待管理员回复。管理员可能正在处理其他任务，回复需经过一次模型调用，存在一定延迟。</p>' : ''}
-      ${state.error ? `<p class="direct-error">${escape(state.error)}</p>` : ''}
+      ${state.error ? `<p class="direct-error" role="alert"><span>${escape(state.error)}</span><button type="button" id="directRetry">重试</button></p>` : ''}
       <form class="direct-form" id="directForm">
         <input type="text" id="directInput" placeholder="向管理员发送消息（仅双方可见）" aria-label="私聊消息" />
-        <button type="submit" ${id ? '' : 'disabled'}>发送</button>
+        <button type="submit" ${id && !state.sending ? '' : 'disabled'}>${state.sending ? '发送中…' : '发送'}</button>
       </form>
     </div>`;
 
@@ -122,35 +122,44 @@ function render() {
     if (wasTyping) input.focus();
   }
 
+  $('#directRetry')?.addEventListener('click', () => void refresh());
   $('#directForm').addEventListener('submit', async (event) => {
     event.preventDefault();
+    // 按钮禁用之外再挡一次：Enter 连发也不能叠出两条相同消息。
+    if (state.sending) return;
     const input = $('#directInput');
     const body = String(input.value || '').trim();
     if (!body || !id) return;
-    input.value = '';
+    state.sending = true;
+    render();
     try {
       await api('/messages', { body, mentions: [id], refs: [DIRECT_REF], direct: true });
+      state.sending = false;
       state.error = null;
+      const sentInput = $('#directInput');
+      if (sentInput) sentInput.value = '';
       await refresh();
     } catch (error) {
-      state.error = String(error.message || error);
+      // 不清输入框：render 会保留当前草稿，失败之后可以原样重试。
+      state.sending = false;
+      state.error = `发送失败：${String(error.message || error)}`;
       render();
     }
   });
 }
 
 async function refresh() {
-  try {
-    const [status, messages] = await Promise.all([
-      api('/status').catch(() => null),
-      api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
-    ]);
-    state.status = status;
-    state.messages = messages.messages || [];
-    state.error = null;
-  } catch (error) {
-    state.error = String(error.message || error);
-  }
+  const [statusResult, messagesResult] = await Promise.allSettled([
+    api('/status'),
+    api('/messages?since_seq=0&limit=500'),
+  ]);
+  const errors = [];
+  if (statusResult.status === 'fulfilled') state.status = statusResult.value;
+  else errors.push(`窗口状态读取失败：${statusResult.reason?.message || statusResult.reason}`);
+  if (messagesResult.status === 'fulfilled') state.messages = messagesResult.value.messages || [];
+  else errors.push(`消息读取失败：${messagesResult.reason?.message || messagesResult.reason}`);
+  // 只有对应请求成功才更新该域；失败时保留最后成功数据，并把原因明确摆出。
+  state.error = errors.join('；');
   render();
 }
 
