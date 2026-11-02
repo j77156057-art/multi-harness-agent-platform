@@ -93,12 +93,28 @@ def insert_output_registrations(
     *,
     merged_seq: int,
 ) -> None:
-    """Append registry rows in the merge_success transaction."""
+    """Append registry rows in the merge_success transaction.
+
+    **幂等写入**：`task_outputs` 的唯一键是 `(task_id, attempt_id, name)`。如果同一次
+    尝试被合并第二次（比如以后给 merge 加重试，或人工重跑一次合并），普通 `INSERT` 会撞
+    唯一键、把整笔合并事务回滚 —— 那会让人看到"合并失败"，而实际只是登记行已存在。
+    所以这里用 upsert：同一个产出的类型/版本/hash/提交/merged_seq 覆盖成**这一次**合并的
+    结果。不删旧行、不改 output_id，避免破坏任何按 id 的引用。
+
+    覆盖而不是"跳过"也是对的：同一次尝试二次合并意味着产出**内容变了**，依赖方要按新
+    hash 判；留着旧 hash 等于让下游拿旧账去对。
+    """
     for item in registrations:
         conn.execute(
             'INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,'
             ' schema_version, actual_hash, "commit", merged_seq)'
-            ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            " ON CONFLICT(task_id, attempt_id, name) DO UPDATE SET"
+            " type = excluded.type,"
+            " schema_version = excluded.schema_version,"
+            " actual_hash = excluded.actual_hash,"
+            ' "commit" = excluded."commit",'
+            " merged_seq = excluded.merged_seq",
             (
                 f"out-{uuid.uuid4().hex}",
                 item.task_id,

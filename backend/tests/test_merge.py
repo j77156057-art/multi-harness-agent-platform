@@ -453,3 +453,43 @@ def test_a_revert_that_cannot_restore_green_escalates(tmp_path):
     assert outcome.status == "revert_red"
     assert status_of(chain) == "escalated"
     assert health_of(chain) == "escalated"
+
+def test_a_second_registration_for_the_same_attempt_updates_instead_of_tripping_the_key(tmp_path):
+    """同一次尝试合并第二次时，产出登记必须**覆盖**而不是撞唯一键。
+
+    `task_outputs` 的唯一键是 (task_id, attempt_id, name)。返工流程会开新尝试，所以平时
+    撞不上；但"同尝试重跑一次合并"（以后给 merge 加重试就会）如果还走普通 INSERT，会直接
+    IntegrityError，把整笔合并事务回滚 —— 人看到的是"合并失败"，其实只是登记行已存在。
+    这条钉住 upsert：同一产出一行，值换成这一次的，output_id 不变。
+    """
+    from app.merge.outputs import OutputRegistration, insert_output_registrations
+
+    chain = approve(build_chain(tmp_path))
+    declare_outputs(chain, ["flag.txt"])
+    outcome = worker_for(chain).merge(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        commit=chain.head_commit,
+        branch=chain.branch,
+    )
+    first = chain.database.read("SELECT * FROM task_outputs WHERE task_id = ?", (chain.task_id,))
+    assert len(first) == 1
+    original_id = str(first[0]["output_id"])
+
+    newer = OutputRegistration(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        name="flag.txt",
+        type="code",
+        schema_version="v1",
+        actual_hash="sha256:" + "b" * 64,
+        commit=outcome.merge_commit,
+    )
+    with chain.database.transaction() as conn:
+        insert_output_registrations(conn, (newer,), merged_seq=10_000)
+
+    rows = chain.database.read("SELECT * FROM task_outputs WHERE task_id = ?", (chain.task_id,))
+    assert len(rows) == 1, "同一个 (task, attempt, name) 只该有一行"
+    assert str(rows[0]["output_id"]) == original_id, "覆盖不该换行、不换 id"
+    assert str(rows[0]["actual_hash"]) == newer.actual_hash, "值要换成这一次合并的"
+    assert int(rows[0]["merged_seq"]) == 10_000
