@@ -697,7 +697,7 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string')
           throw fail(400,'invalid_provision_request');
-        return await provisionRoute(body.harness_id,res);
+        return await provisionRoute(body.harness_id,res,groupId);
       }
       if(req.method==='POST'&&route==='/harnesses/stop'){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>4000)throw fail(413,'body_too_large');}
@@ -1160,8 +1160,7 @@ export function createFormalGateway(config={}){
     python:config.pythonPath,
     canonicalRepo:config.canonicalRepo,
     worktreeRoot:config.worktreeRoot,
-    // 拉起的 worker 落在**启动时绑的那个群**上。界面上切到别的项目时，起窗口这条路还不会
-    // 跟着换群 —— 那是"给哪个项目开工"的另一件事，得先想清一个 worker 能不能同时服务多个群。
+    // 默认落在启动时绑的那个群；真正起 worker 时由请求带上来的群覆盖（见 provisionRoute）。
     group:config.group,
     upstream:config.upstream,
     tokenFile:config.tokenFile,
@@ -1172,12 +1171,14 @@ export function createFormalGateway(config={}){
     repoRoot,
     dataDir: path.join(repoRoot, 'data'),
   });
-  async function provisionRoute(harnessId,res){
+  async function provisionRoute(harnessId,res,targetGroup){
     const registered=await call('/harnesses');
     const listed=(registered.harnesses||[]).map(item=>String(item.harness_id||''));
     if(!listed.includes(harnessId))throw fail(404,'harness_not_registered');
     try{
-      const result=await provisioner.provision(harnessId);
+      // 拉起 worker 时服务**这个请求所在的群**（界面上切到哪个项目就是哪个）。
+    // 没带头就是启动时那个 —— 老行为不变。
+    const result=await provisioner.provision(harnessId,{group:targetGroup});
       json(res,200,result);return true;
     }catch(error){
       throw fail(error.status||503,error.message||'window_provision_failed');

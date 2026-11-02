@@ -44,37 +44,45 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
     }
   }
 
-  /// 这个窗口现在还活着吗？
+  /// 这个窗口现在还活着吗？活着的话，它在为**哪个群**干活？
   ///
   /// **直接看进程**，不看平台心跳：心跳 5 分钟才写一次，拿它判"还活着"会漏，
-  /// 漏了就会给同一个 group 起第二个 worker —— 两个 worker 抢一条活，比没有更糟
+  /// 漏了就会给同一个群起第二个 worker —— 两个 worker 抢一条活，比没有更糟
   /// （`start-formal.ps1` 专门拦过这件事）。判据就是命令行里有没有
   /// `--harness-id <这个窗口>`，和启动脚本用的是同一种看法。
-  async function workerRunning(harnessId) {
+  ///
+  /// 为什么要连 `--group` 一起读回来：一个 worker 一次只服务**一个群**。界面上切到
+  /// 另一个项目再点「让这个窗口能干活」，如果不看这一项，就会给同一个窗口起第二个
+  /// 进程 —— 两个进程用同一个凭据、各领各群的活，出问题时没人说得清是谁领的。
+  async function workerProcess(harnessId) {
     if (process.platform !== 'win32') {
       try {
-        const {stdout} = await execFileAsync('pgrep', ['-f', `--harness-id ${harnessId}`], {
+        const {stdout} = await execFileAsync('pgrep', ['-af', `--harness-id ${harnessId}`], {
           timeout: 5000,
         });
-        return String(stdout).trim().length > 0;
+        const line = String(stdout).trim().split('\n').filter(Boolean)[0] || '';
+        const matched = /--group\s+(\S+)/.exec(line);
+        return {running: Boolean(line), group: matched ? matched[1] : ''};
       } catch {
-        return false; // pgrep 没找到会以 1 退出
+        return {running: false, group: ''}; // pgrep 没找到会以 1 退出
       }
     }
     const script =
       "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | " +
       `Where-Object { $_.CommandLine -like '*--harness-id ${harnessId}*' } | ` +
-      'Select-Object -ExpandProperty ProcessId';
+      'ForEach-Object { $_.CommandLine }';
     try {
       const {stdout} = await execFileAsync(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', script],
         {timeout: 20000, windowsHide: true},
       );
-      return String(stdout).trim().length > 0;
+      const line = String(stdout).trim().split(/\r?\n/).filter(Boolean)[0] || '';
+      const matched = /--group\s+(\S+)/.exec(line);
+      return {running: Boolean(line), group: matched ? matched[1] : ''};
     } catch {
       // 问不出来就当作"没有在跑"：宁可多起一个也要让人能开工，但结果里会写明。
-      return false;
+      return {running: false, group: ''};
     }
   }
 
@@ -107,11 +115,11 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
     return keyFileFor(harnessId);
   }
 
-  function spawnWorker(harnessId) {
+  function spawnWorker(harnessId, targetGroup) {
     const args = [
       '-m', 'app.adapter.formal_worker',
       '--url', upstream,
-      '--group', group,
+      '--group', targetGroup,
       '--canonical-repo', repo,
       '--worktree-root', worktrees,
       '--harness-id', harnessId,
@@ -132,13 +140,30 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
   }
 
   return {
-    /** 让这个窗口能干活：没凭据就发、没 worker 就起。已经在跑就什么都不做。 */
-    async provision(harnessId) {
+    /**
+     * 让这个窗口能干活：没凭据就发、没 worker 就起。已经在跑就什么都不做。
+     *
+     * `group` 是**这一次**要它服务的群（界面上切到哪个项目就是哪个）。不给就用启动时
+     * 绑的那个 —— 老行为不变。
+     */
+    async provision(harnessId, {group: targetGroup} = {}) {
       const id = String(harnessId || '');
       if (!WINDOW_ID.test(id)) throw fail(400, 'invalid_harness_id');
-      // 已经在跑：不重复起第二个（同一个 group 上两个 worker 会抢活）。
-      if (await workerRunning(id)) {
-        return {harness_id: id, started: false, reason: '这个窗口已经有一个 worker 在跑'};
+      const wanted = String(targetGroup || group || '');
+      if (!wanted) throw fail(400, 'invalid_group');
+      // 已经在跑：不重复起第二个。但要看清它服务的是哪个群 ——
+      // 同一个群：什么都不做；另一个群：说清楚，让人自己决定停不停。
+      const existing = await workerProcess(id);
+      if (existing.running) {
+        if (!existing.group || existing.group === wanted) {
+          return {harness_id: id, started: false, group: existing.group || wanted,
+            reason: '这个窗口已经有一个 worker 在跑'};
+        }
+        throw fail(
+          409,
+          `这个窗口已经在为 ${existing.group} 干活了；一个进程一次只服务一个群。`
+            + `要它换到这个项目，先在那边把它停掉再开。`,
+        );
       }
       const notes = [];
       let credential = 'reused';
@@ -149,7 +174,7 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
       }
       let pid;
       try {
-        pid = spawnWorker(id);
+        pid = spawnWorker(id, wanted);
       } catch (error) {
         throw fail(503, `${notes.join('；')}${notes.length ? '；' : ''}${error.message}`);
       }
@@ -158,6 +183,7 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
         harness_id: id,
         started: true,
         pid,
+        group: wanted,
         credential,
         note: notes.join('；') + '。它接到活时平台会给它开自己的工作树。',
       };
