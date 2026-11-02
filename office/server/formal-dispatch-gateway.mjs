@@ -317,7 +317,7 @@ export function createFormalGateway(config={}){
    const outputRoute=/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route);
    // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
    // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
-   if(url.search&&!['/messages','/tasks','/events','/installers'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
+   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
    if(outputRoute&&url.search){
      for(const key of url.searchParams.keys())if(key!=='attempt_id')throw fail(400,'unexpected_query');
      const attemptParam=url.searchParams.get('attempt_id')||'';
@@ -746,6 +746,46 @@ export function createFormalGateway(config={}){
         await humanizePlan(plan);
         json(res,200,plan);return true;
       }
+      if(req.method==='GET'&&route==='/allocation/rounds'){
+        // 分配轮的读面：这一轮要分哪些活、谁申请了、分了给谁。
+        // 后端一直有写侧（开轮、申请、裁决、接受），读面是后补的；补了读面但界面没接，
+        // 于是"有一轮在等我申请/等我定"这件事，只有 curl 看得到。这里把它接出来。
+        // 必须钉死在 config.group 上：别的项目的轮次不该出现在这个项目里。
+        const state=String(url.searchParams.get('state')||'').trim();
+        if(state&&!/^[a-z_]{1,32}$/.test(state))throw fail(400,'invalid_allocation_state');
+        const rounds=await call('/allocation/rounds?group_id='+encodeURIComponent(config.group)
+          +(state?'&state='+encodeURIComponent(state):''));
+        json(res,200,{rounds:(rounds.rounds||[]).filter(r=>String(r.group_id||'')===config.group)});
+        return true;
+      }
+      if(req.method==='GET'&&route==='/allocation/candidates'){
+        // 一个任务的候选集（裁决页的输入）。只读，裁决本身仍要 allocation:decide。
+        const roundId=String(url.searchParams.get('round_id')||'').trim();
+        const taskId=String(url.searchParams.get('task_id')||'').trim();
+        if(!ident(roundId)||!ident(taskId))throw fail(400,'invalid_allocation_query');
+        const result=await call('/allocation/candidates?round_id='+encodeURIComponent(roundId)
+          +'&task_id='+encodeURIComponent(taskId));
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&(route==='/allocation/decision'||route==='/allocation/decision/defer')){
+        // **人**裁决：定给某个候选，或者"先不分配"（两者都要一句话说明）。
+        // decided_by 用 operator —— 平台按令牌主体记账，界面不替人选身份。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.round_id!=='string'||typeof body.task_id!=='string')
+          throw fail(400,'invalid_allocation_fields');
+        const reason=String(body.reason||'').slice(0,2000);
+        const target=route==='/allocation/decision'?'/allocation/decision':'/allocation/decision/defer';
+        const payload=route==='/allocation/decision'
+          ? {round_id:body.round_id,task_id:body.task_id,application_id:String(body.application_id||''),
+             decided_by:operator,expected_revision:Number(body.expected_revision||0),reason}
+          : {round_id:body.round_id,task_id:body.task_id,decided_by:operator,reason};
+        if(route==='/allocation/decision'&&(!payload.application_id||!(payload.expected_revision>=1)))
+          throw fail(400,'invalid_allocation_fields');
+        if(route==='/allocation/decision/defer'&&!reason.trim())throw fail(400,'allocation_reason_required');
+        const answer=await relayCall(target,'POST',payload);
+        json(res,answer.status,answer.data);return true;
+      }
       if(req.method==='POST'&&route==='/task/budget_override'){
         // **人**给一次机会：这条活的尝试预算用完了，只有人能说"再给一次"。
         // 平台不给自己豁免，管理员 harness 也不代劳。
@@ -994,6 +1034,23 @@ export function createFormalGateway(config={}){
         const attemptParam=url.searchParams.get('attempt_id')||'';
         const output=await call('/tasks/'+id+'/output'+(attemptParam?'?attempt_id='+encodeURIComponent(attemptParam):''));
         json(res,200,{output:output.output||null});return true;
+      }
+      // 任务的**证据面**：审核记录与取证报告。
+      //
+      // 这两份后端一直有（`/tasks/{id}/reviews`、`/tasks/{id}/forensics`），但界面只显示
+      // "审核状态"，看不到谁在什么时候说了什么；取证更是完全没上屏。所以补这两条只读路由，
+      // 让"这条活为什么被卡住"能从证据上回答，而不是靠猜。
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/reviews$/.test(route)){
+        const id=route.split('/')[2],task=await call('/tasks/'+id);
+        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        const reviews=await call('/tasks/'+id+'/reviews');
+        json(res,200,reviews);return true;
+      }
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/forensics$/.test(route)){
+        const id=route.split('/')[2],task=await call('/tasks/'+id);
+        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        const forensics=await call('/tasks/'+id+'/forensics');
+        json(res,200,forensics);return true;
       }
       // 注意：这里**没有**人类的派单路由。
       //

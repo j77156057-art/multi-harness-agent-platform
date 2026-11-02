@@ -45,6 +45,14 @@ const escape = escapeHtml;
 // 独立页面共用一份，两个页面的说法不会各说各话。
 
 const FAILED_STATES = new Set(['abandoned', 'stale', 'cancelled']);
+
+//: 审阅结论的说法（平台记的是 `approved` / `changes_requested` 这种机器词）。
+//: 审核记录上屏时才需要它 —— 任务状态另有 `STATE_LABEL`，两套不混用。
+const VERDICT_LABEL = {
+  approved: '通过',
+  changes_requested: '需要返修',
+  rejected: '不通过',
+};
 // 「待领取」= 平台已经**放出来**、等窗口来接的活。
 //
 // `draft` 不在里面：草案还挂在方案上（方案没被人批准之前，谁都领不动它）。
@@ -235,6 +243,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     detail: null,
     output: null,
     availability: [],
+    // 分配轮（§39）：后端一直有写侧，读面是后补的；界面接上之前，
+    // 「有一轮在等我定人」只有 curl 看得到。读不到就是空，不编。
+    allocation: { rounds: [], loaded: false },
     // 当前看的是哪个会话：tasks=项目任务、group=项目群聊、assistant=平台助手、
     // window=某个窗口（id 是它的 harness_id）。
     view: restoredView.view || { kind: 'tasks', id: null },
@@ -2823,8 +2834,44 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * `agent-office.model-trouble-dismissed.v1` 里，所以红点不是"看过了就没了"，
    * 而是"这件事有结论了才没了"。
    */
+  /**
+   * 分配轮里**还没定人**的活：一轮一条，一条一块。
+   *
+   * 为什么也算「需要你处理」：这一轮开着，成员申请了，人没定 —— 就没有分配、
+   * 没有邀请、没有人能开工。它和"模型坏了"是同一类东西：**卡在等我一句话**。
+   */
+  function allocationPending() {
+    const rounds = (state.allocation && state.allocation.rounds) || [];
+    const out = [];
+    for (const round of rounds) {
+      if (String(round.state || '') !== 'open') continue;
+      const assigned = new Set(
+        (round.assignments || []).map((item) => String(item.task_id || '')).filter(Boolean),
+      );
+      for (const task of round.tasks || []) {
+        const taskId = String(task.task_id || '');
+        if (!taskId || assigned.has(taskId)) continue;
+        const applications = (round.applications || []).filter(
+          (app) =>
+            String(app.state || '') !== 'withdrawn' &&
+            (app.task_ids || []).map(String).includes(taskId),
+        );
+        out.push({ round, task, applications });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 需要人处理的事有几件 —— 左栏那个红点只看这一句。
+   *
+   * 它随「处理掉」或「先不管」一起消失：两条路都记在
+   * `agent-office.model-trouble-dismissed.v1` 里，所以红点不是"看过了就没了"，
+   * 而是"这件事有结论了才没了"。分配轮的那几条不同：它们靠**真的裁决**消失
+   * （定给人、或者写明为什么先不分配），没有"先不管"。
+   */
   function attentionCount() {
-    return attentionItems().length;
+    return attentionItems().length + allocationPending().length;
   }
 
   /** 这一页：需要你处理的事，一件一块。处理完就没了。 */
@@ -2832,16 +2879,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const pane = document.createElement('section');
     pane.className = 'flat-main flat-alerts';
     const items = attentionItems();
+    const pendingAllocations = allocationPending();
+    const total = items.length + pendingAllocations.length;
     const head = document.createElement('header');
     head.className = 'flat-detail-head';
     head.innerHTML = `<div>
         <h2>需要你处理</h2>
         <p class="flat-summary">${
-          items.length ? `${items.length} 件事在等你。处理完或选择「先不管」之后，左栏的红点会消失。` : '现在没有需要你处理的事。'
+          total
+            ? `${total} 件事在等你。${
+                items.length ? '「模型用不了」处理完或「先不管」之后红点会消失；' : ''
+              }${pendingAllocations.length ? '分配要定下来（或者写明为什么先不分配）才会算完。' : ''}`
+            : '现在没有需要你处理的事。'
         }</p>
       </div>`;
     pane.append(head);
-    if (!items.length) return pane;
     for (const item of items) {
       const block = document.createElement('section');
       block.className = 'flat-spec flat-alert';
@@ -2861,7 +2913,96 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <p class="flat-trouble-error" data-trouble-error="${escape(item.harnessId)}"></p>`;
       pane.append(block);
     }
+    for (const entry of pendingAllocations) {
+      pane.append(allocationBlock(entry));
+    }
     return pane;
+  }
+
+  /**
+   * 一条活的分配块：候选是谁、定给谁、或者先不分配（要写原因）。
+   *
+   * 候选来自 `round.applications`（快照冻结下来的那一份），所以人看到的就是
+   * "当时摆在桌面上的有谁"—— 这也正是裁决时平台记进 `compared_json` 的那份。
+   */
+  function allocationBlock({ round, task, applications }) {
+    const block = document.createElement('section');
+    block.className = 'flat-spec flat-allocation';
+    block.dataset.round = String(round.round_id || '');
+    block.dataset.task = String(task.task_id || '');
+    block.dataset.revision = String(round.revision || 1);
+    const named = (task.assigned_harness_ids || []).map((id) => harnessName(id) || id);
+    const name = `alloc-cand-${String(task.task_id || '').replace(/[^\w-]/g, '_')}`;
+    block.innerHTML = `
+      <h3>${escape(task.title || task.task_id)}</h3>
+      <p class="flat-note">这一轮分配还没定人。${
+        named.length ? `方案里原本写的是：${escape(named.join('、'))}。` : ''
+      }候选来自成员自己交的申请；定下来只是**邀请**，他自己接受之后才算他的活。</p>
+      ${
+        applications.length
+          ? `<div class="flat-alloc-cands">${applications
+              .map(
+                (app) => `<label class="flat-alloc-cand">
+                  <input type="radio" name="${escape(name)}" value="${escape(app.application_id)}">
+                  <span>${escape(harnessName(app.harness_id) || app.harness_id)}</span>
+                  ${app.reason ? `<small>${escape(app.reason)}</small>` : ''}
+                </label>`,
+              )
+              .join('')}</div>`
+          : '<p class="flat-empty">这一轮还没有成员申请这条活。可以定给方案里写的那个人，但要走「邀请」那条路；这里只能先不分配。</p>'
+      }
+      <label class="flat-alloc-reason">理由（选填；「先不分配」时必填）
+        <input type="text" data-alloc-reason maxlength="200" placeholder="例：等他把手上那条收尾">
+      </label>
+      <div class="flat-alert-pick">
+        ${
+          applications.length
+            ? '<button type="button" data-act="alloc-decide">定给他</button>'
+            : ''
+        }
+        <button type="button" data-act="alloc-defer">先不分配</button>
+      </div>
+      <p class="flat-trouble-error" data-alloc-error></p>`;
+    return block;
+  }
+
+  /**
+   * 人裁决：定给某个候选，或者"先不分配"。
+   *
+   * `expected_revision` 送的是**这一轮的** revision（不是我读到的时候的版本猜测）：
+   * 平台用它挡住"两个人同时定、后一个把前一个覆盖掉"。过期了就重读再让人定。
+   */
+  async function decideAllocation(button, { defer }) {
+    const block = button.closest('.flat-allocation');
+    if (!block) return;
+    const roundId = String(block.dataset.round || '');
+    const taskId = String(block.dataset.task || '');
+    const revision = Number(block.dataset.revision || 0);
+    const reasonInput = block.querySelector('[data-alloc-reason]');
+    const reason = reasonInput ? String(reasonInput.value || '').trim() : '';
+    const note = block.querySelector('[data-alloc-error]');
+    button.disabled = true;
+    try {
+      if (defer) {
+        if (!reason) throw new Error('「先不分配」要写一句为什么 —— 没有理由的延后，下一个人只能重猜。');
+        await api('/allocation/decision/defer', { round_id: roundId, task_id: taskId, reason });
+      } else {
+        const picked = block.querySelector('input[type="radio"]:checked');
+        if (!picked) throw new Error('先选一个候选。');
+        await api('/allocation/decision', {
+          round_id: roundId,
+          task_id: taskId,
+          application_id: String(picked.value || ''),
+          expected_revision: revision,
+          reason,
+        });
+      }
+      await refresh();
+    } catch (error) {
+      // 回灌到这一块自己身上，别把整页换掉：人还要接着看别的块。
+      if (note) note.textContent = `没能定下来：${String((error && error.message) || error)}`;
+      button.disabled = false;
+    }
   }
 
   /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
@@ -2978,6 +3119,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${paths.length ? `<p class="flat-note">允许修改的路径</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
         <p class="flat-note">动作记录${events.length ? `（${events.length} 步）` : ''}</p>
         ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">暂无该任务的记录。</p>'}`;
+      // 证据面：审核记录与取证。后端一直有、界面从来没有入口 ——
+      // 「这条活为什么被卡住」本该能从证据上回答，不该靠猜。
+      // 两块都**展开才去读**（取证可能是几十 KB 的日志尾巴）。
+      body.append(evidenceFold(task.task_id, 'reviews', '审核记录', reviewList));
+      body.append(evidenceFold(task.task_id, 'forensics', '取证（CLI 原始输出）', forensicsView));
     };
     card.addEventListener('toggle', () => {
       if (card.open) void load();
@@ -2988,6 +3134,117 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       void load();
     }
     return card;
+  }
+
+  /**
+   * 一块"展开才去读"的证据面：审核记录、取证都用它。
+   *
+   * 为什么懒加载：取证读的是 CLI 自己的输出尾巴，可能几十 KB；每张开一条活就全读一遍，
+   * 会把"看任务表"这个动作拖住。展开才读，读失败照实说（读不到 ≠ 没有）。
+   */
+  function evidenceFold(taskId, kind, title, render) {
+    const box = document.createElement('details');
+    box.className = 'flat-evidence';
+    box.dataset.fold = `evidence:${kind}:${taskId}`;
+    box.innerHTML = `<summary>${escape(title)}</summary>
+      <p class="flat-note" data-evidence-note>展开才去读。</p>`;
+    box.addEventListener('toggle', () => {
+      if (!box.open || box.dataset.loaded) return;
+      box.dataset.loaded = '1';
+      const note = box.querySelector('[data-evidence-note]');
+      api(`/tasks/${encodeURIComponent(taskId)}/${kind}`)
+        .then((data) => {
+          if (note) note.remove();
+          box.append(render(data || {}));
+        })
+        .catch((error) => {
+          box.dataset.loaded = '';
+          if (note) note.textContent = `读不到：${String((error && error.message) || error)}`;
+        });
+    });
+    return box;
+  }
+
+  /** 审核记录：谁审的、什么结论、什么时候。没有记录就照实说"未记上"。 */
+  function reviewList(data) {
+    const list = document.createElement('div');
+    const reviews = Array.isArray(data.reviews) ? data.reviews : [];
+    if (!reviews.length) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = data.note || '这条任务还没有审阅记录（未记上）。';
+      list.append(empty);
+      return list;
+    }
+    const note = document.createElement('p');
+    note.className = 'flat-note';
+    note.textContent = `${reviews.length} 条审阅记录（最多显示最近 10 条）。`;
+    list.append(note);
+    const ul = document.createElement('ul');
+    ul.className = 'flat-list';
+    for (const review of reviews) {
+      const li = document.createElement('li');
+      const who = harnessName(review.reviewer_harness_id) || review.reviewer_harness_id || '某人';
+      const verdict = review.verdict ? VERDICT_LABEL[String(review.verdict)] || String(review.verdict) : '尚无结论';
+      const when = review.completed_seq ? `第 ${review.completed_seq} 条事件` : '未完成';
+      const findings = Array.isArray(review.findings) ? review.findings : [];
+      li.innerHTML = `<b>${escape(who)}</b> · ${escape(verdict)} · ${escape(review.status || '')} · ${escape(when)}${
+        review.same_provider ? ` · 同厂商审阅（${escape(review.provider_confirmed_by || '')} 开的通道）` : ''
+      }${
+        findings.length
+          ? `<ul class="flat-list">${findings
+              .slice(0, 6)
+              .map((item) => `<li>${escape(typeof item === 'string' ? item : JSON.stringify(item))}</li>`)
+              .join('')}</ul>`
+          : ''
+      }`;
+      ul.append(li);
+    }
+    list.append(ul);
+    return list;
+  }
+
+  /**
+   * 取证：这次的 CLI 到底打印了什么。
+   *
+   * 平台在这条路由里**已经把像凭据的行遮掉了**（`cli_output.redact`），所以这里拿到的
+   * 就是可以给人看的文本；遮了几行也一并显示 —— 人得知道"这不是原文全貌"。
+   */
+  function forensicsView(data) {
+    const box = document.createElement('div');
+    const item = data.forensics;
+    if (!item) {
+      const empty = document.createElement('p');
+      empty.className = 'flat-empty';
+      empty.textContent = '这条任务还没有可取的 CLI 输出（没跑过，或者日志已经被回收）。';
+      box.append(empty);
+      return box;
+    }
+    const who = harnessName(item.harness_id) || item.harness_id || '某个窗口';
+    const head = document.createElement('p');
+    head.className = 'flat-note';
+    head.textContent = `${who} 的第 ${item.attempt_no || '?'} 次尝试（${item.attempt_status || '状态未记'}）${
+      item.current ? ' · 现在这一次' : ' · 不是当前这次'
+    }`;
+    box.append(head);
+    for (const side of ['stdout', 'stderr']) {
+      const part = item[side] || {};
+      const text = String(part.text || '').trim();
+      const title = document.createElement('p');
+      title.className = 'flat-note';
+      title.textContent = `${side}：${text ? `${part.returned_lines || 0} 行 / ${part.bytes || 0} 字节` : '空'}${
+        part.redacted_lines ? ` · 已遮 ${part.redacted_lines} 行疑似凭据` : ''
+      }`;
+      box.append(title);
+      if (text) {
+        const pre = document.createElement('pre');
+        pre.className = 'flat-forensics';
+        // 只给人看，不解析：这是 CLI 的原话，任何"美化"都会改掉证据。
+        pre.textContent = text.length > 12000 ? `${text.slice(0, 12000)}\n…（后面还有 ${text.length - 12000} 字）` : text;
+        box.append(pre);
+      }
+    }
+    return box;
   }
 
   /**
@@ -6131,6 +6388,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       dismissTrouble(button);
       return;
     }
+    if (button.dataset.act === 'alloc-decide') {
+      void decideAllocation(button, { defer: false });
+      return;
+    }
+    if (button.dataset.act === 'alloc-defer') {
+      void decideAllocation(button, { defer: true });
+      return;
+    }
     if (button.dataset.act === 'close-admin-chat') {
       adminDialog.close();
       return;
@@ -6485,6 +6750,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
         api('/assistant/runs').catch(() => ({ runs: [] })),
         loadUserKeys(),
+        // 分配轮：有没有一轮开着、哪条活还没定人。读不到就当没有，不编。
+        api('/allocation/rounds?state=open')
+          .then((data) => {
+            state.allocation = { rounds: data.rounds || [], loaded: true };
+          })
+          .catch(() => {
+            state.allocation = { rounds: [], loaded: false };
+          }),
       ]);
       // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
       // 写进去的更新鲜），就别用这份旧的盖上去。
@@ -6566,6 +6839,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const messages = state.messages || [];
     const lastMessage = messages.length ? `${messages.length}:${messages[messages.length - 1]?.created_seq ?? ''}` : '0';
     const runs = (state.assistantRuns || []).length;
+    // 分配轮：只要有"还没定人"的活，这一屏就要重画（左侧红点与那一页都靠它）。
+    const allocation = allocationPending()
+      .map((item) => `${item.round.round_id}:${item.task.task_id}:${(item.applications || []).length}`)
+      .join('|');
     const installs = state.installs
       ? (state.installs.installers || [])
           .map((row) => `${row.harness_id}:${row.status}:${row.version || ''}`)
@@ -6583,6 +6860,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       plan,
       lastMessage,
       runs,
+      allocation,
       installs,
       state.error || '',
       state.memberNote || '',
