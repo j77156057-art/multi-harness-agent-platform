@@ -32,6 +32,7 @@ from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeError, WorktreeManager
 from app.lease.service import expire_stale_leases, parse_iso
+from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
 from app.verify.worker import STATUS_ABORTED, STATUS_QUEUED, STATUS_RUNNING
@@ -1305,4 +1306,24 @@ def sweep_worktree_recycle(
             "reconciled_missing": reconciled_missing,
             "skipped": skipped,
         },
+    )
+
+
+def sweep_project_trash(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """回收站满 `TRASH_RETAIN_DAYS` 天的项目：连同任务一起删掉，**事件流留底**。
+
+    为什么留 `task_events`：它是 append-only 的"发生过什么"。删掉之后，这条活为什么
+    被卡住、谁审过、合入过什么提交，就再也查不到了。而"这条活现在是什么状态"是投影，
+    投影跟着项目一起走没什么可惜的。
+
+    只删自己认得的东西：归不到某个项目上的表（`command_idempotency`、`jsonl_exports`）
+    一律不碰 —— 宁可留几行孤儿，也不能顺手清掉别的项目还在用的记账。
+    """
+    purged = purge_due_projects(database, now=now)
+    return SweepReport(
+        sweep="project_trash",
+        actions=len(purged),
+        detail={"retain_days": TRASH_RETAIN_DAYS, "purged": purged},
     )

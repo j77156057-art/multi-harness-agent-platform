@@ -1,6 +1,6 @@
 # 项目是什么：一个 id、一个标签、一个回收站
 
-状态：2026-11-02 实现（建/改名/回收站），到期彻底删除的边界待定。作者：助理 agent。
+状态：2026-11-02 实现（建/改名/回收站/到期清扫）。作者：助理 agent。
 
 ## 0. 起因
 
@@ -73,7 +73,8 @@
 
 真跑（`qoder-member-1`）：默认群起 → 命令行 `--group flow-1101-g1`；带另一个群再点 →
 `409` 且没有第二个进程；停掉后用那个群再点 → 命令行换成 `--group proj-…-g1`；最后停掉收尾。
-## 3. 回收站到期之后：删到哪一层（待定）
+
+## 3. 回收站到期之后：删到哪一层（已定，已实现）
 
 「一周之后彻底删除」这句话有三种落法，代价差很多：
 
@@ -83,9 +84,41 @@
 | B 连事件一起删 | 上面全部 + 事件流 | 真·清空，但过去发生过的事不可追 |
 | C 只删项目与群 | 两行记录 | 名下任务会变成没有归属的孤儿 |
 
-**目前没有实现清扫**：`trashed_at` 会被写下、会被显示，但满 7 天不会自动删。也就是说
-现在最坏的结果是"回收站里越积越多"，而不是"手一抖删掉了别人的活"。等这条边界由人定下来
-再写清扫，别先动手。
+**选了 A**（2026-11-02 由人拍板）。理由：`task_events` 是 append-only 的"发生过什么"，
+删掉之后"这条活为什么被卡住、谁审过、合入过什么提交"就再也查不到了；而"这条活现在是
+什么状态"是**投影**，投影跟着项目一起走没什么可惜的。界面清空，但过去发生过的事还能追。
+
+### 3.1 删什么、不删什么
+
+实现：`backend/app/projects/purge.py`（`TRASH_RETAIN_DAYS = 7`、`purge_project`、
+`purge_due_projects`），挂在清扫家族的最后一位（`sweeps.py` 的 `sweep_project_trash`、
+`runner.py` 的 `SWEEPS`）。排在最后是因为它删的是"已经没人看的东西"，不该插在状态推进中间。
+
+| 层 | 删 |
+|---|---|
+| 项目自身 | `projects`、`groups`、`integration_health` |
+| 活与执行 | `tasks`、`task_attempts`、`task_claims`、`task_outputs`、`task_decisions`、`task_dependencies`、`sweep_progress`、`resource_leases`、`leases`、`workspaces`、`artifacts` |
+| 审核与验证 | `reviews`、`verify_jobs`、`verification_receipts` |
+| 分配与传阅 | `allocations`、`allocation_decisions`、`allocation_rounds`、`circulation_rounds`、`circulation_reviews` |
+| 申请 | `applications`、`application_materials`、`application_tasks` |
+| 消息 | `task_messages`、`message_deliveries` |
+| 预算与旁路 | `budget_reservations`、`budget_incidents`、`side_effect_intents`、`alert_deliveries` |
+
+**不删**：
+
+- `task_events` —— 口径本身；
+- 归不到某个项目上的记账（`command_idempotency`、`jsonl_exports`）—— **只删得掉自己认得的
+  东西**：宁可留几行孤儿，也不能顺手清掉别的项目还在用的记账。
+
+删之前先按**真实 schema** 过一遍列名（`PRAGMA table_info`），不是写死"任务表有 task_id 和
+attempt_id"：`sweep_progress` 只有 `task_id`、`resource_leases` 只有 `attempt_id`，写死两句
+`IN (...)` 会撞上"没有这一列"而让整条清扫报错 —— 那等于回收站永远清不掉。
+
+**删除顺序也被外键钉住了**（连接是 `PRAGMA foreign_keys=ON` 的）：子行先删合法，父行先删会被
+SQLite 直接拒掉、整个事务回滚。所以表顺序照 `PRAGMA foreign_key_list` 排，不是照"看起来顺眼"排。
+最容易排错的是分配那几行：`applications → allocation_rounds`、`allocations →
+allocation_decisions → applications` —— 写成"先删轮次"在**没有申请数据**的库上完全看不出问题，
+在真有申请的库上一删就炸。这条有测试钉着（见 §5 的 `foreign_key_check` 那条）。
 
 ## 4. 界面上的样子
 
@@ -100,6 +133,11 @@
 - 后端 `tests/test_project_trash.py` 7 条：随机 id、同名不冲突、改名不动群、空名被拒、
   移除后默认列表没有但 `include_trashed` 还在、重复移除不重置时间、找回后回到列表、
   不认识的项目给 404（不是静默成功）。
+- 后端 `tests/test_project_purge.py` 8 条：到期项目连带任务删掉且**事件流还在**；没到期的
+  一个字不碰；只删到期那个、别家照旧（任务与事件都在）；从没进过回收站的项目哪怕是去年的
+  也不删；清扫报告写清删了什么；清扫在 `SWEEPS` 的最后一位；带申请与裁决的项目能删掉且
+  `PRAGMA foreign_key_check` 为空（这条钉的是删除顺序 —— 把 `applications` 挪到
+  `allocation_rounds` 后面，它就红）；整套清扫跑完不会把删掉的东西"复活"也不会崩。
 - 迁移 `020_project_trash.sql` 只在真实库副本上验过：加列 + 加索引，9 个既有项目
   `trashed_at` 全为 NULL（不在回收站）。
 - office 校验：`npm run verify` 30/30 通过、24 跳过、0 失败。

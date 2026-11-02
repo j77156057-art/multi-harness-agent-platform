@@ -215,6 +215,7 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "project_trash",
     ]
 
     # R10-fix-14：先停在 awaiting_human 问人……
@@ -248,4 +249,5 @@ def test_the_runner_order_includes_the_new_sweeps():
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "project_trash",
     ]

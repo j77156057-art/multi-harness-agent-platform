@@ -17,13 +17,16 @@
 
 | 维度 | 数字 |
 |---|---|
-| `backend/app` 模块 | **32** 个目录，约 **40 500** 行 Python |
-| HTTP 端点 | **112** 条（`api/routes.py` 88 + 池/MCP/人话/转接 24） |
-| 数据表 / 迁移 | **48** 张表、**19** 个迁移 |
-| 规范 `docs/spec/0.3-R10.md` | **1734** 行，且是**封闭集合**（改 §10 边或 §37.7 事件名要同时改文档、`tools/docstate` 镜像、`spec.py`） |
-| Office 前端 | 21 个模块 **10 862** 行；网关 `office/server` **2 569** 行 |
+| `backend/app` 模块 | **33** 个目录，约 **46 800** 行 Python |
+| HTTP 端点 | **120** 条（`api/routes.py` 91 + 池 19 + MCP/人话/转接各 2 + 应用与探针 4） |
+| 数据表 / 迁移 | **48** 张表、**20** 个迁移 |
+| 规范 `docs/spec/0.3-R10.md` | **1996** 行，且是**封闭集合**（改 §10 边或 §37.7 事件名要同时改文档、`tools/docstate` 镜像、`spec.py`） |
+| Office 前端 | 22 个模块 **12 009** 行；网关 `office/server` **2 864** 行 |
 | CLI 适配器 | **16 家 CLI** + 1 个平台基座（`platform`） |
-| 测试 | **106** 个文件、**1458** 个用例 |
+| 测试 | **108** 个文件、**1487** 个用例 |
+
+（2026-11-02 按 §9 的命令重算过一遍：这一行之上的数字当时已经漂了 —— 迁移少算了一个、
+规范少算了两百多行。数字会随提交变，别当真值背，用完就按 §9 重算。）
 
 ## 2. 两种协作方式（项目层面互斥）
 
@@ -34,9 +37,10 @@
 | 传输 | HTTP 消息 + 任务状态机 | `<仓库>/relay/` 下的 md 文件 |
 | 设计稿 | `docs/spec/0.3-R10.md` | `docs/notes/relay-mode.md` |
 
-## 3. 后端模块（32 个，按职责分组）
+## 3. 后端模块（33 个，按职责分组）
 
-数字是行数，括号里是职责一句话。
+数字是行数（**早先一次的逐模块快照，允许有漂移**；总量以 §1 按 §9 重算的结果为准），
+括号里是职责一句话。
 
 **主链（派单那一套）**
 
@@ -50,7 +54,7 @@
 | `git` | 1183 | 每次尝试一个工作树（创建、隔离、归档） |
 | `lease` | 406 | 租约发放/续期/释放/过期扫描 |
 | `plan` | 327 | 方案/任务契约的确定性校验 |
-| `scheduler` | 1546 | 各类清扫（sweep） |
+| `scheduler` | 1570 | 各类清扫（sweep），含回收站到期清理 |
 | `runtime` | 760 | 巡检驱动：Verify 与 Merge 真的跑起来 |
 | `liveness` | 411 | 存活扫描 + 「没提交」告警 |
 | `human` | 783 | 人的决策面（R10 §18） |
@@ -80,6 +84,7 @@
 | `relay` | 1197 | 转接：扫 outbox、投递、线程跳数、守护 |
 | `messages` | 169 | 转接信封拆块（纯函数） |
 | `buzz` | 717 | Buzz 桥：平台事件 → Buzz 频道（只写不发） |
+| `projects` | 163 | 项目生命周期里唯一不在 REST 层的那段：回收站到期清扫（连带任务删、事件流留底） |
 
 **守卫与服务面**
 
@@ -172,7 +177,11 @@ Get-ChildItem backend\app -Directory | ForEach-Object { $_.Name }
 
 # 测试文件与用例
 (Get-ChildItem backend\tests -Filter test_*.py).Count
-.\.venv\Scripts\python.exe -m pytest backend\tests -q --collect-only | Select-String 'tests collected'
+# 这个 pytest 版本的 `-q --collect-only` 不打印 "N tests collected"，只按文件各打一行
+# "tests/x.py: N" —— 所以自己求和，别去找那行不存在的汇总。
+$out = .\.venv\Scripts\python.exe -m pytest backend\tests --collect-only -q
+$sum = 0; foreach ($line in $out) { if ($line -match '^(tests.+?):\s+(\d+)$') { $sum += [int]$Matches[2] } }
+$sum
 ```
 
 ## 10. 这份文档什么时候会过时

@@ -29,6 +29,7 @@ from app.scheduler.sweeps import (
     sweep_expired_leases,
     sweep_human_wait_timeout,
     sweep_merge_recovery,
+    sweep_project_trash,
     sweep_resources,
     sweep_review_lease,
     sweep_stuck,
@@ -67,6 +68,8 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("worktree_recycle", sweep_worktree_recycle),
     ("human_wait_timeout", sweep_human_wait_timeout),
     ("escalation_reminder", sweep_escalation_reminder),
+    # 回收站到期清理放在最后：它删的是"已经没人看的东西"，不该插在状态推进中间。
+    ("project_trash", sweep_project_trash),
 )
 
 

@@ -76,7 +76,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       <div class="project-lobby-body">
         <header class="project-lobby-copy">
           <p class="project-instance-note" data-instance-note hidden></p>
-          <div class="project-lobby-heading"><div><p class="eyebrow">工作空间 / 概览</p><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">让目标、团队与进展，在同一个地方保持同步。</p></div>
+          <div class="project-lobby-heading"><div><p class="eyebrow">AGENT OFFICE / PROJECTS</p><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">从目标到合入，让每个 Agent 的交付都有据可查。</p><div class="project-lobby-ledger" aria-label="交付流程"><span>目标</span><i></i><span>执行</span><i></i><span>验证</span><i></i><span>合入</span></div></div>
             <div class="project-lobby-actions"><button type="button" class="project-connect" data-open-connections><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>连接工作窗口</button><button type="button" class="project-new primary" data-new-project><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建项目</span></button></div>
           </div>
         </header>
@@ -757,7 +757,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         project.platformProjectId
           ? '<button type="button" class="project-card-rename" title="只改给人看的名字；任务、群、事件都不受影响">改名</button>'
           : ''
-      }<button type="button" class="project-card-remove" title="移到回收站，一周内可以找回；平台上的任务与信箱里的信都不会被删">移除</button></div></div>`;
+      }<button type="button" class="project-card-remove" title="移到回收站，一周内可以找回；到期后会连同平台上的任务一起删除（已合入的提交与事件记录保留）">移除</button></div></div>`;
       card.querySelector('strong').textContent = project.name;
       // 卡的副行只说"什么时候建的"：项目编号是给查问题的人看的，不该占着这一行
       // （完整的编号留在 title 里，鼠标悬上去能看到）。
@@ -796,8 +796,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   /**
    * 回收站：平台上看得到的那几条"移除了但还能找回"的项目。
    *
-   * 为什么在界面上要有一块：一周之后它们会彻底删除。只把动作放在"移除"那一刻说一句
-   * 「一周内可找回」，人就再也找不到那个"找回来"的入口了 —— 那等于没有给机会。
+   * 为什么在界面上要有一块：一周之后它们会连同名下的任务一起被删掉（事件记录保留）。
+   * 只把动作放在"移除"那一刻说一句「一周内可找回」，人就再也找不到那个"找回来"的入口了
+   * —— 那等于没有给机会，而这里是真的会失去东西。
    */
   function trashSection() {
     const box = document.createElement('section');
@@ -813,7 +814,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       const name = document.createElement('b');
       name.textContent = item.name || item.project_id;
       const when = document.createElement('span');
-      when.textContent = days > 0 ? `还剩 ${days} 天可找回` : '就要彻底删除了';
+      when.textContent = days > 0 ? `还剩 ${days} 天可找回` : '到期后将连同任务一起删除';
       const restore = document.createElement('button');
       restore.type = 'button';
       restore.textContent = '找回';
@@ -923,7 +924,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
          <button type="button" data-act="with-repo">移出并清掉仓库说明</button>
          <button type="button" data-act="cancel">取消</button>`;
     } else if (project.platformProjectId) {
-      box.innerHTML = `<p>移到回收站：一周内可以找回，之后才彻底删除。平台上的任务与已合入的提交都不受影响。</p>
+      box.innerHTML = `<p>移到回收站：一周内可以找回。到期后不再保留 —— 项目连同它名下的任务一起删除，已合入的提交与事件记录保留。</p>
          <button type="button" data-act="trash">移到回收站</button>
          <button type="button" data-act="cancel">取消</button>`;
     } else {
