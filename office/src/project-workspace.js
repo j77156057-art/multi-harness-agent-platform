@@ -10,6 +10,8 @@ const clone = value => structuredClone(value);
 // 返回首页后项目就消失，看起来像平台把项目弄丢了。现在把项目元数据写进
 // 同源 localStorage；真正的任务与场景仍以平台回执为准，这里只保存入口上下文。
 const PROJECTS_KEY = 'agent-office.projects.v1';
+/** 回收站保留几天（与平台侧清扫同一个口径：满 7 天彻底删除）。 */
+const TRASH_DAYS = 7;
 const ACTIVE_PROJECT_KEY = 'agent-office.active-project.v1';
 
 function readStoredProjects() {
@@ -50,6 +52,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   let projects = readStoredProjects();
   let sequence = nextSequence(projects);
   let activeId = readStoredActiveId();
+  // 回收站：移除了但还能找回的平台项目（7 天）。读不到就是空，不编。
+  let trashed = [];
+  let state_trashError = '';
   if (!projects.some(project => project.id === activeId)) activeId = null;
   const persistProjects = () => {
     try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch {}
@@ -311,6 +316,8 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   // 名册要在大厅打开时就读一次：「已经有几个能干活的了」这句话依赖它。
   // 以前只有注册之后才刷新，所以大厅里从来没人看到过这句提示。
   void loadFormalStatus();
+  // 回收站：一周内可找回的那几条。大厅一打开就读，人不必先去点"移除"才发现有东西在等。
+  void loadTrash();
 
   // ---------------------------------------------------------- 本机可用的工具
   //
@@ -741,17 +748,24 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
       const action = project.phase === 'scene' ? '进入办公室' : '去配置';
-      card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status ${project.phase}">${status}</span><div class="project-card-actions"><button type="button" class="project-card-open">${action}</button><button type="button" class="project-card-remove" title="只从项目列表里去掉；平台上的任务与信箱里的信都不会被删">移除</button></div></div>`;
+      card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status ${project.phase}">${status}</span><div class="project-card-actions"><button type="button" class="project-card-open">${action}</button>${
+        project.platformProjectId
+          ? '<button type="button" class="project-card-rename" title="只改给人看的名字；任务、群、事件都不受影响">改名</button>'
+          : ''
+      }<button type="button" class="project-card-remove" title="移到回收站，一周内可以找回；平台上的任务与信箱里的信都不会被删">移除</button></div></div>`;
       card.querySelector('strong').textContent = project.name;
       // 卡的副行只说"什么时候建的"：项目编号是给查问题的人看的，不该占着这一行
       // （完整的编号留在 title 里，鼠标悬上去能看到）。
       card.querySelector('.project-card-main span').textContent = `${project.createdAt.split(' ')[0]} 建`;
-      card.querySelector('.project-card-main span').title = project.id;
+      card.querySelector('.project-card-main span').title = project.platformProjectId || project.id;
       card.querySelector('.project-card-open').addEventListener('click', () => {
         activeId = project.id;
         persistActive();
         onOpenProject(clone(project));
       });
+      card
+        .querySelector('.project-card-rename')
+        ?.addEventListener('click', () => askRename(project, card));
       card.querySelector('.project-card-remove').addEventListener('click', () => askRemove(project, card));
       history.append(card);
     }
@@ -771,15 +785,125 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
     const total = projects.length + (hasRepoCard ? 1 : 0);
     count.textContent = `${total} 个项目`;
+    history.append(trashSection());
+  }
+
+  /**
+   * 回收站：平台上看得到的那几条"移除了但还能找回"的项目。
+   *
+   * 为什么在界面上要有一块：一周之后它们会彻底删除。只把动作放在"移除"那一刻说一句
+   * 「一周内可找回」，人就再也找不到那个"找回来"的入口了 —— 那等于没有给机会。
+   */
+  function trashSection() {
+    const box = document.createElement('section');
+    box.className = 'project-trash';
+    if (!trashed.length) return box;
+    const title = document.createElement('h3');
+    title.textContent = `回收站（${trashed.length} 个，一周内可找回）`;
+    box.append(title);
+    const list = document.createElement('ul');
+    for (const item of trashed) {
+      const li = document.createElement('li');
+      const days = trashedDaysLeft(item.trashed_at);
+      const name = document.createElement('b');
+      name.textContent = item.name || item.project_id;
+      const when = document.createElement('span');
+      when.textContent = days > 0 ? `还剩 ${days} 天可找回` : '就要彻底删除了';
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.textContent = '找回';
+      restore.addEventListener('click', async () => {
+        restore.disabled = true;
+        try {
+          await platformProjectAction(item.project_id, 'restore');
+        } catch (error) {
+          when.textContent = `没能找回：${error.message}`;
+          restore.disabled = false;
+          return;
+        }
+        void loadTrash();
+      });
+      li.append(name, when, restore);
+      list.append(li);
+    }
+    box.append(list);
+    return box;
+  }
+
+  /** 还剩几天可找回（满 7 天就没了）。算不出来就说算不出来，不编一个数。 */
+  function trashedDaysLeft(stamp) {
+    const at = Date.parse(String(stamp || ''));
+    if (Number.isNaN(at)) return 0;
+    const left = Math.ceil((at + TRASH_DAYS * 24 * 3600 * 1000 - Date.now()) / (24 * 3600 * 1000));
+    return Math.max(0, left);
+  }
+
+  /**
+   * 建一个平台项目（连带它自己的群）。
+   *
+   * id 由服务端随机生成 —— 界面不该决定 id，也不该拿名字当钥匙（同名项目可以有两个）。
+   */
+  async function createPlatformProject(name) {
+    const response = await fetch('/api/formal/projects', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = data && data.error;
+      throw new Error(
+        (detail && detail.message) || (typeof detail === 'string' ? detail : '') || `HTTP ${response.status}`,
+      );
+    }
+    return data;
+  }
+
+  /** 平台项目的三个动作（改名 / 进回收站 / 找回）。失败时把平台的原话带出来。 */
+  async function platformProjectAction(projectId, action, body) {
+    const response = await fetch(`/api/formal/projects/${encodeURIComponent(projectId)}/${action}`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Office-Formal': '1',
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail = data && data.error;
+      throw new Error(
+        (detail && detail.message) || (typeof detail === 'string' ? detail : '') || `HTTP ${response.status}`,
+      );
+    }
+    return data;
+  }
+
+  /** 读回收站。读不到就当读不到 —— 不把"读失败"显示成"回收站是空的"。 */
+  async function loadTrash() {
+    try {
+      const response = await fetch('/api/formal/projects?include_trashed=1', { cache: 'no-store' });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
+      trashed = (data.projects || []).filter((row) => row && row.trashed_at);
+      render();
+    } catch (error) {
+      state_trashError = String((error && error.message) || error);
+    }
   }
 
   /**
    * 「移除」：把项目从列表里去掉。**不删任何真东西** —— 平台上的任务还在，信箱里的信
    * 还在。所以这里问的是"去掉哪一层"，不是"要不要删"。
    *
+   * 平台项目多一层：它现在真的在平台上，所以移除要**走平台的回收站**（一周内可找回），
+   * 而不是只抹掉浏览器里的记录 —— 只抹本地记录的话，换个浏览器它又以「平台上的项目」
+   * 出现了，人看到的是"我移除了它怎么还在"。
+   *
    * 转接项目多一层：项目名还写在仓库的 `relay/project.json` 里。只移出列表的话，
    * 下一次打开大厅它会以「来自仓库」再出现 —— 那不是 bug，是仓库本来就是事实源。
-   * 要它彻底不再出现，得连仓库那份说明一起清（信仍然不动）。
    */
   function askRemove(project, card) {
     if (card.querySelector('.project-card-confirm')) return;
@@ -788,17 +912,36 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     const relay = project.mode === 'relay';
     const box = document.createElement('div');
     box.className = 'project-card-confirm';
-    box.innerHTML = relay
-      ? `<p>只移出列表的话，下次它会从仓库里再出现（信还在那儿）。</p>
+    if (relay) {
+      box.innerHTML = `<p>只移出列表的话，下次它会从仓库里再出现（信还在那儿）。</p>
          <button type="button" data-act="list-only">只移出列表</button>
          <button type="button" data-act="with-repo">移出并清掉仓库说明</button>
-         <button type="button" data-act="cancel">取消</button>`
-      : `<p>只从列表里去掉；平台上的任务不受影响。</p>
+         <button type="button" data-act="cancel">取消</button>`;
+    } else if (project.platformProjectId) {
+      box.innerHTML = `<p>移到回收站：一周内可以找回，之后才彻底删除。平台上的任务与已合入的提交都不受影响。</p>
+         <button type="button" data-act="trash">移到回收站</button>
+         <button type="button" data-act="cancel">取消</button>`;
+    } else {
+      box.innerHTML = `<p>只从列表里去掉；平台上的任务不受影响。</p>
          <button type="button" data-act="list-only">移出列表</button>
          <button type="button" data-act="cancel">取消</button>`;
+    }
     actions.replaceWith(box);
     box.querySelector('[data-act="cancel"]').addEventListener('click', () => render());
-    box.querySelector('[data-act="list-only"]').addEventListener('click', () => removeLocalProject(project.id));
+    box.querySelector('[data-act="list-only"]')?.addEventListener('click', () => removeLocalProject(project.id));
+    box.querySelector('[data-act="trash"]')?.addEventListener('click', async () => {
+      const button = box.querySelector('[data-act="trash"]');
+      button.disabled = true;
+      try {
+        await platformProjectAction(project.platformProjectId, 'trash');
+      } catch (error) {
+        box.querySelector('p').textContent = `没能移进回收站：${error.message}`;
+        button.disabled = false;
+        return;
+      }
+      removeLocalProject(project.id);
+      void loadTrash();
+    });
     box.querySelector('[data-act="with-repo"]')?.addEventListener('click', async () => {
       try {
         await clearRepoRelayProject();
@@ -807,6 +950,44 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         return;
       }
       removeLocalProject(project.id);
+    });
+  }
+
+  /** 改名：只改给人看的名字。id 不动，所以任务、群、事件都不受影响。 */
+  function askRename(project, card) {
+    if (card.querySelector('.project-card-confirm')) return;
+    const actions = card.querySelector('.project-card-side');
+    if (!actions) return;
+    const box = document.createElement('div');
+    box.className = 'project-card-confirm';
+    box.innerHTML = `<p>改名只改给人看的名字；任务、群、事件、已合入的提交都不受影响。</p>
+      <input type="text" data-rename-input maxlength="120" value="">
+      <button type="button" data-act="rename">改成这个名字</button>
+      <button type="button" data-act="cancel">取消</button>`;
+    actions.replaceWith(box);
+    const input = box.querySelector('[data-rename-input]');
+    input.value = project.name;
+    input.focus();
+    input.select();
+    box.querySelector('[data-act="cancel"]').addEventListener('click', () => render());
+    box.querySelector('[data-act="rename"]').addEventListener('click', async () => {
+      const name = String(input.value || '').trim();
+      if (!name) {
+        box.querySelector('p').textContent = '名字不能空着。';
+        return;
+      }
+      const button = box.querySelector('[data-act="rename"]');
+      button.disabled = true;
+      try {
+        await platformProjectAction(project.platformProjectId, 'rename', { name });
+      } catch (error) {
+        box.querySelector('p').textContent = `没能改名：${error.message}`;
+        button.disabled = false;
+        return;
+      }
+      project.name = name;
+      persistProjects();
+      render();
     });
   }
 
@@ -961,6 +1142,22 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       }
       if (confirm) confirm.disabled = false;
     }
+    let platformId = '';
+    let platformGroup = '';
+    if (projectSource.value === 'platform' && mode !== 'relay') {
+      // 现在没有云端：界面里的项目**就是**平台上那一个。所以建项目是真的建到平台上，
+      // id 由服务端随机生成（名字只是标签，重名不冲突、改名不动 id）。
+      // 建不到就当场说，不在本地造一个"看起来建好了"的假象。
+      try {
+        const created = await createPlatformProject(name);
+        platformId = String(created.project_id || '');
+        platformGroup = String(created.group_id || '');
+      } catch (error) {
+        if (hint) hint.textContent = `没能建到平台上：${error.message}`;
+        if (confirm) confirm.disabled = false;
+        return;
+      }
+    }
     sequence += 1;
     const project = {
       id: `project-${String(sequence).padStart(3, '0')}`,
@@ -969,6 +1166,8 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
       phase: 'phone',
       source: projectSource.value,
+      // 平台上的那两个 id：改名、移除、找回都按 id 走，不按名字。
+      ...(platformId ? { platformProjectId: platformId, platformGroupId: platformGroup } : {}),
       // 走哪条路由这个字段决定（见 syncMode）：'dispatch' 是老路，'relay' 是转接。
       mode,
       members: mode === 'relay'

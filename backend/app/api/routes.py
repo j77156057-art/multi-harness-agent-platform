@@ -122,6 +122,41 @@ def create_group(
     return service.create_group(group_id=body.group_id, project_id=project_id, name=body.name)
 
 
+@management.post("/projects/{project_id}/rename")
+def rename_project(
+    project_id: str,
+    body: schemas.RenameProject,
+    service: SchedulerDep,
+    _principal: _guard("project:create"),
+) -> dict[str, Any]:
+    """改名只改**给人看的名字**：id 不动，任务、群、事件、已合入的提交都不受影响。
+
+    为什么复用 `project:create` 这条权限：改的是一条项目的标签，与"能不能建项目"
+    是同一档；不为它新开一条权限边。
+    """
+    return service.rename_project(project_id=project_id, name=body.name)
+
+
+@management.post("/projects/{project_id}/trash")
+def trash_project(
+    project_id: str,
+    service: SchedulerDep,
+    _principal: _guard("project:create"),
+) -> dict[str, Any]:
+    """移除 = 进回收站（一周内可找回），不是删除。"""
+    return service.trash_project(project_id=project_id)
+
+
+@management.post("/projects/{project_id}/restore")
+def restore_project(
+    project_id: str,
+    service: SchedulerDep,
+    _principal: _guard("project:create"),
+) -> dict[str, Any]:
+    """从回收站找回。"""
+    return service.restore_project(project_id=project_id)
+
+
 @management.post("/groups/{group_id}/plans")
 def create_plan(
     group_id: str,
@@ -2172,9 +2207,16 @@ def auth_whoami(request: Request, database: DatabaseDep) -> dict[str, Any]:
 
 
 @read.get("/projects")
-def list_projects(service: SchedulerDep) -> dict[str, Any]:
-    """Read side of the management pair (frontend-thread): the rail's top level."""
-    return {"projects": service.list_projects()}
+def list_projects(
+    service: SchedulerDep,
+    include_trashed: Annotated[bool, Query()] = False,
+) -> dict[str, Any]:
+    """Read side of the management pair (frontend-thread): the rail's top level.
+
+    `include_trashed=1` 把回收站里的也带出来（带 `trashed_at`，界面自己算还剩几天可找回）。
+    默认不带：已经在回收站里的项目不该出现在"继续干活"的列表里。
+    """
+    return {"projects": service.list_projects(include_trashed=include_trashed)}
 
 
 @read.get("/groups")

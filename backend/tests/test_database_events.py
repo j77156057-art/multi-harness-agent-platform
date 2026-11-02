@@ -144,8 +144,11 @@ def test_failed_domain_transaction_has_no_orphan_event(tmp_path):
     database.initialize()
     store = EventStore(database)
     with pytest.raises(RuntimeError), database.transaction() as connection:
+        # 显式列名：这条测试验的是"事务失败不留孤儿事件"，与 projects 有几列无关。
+        # （2026-11-02 加 `trashed_at` 时，写成 `INSERT INTO projects VALUES (?,?,?,?)`
+        #  的版本直接崩在"列数与值数不符"，红的是测试、不是被测代码。）
         connection.execute(
-            "INSERT INTO projects VALUES (?, ?, ?, ?)",
+            "INSERT INTO projects(project_id, name, status, created_at) VALUES (?, ?, ?, ?)",
             ("p-1", "demo", "active", "2026-10-05T00:00:00+00:00"),
         )
         store.append(

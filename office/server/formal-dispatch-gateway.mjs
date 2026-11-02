@@ -103,7 +103,7 @@ export function createFormalGateway(config={}){
    * `{"error": {code, message, details}}`，其中 `details.known` 就是"你能选谁"。
    * 换成一句码，人就只能猜。
    */
-  async function relayCall(path,method,body){
+  async function callRaw(path,method,body){
     const token=readCredential(config.tokenFile).trim();
     if(!/^apt_[a-f0-9]{64}$/.test(token))throw fail(503,'administrator_credential_unavailable');
     let response;
@@ -317,7 +317,7 @@ export function createFormalGateway(config={}){
    const outputRoute=/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route);
    // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
    // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
-   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
+   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates','/projects'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
    if(outputRoute&&url.search){
      for(const key of url.searchParams.keys())if(key!=='attempt_id')throw fail(400,'unexpected_query');
      const attemptParam=url.searchParams.get('attempt_id')||'';
@@ -624,7 +624,7 @@ export function createFormalGateway(config={}){
       if(req.method==='GET'&&route==='/relay/roster'){
         // 收件人候选：谁是窗口、谁是人。**来源只有一个** —— 平台的库。
         // 界面若自己猜一份，就会出现"能选、投递时说不认识"。
-        const answer=await relayCall('/relay/roster','GET');
+        const answer=await callRaw('/relay/roster','GET');
         json(res,answer.status,answer.data);return true;
       }
       if(req.method==='POST'&&route==='/relay/letters'){
@@ -632,7 +632,7 @@ export function createFormalGateway(config={}){
         // 这里没有、也不接受"替哪个窗口写"的字段。
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>200000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
-        const answer=await relayCall('/relay/letters','POST',body);
+        const answer=await callRaw('/relay/letters','POST',body);
         // 预检没过时把平台那份原样交回去：里面有原因、也有可选的名单。
         // 换成一句 `unknown_recipient` 就等于把"改哪个字"这条线索丢了。
         json(res,answer.status,answer.data);return true;
@@ -739,6 +739,49 @@ export function createFormalGateway(config={}){
         });
         json(res,200,result);return true;
       }
+      if(req.method==='GET'&&route==='/projects'){
+        // 平台上的项目（= 界面里的项目，现在没有云端，两者就是同一件事）。
+        // 默认只给"没在回收站"的；`include_trashed=1` 把回收站里的也带出来，
+        // 界面据此算"还剩几天可找回"。只读。
+        const include=url.searchParams.get('include_trashed')==='1';
+        const answer=await callRaw('/projects'+(include?'?include_trashed=1':''),'GET');
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='POST'&&route==='/projects'){
+        // 新建项目：id **在服务端随机生成**，不让人填、也不让浏览器决定。
+        // 名字只是标签 —— 同名不冲突，改名字也不动 id。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        const name=String((body&&body.name)||'').trim();
+        if(!name||name.length>120)throw fail(400,'invalid_project_name');
+        const projectId='proj-'+crypto.randomUUID().replace(/-/g,'').slice(0,12);
+        const created=await callRaw('/projects','POST',{project_id:projectId,name});
+        if(created.status>=400){json(res,created.status,created.data);return true;}
+        // 每个项目自带一个群：平台上的任务、消息都挂在群上，没有群的项目什么都干不了。
+        const groupId=projectId+'-g1';
+        const group=await callRaw('/projects/'+encodeURIComponent(projectId)+'/groups','POST',{group_id:groupId,name:name+' · 主群'});
+        if(group.status>=400){
+          // 群没建起来：项目留着没用，但也不删（删是破坏性动作）——照实说出来。
+          json(res,group.status,{error:{code:'project_group_failed',message:'项目建好了，但它的群没建起来：'+(group.data?.error?.message||''),details:{project_id:projectId}}});
+          return true;
+        }
+        json(res,200,{project_id:projectId,group_id:groupId,name});return true;
+      }
+      if(req.method==='POST'&&/^\/projects\/[A-Za-z0-9_-]{1,120}\/(rename|trash|restore)$/.test(route)){
+        // 改名只改给人看的名字（id 不动）；移除 = 进回收站，一周内可找回。
+        const [,projectId,action]=/^\/projects\/([A-Za-z0-9_-]{1,120})\/(rename|trash|restore)$/.exec(route);
+        let body={};
+        if(action==='rename'){
+          let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
+          try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+          const name=String((body&&body.name)||'').trim();
+          if(!name||name.length>120)throw fail(400,'invalid_project_name');
+          body={name};
+        }
+        const answer=await callRaw('/projects/'+encodeURIComponent(projectId)+'/'+action,'POST',
+          action==='rename'?body:undefined);
+        json(res,answer.status,answer.data);return true;
+      }
       if(req.method==='GET'&&route==='/plan'){
         // 方案定稿：给人看的那一份（草稿 + 传阅记录），以及由人点「批准并派单」。
         const plan=await call('/groups/'+encodeURIComponent(config.group)+'/plans');
@@ -783,7 +826,7 @@ export function createFormalGateway(config={}){
         if(route==='/allocation/decision'&&(!payload.application_id||!(payload.expected_revision>=1)))
           throw fail(400,'invalid_allocation_fields');
         if(route==='/allocation/decision/defer'&&!reason.trim())throw fail(400,'allocation_reason_required');
-        const answer=await relayCall(target,'POST',payload);
+        const answer=await callRaw(target,'POST',payload);
         json(res,answer.status,answer.data);return true;
       }
       if(req.method==='POST'&&route==='/task/budget_override'){

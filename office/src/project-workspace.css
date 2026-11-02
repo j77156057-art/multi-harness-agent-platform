@@ -189,3 +189,64 @@ dialog:not([open]) { display: none !important; }
   .endpoint-row { grid-template-columns: 1fr auto; }
   .endpoint-row code { grid-column: 1 / -1; }
 }
+/* 项目卡上的「改名」与移除同一档：都是对"这条项目入口"的动作，不是对内容。 */
+.project-card-rename {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  color: #1f5fbf;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.project-card-rename:hover {
+  border-color: var(--ao-line, #d8d4cd);
+}
+
+/* 回收站：移除了但还能找回的那几条。一周之后才彻底删除，所以它必须看得见。 */
+.project-trash {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--ao-line, #e2ded7);
+}
+
+.project-trash h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7684;
+}
+
+.project-trash ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.project-trash li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: #5f5c56;
+}
+
+.project-trash li b {
+  font-weight: 600;
+  color: var(--ao-ink, #1a1a1a);
+}
+
+.project-trash li button {
+  margin-left: auto;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--ao-line, #d8d4cd);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}

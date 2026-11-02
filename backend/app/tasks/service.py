@@ -2240,12 +2240,70 @@ class SchedulerService:
                     }
         return titles
 
-    def list_projects(self) -> list[dict]:
-        """Every project, oldest first -- the frontend rail's top level."""
-        rows = self.database.read(
-            "SELECT project_id, name, created_at FROM projects ORDER BY created_at, project_id"
-        )
+    def list_projects(self, *, include_trashed: bool = False) -> list[dict]:
+        """Every project, oldest first -- the frontend rail's top level.
+
+        `include_trashed` 把回收站里的也带出来（带 `trashed_at`，界面自己算还剩几天）。
+        默认不带：一个已经在回收站里的项目不该出现在"继续干活"的列表里。
+        """
+        columns = "project_id, name, created_at, trashed_at"
+        if include_trashed:
+            rows = self.database.read(
+                f"SELECT {columns} FROM projects ORDER BY created_at, project_id"
+            )
+        else:
+            rows = self.database.read(
+                f"SELECT {columns} FROM projects WHERE trashed_at IS NULL"
+                " ORDER BY created_at, project_id"
+            )
         return [dict(row) for row in rows]
+
+    def rename_project(self, *, project_id: str, name: str) -> dict:
+        """改名只改**给人看的那个名字**：id 不动，任务/群/事件/已合入的提交都不受影响。"""
+        cleaned = str(name or "").strip()
+        if not cleaned:
+            raise InvalidInput("project name must not be empty")
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT project_id FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"unknown project: {project_id}")
+            conn.execute("UPDATE projects SET name = ? WHERE project_id = ?", (cleaned, project_id))
+        return {"project_id": project_id, "name": cleaned}
+
+    def trash_project(self, *, project_id: str) -> dict:
+        """移除 = 进回收站，不是删除。
+
+        为什么不是立刻删：一条项目背后有一堆已经发生过的事（任务、尝试、审核、合入）。
+        点错一次就全没了，代价和收益完全不对等。所以先"从列表里拿走"，一周内可找回。
+        """
+        now = _now()
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT trashed_at FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"unknown project: {project_id}")
+            already = str(row["trashed_at"] or "")
+            if not already:
+                conn.execute(
+                    "UPDATE projects SET trashed_at = ? WHERE project_id = ?", (now, project_id)
+                )
+        return {"project_id": project_id, "trashed_at": already or now}
+
+    def restore_project(self, *, project_id: str) -> dict:
+        """从回收站找回：只清那个时间戳，别的什么都没动过。"""
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT trashed_at FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"unknown project: {project_id}")
+            conn.execute(
+                "UPDATE projects SET trashed_at = NULL WHERE project_id = ?", (project_id,)
+            )
+        return {"project_id": project_id, "restored": True}
 
     def list_groups(self, *, project_id: str | None = None) -> list[dict]:
         """Groups, optionally scoped to one project (frontend-rail read)."""

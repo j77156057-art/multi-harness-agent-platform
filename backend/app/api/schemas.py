@@ -23,6 +23,12 @@ class CreateGroup(BaseModel):
     group_short: str | None = None
 
 
+class RenameProject(BaseModel):
+    """只改名字：`project_id` 在路径上，正文里没有它 —— id 不该被改。"""
+
+    name: str = Field(min_length=1, max_length=120)
+
+
 class CreatePlan(BaseModel):
     plan_id: str = Field(min_length=1)
     snapshot: dict[str, Any]
