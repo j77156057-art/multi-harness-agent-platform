@@ -2509,3 +2509,22 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+/* 「停掉它的 worker」的确认条：杀进程是不可逆的，问一句、把后果写在同一行。 */
+.flat-stop-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 12px;
+  color: #8a4b12;
+}
+
+.flat-stop-confirm button {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--ao-line, #d8d4cd);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}

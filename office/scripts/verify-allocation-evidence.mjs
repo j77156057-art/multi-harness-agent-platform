@@ -315,7 +315,41 @@ try {
   assert.ok(forensicText.includes('all done'), '取证里是 CLI 的原话');
   assert.ok(forensicText.includes('warn: nothing to commit'), 'stderr 那一侧也要有');
 
-  // 7. 群头：项目在平台上有自己的群，界面每次请求都要报出来。
+  // 7. 窗口页的两个动作：让它能干活 / 停掉它的 worker（后者要先问一句）。
+  assert.equal(
+    await page.locator('#aoWorkspace [data-act="stop-window"]').count(),
+    1,
+    '窗口页有「停掉它的 worker」',
+  );
+  assert.equal(
+    await page.locator('#aoWorkspace [data-act="provision-window"]').count(),
+    1,
+    '窗口页也有「让它能干活」',
+  );
+  const beforeStop = writes.length;
+  await page.locator('#aoWorkspace [data-act="stop-window"]').first().click();
+  await page.waitForSelector('#aoWorkspace .flat-stop-confirm', { timeout: 10000 });
+  const confirmText = await page.locator('#aoWorkspace .flat-stop-confirm').innerText();
+  assert.ok(confirmText.includes('领不到活'), `要写清停掉之后的后果：${confirmText}`);
+  // 取消：什么都不发，确认条收掉。
+  await page.locator('#aoWorkspace [data-act="stop-window-cancel"]').click();
+  await page.waitForTimeout(300);
+  assert.equal(writes.length, beforeStop, '取消之后不该发请求');
+  assert.equal(
+    await page.locator('#aoWorkspace .flat-stop-confirm').count(),
+    0,
+    '取消要把确认条收掉',
+  );
+  // 确定：发 /harnesses/stop，带的是这个窗口。
+  await page.locator('#aoWorkspace [data-act="stop-window"]').first().click();
+  await page.waitForSelector('#aoWorkspace [data-act="stop-window-confirm"]', { timeout: 10000 });
+  await page.locator('#aoWorkspace [data-act="stop-window-confirm"]').click();
+  await page.waitForTimeout(700);
+  const stopped = writes.find((item) => item.route === '/harnesses/stop');
+  assert.ok(stopped, `要打 /harnesses/stop，实际：${JSON.stringify(writes.map((w) => w.route))}`);
+  assert.equal(stopped.body.harness_id, 'codex', '停的是这个窗口');
+
+  // 8. 群头：项目在平台上有自己的群，界面每次请求都要报出来。
   //    没有这一条时，网关只能用启动时绑的那个群 —— 切项目等于没切。
   assert.ok(groupHeaders.length > 0, '这一步之前应该已经发过请求');
   assert.ok(

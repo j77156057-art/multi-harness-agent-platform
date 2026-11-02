@@ -704,7 +704,7 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='harness_id')||typeof body.harness_id!=='string')
           throw fail(400,'invalid_stop_request');
-        try{ json(res,200,provisioner.stop(body.harness_id)); }
+        try{ json(res,200,await provisioner.stop(body.harness_id)); }
         catch(error){ throw fail(error.status||503, error.message||'window_stop_failed'); }
         return true;
       }

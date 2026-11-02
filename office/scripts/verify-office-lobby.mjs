@@ -144,8 +144,22 @@ try {
   assert.match(cardText, /示例项目/, '本机历史里多了这个项目');
 
   // 4. 额度池与"现在能干活的人"默认收起。
+  //    这两张卡是**第二批数据**到了才画的（额度池要问上游、可执行成员要看 availability），
+  //    所以先等它们出现再数 —— 第一屏就数会数到 0，红的是时序不是功能
+  //    （2026-11-02 在整轮并发下真撞到过一次，单跑却通过）。
   const folds = page.locator('.flat-card-fold > details');
-  assert.ok((await folds.count()) >= 2, '额度池与可用窗口是可收起的卡片');
+  try {
+    await page.waitForFunction(
+      () => document.querySelectorAll('.flat-card-fold > details').length >= 2,
+      { timeout: 15000 },
+    );
+  } catch {
+    assert.fail(
+      `额度池与可用窗口是可收起的卡片（等到 15 秒还是 0 张；页面错误：${
+        errors.join(' | ') || '无'
+      }）`,
+    );
+  }
   for (let i = 0; i < (await folds.count()); i += 1) {
     assert.equal(await folds.nth(i).evaluate(node => node.open), false, '默认是收起的');
   }

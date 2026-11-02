@@ -3573,6 +3573,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
                 ? '<span class="flat-note">已在这个项目里</span>'
                 : ''
           }
+          ${
+            isAssistant
+              ? ''
+              : `<button type="button" data-act="provision-window" data-harness="${escape(harnessId)}">让它能干活</button>
+                 <button type="button" data-act="stop-window" data-harness="${escape(harnessId)}">停掉它的 worker</button>`
+          }
         </div>
       </div>
       <dl class="flat-facts">${facts.map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`).join('')}</dl>`;
@@ -3825,6 +3831,63 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const name = String((sample && sample.name) || '');
     if (name) return name.split('·')[0].trim() || brand;
     return brand;
+  }
+
+  /**
+   * 「让它能干活」：发凭据（没有的话）+ 起它自己的 worker（服务**这个项目所在的群**）。
+   *
+   * 这一步失败不能说成成功 —— 人以为窗口能用了，实际领不到活。所以结果照平台的原话报。
+   */
+  async function provisionWindow(harnessId, button) {
+    const name = harnessName(harnessId) || harnessId;
+    button.disabled = true;
+    try {
+      const started = await api('/harnesses/provision', { harness_id: harnessId });
+      state.memberNote = started && started.started
+        ? `${name} 已经能接活了：${String(started.note || '')}`
+        : `${name}：${String((started && started.reason) || '它本来就在跑')}。`;
+    } catch (error) {
+      state.memberNote = `${name} 还没能开始干活：${String((error && error.message) || error)}`;
+    }
+    await refresh();
+  }
+
+  /**
+   * 「停掉它的 worker」：先问一句，再说结果。
+   *
+   * 为什么不直接停：这是**杀本机进程**。停掉之后这个窗口立刻领不到活，而界面上看状态还是
+   * 在线 —— 差别不在那一行里。所以必须先问，停了也要把"现在领不到活"说出来。
+   */
+  function askStopWindow(button, harnessId) {
+    const name = harnessName(harnessId) || harnessId;
+    const host = button.parentElement;
+    if (!host || host.querySelector('[data-act="stop-window-confirm"]')) return;
+    const box = document.createElement('span');
+    box.className = 'flat-stop-confirm';
+    box.innerHTML = `停掉 ${escape(name)} 的 worker？它马上领不到活。
+      <button type="button" data-act="stop-window-confirm" data-harness="${escape(harnessId)}">确定停掉</button>
+      <button type="button" data-act="stop-window-cancel">取消</button>`;
+    host.append(box);
+    button.disabled = true;
+    host.querySelector('[data-act="stop-window-cancel"]')?.addEventListener('click', () => {
+      box.remove();
+      button.disabled = false;
+    });
+  }
+
+  /** 真的要停：只停**办公室自己起的**那个；别人起的照实说不归这里管。 */
+  async function stopWindow(harnessId, button) {
+    const name = harnessName(harnessId) || harnessId;
+    button.disabled = true;
+    try {
+      const result = await api('/harnesses/stop', { harness_id: harnessId });
+      state.memberNote = result && result.stopped
+        ? `${name} 的 worker 已经停掉（pid ${result.pid}）；它现在领不到活。`
+        : `${name}：${String((result && result.reason) || '没有可停的 worker')}。`;
+    } catch (error) {
+      state.memberNote = `${name} 没能停掉：${String((error && error.message) || error)}`;
+    }
+    await refresh();
   }
 
   /**
@@ -6204,6 +6267,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'add-member') {
       void addMemberToProject(String(button.dataset.harness || ''));
+      return;
+    }
+    if (button.dataset.act === 'provision-window') {
+      void provisionWindow(String(button.dataset.harness || ''), button);
+      return;
+    }
+    if (button.dataset.act === 'stop-window') {
+      askStopWindow(button, String(button.dataset.harness || ''));
+      return;
+    }
+    if (button.dataset.act === 'stop-window-confirm') {
+      void stopWindow(String(button.dataset.harness || ''), button);
       return;
     }
     if (button.dataset.act === 'dismiss-error') {

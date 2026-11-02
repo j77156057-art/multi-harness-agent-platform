@@ -190,11 +190,23 @@ export function createWindowProvisioner({repoRoot, python, dataDir, canonicalRep
     },
 
     /** 停掉"我自己起的"那个 worker。别人起的（比如 start-formal.ps1）不碰。 */
-    stop(harnessId) {
+    async stop(harnessId) {
       const id = String(harnessId || '');
       if (!WINDOW_ID.test(id)) throw fail(400, 'invalid_harness_id');
       const pid = started.get(id);
-      if (!pid) return {harness_id: id, stopped: false, reason: '这个窗口不是办公室起的，不在这里停'};
+      if (!pid) {
+        // 分两种，别说成一句含糊的"不在这里停"：
+        //   压根没有 worker 在跑 -> 照实说没有；
+        //   有，但不是这个进程起的 -> 说清不归这里管（免得人以为按钮坏了）。
+        const existing = await workerProcess(id);
+        return {
+          harness_id: id,
+          stopped: false,
+          reason: existing.running
+            ? '这个窗口的 worker 不是办公室起的，不在这里停（它还在跑）'
+            : '这个窗口现在没有 worker 在跑',
+        };
+      }
       try {
         process.kill(pid);
       } catch (error) {
