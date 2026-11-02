@@ -151,10 +151,45 @@ class CodexAdapter(CliHarness):
                 "-c",
                 "model_providers.pool.env_key=OPENAI_API_KEY",
             ]
+        # 平台工具：codex 认 ``-c`` 内联覆盖，所以**不用写任何文件** —— 这也是它比
+        # 另两家干净的地方（工作树里一个文件都不会多）。
+        #
+        # 令牌只以**变量名**出现（``bearer_token_env_var``）；值由
+        # ``process_environment()`` 放进子进程环境。把令牌写进 ``-c`` 的值里会让它
+        # 出现在 Windows 的命令行上 —— 那对全机可读（``docs/notes/mcp-wiring.md`` §3）。
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is not None:
+            server = f"mcp_servers.{mcp_config.SERVER_NAME}"
+            argv += [
+                "-c",
+                f'{server}.url="{binding.url()}"',
+                "-c",
+                f'{server}.bearer_token_env_var="{mcp_config.TOKEN_ENV}"',
+            ]
         # The work order is on stdin (``-``): argv has a hard length limit on
         # Windows, and a review prompt with the whole diff does not fit.
         argv.append("-")
         return argv
+
+    # ---------------------------------------------------------------- 平台工具
+
+    def mcp_binding(self) -> dict[str, object] | None:
+        """codex 的平台工具端点；没有这次尝试就返回 ``None``。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        return None if binding is None else {"url": binding.url()}
+
+    def process_environment(self) -> dict[str, str] | None:
+        """令牌进子进程环境（只有变量名进了命令行）。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is None:
+            return None
+        return {mcp_config.TOKEN_ENV: binding.token}
 
     def review_command(self, prompt: str, workdir: Path) -> list[str]:
         """A review runs **read-only**: the reviewer may look, not write."""

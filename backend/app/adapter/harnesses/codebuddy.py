@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -128,10 +129,46 @@ class CodeBuddyAdapter(CliHarness):
             or ("CodeBuddy" if harness_id == "codebuddy" else f"CodeBuddy · {harness_id}"),
         )
         super().__init__(client, registration, prefix=prefix)
+        self._mcp_bundle: Path | None = None
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
         # `work_order` is deliberately unused: it goes on stdin (prompt_via_stdin).
-        return codebuddy_command(worktree)
+        argv = codebuddy_command(worktree)
+        # 平台工具：这家跟 claude 同形，认 ``--mcp-config <文件>``。
+        #
+        # 不传 ``--strict-mcp-config``：那会把这个人自己配的 MCP 服务器**全部忽略**。
+        # 我们只用 ``platform`` 这一个名字，撞名才需要再议。
+        #
+        # 文件写在临时目录、**不进工作树**（工作树里多一个平台自己写的文件会让这次
+        # 交付被判成"留了脏东西"），命令行里只有路径 —— 令牌不在 argv 里。
+        if self.mcp_binding() is not None:
+            argv += ["--mcp-config", str(self._write_mcp_config())]
+        return argv
+
+    # ---------------------------------------------------------------- 平台工具
+
+    def mcp_binding(self) -> dict[str, object] | None:
+        """CodeBuddy 的平台工具端点；没有这次尝试就返回 ``None``。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        return None if binding is None else {"url": binding.url()}
+
+    def _write_mcp_config(self) -> Path:
+        """把 ``--mcp-config`` 要的那份文件写到临时目录里（0600）。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is None:
+            raise RuntimeError("no task context: cannot build the MCP binding")
+        bundle = Path(tempfile.mkdtemp(prefix="agent-platform-codebuddy-mcp-"))
+        self._mcp_bundle = bundle
+        return mcp_config.write_json(bundle / "mcp.json", binding.http_document())
+
+    def cleanup_work_order(self) -> None:
+        bundle, self._mcp_bundle = getattr(self, "_mcp_bundle", None), None
+        if bundle is not None:
+            shutil.rmtree(bundle, ignore_errors=True)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}

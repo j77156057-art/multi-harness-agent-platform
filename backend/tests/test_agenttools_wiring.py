@@ -19,8 +19,11 @@ import pytest
 
 from app.adapter.formal_worker import ScopedRunner
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
+from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
+from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.platform import PlatformToolsAdapter
+from app.adapter.harnesses.qoder import QoderAdapter
 from app.agenttools import mcp_config
 
 
@@ -125,6 +128,96 @@ def test_opencode_merges_into_the_isolated_pool_config(tmp_path: Path) -> None:
     assert "pool" in document["provider"], "并进去，不是覆盖：窗口的模型不能被弄丢"
     assert "platform" in document["mcp"]["servers"]
     assert not (worktree / "opencode.json").exists()
+
+
+# ------------------------------------------------------------------ codebuddy
+
+
+def test_codebuddy_gets_an_mcp_config_file_not_an_inline_token(tmp_path: Path) -> None:
+    worktree = _worktree(tmp_path)
+    adapter = CodeBuddyAdapter(FakeClient())
+    adapter.task_context = {"task_id": "T-1", "attempt_id": "T-1.a1"}
+    argv = adapter.command("干活", worktree)
+    try:
+        assert "--mcp-config" in argv
+        path = Path(argv[argv.index("--mcp-config") + 1])
+        assert path.is_file()
+        document = json.loads(path.read_text(encoding="utf-8"))
+        server = document["mcpServers"]["platform"]
+        # 这家认的是 ``http``（``remote`` 它自己也归一成 http，但写清楚的更稳）。
+        assert server["type"] == "http"
+        assert server["url"].endswith("task_id=T-1&attempt_id=T-1.a1")
+        assert server["headers"]["Authorization"] == "Bearer apt_demo"
+        assert "apt_demo" not in " ".join(argv)
+        assert worktree not in path.parents, "配置文件不许落在工作树里"
+        # 不传 strict：那会把这个人自己配的 MCP 服务器全部忽略。
+        assert "--strict-mcp-config" not in argv
+    finally:
+        adapter.cleanup_work_order()
+    assert not path.exists(), "这次尝试的 MCP 配置用完就要删掉"
+
+
+def test_codebuddy_without_task_context_gets_no_mcp_flag(tmp_path: Path) -> None:
+    adapter = CodeBuddyAdapter(FakeClient())
+    assert "--mcp-config" not in adapter.command("干活", _worktree(tmp_path))
+
+
+# --------------------------------------------------------------------- qoder
+
+
+def test_qoder_puts_the_mcp_flag_before_the_positional_work_order(tmp_path: Path) -> None:
+    """这家把工作令当**位置参数**收：旗标插在后面会被当成它的值。"""
+    worktree = _worktree(tmp_path)
+    adapter = QoderAdapter(FakeClient())
+    adapter.task_context = {"task_id": "T-1", "attempt_id": "T-1.a1"}
+    argv = adapter.command("干活", worktree)
+    try:
+        assert "--mcp-config" in argv
+        path = Path(argv[argv.index("--mcp-config") + 1])
+        document = json.loads(path.read_text(encoding="utf-8"))
+        server = document["mcpServers"]["platform"]
+        assert server["type"] == "http"
+        assert server["headers"]["Authorization"] == "Bearer apt_demo"
+        assert "apt_demo" not in " ".join(argv)
+        assert worktree not in path.parents
+        assert argv[-1] == "干活", "工作令必须是最后一个位置参数"
+    finally:
+        adapter.cleanup_work_order()
+    assert not path.exists()
+
+
+def test_qoder_without_task_context_gets_no_mcp_flag(tmp_path: Path) -> None:
+    adapter = QoderAdapter(FakeClient())
+    assert "--mcp-config" not in adapter.command("干活", _worktree(tmp_path))
+
+
+# --------------------------------------------------------------------- codex
+
+
+def test_codex_names_the_token_variable_instead_of_the_token(tmp_path: Path) -> None:
+    """codex 的 ``-c`` 只收**变量名**；令牌由子进程环境给。
+
+    令牌进 ``-c`` 的值就上了命令行，而 Windows 的命令行对全机可读。
+    """
+    worktree = _worktree(tmp_path)
+    adapter = CodexAdapter(FakeClient())
+    adapter.task_context = {"task_id": "T-1", "attempt_id": "T-1.a1"}
+    argv = adapter.command("干活", worktree)
+    joined = " ".join(argv)
+    assert "mcp_servers.platform.url=" in joined
+    assert "task_id=T-1&attempt_id=T-1.a1" in joined, "查询串要完整（有 & 也不能被拆开）"
+    assert 'mcp_servers.platform.bearer_token_env_var="AP_PLATFORM_MCP_TOKEN"' in argv
+    assert "apt_demo" not in joined, "令牌不许出现在命令行上"
+    assert adapter.process_environment() == {"AP_PLATFORM_MCP_TOKEN": "apt_demo"}
+    # codex 不写任何配置文件：工作树里一个文件都不多。
+    assert sorted(p.name for p in worktree.iterdir()) == ["docs"]
+
+
+def test_codex_without_task_context_gets_no_mcp_overrides(tmp_path: Path) -> None:
+    adapter = CodexAdapter(FakeClient())
+    argv = adapter.command("干活", _worktree(tmp_path))
+    assert not any("mcp_servers" in item for item in argv)
+    assert adapter.process_environment() is None
 
 
 # ------------------------------------------------------------------- 反作弊

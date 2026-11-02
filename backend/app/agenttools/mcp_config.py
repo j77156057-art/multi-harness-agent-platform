@@ -39,6 +39,13 @@ SERVER_NAME = "platform"
 #: Kept for the descriptor shape claude's ``--mcp-config`` expects.
 CLAUDE_CONFIG_SHAPE = "mcpServers"
 
+#: 令牌进子进程环境时用的变量名。
+#:
+#: codex 的 ``-c ...bearer_token_env_var=`` 只收一个**变量名**，值由它的子进程环境提供
+#: （见 ``docs/notes/mcp-wiring.md`` §3）。这个名字进命令行是安全的：它只是一个名字，
+#: 而 Windows 的命令行对全机可见。
+TOKEN_ENV = "AP_PLATFORM_MCP_TOKEN"
+
 
 @dataclass(frozen=True)
 class Binding:
@@ -67,6 +74,28 @@ class Binding:
     def opencode_document(self) -> dict[str, Any]:
         """opencode's project config fragment: ``{"mcp": {"servers": {...}}}``."""
         return {"mcp": {"servers": {SERVER_NAME: self.server_entry()}}}
+
+    def http_document(self) -> dict[str, Any]:
+        """codebuddy / qoder 的 ``--mcp-config`` 文件：``{"mcpServers": {...}}``。
+
+        与 :meth:`claude_document` 的差别只在 ``type``：claude 收 ``"remote"``，而这两家
+        的 schema 里是 ``stdio/sse/http/ws/streamable-http`` 这几个值（codebuddy 会把
+        ``remote`` 归一成 ``http``，qoder 的枚举里压根没有 ``remote``）。所以这里写
+        ``"http"`` —— 同一个端点，写它们各自认的那个词。
+
+        令牌是**字面值**（跟 claude 一样）：两家都支持 ``${VAR}``，但 codebuddy 在
+        ``--mcp-config`` 这条路上会不会展开没有验过，赌错的后果是 401 被读成"模型不会用
+        工具"。文件是 0600、在临时目录、跑完就删。
+        """
+        return {
+            CLAUDE_CONFIG_SHAPE: {
+                SERVER_NAME: {
+                    "type": "http",
+                    "url": self.url(),
+                    "headers": self.headers(),
+                }
+            }
+        }
 
 
 def binding_for(adapter: Any, *, base_url: str | None = None) -> Binding | None:

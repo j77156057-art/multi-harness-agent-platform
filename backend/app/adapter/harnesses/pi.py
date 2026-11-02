@@ -25,7 +25,21 @@ PI_REGISTRATION = HarnessRegistration(
 
 
 class PiAdapter(CliHarness):
-    """Run Pi without touching the operator's global ``~/.pi/agent``."""
+    """Run Pi without touching the operator's global ``~/.pi/agent``.
+
+    **平台工具（MCP）这一版不接**，理由是可核对的，不是"没来得及"：
+
+    * Pi 没有 ``--mcp-config`` 这种"这一次用这份配置"的入口 —— 它只读 agent 目录里的
+      ``mcp.json``，所以接线得往隔离目录里写文件；本类已经这么做（``models.json``），
+      写 ``mcp.json`` 技术上可行；
+    * 但 Pi 的工具是 codemode / ``tool_search`` 那一套：服务端的工具能不能被模型**直接
+      调到**，一点证据都没有；
+    * 它还拒绝 legacy SSE，只收 streamable HTTP。
+
+    在这三条都清楚之前接上去，最可能的结果是"看起来有工具、实际调不到"—— 那比不接更坏：
+    窗口会照着"我有工具"的样子写交付。要开这条，先有一次端到端的实证（见
+    ``docs/notes/mcp-wiring.md`` §5 与 §7）。
+    """
 
     binary = "pi"
 

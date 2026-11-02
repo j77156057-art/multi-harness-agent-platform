@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -37,11 +38,17 @@ def _qoder_binary() -> str:
     return str(candidate) if candidate.exists() else "qoderclicn"
 
 
-def qoder_command(work_order: str, worktree: Path) -> list[str]:
+def qoder_command(
+    work_order: str, worktree: Path, extra: list[str] | None = None
+) -> list[str]:
     """The one unattended argv contract for the Qoder CN CLI.
 
     Module-level so a second caller (the admin harness's refine call) reuses the
     exact argv the worker uses instead of keeping a drifting copy.
+
+    ``extra`` 是"这一次多带几个参数"的口子（平台工具的 ``--mcp-config`` 走这儿）：
+    它插在**位置参数之前** —— 这家把工作令当位置参数收，放在后面才不会被当成旗标的
+    值。
 
     ``--output-format stream-json`` (not ``json``): measured against the real
     binary (qoderclicn 1.1.71), ``json`` writes **one** object when the run
@@ -53,7 +60,7 @@ def qoder_command(work_order: str, worktree: Path) -> list[str]:
 
     Unlike claude, this CLI has no ``--verbose`` and rejects it.
     """
-    return [
+    argv = [
         _qoder_binary(),
         "-p",
         "--output-format",
@@ -61,8 +68,11 @@ def qoder_command(work_order: str, worktree: Path) -> list[str]:
         "--dangerously-skip-permissions",
         "-w",
         str(worktree),
-        work_order,
     ]
+    if extra:
+        argv += list(extra)
+    argv.append(work_order)
+    return argv
 
 
 class QoderAdapter(CliHarness):
@@ -83,9 +93,41 @@ class QoderAdapter(CliHarness):
             or ("Qoder CLI CN" if harness_id == "qoder" else f"Qoder CLI CN · {harness_id}"),
         )
         super().__init__(client, registration, prefix=prefix)
+        self._mcp_bundle: Path | None = None
 
     def command(self, work_order: str, worktree: Path) -> list[str]:
-        return qoder_command(work_order, worktree)
+        # 平台工具：跟 claude / codebuddy 同形，认 ``--mcp-config <文件>``。
+        # 不传 ``--strict-mcp-config``（会把这个人自己配的服务器全忽略）；文件在临时
+        # 目录、不在工作树，命令行里只有路径 —— 令牌不进 argv。
+        extra: list[str] = []
+        if self.mcp_binding() is not None:
+            extra = ["--mcp-config", str(self._write_mcp_config())]
+        return qoder_command(work_order, worktree, extra=extra)
+
+    # ---------------------------------------------------------------- 平台工具
+
+    def mcp_binding(self) -> dict[str, object] | None:
+        """Qoder 的平台工具端点；没有这次尝试就返回 ``None``。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        return None if binding is None else {"url": binding.url()}
+
+    def _write_mcp_config(self) -> Path:
+        """把 ``--mcp-config`` 要的那份文件写到临时目录里（0600）。"""
+        from app.agenttools import mcp_config
+
+        binding = mcp_config.binding_for(self)
+        if binding is None:
+            raise RuntimeError("no task context: cannot build the MCP binding")
+        bundle = Path(tempfile.mkdtemp(prefix="agent-platform-qoder-mcp-"))
+        self._mcp_bundle = bundle
+        return mcp_config.write_json(bundle / "mcp.json", binding.http_document())
+
+    def cleanup_work_order(self) -> None:
+        bundle, self._mcp_bundle = getattr(self, "_mcp_bundle", None), None
+        if bundle is not None:
+            shutil.rmtree(bundle, ignore_errors=True)
 
     def parse_output(self, stdout: str) -> dict[str, Any]:
         parsed: dict[str, Any] = {}

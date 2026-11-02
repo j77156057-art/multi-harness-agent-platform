@@ -535,6 +535,7 @@ docs/adr/             架构决策记录
 
 平台工具（`backend/app/agenttools/`）这块的边界写清楚，免得当成"什么都支持"：
 
-- **MCP 自动接线只做了 `claude` 与 `opencode`**。`pi` / `codebuddy` / `codex` / `qoder` 的 MCP 配置方式还没核对过，它们的 `mcp_binding()` 返回 `None` —— 不假装支持。
+- **MCP 自动接线做了 `claude`、`opencode`、`codex`、`codebuddy`、`qoder`**。前两家的端到端路径跑过；后三家只到"配置被它自己认下来了"这一档 —— 命令行形状与配置文件内容有单测钉住，但"模型真的调到了平台工具"还需要一次真跑（见 `docs/notes/mcp-wiring.md` §7，那里把证据分成三档，不混着说）。
+- **`pi` 不接**：它没有"这一次用这份配置"的入口（只能往 agent 目录写文件），而它的工具是 codemode / `tool_search` 那一套，服务端工具能不能被直接调到没有证据；它还只收 streamable HTTP。`mcp_binding()` 返回 `None` —— 不假装支持。
 - **模型仍要能调工具**。MCP 救不了"通道本身给不出 `tool_calls`"那种情况（额度池里 CLI 顶替的免费档），那种只能走 `platform` 保底路。
 - **写操作只在本任务的工作树内**，且必须有授权落点；提交、推送、切分支都不在工具手里。
