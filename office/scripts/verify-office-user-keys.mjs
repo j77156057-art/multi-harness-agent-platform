@@ -210,10 +210,13 @@ try {
   assert.equal(await ask.locator('button[data-act="approve-user-key"][data-mode="always"]').count(), 1, '有「以后都用它」');
   const askCard = page.locator('.flat-card-ask');
   assert.equal(await askCard.count(), 1, '平台在问的时候有一张专门的卡');
-  const railChildren = await page.locator('.flat-rail > *').evaluateAll((nodes) =>
-    nodes.map((node) => node.className),
-  );
-  assert.match(railChildren[0] || '', /flat-card-ask/, '这张卡排在右栏第一个');
+  // 「排在最上面」说的是**卡片里的第一张**，不是右栏的第一个子节点：
+  // 2026-11-02 右栏顶上多了一块非卡片的摘要头（`.flat-rail-head`：待决策数 + 运维摘要），
+  // 它本来就不该算进"卡片排序"。写死 `> *` 的第一个，等于谁加个标题这条门禁就红。
+  const firstCard = await page
+    .locator('.flat-rail > .flat-card')
+    .evaluateAll((nodes) => nodes.map((node) => node.className));
+  assert.match(firstCard[0] || '', /flat-card-ask/, '这张卡排在所有卡片里第一个');
 
   // 3. 点「同意用一次」：先让它失败一次 —— 界面必须**看得见**这次失败，
   //    而不是"点了没反应"（以前 state.error 从来没被渲染过）。

@@ -25,9 +25,14 @@ try {
   const listReads = { count: 0 };
   page.on('pageerror', (e) => errors.push(e.message));
 
+  // 这两条的 `recipients` 必须写：真实接口返回的消息**带 recipients**（我问过一次真库：
+  // 人发给管理员的那条是 `recipients: ["codex-window-admin"]`，管理员回的是
+  // `recipients: ["office-operator"]`）。页面按 recipients 与发送者挑"与管理员的这条线"，
+  // 少了这个字段，人造数据会被当成"别的定向线"，页面就不显示它 —— 那是数据不像真，
+  // 不是页面坏了。
   const messages = [
-    { message_id: 'm1', sender_type: 'human', sender_id: 'operator', body: '\u53ea\u7ed9\u4f60\u770b\u7684\u90a3\u53e5', created_seq: 10, created_at: '2026-10-22T10:00:00', refs: ['direct'] },
-    { message_id: 'm2', sender_type: 'harness', sender_id: ADMIN, body: '\u6536\u5230\u4e86\uff0c\u6211\u770b\u4e00\u4e0b', created_seq: 11, created_at: '2026-10-22T10:01:00', refs: ['direct'] },
+    { message_id: 'm1', sender_type: 'human', sender_id: 'operator', body: '\u53ea\u7ed9\u4f60\u770b\u7684\u90a3\u53e5', created_seq: 10, created_at: '2026-10-22T10:00:00', refs: ['direct'], recipients: [ADMIN] },
+    { message_id: 'm2', sender_type: 'harness', sender_id: ADMIN, body: '\u6536\u5230\u4e86\uff0c\u6211\u770b\u4e00\u4e0b', created_seq: 11, created_at: '2026-10-22T10:01:00', refs: ['direct'], recipients: ['operator'] },
     { message_id: 'm3', sender_type: 'human', sender_id: 'operator', body: '\u7fa4\u91cc\u7684\u8bdd\uff0c\u4e0d\u5e94\u8be5\u51fa\u73b0\u5728\u8fd9\u91cc', created_seq: 12, created_at: '2026-10-22T10:02:00', refs: [] },
   ];
 
