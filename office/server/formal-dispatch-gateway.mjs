@@ -216,6 +216,38 @@ export function createFormalGateway(config={}){
     scopeCache=auth.subject.id;scopeCacheAt=now;
     return scopeCache;
   };
+  /**
+   * 请求头指过来的那个群，平台上**真的能用**吗？
+   *
+   * 两条判据：群存在，且它所属的项目**不在回收站**（回收站里的项目不该还能干活）。
+   * 为什么要验：不验的话，随便一个请求头就能让这个界面去读别的群 —— 库里什么都有，
+   * 但这个 office 是"人看着的那个项目"的观察面，不该凭一个头就换台。
+   *
+   * 缓存 15 秒：一个页面一次刷新会发好几个请求，每个都问两遍平台太浪费。
+   */
+  const groupCache=new Map();
+  const GROUP_TTL_MS=15000;
+  const ensureGroup=async(candidate)=>{
+    if(candidate===config.group)return candidate;   // 启动时那个已经验过了
+    const hit=groupCache.get(candidate);
+    if(hit&&Date.now()-hit.at<GROUP_TTL_MS){
+      if(!hit.ok)throw fail(403,'group_not_available');
+      return candidate;
+    }
+    let ok=false;
+    try{
+      const groups=await call('/groups');
+      const row=(groups.groups||[]).find(g=>g.group_id===candidate);
+      if(row){
+        const projects=await call('/projects?include_trashed=1');
+        const project=(projects.projects||[]).find(p=>p.project_id===row.project_id);
+        ok=Boolean(project)&&!project.trashed_at;
+      }
+    }catch{ok=false;}
+    groupCache.set(candidate,{ok,at:Date.now()});
+    if(!ok)throw fail(403,'group_not_available');
+    return candidate;
+  };
   // The administrator's own credential, verified by the platform rather than by
   // us: whoami must come back as a *harness* subject. A human token pasted into
   // the admin slot therefore cannot borrow the harness's authority, and an admin
@@ -324,9 +356,16 @@ export function createFormalGateway(config={}){
      if(attemptParam&&!/^[A-Za-z0-9._-]{1,120}$/.test(attemptParam))throw fail(400,'invalid_attempt_id');
    }
       if(process.env.ADMIN_DEBUG_ROUTES){console.error('ADMIN-DEBUG ROUTE',req.method,route,req.url);}
+      // 这个 office 实例默认绑一个群，但界面上**可以切到别的项目**（项目现在真的在平台上）。
+      // 群由请求头 `X-Office-Group` 指定；不指定就用启动时那个 —— 默认行为完全不变。
+      const requestedGroup=String(req.headers['x-office-group']||'').trim();
+      if(requestedGroup&&!ident(requestedGroup))throw fail(400,'invalid_group');
+      const groupId=requestedGroup||config.group;
       if(!enabled){if(req.method==='GET'&&route==='/status'){json(res,200,{configured:false,connected:false});return true;}throw fail(503,'formal_gateway_not_configured');}
       if(req.method==='POST'&&(req.headers['x-office-formal']!=='1'||req.headers.origin!==`http://${host}`))throw fail(403,'same_origin_write_required');
       const operator=await scope();
+      // 只有"用户点名要另一个群"时才去平台核一遍（默认那个启动时已经验过）。
+      if(requestedGroup)await ensureGroup(groupId);
       const admin={accounted:false};
       // Lazily verified, so the administrator credential is only read on the
       // routes that actually act as the administrator harness. Returns the
@@ -351,8 +390,8 @@ export function createFormalGateway(config={}){
         // 后台的 harness 注册表是全局的：所有项目共用同一批登记窗口。真正的成员关系
         // 只能从本项目已派发的任务里推导（指定执行者 / 持有者 / 提交者 / 审查者），
         // 否则新开一个项目会把别的项目的窗口也算进巡检摘要。
-        const scoped=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
-        if((scoped.tasks||[]).some(t=>t.group_id&&t.group_id!==config.group))throw fail(502,'task_scope_mismatch');
+        const scoped=await call('/groups/'+encodeURIComponent(groupId)+'/tasks');
+        if((scoped.tasks||[]).some(t=>t.group_id&&t.group_id!==groupId))throw fail(502,'task_scope_mismatch');
         // The raw `/tasks` payload carries `assigned_harness_ids_json`; only the
         // gateway's own `safeTask()` parses it. Reading the raw row directly is
         // how the roster briefly came back empty.
@@ -364,7 +403,7 @@ export function createFormalGateway(config={}){
           if(t.owner) seen.add(t.owner);
           if(t.reviewer_harness_id) seen.add(t.reviewer_harness_id);
         }
-        json(res,200,{configured:true,connected:true,project_id:config.project,group_id:config.group,operator,
+        json(res,200,{configured:true,connected:true,project_id:config.project,group_id:groupId,operator,
           // `identity` 是网关当前**以谁的管理员身份**动作——由平台配置决定，不是常量。
           // 拿不到（凭据坏了/未配置）就是 null 加一条 `error`：前端据此不显示管理员
           // 结论，而不是拿一个过期的 id 去猜。
@@ -439,7 +478,7 @@ export function createFormalGateway(config={}){
         // 正式任务观察面板要看校验回执，走默认路径。
         const basic=url.searchParams.get('basic')==='1';
         if([...url.searchParams.keys()].some(k=>k!=='basic'))throw fail(400,'unexpected_query');
-        const result=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/tasks');
         const tasks=await Promise.all(result.tasks.map(async t=>{
           const base=safeTask(t);
           if(basic)return {...base,verification:null};
@@ -458,7 +497,7 @@ export function createFormalGateway(config={}){
         // 尝试 —— 直接按 1..attempt_no 枚举即可；平台对不存在的 attempt 会回
         // `{output: null}`，那种直接跳过。
         const MAX_ATTEMPTS=8; // 一条活最多摊开多少次尝试（平台的 max_attempts 通常是 3）
-        const group=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const group=await call('/groups/'+encodeURIComponent(groupId)+'/tasks');
         const taskIds=new Set((group.tasks||[]).map(t=>t.task_id));
         // 每一轮**真正的结果**在事件里，不在 attempt 的状态列上 ——
         // 那列在提交之后就停在 verifying/in_progress 不动了（真数据实测：一条
@@ -537,7 +576,7 @@ export function createFormalGateway(config={}){
         // 结论里常有编号（FD-…、attempt .a1、commit 的 hash、exclusive_paths）——
         // 让**平台**统一洗成人话（规则在平台的翻译服务里，界面不自己造一套）。
         await humanizeRows(rows);
-        json(res,200,{outputs:rows,project_id:config.project,group_id:config.group});return true;
+        json(res,200,{outputs:rows,project_id:config.project,group_id:groupId});return true;
       }
       if(req.method==='GET'&&route==='/user-keys'){
         // 用户自己的 API key：平台替用户保管，但**不自己花** —— 要用得用户点头。
@@ -589,7 +628,7 @@ export function createFormalGateway(config={}){
         // 本群的任务上（否则别的项目的事件会混进来）。
         for(const key of url.searchParams.keys())if(key!=='limit')throw fail(400,'unexpected_query');
         const limit=Math.min(1000,Math.max(1,Number(url.searchParams.get('limit'))||300));
-        const groupTasks=await call('/groups/'+encodeURIComponent(config.group)+'/tasks');
+        const groupTasks=await call('/groups/'+encodeURIComponent(groupId)+'/tasks');
         const taskIds=new Set((groupTasks.tasks||[]).map(t=>t.task_id));
         // 平台的事件页是按 seq 升序的（最旧的在前面），而这个群可能已经超过
         // 一页。用本群任务的 state_changed_seq 定位最新的一段，再裁到本群的任务上。
@@ -784,7 +823,7 @@ export function createFormalGateway(config={}){
       }
       if(req.method==='GET'&&route==='/plan'){
         // 方案定稿：给人看的那一份（草稿 + 传阅记录），以及由人点「批准并派单」。
-        const plan=await call('/groups/'+encodeURIComponent(config.group)+'/plans');
+        const plan=await call('/groups/'+encodeURIComponent(groupId)+'/plans');
         // 批准之前人读的就是这一份，所以先把方案里的机器标记洗成人话。
         await humanizePlan(plan);
         json(res,200,plan);return true;
@@ -793,12 +832,12 @@ export function createFormalGateway(config={}){
         // 分配轮的读面：这一轮要分哪些活、谁申请了、分了给谁。
         // 后端一直有写侧（开轮、申请、裁决、接受），读面是后补的；补了读面但界面没接，
         // 于是"有一轮在等我申请/等我定"这件事，只有 curl 看得到。这里把它接出来。
-        // 必须钉死在 config.group 上：别的项目的轮次不该出现在这个项目里。
+        // 必须钉死在 groupId 上：别的项目的轮次不该出现在这个项目里。
         const state=String(url.searchParams.get('state')||'').trim();
         if(state&&!/^[a-z_]{1,32}$/.test(state))throw fail(400,'invalid_allocation_state');
-        const rounds=await call('/allocation/rounds?group_id='+encodeURIComponent(config.group)
+        const rounds=await call('/allocation/rounds?group_id='+encodeURIComponent(groupId)
           +(state?'&state='+encodeURIComponent(state):''));
-        json(res,200,{rounds:(rounds.rounds||[]).filter(r=>String(r.group_id||'')===config.group)});
+        json(res,200,{rounds:(rounds.rounds||[]).filter(r=>String(r.group_id||'')===groupId)});
         return true;
       }
       if(req.method==='GET'&&route==='/allocation/candidates'){
@@ -945,7 +984,7 @@ export function createFormalGateway(config={}){
         if(!/^\d+$/.test(sinceRaw)||!/^\d+$/.test(limitRaw))throw fail(400,'invalid_message_cursor');
         const since=Number(sinceRaw),limit=Number(limitRaw);
         if(!Number.isSafeInteger(since)||!Number.isSafeInteger(limit)||limit<1||limit>500)throw fail(400,'invalid_message_cursor');
-        const result=await call('/groups/'+encodeURIComponent(config.group)+'/messages?since_seq='+since+'&limit='+limit);
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/messages?since_seq='+since+'&limit='+limit);
         json(res,200,result);return true;
       }
       if(req.method==='POST'&&['/human/resume','/human/reopen','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
@@ -984,7 +1023,7 @@ export function createFormalGateway(config={}){
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||typeof body.body!=='string'||!body.body.trim())throw fail(400,'invalid_message_fields');
         if(body.mentions!==undefined&&!Array.isArray(body.mentions))throw fail(400,'invalid_message_fields');
         if(body.refs!==undefined&&!Array.isArray(body.refs))throw fail(400,'invalid_message_fields');
-        const result=await call('/groups/'+encodeURIComponent(config.group)+'/messages',{author_kind:'human',author_id:operator,
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/messages',{author_kind:'human',author_id:operator,
           body:body.body,mentions:body.mentions||[],...(body.task_id?{task_id:body.task_id}:{}),refs:body.refs||[],
           ...(body.direct?{direct:true}:{})});
         json(res,200,result);return true;
@@ -994,7 +1033,7 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||typeof body.task_id!=='string'||typeof body.attempt_id!=='string')throw fail(400,'invalid_review_fields');
         const task=await call('/tasks/'+encodeURIComponent(body.task_id));
-        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
         // Reviewer identity: 0 means the administrator harness (the platform
         // then enforces review_policy=cross_provider against the task owner),
         // 1 means the human operator (kind=human, so the policy check is the
@@ -1033,7 +1072,7 @@ export function createFormalGateway(config={}){
           typeof body.requirement!=='string'||!body.requirement.trim()||body.requirement.length>4000)throw fail(400,'invalid_refine_fields');
         if(body.max_tasks!==undefined&&(!Number.isInteger(body.max_tasks)||body.max_tasks<1||body.max_tasks>8))throw fail(400,'invalid_refine_fields');
         if(body.answers!==undefined&&(!Array.isArray(body.answers)||body.answers.length>8||body.answers.some(a=>typeof a!=='string')))throw fail(400,'invalid_refine_fields');
-        const result=await call('/adapter/admin/refine',{group_id:config.group,requirement:body.requirement,
+        const result=await call('/adapter/admin/refine',{group_id:groupId,requirement:body.requirement,
           max_tasks:body.max_tasks??3,answers:body.answers||[]},config.adminTokenFile);
         json(res,200,result);return true;
       }
@@ -1042,9 +1081,9 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         const fields=['request_id','title','goal','harness_id','exclusive_paths','acceptance'];
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||fields.some(k=>!(k in body)))throw fail(400,'invalid_fields');
-        const result=await call('/groups/'+encodeURIComponent(config.group)+'/dispatch',{...body,decided_by:await asAdmin()});
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/dispatch',{...body,decided_by:await asAdmin()});
         const task=await call('/tasks/'+encodeURIComponent(result.task_id));
-        if(task.group_id!==config.group)throw fail(502,'task_scope_mismatch');
+        if(task.group_id!==groupId)throw fail(502,'task_scope_mismatch');
         json(res,200,{...result,task:safeTask(task)});return true;
       }
       // 任务 id 的形状**不由这条网关决定**：平台的派单允许任意 id（`plan-create --task T-1`、
@@ -1055,7 +1094,7 @@ export function createFormalGateway(config={}){
       // 这里只需要挡掉明显不是 id 的东西（斜杠、空白、控制字符、超长）。
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$/.test(route)){
         const id=route.split('/').at(-1),task=await call('/tasks/'+id);
-        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
         // 改动与事件是**锦上添花**：平台那边算不出 diff（提交不在正式仓库里、
         // 正式仓库路径不对）时，它会回 500 —— 那是"没有改动"，不是"这条活
         // 坏了"。所以这两样各自失败就各自空着，不能把整条详情一起带崩
@@ -1073,7 +1112,7 @@ export function createFormalGateway(config={}){
         // The harness CLI's own output, as it streams. Read-only, and scoped to
         // this group exactly like the task route above.
         const id=route.split('/')[2],task=await call('/tasks/'+id);
-        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
         const attemptParam=url.searchParams.get('attempt_id')||'';
         const output=await call('/tasks/'+id+'/output'+(attemptParam?'?attempt_id='+encodeURIComponent(attemptParam):''));
         json(res,200,{output:output.output||null});return true;
@@ -1085,13 +1124,13 @@ export function createFormalGateway(config={}){
       // 让"这条活为什么被卡住"能从证据上回答，而不是靠猜。
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/reviews$/.test(route)){
         const id=route.split('/')[2],task=await call('/tasks/'+id);
-        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
         const reviews=await call('/tasks/'+id+'/reviews');
         json(res,200,reviews);return true;
       }
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/forensics$/.test(route)){
         const id=route.split('/')[2],task=await call('/tasks/'+id);
-        if(task.group_id!==config.group)throw fail(404,'task_not_in_group');
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
         const forensics=await call('/tasks/'+id+'/forensics');
         json(res,200,forensics);return true;
       }
@@ -1121,6 +1160,8 @@ export function createFormalGateway(config={}){
     python:config.pythonPath,
     canonicalRepo:config.canonicalRepo,
     worktreeRoot:config.worktreeRoot,
+    // 拉起的 worker 落在**启动时绑的那个群**上。界面上切到别的项目时，起窗口这条路还不会
+    // 跟着换群 —— 那是"给哪个项目开工"的另一件事，得先想清一个 worker 能不能同时服务多个群。
     group:config.group,
     upstream:config.upstream,
     tokenFile:config.tokenFile,

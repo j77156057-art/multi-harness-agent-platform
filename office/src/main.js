@@ -26,12 +26,17 @@ import { mountRelayWorkspace } from './relay-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
+import { withGroup } from './office-scope.js';
 
+// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
+const formal = (url, options = {}) =>
+  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
 const $ = (selector) => document.querySelector(selector);
 
 // ---------------------------------------------------------------- 平台状态
 
-const status = await fetch('/api/formal/status', { cache: 'no-store' })
+const status = await formal('/api/formal/status', { cache: 'no-store' })
   .then((response) => (response.ok ? response.json() : null))
   .catch(() => null);
 
@@ -165,7 +170,7 @@ async function submitFormalGoal(request, catalog) {
     max_tasks: Math.min(8, Math.max(3, workers.length)),
     admin: request.admin?.instance_id || ADMIN_IDENTITY || null,
   };
-  const response = await fetch('/api/formal/messages', {
+  const response = await formal('/api/formal/messages', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
     body: JSON.stringify({

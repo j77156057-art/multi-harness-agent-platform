@@ -36,6 +36,8 @@ import {
   summaryLine,
 } from './harness-install.js';
 import { readInstallCache, writeInstallCache } from './install-cache.js';
+// 每个请求要说清"问的是哪个群"（项目现在真的在平台上）。见 office-scope.js。
+import { withGroup } from './office-scope.js';
 // 刷新之后还该在的：没提交完的草稿、刚才看到哪一页（凭据一格都不落盘）。
 import { forgetDraft, readDrafts, readViewState, writeDrafts, writeViewState } from './session-state.js';
 
@@ -458,15 +460,15 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   demoRuntime.ingest(demoFixture);
 
   const api = async (route, body_) => {
+    // 每个请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+    // 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个。
+    const headers = withGroup(
+      body_ ? { 'Content-Type': 'application/json', 'X-Office-Formal': '1' } : {},
+    );
     const response = await fetch(`/api/formal${route}`, {
       cache: 'no-store',
-      ...(body_
-        ? {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
-            body: JSON.stringify(body_),
-          }
-        : {}),
+      headers,
+      ...(body_ ? { method: 'POST', body: JSON.stringify(body_) } : {}),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {

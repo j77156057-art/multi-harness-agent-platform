@@ -1,3 +1,4 @@
+
 // 人话从**平台**来。
 //
 // 这些文本的出处就在平台：失败原因是平台写的、事件名是平台的事件、窗口的登记名
@@ -22,8 +23,15 @@ export function wordingVersion() {
   return cache.size;
 }
 
+import { withGroup } from './office-scope.js';
+
+// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
+const formal = (url, options = {}) =>
+  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
+
 const post = async (route, body) => {
-  const response = await fetch(`/api/formal${route}`, {
+  const response = await formal(`/api/formal${route}`, {
     method: 'POST',
     cache: 'no-store',
     headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },

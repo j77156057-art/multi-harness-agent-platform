@@ -13,7 +13,12 @@ import './admin-agent.css';
 import { createRoutedMessage } from './routed-message.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { readableText } from './cli-transcript.js';
+import { withGroup } from './office-scope.js';
 
+// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
+const formal = (url, options = {}) =>
+  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
 const POLL_MS = 20000; // 面板刷新周期：只影响显示新鲜度，不参与停滞判定
 // 进度窗口按 PROACTIVE-HELP-REQUIREMENT.md §3 的产品默认值：每 5 分钟核对一次，
 // 连续两个窗口无实质进展提醒说明卡点，连续四个窗口且无有效回应交管理员。
@@ -181,7 +186,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   const backlogDraft = { text: '', target: '' };
 
   const api = async (route, body_) => {
-    const response = await fetch('/api/formal' + route, { cache: 'no-store', ...(body_ ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' }, body: JSON.stringify(body_) } : {}) });
+    const response = await formal('/api/formal' + route, { cache: 'no-store', ...(body_ ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' }, body: JSON.stringify(body_) } : {}) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '请求失败');
     return data;

@@ -11,7 +11,12 @@ import './outputs.css';
 import { DONE_STATES, FAILED_STATES, outcomeLabel, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
+import { withGroup } from './office-scope.js';
 
+// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
+const formal = (url, options = {}) =>
+  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
 
@@ -19,7 +24,7 @@ const escape = escapeHtml;
 const INLINE_LIMIT = 1200;
 
 const api = async (route) => {
-  const response = await fetch(`/api/formal${route}`, { cache: 'no-store' });
+  const response = await formal(`/api/formal${route}`, { cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
   return data;

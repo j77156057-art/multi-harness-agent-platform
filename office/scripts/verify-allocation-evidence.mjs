@@ -117,10 +117,13 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   const writes = [];
   const reads = [];
+  // 每个请求上带的群头：项目在平台上有群时，界面必须报出来（切项目就是换群）。
+  const groupHeaders = [];
 
   await page.route('**/api/formal/**', (route) => {
     const url = new URL(route.request().url());
     const route_ = url.pathname.replace('/api/formal', '');
+    groupHeaders.push(String(route.request().headers()['x-office-group'] || ''));
     const json = (body, status = 200) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
     if (route.request().method() === 'POST') {
@@ -215,6 +218,8 @@ try {
       source: 'platform',
       members: [],
       taskIds: [],
+      // 这个项目在平台上有自己的群：界面每次请求都要把它报出来（切项目就是换群）。
+      platformGroupId: 'proj-test-g1',
     };
     localStorage.setItem('agent-office.projects.v1', JSON.stringify([project]));
     localStorage.setItem('agent-office.active-project.v1', project.id);
@@ -309,6 +314,14 @@ try {
   const forensicText = await folds.filter({ hasText: '取证' }).innerText();
   assert.ok(forensicText.includes('all done'), '取证里是 CLI 的原话');
   assert.ok(forensicText.includes('warn: nothing to commit'), 'stderr 那一侧也要有');
+
+  // 7. 群头：项目在平台上有自己的群，界面每次请求都要报出来。
+  //    没有这一条时，网关只能用启动时绑的那个群 —— 切项目等于没切。
+  assert.ok(groupHeaders.length > 0, '这一步之前应该已经发过请求');
+  assert.ok(
+    groupHeaders.every((value) => value === 'proj-test-g1'),
+    `每个请求都要带本项目的群，实际：${[...new Set(groupHeaders)].join(' / ')}`,
+  );
 
   assert.deepEqual(errors, [], `页面不该报错：${errors.join(' | ')}`);
   console.log('allocation + evidence: ok');

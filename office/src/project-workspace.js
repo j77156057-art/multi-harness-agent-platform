@@ -3,7 +3,12 @@ import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } fro
 // 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
 import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
 import { probedAtLine, readInstallCache, writeInstallCache } from './install-cache.js';
+import { withGroup } from './office-scope.js';
 
+// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
+// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
+const formal = (url, options = {}) =>
+  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
 const clone = value => structuredClone(value);
 
 // 项目历史必须跨刷新保留。此前它只活在这个模块的数组里：刷新、换标签页或
@@ -277,7 +282,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   async function loadRecoverableProject() {
     try {
-      const response = await fetch('/api/formal/tasks', {cache: 'no-store'});
+      const response = await formal('/api/formal/tasks', {cache: 'no-store'});
       if (!response.ok) return;
       const data = await response.json();
       const tasks = Array.isArray(data?.tasks) ? data.tasks : [];
@@ -383,7 +388,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       toolsSummary.textContent = '正在探测这台机器上的命令…';
     }
     try {
-      const response = await fetch(`/api/formal/installers${probe ? '' : '?probe_local=false'}`, {cache: 'no-store'});
+      const response = await formal(`/api/formal/installers${probe ? '' : '?probe_local=false'}`, {cache: 'no-store'});
       if (!response.ok) throw new Error(`读取安装清单失败（HTTP ${response.status}）`);
       const payload = await response.json();
       const at = probe ? writeInstallCache(payload) && readInstallCache()?.at : '';
@@ -505,7 +510,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   async function loadFormalStatus() {
     try {
-      const response = await fetch('/api/formal/status', {cache: 'no-store'});
+      const response = await formal('/api/formal/status', {cache: 'no-store'});
       const state = response.ok ? await response.json() : null;
       renderFormalRegistration(state);
       renderWorkerHint();
@@ -541,7 +546,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
   }
   renderMembers(members);
-  fetch('/api/formal/status', {cache: 'no-store'}).then(response => response.ok ? response.json() : null).then(state => {
+  formal('/api/formal/status', {cache: 'no-store'}).then(response => response.ok ? response.json() : null).then(state => {
     renderFormalRegistration(state);
     if (!state?.project_id) { projectScope.textContent = '正式项目范围暂不可用；本窗口仍可创建本地项目。'; return; }
     // 在任管理员和其它管理员窗口都不进成员名单；管理员由开工向导从全部外部窗口里挑（不预选）。
@@ -671,7 +676,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     baseButton.disabled = true;
     baseResult.textContent = '正在写入正式注册表…';
     try {
-      const response = await fetch('/api/formal/base-harnesses', {
+      const response = await formal('/api/formal/base-harnesses', {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-Office-Formal': '1'},
         body: JSON.stringify({harness_id}),
@@ -700,7 +705,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     registerButton.disabled = true;
     registerResult.textContent = '正在写入正式注册表…';
     try {
-      const response = await fetch('/api/formal/harnesses', {
+      const response = await formal('/api/formal/harnesses', {
         method: 'POST',
         headers: {'Content-Type': 'application/json', 'X-Office-Formal': '1'},
         body: JSON.stringify({source_harness_id, instance_id, name}),
@@ -844,7 +849,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
    * id 由服务端随机生成 —— 界面不该决定 id，也不该拿名字当钥匙（同名项目可以有两个）。
    */
   async function createPlatformProject(name) {
-    const response = await fetch('/api/formal/projects', {
+    const response = await formal('/api/formal/projects', {
       method: 'POST',
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
@@ -862,7 +867,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   /** 平台项目的三个动作（改名 / 进回收站 / 找回）。失败时把平台的原话带出来。 */
   async function platformProjectAction(projectId, action, body) {
-    const response = await fetch(`/api/formal/projects/${encodeURIComponent(projectId)}/${action}`, {
+    const response = await formal(`/api/formal/projects/${encodeURIComponent(projectId)}/${action}`, {
       method: 'POST',
       cache: 'no-store',
       headers: {
@@ -884,7 +889,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   /** 读回收站。读不到就当读不到 —— 不把"读失败"显示成"回收站是空的"。 */
   async function loadTrash() {
     try {
-      const response = await fetch('/api/formal/projects?include_trashed=1', { cache: 'no-store' });
+      const response = await formal('/api/formal/projects?include_trashed=1', { cache: 'no-store' });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error?.message || `HTTP ${response.status}`);
       trashed = (data.projects || []).filter((row) => row && row.trashed_at);
@@ -1023,7 +1028,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   }
 
   async function clearRepoRelayProject() {
-    const response = await fetch('/api/formal/relay/project', {
+    const response = await formal('/api/formal/relay/project', {
       method: 'DELETE',
       headers: { 'X-Office-Formal': '1' },
       cache: 'no-store',
@@ -1062,7 +1067,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
 
   /** 转接项目写进仓库：仓库是转接的事实源，写不进去要当场说，别假装成功了。 */
   async function rememberRelayProject(name) {
-    const response = await fetch('/api/formal/relay/project', {
+    const response = await formal('/api/formal/relay/project', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
       body: JSON.stringify({ name }),
@@ -1077,7 +1082,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   /** 读仓库里那个转接项目（只读；失败就当没有，不在大厅里刷红）。 */
   async function loadRepoRelayProject() {
     try {
-      const response = await fetch('/api/formal/relay/overview', { cache: 'no-store' });
+      const response = await formal('/api/formal/relay/overview', { cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json();
       repoRelayProject = data.project || null;

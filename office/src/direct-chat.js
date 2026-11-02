@@ -4,6 +4,7 @@
 // \u8fd9\u6837\u7684\u6d88\u606f\u53ea\u6709\u53d1\u9001\u65b9\u4e0e\u6536\u4ef6\u65b9\u770b\u5f97\u5230\uff0c\u5176\u4ed6\u6210\u5458\u8bfb\u4e0d\u5230\u3002
 // \u8fd9\u4e2a\u9875\u9762\u5c55\u793a\u7684\u5c31\u662f\u8fd9\u7c7b\u6d88\u606f\uff1b\u53d1\u51fa\u53bb\u4e5f\u5e26 direct\uff0c\u6240\u4ee5\u5b83\u4e0d\u4f1a\u6cc4\u5230\u7fa4\u91cc\u3002
 import './direct-chat.css';
+import { withGroup } from './office-scope.js';
 
 const DIRECT_REF = 'direct';
 const $ = (selector) => document.querySelector(selector);
@@ -11,12 +12,15 @@ const escape = (value) =>
   String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
 const api = async (route, body_) => {
+  const headers = withGroup(
+    body_ ? { 'Content-Type': 'application/json', 'X-Office-Formal': '1' } : {},
+  );
   const response = await fetch(`/api/formal${route}`, {
     cache: 'no-store',
+    headers,
     ...(body_
       ? {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
           body: JSON.stringify(body_),
         }
       : {}),
