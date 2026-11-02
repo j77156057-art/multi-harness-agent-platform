@@ -2285,29 +2285,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
-   * 给「CLI 自己说它能用、但没人定档」的模型定档。
-   *
-   * 免费还是收费是**人的事实**（账户里的事），平台猜不出来；所以这里只做一件事：
-   * 把人的判断写进池子的声明（沿用同一家的调用约定），然后重探一遍。
-   */
-  async function declareModel(button) {
-    const cli = String(button.dataset.cli || '');
-    const model = String(button.dataset.model || '');
-    const tier = String(button.dataset.tier || '');
-    button.disabled = true;
-    try {
-      const result = await api('/pool/declaration', { cli, model, tier });
-      applyPool(result && result.pool);
-      state.error = null;
-      render();
-    } catch (error) {
-      button.disabled = false;
-      state.error = `档位设置失败：${String((error && error.message) || error)}`;
-      render();
-    }
-  }
-
-  /**
    * 中途把一个窗口加进这个项目，并**通知管理员**。
    *
    * 加人要让人知道：管理员据此知道，并把**还没人领的活**改派给它（已经在跑的活
@@ -5928,10 +5905,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'probe-pool') {
       void probePool();
-      return;
-    }
-    if (button.dataset.act === 'declare-model') {
-      void declareModel(button);
       return;
     }
     if (button.dataset.act === 'use-undeclared') {
