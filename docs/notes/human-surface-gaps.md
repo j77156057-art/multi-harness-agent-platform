@@ -1,6 +1,6 @@
 # 人面动作对账：界面上还剩哪些「该人做、但没人做」的事
 
-状态：2026-11-02 对账完成；两个真缺口已定位，其中一个已做完（§3）。作者：助理 agent。
+状态：2026-11-02 对账完成；两个真缺口都已闭环（§3 撤销分配、§4 人审打回）。作者：助理 agent。
 
 ## 0. 为什么写这个
 
@@ -48,8 +48,9 @@ Select-String -Path office\src\*.js -Pattern 'review/claim|/revoke|same_provider
 | 分配开轮 / 冻结（`allocation:open|close`） | 有 | 只读列表 | 只读 | **不做**：同上，轮次由管理员 worker 开（`pending_allocation`） |
 | 分配裁决 / 暂缓（`allocation:decide`） | 有 | 有 | 有 | 已上（人也能改管理员给的结果） |
 | **撤销一份尚未 Claim 的分配**（`assignment:revoke`） | 有（`POST /revoke`） | 有（`/allocation/revoke`、`/allocation/assignment`） | 有（任务详情页「这条活定给了谁」） | **已做**，见 §3 |
-| **人审阅**（`review:human_claim`、`review:human_submit`） | 有 | **有**（`/review/claim`、`/review/submit`，`as:1` 即人） | **无** | **建议先不做**，见 §4 |
-| **同厂商审阅豁免**（`review:same_provider`） | 有（`POST /human/review_same_provider`） | **无** | 只显示结果 | 与人审阅同一条线，一起判 |
+| **人审：对「已通过」的打回**（`task:reopen` → `reopen_for_changes`） | 有（`POST /human/reopen_for_changes`） | 有（`/human/reopen_for_changes`） | 有（approved 任务详情页「打回返工」） | **已做**，见 §4 |
+| 人**主动**认领审阅（`review:human_claim`、`review:human_submit`） | 有 | 有（`as:1` 即人） | 无 | **不需要做**：口径是"管理员先审、人后审"，人的位置是打回，不是在 `awaiting_review` 抢审阅 |
+| **同厂商审阅豁免**（`review:same_provider`） | 有（`POST /human/review_same_provider`） | 无 | 只显示结果 | 仍只在 CLI：它服务于"让同厂商的 **harness** 来审"，与人审无关 |
 
 另：`pool:user_keys`、`relay:letter`、`wording:read` 不在 `api/routes.py` 里（各自模块有自己的
 路由文件），界面上都已经有入口，不在这张表里重复。
@@ -92,30 +93,48 @@ Select-String -Path office\src\*.js -Pattern 'review/claim|/revoke|same_provider
   `claimed`，没有可撤的对象；要造一个得先跑完 方案→传阅→开轮→申请→裁决 整条链。这条目前只有
   后端 3 条测试 + 网关/界面桩数据覆盖。
 
-## 4. 建议先不做：人审阅
+## 4. 已做：人审 = 对「已通过」的一次打回（默认通过）
 
-**缺口是实的**：`/review/claim`、`/review/submit` 网关已经有（`as: 1` 就是人审），`same_provider`
-的豁免只有人能给（R10 §37.3、`review:same_provider` 只对 HUMAN 开），但界面上只能**看**审核记录
-（"同厂商审阅 · 谁放通过了"），认领与提交一个按钮都没有 —— 人想审只能去 CLI。
+**口径**（2026-11-02 拍板）：管理员先审，审过就是放行；人手里留一个**不同意就写原因打回**的
+权力。所以人**不需要**在 `awaiting_review` 阶段认领审阅，也**不需要**人审租约 —— 他的动作是
+针对一条已经通过的活的即时否决。
 
-**先不做的三条理由**：
+**这条边规范里早就有**（§10 第 462 行）：
 
-1. **它不是常规路径**。常态是成员窗口互审（cross-provider），管理员窗口也会审；人审是"没有
-   合适审阅人 / 需要立刻放行"的兜底。
-2. **它要新的状态机语义，不是补个按钮**。人认领审阅会占一条 `review` 记录（有租约、有
-   `review_id`、绑定 `attempt_id`），和成员/管理员的审阅**竞争同一条尝试**。先得回答：
-   人审和管理员审撞上了谁赢？人认领后超时怎么办？现在没有任何口径，硬上只会造出一种新的
-   「界面点了没反应 / 409 看不懂」。
-3. **同厂商豁免是安全边**。它允许"自己人审自己人"，而且每个任务只能豁免一次。这条边上界面
-   之前，得先把"这次豁免为什么给"的记录面想清楚（现在落在 `task_decisions` 的
-   `scope='review_same_provider'`），否则界面上就是一个"点一下就能绕过互审"的按钮。
+```
+approved | reopen_for_changes | human.adjudicate 退回或检测到 approved 后分支头前移 | changes_requested
+```
 
-**要做的话，前置是这三件**（写清，别下次重新想）：
+状态机也实现了它（`backend/app/state/machine.py`，带 `branch_unfrozen`），但此前**没有任何服务
+能触发**：全仓只有状态机与文案表提到 `REOPEN_FOR_CHANGES`，`human/service.py` 的 `reopen` 只认
+`abandoned / awaiting_human / 两种 drift`。也就是说这条路画好了却没通电 —— 缺的不是设计，是接线。
 
-- 定"人审阅与管理员审阅并发"的胜出规则（建议：谁先认领谁持有，另一方 `409` 并显示持有者）；
-- 定人审阅的租约与超时回收（照现有 `review_lease` 清扫，不要新造一套）；
-- 同厂商豁免上界面时，**必须**同时要求填写理由（后端已有 `reason` 字段），并把它显示在审核
-  记录里 —— 否则事后没人说得清是谁放的行。
+**2026-11-02 接上了**（三处）：
+
+1. 后端 `HumanOpsService.reopen_for_changes` + `POST /human/reopen_for_changes`
+   （权限复用 `task:reopen`，不新开权限边）：只允许 `approved`，理由**必填**，
+   事件 `reopen_for_changes` 的 payload 里记 `reason` / `decided_by` / `from` ——
+   半年后有人问"这版都过了为什么又返工"，答案在事件流里。
+2. 网关 `/human/reopen_for_changes`：理由必填（空理由 `400 human_reason_required`，
+   且**不发**请求），身份用 operator；只让 `task_id` / `reason` 两个字段进来。
+3. 界面：`approved` 的任务详情页多一块「管理员审过了，这一版默认放行」，写明**不必再点同意**，
+   只有一颗「打回返工」按钮 + 理由输入 + 两步确认；打回成功后刷新任务表，那块随之消失。
+
+**为什么不需要人审租约**：租约是给 harness 认领制用的（认领 20 分钟、过期由 `sweep_review_lease`
+标 `expired`、任务时钟继续走）。人这个动作不认领、即时完成、只有一个 operator，不存在"谁占着"。
+**为什么不需要同厂商豁免**：`_assert_review_policy` 里 `reviewer_kind == 'human'` 直接放行、
+不查厂商；`review:same_provider` 那条豁免是给"让一个与执行方同厂商的 **harness** 来审"的，
+和人审是两件事。（我上一轮把这两条绑在一起说"上界面前得先想清楚"，那是错的。）
+
+**仍然只在 CLI / 需另开会话的**：让**成员窗口**走同厂商审阅（`POST /human/review_same_provider`）。
+它是安全边（允许"自己人审自己人"、每任务只能豁免一次），上界面要先解决"为什么给"的记录面 ——
+现在落在 `task_decisions` 的 `scope='review_same_provider'`，界面上只显示结果、不给按钮。
+
+**验过的**：后端 5 条（`tests/test_human_reopen_for_changes.py`：打回落到 `changes_requested`、
+理由进事件、从哪个状态来的也记、理由必填且拒绝时不动状态、非 `approved` 明确拒绝、未知任务）；
+网关 2 条（理由必填且不发、字段不许夹带）；界面 1 条桩数据回归
+（`office/scripts/verify-office-approved-return.mjs`：只有一颗按钮、没理由不发、两步确认、
+发的是 `POST /human/reopen_for_changes`、打回后那块消失）。
 
 ## 5. 本版不做什么
 

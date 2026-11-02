@@ -1056,13 +1056,16 @@ export function createFormalGateway(config={}){
         const result=await call('/groups/'+encodeURIComponent(groupId)+'/messages?since_seq='+since+'&limit='+limit);
         json(res,200,result);return true;
       }
-      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
+      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/reopen_for_changes','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
         const action=route.slice('/human'.length);
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         const allowed=action==='/cancel'?['task_id','reason']
           :action==='/release'?['task_id','reason','budget_override']
           :action==='/adjudicate'?['task_id','question','options']
+          // 打回返工：**理由必填**（推翻一个已经通过的审阅，事后要答得出为什么）。
+          // 默认是放行 —— 人不同意才走这条，所以界面上只有"打回"，没有"同意"。
+          :action==='/reopen_for_changes'?['task_id','reason']
           // 合入：二次确认是**手抄要合的那个 commit**（§17「需二次确认」）。
           // reason 可留空；平台会把人是谁记进事件。
           :action==='/merge'?['task_id','confirm_commit','reason']
@@ -1077,6 +1080,7 @@ export function createFormalGateway(config={}){
         if(body.question!==undefined&&typeof body.question!=='string')throw fail(400,'invalid_task_action');
         if(body.options!==undefined&&(!Array.isArray(body.options)||body.options.length>20||body.options.some(option=>typeof option!=='string')))throw fail(400,'invalid_task_action');
         if(action==='/adjudicate'&&(typeof body.question!=='string'||!body.question.trim()))throw fail(400,'invalid_task_action');
+        if(action==='/reopen_for_changes'&&(typeof body.reason!=='string'||!body.reason.trim()))throw fail(400,'human_reason_required');
         const payload={task_id:body.task_id,decided_by:operator,
           ...(body.answer!==undefined?{answer:body.answer}:{}),...(body.reason!==undefined?{reason:body.reason}:{}),
           ...(body.confirm_commit!==undefined?{confirm_commit:body.confirm_commit.trim()}:{}),

@@ -267,6 +267,52 @@ class HumanOpsService:
                 "status": nxt.value,
             }
 
+    def reopen_for_changes(
+        self, *, task_id: str, decided_by: str, reason: str
+    ) -> dict[str, object]:
+        """人不同意"已经通过审阅"的那一版：打回返工。
+
+        R10 §10 里这条边本来就有（`approved | reopen_for_changes | human.adjudicate
+        退回或检测到 approved 后分支头前移 | changes_requested`），状态机也实现了它
+        （`state/machine.py` 里带 `branch_unfrozen`），但**没有任何服务能触发** ——
+        也就是说"管理员审完人再看一眼、不同意就打回"这条路在规范里画好了却没通电。
+
+        口径（2026-11-02 由人拍板）：**默认通过**。approved 之后合入照常可以走，人手里
+        只留一个"不同意"的权力；所以这里只有打回，没有"同意"接口 —— 不打回就是同意。
+
+        为什么不复用 `reopen`：`reopen` 认的是 abandoned / awaiting_human / 两种 drift，
+        语义是"把停下来的活重新打开"；这里是"推翻一个已通过的决定"，事件不同
+        （`reopen_for_changes`）、后果不同（解冻分支、回到返修），混在一起会让事件流
+        分不清这两种事。
+        """
+        text = reason.strip()
+        if not text:
+            raise Conflict("a reopen-for-changes needs a reason")
+        with self.database.transaction() as conn:
+            task = self._task(conn, task_id)
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.APPROVED:
+                raise Conflict(
+                    f"{task_id} is {status.value}; only an approved task can be sent back"
+                )
+            record, nxt = self._transition(
+                conn,
+                task,
+                task_id=task_id,
+                event=EventKind.REOPEN_FOR_CHANGES,
+                actor_type="human",
+                actor_id=decided_by,
+                # 理由进事件：半年后有人问"这一版都过了为什么又返工"，答案在这里。
+                payload={"decided_by": decided_by, "reason": text, "from": status.value},
+                extra_sets={"waiting_since": _now(), "next_reminder_at": None},
+            )
+            return {
+                "task_id": task_id,
+                "event": record.event_name,
+                "seq": record.seq,
+                "status": nxt.value,
+            }
+
     def grant_attempt_budget_override(
         self,
         *,

@@ -599,3 +599,55 @@ test('a task with no assignment says so instead of inventing one', async () => {
   assert.equal(refused.status, 409);
   assert.equal(refused.payload.error, 'assignment_not_found');
 });
+// ---------------------------------------------------------------------------
+// 打回返工：approved 之后人推翻一次（R10 §10 的 reopen_for_changes）
+//
+// 网关自己的判断只有两条：理由必填、身份用 operator。**能不能打回**由平台判
+// （只有 approved 能打回），这里不复制它的状态规则。
+// ---------------------------------------------------------------------------
+
+test('sending an approved task back needs a reason and posts as the human', async () => {
+  const calls = [];
+  globalThis.fetch = responder({
+    '/api/v1/human/reopen_for_changes': (_bearer, json, init) => {
+      calls.push(JSON.parse(String(init.body)));
+      return json(200, { task_id: 'T1', status: 'changes_requested', event: 'reopen_for_changes' });
+    },
+  });
+  const gateway = gatewayFor();
+
+  const empty = await exchange(gateway, '/human/reopen_for_changes', { task_id: 'T1', reason: ' ' });
+  assert.equal(empty.status, 400);
+  assert.equal(empty.payload.error, 'human_reason_required');
+  assert.equal(calls.length, 0, '没理由就别发');
+
+  const sent = await exchange(gateway, '/human/reopen_for_changes', {
+    task_id: 'T1',
+    reason: '第 3 条验收标准没对上',
+  });
+  assert.equal(sent.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].task_id, 'T1');
+  assert.equal(calls[0].reason, '第 3 条验收标准没对上');
+  assert.equal(calls[0].decided_by, 'office-operator', '记的是人，不是管理员窗口');
+});
+
+test('a reopen request cannot smuggle in other fields', async () => {
+  let calls = 0;
+  globalThis.fetch = responder({
+    '/api/v1/human/reopen_for_changes': (_bearer, json) => {
+      calls += 1;
+      return json(200, {});
+    },
+  });
+  const gateway = gatewayFor();
+
+  const refused = await exchange(gateway, '/human/reopen_for_changes', {
+    task_id: 'T1',
+    reason: '不同意',
+    decided_by: 'someone-else',
+  });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.payload.error, 'invalid_task_action');
+  assert.equal(calls, 0);
+});

@@ -290,6 +290,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     // 列表的看法：'person' = 按窗口归堆（谁忙谁闲），'time' = 平铺按时间排。
     groupBy: restoredView.groupBy || 'person',
     error: null,
+    // 各数据域分别记错误；任何失败都保留该域最后一次成功结果。
+    errors: { events: '', availability: '', messages: '', pool: '', plan: '' },
     // 上一件「成功了但还没说完」的事（比如刚给某个窗口开好新成员）。
     // 与 error 分开：成功和失败摆同一个框里，人会以为是失败。
     memberNote: '',
@@ -1402,6 +1404,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return sentences.join('');
   }
 
+  function domainErrorNotices() {
+    const labels = {
+      events: '事件记录',
+      availability: '窗口名册',
+      messages: '项目消息',
+      pool: '额度池',
+      plan: '项目方案',
+    };
+    return Object.entries(state.errors)
+      .filter(([, message]) => Boolean(message))
+      .map(([key, message]) => `<div class="flat-domain-error" role="alert">
+        <b>${labels[key]}读取失败</b><span>${escape(message)}；已保留该域最后成功数据，不按空数据处理。</span>
+        <button type="button" data-act="retry-refresh">重试</button>
+      </div>`)
+      .join('');
+  }
+
   function header(counts) {
     const wrap = document.createElement('header');
     wrap.className = 'flat-head';
@@ -1466,6 +1485,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             </div>`
           : ''
       }
+      ${domainErrorNotices()}
       ${
         state.memberNote
           ? `<div class="flat-note-row">
@@ -1581,16 +1601,20 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       '项目群聊',
       last
         ? oneLine(readableMessageBody(last) || last.body || '')
-        : state.messagesLoaded
-          ? '暂无消息'
-          : '正在读取…',
+        : state.errors.messages
+          ? '消息读取失败 · 保留当前记录'
+          : state.messagesLoaded
+            ? '暂无消息'
+            : '正在读取…',
     );
 
     const adminId = adminIdentity();
     const roster = state.availability || [];
     // 窗口名单是第二批才到的（要探每个 CLI 的配置，慢）。这段时间说清楚在读，
     // 别让左栏空着像"这个项目里没有窗口"。
-    if (!state.loaded && !roster.length) {
+    if (state.errors.availability) {
+      addRow('window', null, '窗口名册读取失败', '保留当前名单，不重写成空');
+    } else if (!state.loaded && !roster.length) {
       addRow('window', null, '窗口名单', '正在读取…');
     }
     // 平台助手**常驻**：工作区域里一直有它，不用在新建项目时勾选，也不依赖平台
@@ -3098,8 +3122,48 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  /**
+   * 人不同意"已经过审"的那一版：写原因打回返工。
+   *
+   * 两步确认（和撤销授权一致）：第一次点只把按钮换成「确认打回」，第二次才发。理由是**必填**的
+   * —— 它要进事件流，成为"这版都过了为什么又返工"的答案。
+   */
+  async function returnForChanges(button) {
+    const block = button.closest('.flat-approved');
+    if (!block) return;
+    const taskId = String(button.dataset.task || '');
+    const reasonInput = block.querySelector('[data-approved-reason]');
+    const reason = reasonInput ? String(reasonInput.value || '').trim() : '';
+    const note = block.querySelector('[data-approved-error]');
+    if (!reason) {
+      if (note) note.textContent = '打回要写一句原因：它会回到返修，理由也会留在记录里。';
+      if (reasonInput) reasonInput.focus();
+      return;
+    }
+    if (button.dataset.confirm !== '1') {
+      button.dataset.confirm = '1';
+      button.textContent = '确认打回（它会回到返修）';
+      if (note) note.textContent = '再点一下才会真的打回。';
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api('/human/reopen_for_changes', { task_id: taskId, reason });
+      // 先把任务表刷一遍（状态已经变了），再重读这条活：只重读详情的话，
+      // `state.selected` 还是旧列表里那份 approved，那块会赖在界面上不走。
+      await refresh();
+      await select(taskId);
+    } catch (error) {
+      if (note) note.textContent = `没能打回：${String((error && error.message) || error)}`;
+      button.dataset.confirm = '0';
+      button.textContent = '打回返工';
+      button.disabled = false;
+    }
+  }
+
   /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
-  async function applyTroubleModel(button) {    const harnessId = String(button.dataset.harness || '');
+  async function applyTroubleModel(button) {
+    const harnessId = String(button.dataset.harness || '');
     const block = button.closest('.flat-alert') || button.closest('.flat-trouble');
     const select = block ? block.querySelector('[data-trouble-select]') : null;
     const modelId = select ? String(select.value || '') : '';
@@ -3164,11 +3228,19 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    */
   async function loadTaskSpec(taskId) {
     const cached = state.windowSpecs[taskId];
-    if (cached && Date.now() - cached.at < 60000) return cached.spec;
-    const data = await api(`/tasks/${encodeURIComponent(taskId)}`).catch(() => null);
-    const spec = (data && data.task && data.task.spec) || null;
-    state.windowSpecs[taskId] = { at: Date.now(), spec };
-    return spec;
+    if (cached && Date.now() - cached.at < 60000) return { spec: cached.spec, error: '' };
+    try {
+      const data = await api(`/tasks/${encodeURIComponent(taskId)}`);
+      const spec = (data && data.task && data.task.spec) || null;
+      state.windowSpecs[taskId] = { at: Date.now(), spec };
+      return { spec, error: '' };
+    } catch (error) {
+      // 失败不进入一分钟缓存；有旧规格就继续展示，但必须同时说明更新失败。
+      return {
+        spec: cached ? cached.spec : null,
+        error: String((error && error.message) || error),
+      };
+    }
   }
 
   /**
@@ -3194,7 +3266,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const load = async () => {
       if (card.dataset.loaded || card.dataset.loading) return;
       card.dataset.loading = '1';
-      const spec = await loadTaskSpec(task.task_id);
+      const { spec, error: specError } = await loadTaskSpec(task.task_id);
       card.dataset.loading = '';
       if (!card.open) return;
       card.dataset.loaded = '1';
@@ -3205,12 +3277,25 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const paths = spec && Array.isArray(spec.exclusive_paths) ? spec.exclusive_paths : [];
       const events = (state.events || []).filter((event) => event.aggregate_id === task.task_id);
       body.innerHTML = `
+        ${specError ? `<p class="flat-domain-error" role="alert"><b>任务规格读取失败</b><span>${escape(specError)}${spec ? '；当前显示最后成功读取的内容。' : '；无法确认平台是否提供。'}</span></p>` : ''}
         <p class="flat-note">任务目标</p>
-        <p class="flat-wtask-goal">${goal ? escape(goal) : '（平台未提供该任务的目标）'}</p>
+        <p class="flat-wtask-goal">${goal ? escape(goal) : specError ? '（读取失败，暂不能确认）' : '（平台未提供该任务的目标）'}</p>
         ${acceptance.length ? `<p class="flat-note">验收标准</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
         ${paths.length ? `<p class="flat-note">允许修改的路径</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
         <p class="flat-note">动作记录${events.length ? `（${events.length} 步）` : ''}</p>
         ${events.length ? `<ol class="flat-events">${events.map((event) => eventRow(event, { subject: taskTitleOf(event.aggregate_id) })).join('')}</ol>` : '<p class="flat-empty">暂无该任务的记录。</p>'}`;
+      if (specError) {
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'flat-back';
+        retry.textContent = '重新读取任务规格';
+        retry.addEventListener('click', () => {
+          delete state.windowSpecs[task.task_id];
+          delete card.dataset.loaded;
+          void load();
+        });
+        body.append(retry);
+      }
       // 证据面：审核记录与取证。后端一直有、界面从来没有入口 ——
       // 「这条活为什么被卡住」本该能从证据上回答，不该靠猜。
       // 两块都**展开才去读**（取证可能是几十 KB 的日志尾巴）。
@@ -4233,6 +4318,31 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
+   * 审阅通过了，人还留着一次否决权（R10 §10 的 `approved → changes_requested`）。
+   *
+   * 口径（人拍的）：**默认通过** —— approved 之后合入照常走，不必等人点"同意"；
+   * 所以这里只有"打回"，没有"通过"。理由必填，并且进事件：半年后有人问"这版都过了
+   * 为什么又返工"，答案在事件流里。
+   *
+   * 只对 approved 显示这一块：别的状态下打回不合法（平台会拒），界面上不该引诱人点。
+   */
+  function approvedReviewBlock(task) {
+    if (String(task.status || '') !== 'approved') return '';
+    return `<section class="flat-spec flat-approved">
+      <h3>管理员审过了，这一版默认放行</h3>
+      <p class="flat-note">合入会照常进行，不需要你再点一次「同意」。若你不同意，写清原因打回 ——
+        它会回到返修，原因会记进这条活的记录里。</p>
+      <label class="flat-alloc-reason">不同意的话，写清为什么
+        <input type="text" data-approved-reason maxlength="200" placeholder="例：第 3 条验收标准没对上">
+      </label>
+      <div class="flat-alert-pick">
+        <button type="button" data-act="return-for-changes" data-task="${escape(task.task_id)}" data-confirm="0">打回返工</button>
+      </div>
+      <p class="flat-trouble-error" data-approved-error></p>
+    </section>`;
+  }
+
+  /**
    * 这条活定给了谁 —— 以及**能不能撤回**。
    *
    * 为什么要有这一块：裁决是单向的（一轮一任务一条裁决），定错人、或者对方一直不接，
@@ -4314,6 +4424,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       </div>
       ${lineageBlock(task)}
       ${assignmentBlock(task)}
+      ${approvedReviewBlock(task)}
       ${spec.goal ? `<section class="flat-spec"><h3>任务目标</h3><p>${escape(spec.goal)}</p></section>` : ''}
       ${handoffBlock(spec)}
       ${acceptance ? `<section class="flat-spec"><h3>验收标准</h3><p>${escape(acceptance)}</p></section>` : ''}
@@ -5292,7 +5403,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       modelsByUpstream.get(key).push(model);
     }
     if (!upstreams.length) {
-      return '<section class="flat-card"><h3>额度池</h3><p class="flat-empty">暂无额度来源记录。</p></section>';
+      return state.errors.pool
+        ? `<section class="flat-card"><h3>额度池</h3><p class="flat-empty">额度池读取失败：${escape(state.errors.pool)}</p><p class="flat-note">当前没有可显示的旧数据；不会把失败写成“暂无额度来源”。</p></section>`
+        : '<section class="flat-card"><h3>额度池</h3><p class="flat-empty">暂无额度来源记录。</p></section>';
     }
     const items = upstreams.map((source) => {
       const name = source.name || '?';
@@ -6656,6 +6769,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       void revokeAssignment(button);
       return;
     }
+    if (button.dataset.act === 'return-for-changes') {
+      void returnForChanges(button);
+      return;
+    }
     if (button.dataset.act === 'close-admin-chat') {
       adminDialog.close();
       return;
@@ -6941,6 +7058,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.pool = null;
         state.plan = null;
         state.error = null;
+        state.errors = { events: '', availability: '', messages: '', pool: '', plan: '' };
         render();
         return;
       }
@@ -6958,12 +7076,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (tasksResult.status === 'rejected') {
         throw new Error(`任务读取失败：${tasksResult.reason?.message || tasksResult.reason || '网络不可用'}`);
       }
-      const status = statusResult.status === 'fulfilled' ? statusResult.value : null;
+      const status = statusResult.status === 'fulfilled' ? statusResult.value : state.status;
       const tasks = tasksResult.value;
-      const events = eventsResult.status === 'fulfilled' ? eventsResult.value : { events: [] };
-      if (!status) state.error = '平台状态读取失败，任务数据可能不是最新；请重试。';
-      state.status = status;
-      state.events = events.events || [];
+      const events = eventsResult.status === 'fulfilled' ? eventsResult.value : { events: state.events };
+      if (statusResult.status === 'rejected') state.error = '平台状态读取失败，任务数据可能不是最新；请重试。';
+      else state.status = status;
+      if (eventsResult.status === 'fulfilled') {
+        state.events = events.events || [];
+        state.errors.events = '';
+      } else {
+        state.errors.events = String(eventsResult.reason?.message || eventsResult.reason);
+      }
       const all = tasks.tasks || [];
       state.tasks = scope ? all.filter(scope.matches) : all;
       // 这里**不**清 state.error：一次失败的提示要留到人下一次动手为止。
@@ -6984,8 +7107,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 窗口名单与状态栏**先**落地：池子那一次读可能要十几秒（冷启动要问各家
       // CLI 的名册），把它和名单放在同一个 Promise.all 里，慢的那个会把快的
       // 一起拖住 —— 名单空着、状态栏没数。
-      const availability = await api('/availability').catch(() => ({ availability: [] }));
-      state.availability = availability.availability || [];
+      const availability = await api('/availability')
+        .then((value) => ({ value }))
+        .catch((error) => ({ error }));
+      if (availability.error) {
+        state.errors.availability = String(availability.error.message || availability.error);
+      } else {
+        state.availability = availability.value.availability || [];
+        state.errors.availability = '';
+        state.loaded = true;
+      }
       // 安装清单**自己一段、自己重绘**：它不该等额度池那几秒（那边一问就是二十几个
       // 上游）才跟着出现。没读到就让它自己说没读到，别一直挂着「正在读取」。
       // 读到的安装方式不会每 15 秒变，所以只取一次；失败时等人点「探测」再重试。
@@ -7002,7 +7133,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.installs = cachedInstalls ? cachedInstalls.payload : null;
         if (!state.installs) void loadInstalls();
       }
-      state.loaded = true;
       // 顶栏的状态：平台连不连得上、几个窗口**在跑**（平台上的在场事实，不猜）。
       // 「在跑」只认进程报过到：注册表里的在线是注册那一刻的声明，进程停了它不会变。
       const online = state.availability.filter((item) => item.status === 'online').length;
@@ -7011,10 +7141,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         online,
         offline: state.availability.length - online,
       });
+      const failed = (error) => ({ __error: String((error && error.message) || error) });
       const [pool, plan, messages, runs] = await Promise.all([
-        probed ? Promise.resolve(probed) : api('/pool').catch(() => null),
-        api('/plan').catch(() => null),
-        api('/messages?since_seq=0&limit=500').catch(() => ({ messages: [] })),
+        probed ? Promise.resolve(probed) : api('/pool').catch(failed),
+        api('/plan').catch(failed),
+        api('/messages?since_seq=0&limit=500').catch(failed),
         // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
         api('/assistant/runs').catch(() => ({ runs: [] })),
         loadUserKeys(),
@@ -7029,20 +7160,32 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ]);
       // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
       // 写进去的更新鲜），就别用这份旧的盖上去。
-      if (poolReadAt >= state.poolAt) {
-        state.pool = pool;
-        state.poolAt = poolReadAt;
+      if (pool.__error) {
+        state.errors.pool = pool.__error;
+      } else {
+        state.errors.pool = '';
+        if (poolReadAt >= state.poolAt) {
+          state.pool = pool;
+          state.poolAt = poolReadAt;
+        }
       }
       if (probed) {
         // 探过了：把与上次的差别记下来（多了什么、谁换了档、谁还没定档）。
         state.poolProbe = comparePool(probed);
         savePoolSnapshot(probed);
       }
-      state.plan = plan;
-      state.messages = messages.messages || [];
-      // 「读到了」是一个**自己的**事实：`loaded` 在窗口名单那一步就置位了，
-      // 而消息是更晚一批才到的。分开记，界面才不会把「还没读到」说成「没有」。
-      state.messagesLoaded = true;
+      if (plan.__error) state.errors.plan = plan.__error;
+      else {
+        state.plan = plan;
+        state.errors.plan = '';
+      }
+      if (messages.__error) state.errors.messages = messages.__error;
+      else {
+        state.messages = messages.messages || [];
+        state.errors.messages = '';
+        // 只有成功才宣布“读到了”；失败保留旧消息，不把失败翻译成暂无消息。
+        state.messagesLoaded = true;
+      }
       state.assistantRuns = runs.runs || [];
       state.events = events.events || [];
       // 人话从平台来（问过的会缓存，不会每 15 秒问一次）。
@@ -7075,6 +7218,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       (state.events || []).length,
       state.status ? `${state.status.connected ? 1 : 0}:${state.status.group_id || ''}` : '-',
       state.error || '',
+      state.errors.events,
+      state.errors.availability,
     ].join('#');
   }
 
@@ -7131,6 +7276,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       allocation,
       installs,
       state.error || '',
+      Object.values(state.errors).join('|'),
       state.memberNote || '',
       // 译文是异步补上的：数据一样、译文刚到，也必须重画一次。
       wordingVersion(),

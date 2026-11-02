@@ -236,6 +236,18 @@ class HumanReopenRequest(BaseModel):
     answer: str | None = None
 
 
+class HumanReopenForChangesRequest(BaseModel):
+    """人不同意管理员已经审过的那一版：打回返工（R10 §10 的 ``approved → changes_requested``）。
+
+    理由必填：这是**推翻一个已经做出的判断**，事后必须答得出"为什么"。默认是放行
+    （approved 之后合入照常走），只有人明确打回才动状态 —— 所以这条请求只在"不同意"时发。
+    """
+
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    reason: str = Field(min_length=1, max_length=4000)
+
+
 class HumanAttemptBudgetOverrideRequest(BaseModel):
     """A human gives a task whose attempt budget is spent one more chance."""
 

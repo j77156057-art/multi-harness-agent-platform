@@ -1282,6 +1282,25 @@ def human_reopen(
     return service.reopen(task_id=body.task_id, decided_by=body.decided_by, answer=body.answer)
 
 
+@human.post("/reopen_for_changes")
+def human_reopen_for_changes(
+    body: schemas.HumanReopenForChangesRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:reopen"),
+) -> dict[str, Any]:
+    """人不同意已经通过审阅的那一版：打回返工（R10 §10 的 `approved → changes_requested`）。
+
+    **默认放行**：approved 之后合入照常走；这条接口只在"人明确不同意"时才用。理由必填，
+    并且会写进事件 —— 推翻一个已经做出的判断，事后要答得出为什么。
+    """
+    bind_declared(principal, body.decided_by, key="task:reopen", database=database, request=request)
+    return service.reopen_for_changes(
+        task_id=body.task_id, decided_by=body.decided_by, reason=body.reason
+    )
+
+
 @human.post("/attempt_budget_override")
 def human_attempt_budget_override(
     body: schemas.HumanAttemptBudgetOverrideRequest,

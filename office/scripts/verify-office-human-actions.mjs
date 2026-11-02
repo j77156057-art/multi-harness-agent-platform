@@ -93,14 +93,12 @@ const backendCancel = new Set([
   // 那两个常量里 —— 只看常量会漏掉它。
   ...statusesIn(sliceMethod(humanService, 'cancel'), values),
 ]);
-const backendResume = statusesIn(
-  sliceBetween(humanService, 'def resume(', 'def reopen('),
-  values,
-);
-const backendReopen = statusesIn(
-  sliceBetween(humanService, 'def reopen(', 'def grant_attempt_budget_override('),
-  values,
-);
+// 用「这个方法自己的函数体」取状态，而不是在两个方法名之间切一段：
+// 后者假设"reopen 后面紧跟 grant_attempt_budget_override"，只要中间插进一个新方法
+// （2026-11-02 插了 `reopen_for_changes`），那个新方法里的 APPROVED 就会被算进 reopen 的
+// 允许状态里 —— 门禁报的是"界面与后端不一致"，其实是**解析方式**脆。
+const backendResume = statusesIn(sliceMethod(humanService, 'resume'), values);
+const backendReopen = statusesIn(sliceMethod(humanService, 'reopen'), values);
 
 await check('the cancel states mirror the backend guard exactly', () => {
   assert.deepEqual([...CANCEL_STATES].sort(), [...backendCancel].sort());
