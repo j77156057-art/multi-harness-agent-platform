@@ -3161,6 +3161,30 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  /**
+   * 人点头：**只留痕，不改状态**（`task_decisions` 的 `approved_release`）。
+   *
+   * 一次点击就够 —— 它不推进任何东西，误点的代价只是多一条"我看过了"，所以不做两步确认；
+   * 备注选填（它是"我为什么认为可以合入"，不是必填的理由）。成功后重读这条活，
+   * 让那块变成"某某已确认"，按钮消失，避免人以为自己没点成功又点一遍。
+   */
+  async function confirmRelease(button) {
+    const block = button.closest('.flat-approved');
+    if (!block) return;
+    const taskId = String(button.dataset.task || '');
+    const noteInput = block.querySelector('[data-approved-note]');
+    const note = noteInput ? String(noteInput.value || '').trim() : '';
+    const error = block.querySelector('[data-approved-error]');
+    button.disabled = true;
+    try {
+      await api('/human/confirm_release', { task_id: taskId, note });
+      await select(taskId);
+    } catch (requestError) {
+      if (error) error.textContent = `没能记下这次确认：${String((requestError && requestError.message) || requestError)}`;
+      button.disabled = false;
+    }
+  }
+
   /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
   async function applyTroubleModel(button) {
     const harnessId = String(button.dataset.harness || '');
@@ -4318,20 +4342,53 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   /**
+   * 这一版人确认过没有 —— 读回 `task_decisions` 里那条 `approved_release` 留痕。
+   *
+   * 为什么要读回来：默认通过意味着"不打回就是同意"，如果界面上确认完什么也不变，人下次
+   * 打开这条活还是看到同一颗按钮，会以为自己没点过（或者重复点）。痕迹要看得见才算留住了。
+   */
+  function releaseConfirmation() {
+    const raw = state.detail && state.detail.decisions;
+    const rows = Array.isArray(raw) ? raw : Array.isArray(raw?.decisions) ? raw.decisions : [];
+    const hit = rows.find((row) => String(row?.scope || '') === 'approved_release');
+    return hit || null;
+  }
+
+  /**
    * 审阅通过了，人还留着一次否决权（R10 §10 的 `approved → changes_requested`）。
    *
-   * 口径（人拍的）：**默认通过** —— approved 之后合入照常走，不必等人点"同意"；
-   * 所以这里只有"打回"，没有"通过"。理由必填，并且进事件：半年后有人问"这版都过了
-   * 为什么又返工"，答案在事件流里。
-   *
-   * 只对 approved 显示这一块：别的状态下打回不合法（平台会拒），界面上不该引诱人点。
+   * 口径（人拍的）：**默认通过** —— approved 之后合入照常走，不必等人点"同意"；但"人真的
+   * 看过并点头"这件事要留痕（`task_decisions` 的 `approved_release`），否则事后分不清
+   * "人看过"和"人没看"。所以这一块两颗按钮各管一头：确认**只留痕、不改状态**，
+   * 打回才会动状态。理由只在打回时必填。
    */
   function approvedReviewBlock(task) {
     if (String(task.status || '') !== 'approved') return '';
+    const confirmed = releaseConfirmation();
+    const confirmedLine = confirmed
+      ? `<p class="flat-note">${escape(String(confirmed.actor || '你'))} 已确认这一版可以合入${
+          confirmed.answer && String(confirmed.answer) !== 'confirmed'
+            ? `：${escape(String(confirmed.answer))}`
+            : '（没写备注）'
+        }。合入照常进行。</p>`
+      : '';
     return `<section class="flat-spec flat-approved">
       <h3>管理员审过了，这一版默认放行</h3>
-      <p class="flat-note">合入会照常进行，不需要你再点一次「同意」。若你不同意，写清原因打回 ——
-        它会回到返修，原因会记进这条活的记录里。</p>
+      <p class="flat-note">合入会照常进行，不需要你再点一次「同意」。${
+        confirmed ? '' : '不过留一条「我看过」的痕迹，事后能分清是人点头放行的、还是没人看就过了。'
+      }</p>
+      ${confirmedLine}
+      ${
+        confirmed
+          ? ''
+          : `<label class="flat-alloc-reason">确认的话可以写一句依据（选填）
+               <input type="text" data-approved-note maxlength="200" placeholder="例：验收标准第 1~3 条我核过了">
+             </label>
+             <div class="flat-alert-pick">
+               <button type="button" data-act="confirm-release" data-task="${escape(task.task_id)}">我确认，可以合入</button>
+             </div>`
+      }
+      <p class="flat-note">若你不同意，写清原因打回 —— 它会回到返修，原因会记进这条活的记录里。</p>
       <label class="flat-alloc-reason">不同意的话，写清为什么
         <input type="text" data-approved-reason maxlength="200" placeholder="例：第 3 条验收标准没对上">
       </label>
@@ -6771,6 +6828,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'return-for-changes') {
       void returnForChanges(button);
+      return;
+    }
+    if (button.dataset.act === 'confirm-release') {
+      void confirmRelease(button);
       return;
     }
     if (button.dataset.act === 'close-admin-chat') {

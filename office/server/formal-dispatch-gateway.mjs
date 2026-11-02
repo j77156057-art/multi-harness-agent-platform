@@ -1056,7 +1056,7 @@ export function createFormalGateway(config={}){
         const result=await call('/groups/'+encodeURIComponent(groupId)+'/messages?since_seq='+since+'&limit='+limit);
         json(res,200,result);return true;
       }
-      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/reopen_for_changes','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
+      if(req.method==='POST'&&['/human/resume','/human/reopen','/human/reopen_for_changes','/human/confirm_release','/human/release','/human/cancel','/human/adjudicate','/human/merge'].includes(route)){
         const action=route.slice('/human'.length);
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>8000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
@@ -1066,6 +1066,9 @@ export function createFormalGateway(config={}){
           // 打回返工：**理由必填**（推翻一个已经通过的审阅，事后要答得出为什么）。
           // 默认是放行 —— 人不同意才走这条，所以界面上只有"打回"，没有"同意"。
           :action==='/reopen_for_changes'?['task_id','reason']
+          // 确认放行：**不改状态**，只留一条「人看过并点头」的痕迹（`task_decisions`）。
+          // note 可留空 —— 它是"我为什么认为可以合入"，不是必填的理由。
+          :action==='/confirm_release'?['task_id','note']
           // 合入：二次确认是**手抄要合的那个 commit**（§17「需二次确认」）。
           // reason 可留空；平台会把人是谁记进事件。
           :action==='/merge'?['task_id','confirm_commit','reason']
@@ -1079,13 +1082,15 @@ export function createFormalGateway(config={}){
         if(body.budget_override!==undefined&&typeof body.budget_override!=='boolean')throw fail(400,'invalid_task_action');
         if(body.question!==undefined&&typeof body.question!=='string')throw fail(400,'invalid_task_action');
         if(body.options!==undefined&&(!Array.isArray(body.options)||body.options.length>20||body.options.some(option=>typeof option!=='string')))throw fail(400,'invalid_task_action');
+        if(body.note!==undefined&&typeof body.note!=='string')throw fail(400,'invalid_task_action');
         if(action==='/adjudicate'&&(typeof body.question!=='string'||!body.question.trim()))throw fail(400,'invalid_task_action');
         if(action==='/reopen_for_changes'&&(typeof body.reason!=='string'||!body.reason.trim()))throw fail(400,'human_reason_required');
         const payload={task_id:body.task_id,decided_by:operator,
           ...(body.answer!==undefined?{answer:body.answer}:{}),...(body.reason!==undefined?{reason:body.reason}:{}),
           ...(body.confirm_commit!==undefined?{confirm_commit:body.confirm_commit.trim()}:{}),
           ...(body.budget_override!==undefined?{budget_override:body.budget_override}:{}),
-          ...(body.question!==undefined?{question:body.question}:{}),...(body.options!==undefined?{options:body.options}:{})};
+          ...(body.question!==undefined?{question:body.question}:{}),...(body.options!==undefined?{options:body.options}:{}),
+          ...(body.note!==undefined?{note:body.note}:{})};
         const result=await call(route,payload);
         json(res,200,result);return true;
       }
@@ -1179,7 +1184,10 @@ export function createFormalGateway(config={}){
         // 人看的是工单，机器那部分单独摆（见 splitHandoff）；里面的失败原因
         // 顺手翻成人话（见 humanizeHandoff）。
         const spec=await humanizeHandoff(splitHandoff(task.spec||{}));
-        json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events});return true;
+        // 人在这一版上留过的决定（目前是「确认放行」那一条留痕）。同样是**锦上添花**：
+        // 读不到就空着，不能因为一条审计痕迹把整条任务详情带崩。
+        const decisions=await call('/tasks/'+id+'/decisions').catch(()=>({decisions:[]}));
+        json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events,decisions});return true;
       }
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route)){
         // The harness CLI's own output, as it streams. Read-only, and scoped to

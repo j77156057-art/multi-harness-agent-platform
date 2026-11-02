@@ -248,6 +248,19 @@ class HumanReopenForChangesRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=4000)
 
 
+class HumanConfirmReleaseRequest(BaseModel):
+    """人给一版已通过的活留一条「我看过并点头」的痕迹（不改状态）。
+
+    默认通过意味着"不打回就是同意"，于是"人到底看过没有"在记录里分不出来。这条请求补的就是
+    那一条痕迹：写一条 ``task_decisions``（scope ``approved_release``），任务状态不动。
+    """
+
+    task_id: str
+    decided_by: str = Field(min_length=1)
+    # 可留空；填了就是"我为什么认为它可以合入"，会跟着决定行一起留下来。
+    note: str = Field(default="", max_length=2000)
+
+
 class HumanAttemptBudgetOverrideRequest(BaseModel):
     """A human gives a task whose attempt budget is spent one more chance."""
 

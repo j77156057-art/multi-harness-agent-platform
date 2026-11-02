@@ -267,6 +267,71 @@ class HumanOpsService:
                 "status": nxt.value,
             }
 
+    def confirm_release(
+        self, *, task_id: str, decided_by: str, note: str = ""
+    ) -> dict[str, object]:
+        """人给一版**已经过审**的活留一条「我看过并点头」的痕迹。**不动任务状态。**
+
+        为什么需要它：口径是"默认通过"（approved 之后合入照常走），所以"人真的看过并同意"
+        这件事在事件流里没有落点 —— 不打回就是同意，事后分不清"人看过"和"人没看"。
+
+        为什么写 `task_decisions` 而不是发一个事件：R10 §37.7 的事件名是封闭集合，为一个
+        审计痕迹扩集合不划算；`task:attempt_budget_override` 就是这么做的（"决定行就是
+        审计线索"）。任务状态、epoch、owner 一律不碰。
+
+        幂等：同一任务**同一尝试**只留一条；重复点返回已有那条，不刷时间。
+        """
+        text = note.strip()
+        with self.database.transaction() as conn:
+            task = self._task(conn, task_id)
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.APPROVED:
+                raise Conflict(
+                    f"{task_id} is {status.value}; only an approved task can be confirmed"
+                )
+            attempt = task["current_attempt_id"]
+            attempt_key = "" if attempt is None else str(attempt)
+            existing = conn.execute(
+                "SELECT decision_id, decided_seq FROM task_decisions"
+                " WHERE task_id = ? AND scope = 'approved_release'"
+                " AND IFNULL(attempt_id, '') = ?"
+                " ORDER BY decided_seq DESC LIMIT 1",
+                (task_id, attempt_key),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "task_id": task_id,
+                    "decision_id": str(existing["decision_id"]),
+                    "decided_seq": int(existing["decided_seq"] or 0),
+                    "already": True,
+                    "status": status.value,
+                }
+            # 锚在当下最后一个事件上：这不是状态推进，用"决定发生时的位置"当时间锚就够了。
+            anchor = conn.execute("SELECT IFNULL(MAX(seq), 0) AS seq FROM task_events").fetchone()
+            decided_seq = int(anchor["seq"] if anchor is not None else 0)
+            decision_id = f"dec-{uuid.uuid4().hex}"
+            conn.execute(
+                "INSERT INTO task_decisions(decision_id, task_id, attempt_id, actor, question,"
+                " options_json, answer, scope, expires_at, decided_seq, superseded_by)"
+                " VALUES (?, ?, ?, ?, ?, '[]', ?, 'approved_release', NULL, ?, NULL)",
+                (
+                    decision_id,
+                    task_id,
+                    None if attempt is None else str(attempt),
+                    decided_by,
+                    "人确认这一版可以合入（默认通过，这条是留痕）",
+                    text or "confirmed",
+                    decided_seq,
+                ),
+            )
+            return {
+                "task_id": task_id,
+                "decision_id": decision_id,
+                "decided_seq": decided_seq,
+                "already": False,
+                "status": status.value,
+            }
+
     def reopen_for_changes(
         self, *, task_id: str, decided_by: str, reason: str
     ) -> dict[str, object]:

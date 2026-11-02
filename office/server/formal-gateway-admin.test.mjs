@@ -651,3 +651,57 @@ test('a reopen request cannot smuggle in other fields', async () => {
   assert.equal(refused.payload.error, 'invalid_task_action');
   assert.equal(calls, 0);
 });
+// ---------------------------------------------------------------------------
+// 确认放行：默认通过之外的那一条留痕（不改状态）
+//
+// 网关只需要做两件事：只让 task_id / note 进来、身份用 operator。
+// "只有 approved 能确认"由平台判，这里不复制。
+// ---------------------------------------------------------------------------
+
+test('confirming a release posts as the human and keeps the note', async () => {
+  const calls = [];
+  globalThis.fetch = responder({
+    '/api/v1/human/confirm_release': (_bearer, json, init) => {
+      calls.push(JSON.parse(String(init.body)));
+      return json(200, { task_id: 'T1', decision_id: 'dec-1', already: false, status: 'approved' });
+    },
+  });
+  const gateway = gatewayFor();
+
+  const sent = await exchange(gateway, '/human/confirm_release', {
+    task_id: 'T1',
+    note: '我核过验收标准了',
+  });
+  assert.equal(sent.status, 200);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].task_id, 'T1');
+  assert.equal(calls[0].note, '我核过验收标准了');
+  assert.equal(calls[0].decided_by, 'office-operator', '记的是人，不是管理员窗口');
+  // 留痕动作不该带任何状态字段过去：它是记录，不是推进。
+  assert.equal(Object.prototype.hasOwnProperty.call(calls[0], 'answer'), false);
+
+  const withoutNote = await exchange(gateway, '/human/confirm_release', { task_id: 'T1' });
+  assert.equal(withoutNote.status, 200, 'note 是可选的');
+});
+
+test('a confirm request cannot smuggle other fields or a non-string note', async () => {
+  let calls = 0;
+  globalThis.fetch = responder({
+    '/api/v1/human/confirm_release': (_bearer, json) => {
+      calls += 1;
+      return json(200, {});
+    },
+  });
+  const gateway = gatewayFor();
+
+  const smuggled = await exchange(gateway, '/human/confirm_release', {
+    task_id: 'T1',
+    reason: '顺手塞一个',
+  });
+  assert.equal(smuggled.status, 400);
+  assert.equal(smuggled.payload.error, 'invalid_task_action');
+
+  const badNote = await exchange(gateway, '/human/confirm_release', { task_id: 'T1', note: 5 });
+  assert.equal(badNote.status, 400);
+  assert.equal(calls, 0);
+});

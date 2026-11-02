@@ -1,12 +1,12 @@
-// 「默认通过，只在不同意时打回」：approved 的任务详情页给人一次否决权。
+// 「默认通过 + 留痕」：approved 的任务详情页给人一次点头（留痕）和一次否决（打回）。
 //
 // 断言：
-//   1. approved 的任务上写着"默认放行"，并且**只有「打回返工」这一颗按钮**（没有"同意"）；
-//   2. 没写原因就点 → 不发请求，把原因说在块里；
-//   3. 写了原因：第一次点只是确认，第二次才发；
-//   4. 发出去的是 `POST /human/reopen_for_changes`，带 task_id 与理由；
-//   5. 打回之后任务不再 approved，那块就消失（不留在界面上当摆设）；
-//   6. 非 approved 的任务根本没有这一块。
+//   1. 这块写着"默认放行，不需要你再点一次同意" —— 门槛没变高；
+//   2. 两颗按钮各管一头：**我确认，可以合入**（只留痕、不改状态）/ **打回返工**（改状态）；
+//   3. 确认：一次点击就发 `POST /human/confirm_release`，带 task_id 与备注；
+//   4. 确认之后那块变成"已确认"，确认按钮消失（否则人会以为自己没点上、又点一遍）；
+//   5. 打回：没写原因不发请求；第一次点只是确认，第二次才发；打回后那块整体消失；
+//   6. 已经打过回的（非 approved）没有这一块。
 //
 // 只读脚本：`/api/**` 全部拦截，不往正式平台写任何东西。
 import { chromium } from 'playwright';
@@ -20,8 +20,10 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const errors = [];
+  const confirms = [];
   const sends = [];
   let status = 'approved';
+  let decisions = [];
 
   page.on('pageerror', (error) => errors.push(error.message));
 
@@ -66,10 +68,25 @@ try {
         task: { task_id: TASK, title: '写一份变更说明', status, spec: {} },
         diff: { files: [] },
         events: { events: [] },
+        decisions: { decisions },
       });
     }
     if (url.pathname === '/api/formal/allocation/assignment') {
       return json({ task_id: TASK, assignment: null, round_id: null, revocable: false });
+    }
+    if (url.pathname === '/api/formal/human/confirm_release') {
+      const body = route.request().postDataJSON();
+      confirms.push(body);
+      decisions = [
+        {
+          decision_id: 'dec-confirm',
+          actor: 'office-operator',
+          answer: body.note || 'confirmed',
+          scope: 'approved_release',
+          decided_seq: 1,
+        },
+      ];
+      return json({ task_id: TASK, decision_id: 'dec-confirm', already: false, status });
     }
     if (url.pathname === '/api/formal/human/reopen_for_changes') {
       sends.push(route.request().postDataJSON());
@@ -97,45 +114,66 @@ try {
     localStorage.setItem('agent-office.active-project.v1', project.id);
   });
 
+  const openTask = async () => {
+    const back = page.locator('#aoWorkspace [data-act="back-tasks"]');
+    if (await back.count()) await back.first().click();
+    await page.locator('#aoWorkspace .flat-task').first().click();
+    await page.locator('#aoWorkspace .flat-approved').first().waitFor({ state: 'visible' });
+  };
+
   await page.goto(BASE);
   await page.waitForSelector('.project-card-open', { timeout: 20000 });
   await page.locator('.project-card-open').first().click();
   await page.waitForSelector('#aoWorkspace .flat-head', { timeout: 20000 });
-  await page.locator('#aoWorkspace .flat-task').first().click();
+  await openTask();
 
   const block = page.locator('#aoWorkspace .flat-approved');
-  await block.waitFor({ state: 'visible', timeout: 20000 });
   const text = await block.innerText();
-  assert.match(text, /默认放行/, '要说清默认通过，不用再点同意');
-  assert.match(text, /打回/, '要有打回的入口');
-  // 只有一颗按钮：默认通过，所以没有"同意"按钮可点。
-  const buttons = await block.locator('button').count();
-  assert.equal(buttons, 1, `这块只该有一颗按钮，实际 ${buttons} 颗`);
-  assert.doesNotMatch(text, /点击?同意|确认通过/, '默认通过不该还要人点一次同意');
+  assert.match(text, /默认放行/, '要说清默认通过');
+  assert.match(text, /不需要你再点一次「同意」/, '门槛没变高：不点也能过');
+  // 两颗按钮各管一头：确认（留痕，不改状态）/ 打回（改状态）
+  assert.equal(await block.locator('[data-act="confirm-release"]').count(), 1, '有「我确认」');
+  assert.equal(await block.locator('[data-act="return-for-changes"]').count(), 1, '有「打回返工」');
 
   if (process.env.OFFICE_SHOT) {
     await page.screenshot({ path: process.env.OFFICE_SHOT, fullPage: false });
   }
 
-  const button = block.locator('[data-act="return-for-changes"]');
-  await button.click();
+  // 3/4. 确认：一次点击就发，带备注；之后那块说"已确认"，按钮消失
+  await block.locator('[data-approved-note]').fill('验收标准第 1~3 条我核过了');
+  await block.locator('[data-act="confirm-release"]').click();
+  await page.waitForTimeout(600);
+  assert.equal(confirms.length, 1, '确认要发出去');
+  assert.equal(confirms[0].task_id, TASK);
+  assert.equal(confirms[0].note, '验收标准第 1~3 条我核过了');
+  await page.waitForFunction(
+    () => !document.querySelector('#aoWorkspace .flat-approved [data-act="confirm-release"]'),
+    undefined,
+    { timeout: 10000 },
+  );
+  assert.match(await block.innerText(), /已确认这一版可以合入/, '确认过之后要看得见痕迹');
+  // 确认不改状态：任务还在 approved，打回仍然可用
+  assert.equal(await block.locator('[data-act="return-for-changes"]').count(), 1, '确认之后仍然可以打回');
+
+  // 5. 打回：没原因不发、两步确认、发完这块消失
+  const back = block.locator('[data-act="return-for-changes"]');
+  await back.click();
   await page.waitForTimeout(200);
   assert.equal(sends.length, 0, '没写原因不该发请求');
   assert.match(await block.locator('[data-approved-error]').innerText(), /原因/, '要说清缺原因');
 
   await block.locator('[data-approved-reason]').fill('第 3 条验收标准没对上');
-  await button.click();
+  await back.click();
   await page.waitForTimeout(200);
   assert.equal(sends.length, 0, '第一次点只是确认');
-  assert.match(await button.innerText(), /确认打回/, '按钮要变成确认');
+  assert.match(await back.innerText(), /确认打回/, '按钮要变成确认');
 
-  await button.click();
+  await back.click();
   await page.waitForTimeout(600);
   assert.equal(sends.length, 1, '第二次点才真的打回');
-  assert.equal(sends[0].task_id, TASK);
   assert.equal(sends[0].reason, '第 3 条验收标准没对上');
 
-  // 打回之后不再是 approved，这块应当消失
+  // 6. 打回之后不再是 approved，那块整体消失
   await page.waitForFunction(
     () => !document.querySelector('#aoWorkspace .flat-approved'),
     undefined,
@@ -143,7 +181,7 @@ try {
   );
 
   assert.deepEqual(errors, [], '页面不该报错');
-  console.log(JSON.stringify({ checks: 12, result: 'PASS' }));
+  console.log(JSON.stringify({ checks: 16, result: 'PASS' }));
 } finally {
   await browser.close();
 }

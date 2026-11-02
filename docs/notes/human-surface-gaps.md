@@ -1,6 +1,6 @@
 # 人面动作对账：界面上还剩哪些「该人做、但没人做」的事
 
-状态：2026-11-02 对账完成；两个真缺口都已闭环（§3 撤销分配、§4 人审打回）。作者：助理 agent。
+状态：2026-11-03 对账完成；两个真缺口都已闭环（§3 撤销分配、§4 人审：默认通过 + 确认留痕 + 打回）。作者：助理 agent。
 
 ## 0. 为什么写这个
 
@@ -48,6 +48,7 @@ Select-String -Path office\src\*.js -Pattern 'review/claim|/revoke|same_provider
 | 分配开轮 / 冻结（`allocation:open|close`） | 有 | 只读列表 | 只读 | **不做**：同上，轮次由管理员 worker 开（`pending_allocation`） |
 | 分配裁决 / 暂缓（`allocation:decide`） | 有 | 有 | 有 | 已上（人也能改管理员给的结果） |
 | **撤销一份尚未 Claim 的分配**（`assignment:revoke`） | 有（`POST /revoke`） | 有（`/allocation/revoke`、`/allocation/assignment`） | 有（任务详情页「这条活定给了谁」） | **已做**，见 §3 |
+| **人审：确认放行（留痕，不改状态）**（`task:confirm_release`） | 有（`POST /human/confirm_release`） | 有（`/human/confirm_release`、`/tasks/{id}/decisions`） | 有（approved 任务详情页「我确认，可以合入」） | **已做**，见 §4 |
 | **人审：对「已通过」的打回**（`task:reopen` → `reopen_for_changes`） | 有（`POST /human/reopen_for_changes`） | 有（`/human/reopen_for_changes`） | 有（approved 任务详情页「打回返工」） | **已做**，见 §4 |
 | 人**主动**认领审阅（`review:human_claim`、`review:human_submit`） | 有 | 有（`as:1` 即人） | 无 | **不需要做**：口径是"管理员先审、人后审"，人的位置是打回，不是在 `awaiting_review` 抢审阅 |
 | **同厂商审阅豁免**（`review:same_provider`） | 有（`POST /human/review_same_provider`） | 无 | 只显示结果 | 仍只在 CLI：它服务于"让同厂商的 **harness** 来审"，与人审无关 |
@@ -117,8 +118,21 @@ approved | reopen_for_changes | human.adjudicate 退回或检测到 approved 后
    半年后有人问"这版都过了为什么又返工"，答案在事件流里。
 2. 网关 `/human/reopen_for_changes`：理由必填（空理由 `400 human_reason_required`，
    且**不发**请求），身份用 operator；只让 `task_id` / `reason` 两个字段进来。
-3. 界面：`approved` 的任务详情页多一块「管理员审过了，这一版默认放行」，写明**不必再点同意**，
-   只有一颗「打回返工」按钮 + 理由输入 + 两步确认；打回成功后刷新任务表，那块随之消失。
+3. 界面：`approved` 的任务详情页多一块「管理员审过了，这一版默认放行」，写明**不必再点同意**；
+   「打回返工」一路是理由输入 + 两步确认，打回成功后刷新任务表，那块随之消失。
+
+**2026-11-03 补：默认通过之外，还要留一条「人确认过」的痕迹。** 因为"默认通过"意味着
+"不打回就是同意"，事后分不清"人看过并点头"和"人根本没看"。补的是一条**不改状态**的动作：
+
+- `task:confirm_release`（**只给人**）：`POST /human/confirm_release`，写一条 `task_decisions`
+  （`scope='approved_release'`，`answer` 存可选的一句依据），**任务状态、epoch、owner 一律不动**；
+  与 `task:attempt_budget_override` 同一个套路 —— 决定行就是审计线索，不去扩 R10 §37.7 的封闭事件集。
+- 幂等：同一任务**同一尝试**只留一条，重复点返回已有那条，不刷时间。
+- 读面：`GET /tasks/{id}/decisions`（只读，没有记录回空数组），网关把它并进任务详情，
+  界面据此把这块变成「某某已确认这一版可以合入：<依据>」，确认按钮随之消失 ——
+  否则人下次打开还是看到同一颗按钮，会以为自己没点上。
+- 界面这一块因此是两颗按钮各管一头：**我确认，可以合入**（留痕、不改状态，一次点击即可）/
+  **打回返工**（改状态，两步确认、理由必填）。
 
 **为什么不需要人审租约**：租约是给 harness 认领制用的（认领 20 分钟、过期由 `sweep_review_lease`
 标 `expired`、任务时钟继续走）。人这个动作不认领、即时完成、只有一个 operator，不存在"谁占着"。

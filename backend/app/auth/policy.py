@@ -107,6 +107,14 @@ POLICY: dict[str, frozenset[str]] = {
     # 单写者没有被拆掉，闸门照旧逐条判（回执/审批/分支头/集成健康/密钥扫描）。
     # 二次确认就是**手动敲一遍要合的 commit**：一个按钮点下去不算确认。
     "merge:confirm": frozenset({HUMAN}),
+    # 人给一版**已经过审**的活留一条「我看过并点头」的痕迹。
+    #
+    # 口径是"默认通过"（approved 之后合入照常走），所以"人真的确认过"这件事在事件流里本来
+    # 没有落点 —— 不打回就是同意，事后分不清"人看过"和"人没看"。这条边只写一条
+    # `task_decisions`（scope='approved_release'）、**不动任务状态**，与
+    # `task:attempt_budget_override` 同一个套路：决定行就是审计线索。
+    # 只给人：机器替人点头等于没有这条痕迹。
+    "task:confirm_release": frozenset({HUMAN}),
     # 传阅（方案互审）。`circulation:start` 是 §39 的创建边（管理员发布草案+名单+轮数）。
     "circulation:start": frozenset({HUMAN}),
     "circulation:close": frozenset({HUMAN}),

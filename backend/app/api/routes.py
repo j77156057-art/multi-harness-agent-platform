@@ -1301,6 +1301,26 @@ def human_reopen_for_changes(
     )
 
 
+@human.post("/confirm_release")
+def human_confirm_release(
+    body: schemas.HumanConfirmReleaseRequest,
+    service: HumanDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:confirm_release"),
+) -> dict[str, Any]:
+    """人给一版已通过的活留一条「我看过并点头」的痕迹 —— **不动状态**，默认通过照旧。
+
+    为什么单开一条而不是复用「打回」：打回是推翻决定，这条是**确认决定**；两者都只在
+    `approved` 上发生，但一个会改状态、一个不会。写进 `task_decisions`
+    （scope `approved_release`），与 `attempt_budget_override` 同一个套路。
+    """
+    bind_declared(
+        principal, body.decided_by, key="task:confirm_release", database=database, request=request
+    )
+    return service.confirm_release(task_id=body.task_id, decided_by=body.decided_by, note=body.note)
+
+
 @human.post("/attempt_budget_override")
 def human_attempt_budget_override(
     body: schemas.HumanAttemptBudgetOverrideRequest,
@@ -2249,6 +2269,34 @@ def list_groups(
 @read.get("/tasks/{task_id}")
 def get_task(task_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.get_task(task_id)
+
+
+@read.get("/tasks/{task_id}/decisions")
+def task_decisions(task_id: str, database: DatabaseDep) -> dict[str, Any]:
+    """人在这一版上留过的决定（目前只有「确认放行」：`scope='approved_release'`）。
+
+    与 `/tasks/{id}/reviews` 同一种形状：只读、没有记录就回空数组、不猜。为什么要读面：
+    「人到底看过没有」这条痕迹要能被界面读回来显示 —— 写进去却看不见，等于没写。
+    """
+    rows = database.read(
+        "SELECT decision_id, task_id, attempt_id, actor, question, answer, scope, decided_seq"
+        "  FROM task_decisions WHERE task_id = ? ORDER BY decided_seq DESC, decision_id DESC",
+        (task_id,),
+    )
+    return {
+        "decisions": [
+            {
+                "decision_id": str(row["decision_id"]),
+                "attempt_id": row["attempt_id"],
+                "actor": str(row["actor"]),
+                "question": str(row["question"]),
+                "answer": row["answer"],
+                "scope": str(row["scope"]),
+                "decided_seq": row["decided_seq"],
+            }
+            for row in rows
+        ]
+    }
 
 
 @read.get("/tasks/{task_id}/reviews")
