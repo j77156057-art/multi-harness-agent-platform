@@ -478,3 +478,124 @@ test('a broken administrator credential is reported without taking /status down'
   assert.equal(payload.admin.identity, null);
   assert.equal(payload.admin.error, 'formal_admin_authentication_required');
 });
+// ---------------------------------------------------------------------------
+// 撤销一份还没被接走的分配（§39 硬规则 7）
+//
+// 这一组钉的是**网关自己的判断**：谁能撤、什么时候不该撤、写之前现读修订号。
+// 平台那边的规则（invited/accepted 才能撤、claimed_at 非空就拒）不在这里复制，
+// 但网关不该把明显撤不掉的东西也发给平台 —— 那会让人看到一段平台内部错误。
+// ---------------------------------------------------------------------------
+
+const roundsWith = (assignment) => ({
+  rounds: [
+    {
+      round_id: 'alloc-1',
+      group_id: 'g',
+      state: 'decided',
+      tasks: [{ task_id: 'T1' }],
+      applications: [],
+      assignments: [
+        { allocation_id: 'al-1', task_id: 'T1', harness_id: 'qoder', revision: 3, ...assignment },
+      ],
+    },
+  ],
+});
+
+test('an unclaimed assignment is revocable, and the gateway rereads its revision', async () => {
+  const writes = [];
+  globalThis.fetch = responder({
+    '/api/v1/allocation/rounds': (_bearer, json) =>
+      json(200, roundsWith({ state: 'accepted', claimed_at: null })),
+    '/api/v1/revoke': (bearer, json, init) => {
+      // 界面上读到的可能是几十秒前的快照；这里必须是**现读的**修订号（3），
+      // 不是浏览器传来的旧值。撤一份授权是危险动作，先看现状再写。
+      writes.push(JSON.parse(String(init.body)));
+      return json(200, { allocation_id: 'al-1', state: 'revoked' });
+    },
+  });
+  const gateway = gatewayFor();
+
+  const read = await get(gateway, '/allocation/assignment?task_id=T1');
+  assert.equal(read.status, 200);
+  assert.equal(read.payload.revocable, true);
+  assert.equal(read.payload.assignment.allocation_id, 'al-1');
+  assert.equal(read.payload.round_id, 'alloc-1');
+
+  const revoked = await exchange(gateway, '/allocation/revoke', {
+    task_id: 'T1',
+    reason: '定错人了，改给另一个窗口',
+    expected_revision: 1,
+  });
+  assert.equal(revoked.status, 200);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].allocation_id, 'al-1');
+  assert.equal(writes[0].expected_revision, 3, '用的是现读的修订号，不是界面传来的旧值');
+  assert.equal(writes[0].revoked_by, 'office-operator');
+  assert.equal(writes[0].reason, '定错人了，改给另一个窗口');
+});
+
+test('an assignment somebody already claimed is not revocable and nothing is written', async () => {
+  let writes = 0;
+  globalThis.fetch = responder({
+    '/api/v1/allocation/rounds': (_bearer, json) =>
+      json(200, roundsWith({ state: 'accepted', claimed_at: '2026-11-02T10:00:00+00:00' })),
+    '/api/v1/revoke': (_bearer, json) => {
+      writes += 1;
+      return json(200, {});
+    },
+  });
+  const gateway = gatewayFor();
+
+  const read = await get(gateway, '/allocation/assignment?task_id=T1');
+  assert.equal(read.payload.revocable, false, '已经开工的不能撤');
+
+  const refused = await exchange(gateway, '/allocation/revoke', { task_id: 'T1', reason: '想换人' });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.payload.error, 'assignment_not_revocable');
+  assert.equal(writes, 0, '撤不掉的就别写');
+});
+
+test('revoking without a reason is refused before it reaches the platform', async () => {
+  let writes = 0;
+  globalThis.fetch = responder({
+    '/api/v1/allocation/rounds': (_bearer, json) =>
+      json(200, roundsWith({ state: 'accepted', claimed_at: null })),
+    '/api/v1/revoke': (_bearer, json) => {
+      writes += 1;
+      return json(200, {});
+    },
+  });
+  const gateway = gatewayFor();
+
+  const refused = await exchange(gateway, '/allocation/revoke', { task_id: 'T1', reason: '   ' });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.payload.error, 'allocation_reason_required');
+  assert.equal(writes, 0);
+});
+
+test('a task with no assignment says so instead of inventing one', async () => {
+  globalThis.fetch = responder({
+    '/api/v1/allocation/rounds': (_bearer, json) =>
+      json(200, {
+        rounds: [
+          {
+            round_id: 'alloc-1',
+            group_id: 'g',
+            state: 'decided',
+            tasks: [{ task_id: 'T2' }],
+            assignments: [],
+          },
+        ],
+      }),
+  });
+  const gateway = gatewayFor();
+
+  const read = await get(gateway, '/allocation/assignment?task_id=T1');
+  assert.equal(read.status, 200);
+  assert.equal(read.payload.assignment, null);
+  assert.equal(read.payload.revocable, false);
+
+  const refused = await exchange(gateway, '/allocation/revoke', { task_id: 'T1', reason: '撤掉' });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.payload.error, 'assignment_not_found');
+});

@@ -55,6 +55,15 @@ const VERDICT_LABEL = {
   changes_requested: '需要返修',
   rejected: '不通过',
 };
+// 分配（谁来做这条活）的状态说法。机器的词是 invited/accepted/...，
+// 人要看的是"还没答复 / 已经答应 / 已经开工"。
+const CLAIM_STATE_LABEL = {
+  invited: '已邀请，还没答复',
+  accepted: '已经答应',
+  declined: '已谢绝',
+  revoked: '已撤销',
+  expired: '已过期',
+};
 // 「待领取」= 平台已经**放出来**、等窗口来接的活。
 //
 // `draft` 不在里面：草案还挂在方案上（方案没被人批准之前，谁都领不动它）。
@@ -317,6 +326,8 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     page: restoredView.page || 1,
     pageSize: restoredView.pageSize || 20,
     failureOutput: null,
+    // 当前这条活定给了谁（`/allocation/assignment` 的读面）。null = 还没读到。
+    assignment: null,
     allEvents: false,
     events: [],
     chatExpanded: false,
@@ -3045,9 +3056,50 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  /**
+   * 人撤回一份**还没被接走**的分配。
+   *
+   * 两步：先点一次把按钮换成「确认撤销」，再点才发。不是为了多点一下，而是这件事
+   * 之后得重来一遍（撤完这条活要重新裁决），而且理由必填 —— 半年后有人问"这活
+   * 当初怎么又换人了"，得答得出来。
+   *
+   * 已经开工的（`claimed_at` 非空）这里根本不显示按钮：撤一份正在跑的活要换用取消/释放，
+   * 否则工作区里的东西就成了孤儿。这条规则平台那边也判一遍，界面只是不引诱人点。
+   */
+  async function revokeAssignment(button) {
+    const block = button.closest('.flat-assignment');
+    if (!block) return;
+    const taskId = String(button.dataset.task || '');
+    const reasonInput = block.querySelector('[data-assignment-reason]');
+    const reason = reasonInput ? String(reasonInput.value || '').trim() : '';
+    const note = block.querySelector('[data-assignment-error]');
+    if (!reason) {
+      if (note) note.textContent = '撤销要写一句理由：撤完之后这条活得重新裁决，理由要留着。';
+      if (reasonInput) reasonInput.focus();
+      return;
+    }
+    if (button.dataset.confirm !== '1') {
+      button.dataset.confirm = '1';
+      button.textContent = '确认撤销（撤完要重新裁决）';
+      if (note) note.textContent = '再点一下才会真的撤销。';
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api('/allocation/revoke', { task_id: taskId, reason });
+      // 撤完把这条活的现状重新读一遍：分配块要么变成"已撤销"，要么整块消失。
+      await select(taskId);
+    } catch (error) {
+      // 回灌到这一块自己身上；按钮退回未确认状态，别让人以为点过就撤了。
+      if (note) note.textContent = `没能撤销：${String((error && error.message) || error)}`;
+      button.dataset.confirm = '0';
+      button.textContent = '撤销这份授权';
+      button.disabled = false;
+    }
+  }
+
   /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
-  async function applyTroubleModel(button) {
-    const harnessId = String(button.dataset.harness || '');
+  async function applyTroubleModel(button) {    const harnessId = String(button.dataset.harness || '');
     const block = button.closest('.flat-alert') || button.closest('.flat-trouble');
     const select = block ? block.querySelector('[data-trouble-select]') : null;
     const modelId = select ? String(select.value || '') : '';
@@ -4180,6 +4232,47 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     </section>`;
   }
 
+  /**
+   * 这条活定给了谁 —— 以及**能不能撤回**。
+   *
+   * 为什么要有这一块：裁决是单向的（一轮一任务一条裁决），定错人、或者对方一直不接，
+   * 以前界面上没有任何退路，只能去 CLI 调 `/revoke`。后端那条边早就有了（`assignment:revoke`，
+   * 只覆盖尚未 Claim 的分配），缺的是"看得见 + 能点"。
+   *
+   * 为什么撤销只在这里、不在「需要你处理」那一列：撤一份授权是**纠错**，不是待办 ——
+   * 待办会一直在那儿，而"这条活当初定给谁"只有点开这条活才说得清。
+   */
+  function assignmentBlock(task) {
+    const data = state.assignment;
+    if (!data || !data.assignment) return '';
+    const item = data.assignment;
+    const who = harnessName(item.harness_id) || item.harness_id || '某个窗口';
+    const claimed = Boolean(item.claimed_at);
+    const stateLabel = CLAIM_STATE_LABEL[String(item.state || '')] || String(item.state || '');
+    const revocable = Boolean(data.revocable);
+    const verdict = claimed
+      ? '这条活已经开工了：撤销只覆盖**还没被接走**的分配。要收口请用上面的取消或释放。'
+      : revocable
+        ? '撤销只是收回这份授权：不动产出、不删任务，撤完这条活要重新裁决。'
+        : '这份分配现在撤不了（状态已经变了）。刷新一下再看。';
+    return `<section class="flat-spec flat-assignment" data-assignment="${escape(item.allocation_id || '')}">
+      <h3>这条活定给了谁</h3>
+      <p>${escape(who)} · ${escape(stateLabel)}${claimed ? ' · 已开工' : ' · 还没开工'}</p>
+      <p class="flat-note">${verdict}</p>
+      ${
+        revocable && !claimed
+          ? `<label class="flat-alloc-reason">撤销理由（必填；事后要能回答"当时为什么撤"）
+               <input type="text" data-assignment-reason maxlength="200" placeholder="例：定错人了，改给另一个窗口">
+             </label>
+             <div class="flat-alert-pick">
+               <button type="button" data-act="alloc-revoke" data-task="${escape(task.task_id)}" data-confirm="0">撤销这份授权</button>
+             </div>`
+          : ''
+      }
+      <p class="flat-trouble-error" data-assignment-error></p>
+    </section>`;
+  }
+
   function detail() {
     const panel = document.createElement('section');
     panel.className = 'flat-detail';
@@ -4220,6 +4313,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <div class="flat-detail-actions">${humanActions(task)}</div>
       </div>
       ${lineageBlock(task)}
+      ${assignmentBlock(task)}
       ${spec.goal ? `<section class="flat-spec"><h3>任务目标</h3><p>${escape(spec.goal)}</p></section>` : ''}
       ${handoffBlock(spec)}
       ${acceptance ? `<section class="flat-spec"><h3>验收标准</h3><p>${escape(acceptance)}</p></section>` : ''}
@@ -6035,14 +6129,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     state.detail = null;
     state.output = null;
     state.failureOutput = null;
+    // 这条活定给了谁：**每次看一条就现读一次**，不从全局的分配轮快照里翻 ——
+    // 那个快照只读"开着的轮"（`state=open`），裁决过之后轮就 decided 了，
+    // 恰恰在最想撤销的时候一条都翻不到。
+    state.assignment = null;
     render();
     try {
-      const [detailData, outputData] = await Promise.all([
+      const [detailData, outputData, assignmentData] = await Promise.all([
         api(`/tasks/${encodeURIComponent(taskId)}`),
         api(`/tasks/${encodeURIComponent(taskId)}/output`).catch(() => null),
+        // 读不到就当"不知道"，不把失败说成"没人被分到"。
+        api(`/allocation/assignment?task_id=${encodeURIComponent(taskId)}`).catch(() => null),
       ]);
       state.detail = detailData;
       state.output = outputData;
+      state.assignment = assignmentData;
       // 「本次失败的真实日志」要看的是**失败那一轮**，不是正在重跑的那一轮。
       const failedAttempt = failedAttemptId(detailData);
       if (failedAttempt && outputData?.output?.attempt_id !== failedAttempt) {
@@ -6549,6 +6650,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'alloc-defer') {
       void decideAllocation(button, { defer: true });
+      return;
+    }
+    if (button.dataset.act === 'alloc-revoke') {
+      void revokeAssignment(button);
       return;
     }
     if (button.dataset.act === 'close-admin-chat') {

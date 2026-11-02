@@ -12,6 +12,25 @@ import { parseTranscript } from '../src/cli-transcript.js';
 const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
+// 分配：一条任务在轮次里被定给了谁。轮次读面的形状是
+// `{rounds:[{round_id,group_id,state,tasks[],applications[],assignments[]}]}`，
+// assignments 上带 `allocation_id / task_id / harness_id / state / revision / claimed_at`。
+const findAssignment=(rounds,taskId)=>{
+  for(const round of Array.isArray(rounds)?rounds:[]){
+    for(const item of Array.isArray(round?.assignments)?round.assignments:[]){
+      if(String(item?.task_id||'')===String(taskId))return {round,assignment:item};
+    }
+  }
+  return null;
+};
+// 只有「邀请出去/已接受，但还没人拿它开工」的分配撤得掉（§39 硬规则 7）。
+// `claimed_at` 一非空就说明工作树已经开出来了 —— 那时该走的是取消/释放，不是撤销。
+const isRevocable=(assignment)=>{
+  if(!assignment)return false;
+  const state=String(assignment.state||'');
+  if(state!=='invited'&&state!=='accepted')return false;
+  return assignment.claimed_at===null||assignment.claimed_at===undefined||assignment.claimed_at==='';
+};
 const BASE_HARNESSES=new Set(['codex','claude-code','opencode','qoder','codebuddy','platform']);
 // 声明出来的基座（`adapters/cli.json`）：平台知道它们（`known_bases()` 读声明表），
 // 办公室本地照着它登记 —— 「加一个新 harness 不用改代码」在本地这一侧也成立。
@@ -349,7 +368,7 @@ export function createFormalGateway(config={}){
    const outputRoute=/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route);
    // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
    // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
-   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates','/projects'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
+   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates','/allocation/assignment','/projects'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
    if(outputRoute&&url.search){
      for(const key of url.searchParams.keys())if(key!=='attempt_id')throw fail(400,'unexpected_query');
      const attemptParam=url.searchParams.get('attempt_id')||'';
@@ -866,6 +885,56 @@ export function createFormalGateway(config={}){
           throw fail(400,'invalid_allocation_fields');
         if(route==='/allocation/decision/defer'&&!reason.trim())throw fail(400,'allocation_reason_required');
         const answer=await callRaw(target,'POST',payload);
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='GET'&&route==='/allocation/assignment'){
+        // 这条活现在定给了谁 —— 裁决是单向门的那一半，这里补上"看一眼现状"的那一半。
+        //
+        // 为什么不让界面自己从 `/allocation/rounds` 里翻：那个读面默认只看开着的轮
+        // （`state=open`），而**裁决过以后轮就是 decided**，界面照 `state=open` 取会一条都
+        // 找不到 —— 恰恰是最需要撤销的时候找不到。所以这里按 task 现查，并顺手算出
+        // "能不能撤"：只有 invited / accepted **且还没被 Claim** 的才撤得掉（§39 硬规则 7）。
+        const taskId=String(url.searchParams.get('task_id')||'').trim();
+        if(!ident(taskId))throw fail(400,'invalid_allocation_query');
+        const task=await call('/tasks/'+encodeURIComponent(taskId));
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        const rounds=await call('/allocation/rounds?group_id='+encodeURIComponent(groupId));
+        const found=findAssignment(rounds.rounds||[],taskId);
+        json(res,200,{
+          task_id:taskId,
+          assignment:found?found.assignment:null,
+          round_id:found?found.round.round_id:null,
+          revocable:Boolean(found&&isRevocable(found.assignment)),
+        });
+        return true;
+      }
+      if(req.method==='POST'&&route==='/allocation/revoke'){
+        // **人**撤回一份还没被接走的分配：裁决给错了人、或者那人一直没接，都得有一条退路。
+        //
+        // 这里不收 `expected_revision`：那是乐观锁的入参，界面读到的轮次快照可能是几十秒前的，
+        // 拿旧值去撞只会让人看到"修订号不对"这种看不懂的话。撤销是**危险动作**，正确的做法
+        // 是写之前现读一次现状，用当下的修订号提交；真正的闸门（已 Claim 不许撤、轮次状态）
+        // 仍在平台那边判，这里不复制它的规则。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.task_id!=='string'||!ident(body.task_id))
+          throw fail(400,'invalid_allocation_fields');
+        const reason=String(body.reason||'').trim().slice(0,2000);
+        // 理由必填：撤一份授权之后总得有人能回答"当时为什么撤"。平台那边也要求非空，
+        // 但在这里先挡一次，好让界面拿到一句人话而不是 400 里的字段名。
+        if(!reason)throw fail(400,'allocation_reason_required');
+        const task=await call('/tasks/'+encodeURIComponent(body.task_id));
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        const rounds=await call('/allocation/rounds?group_id='+encodeURIComponent(groupId));
+        const found=findAssignment(rounds.rounds||[],body.task_id);
+        if(!found)throw fail(409,'assignment_not_found');
+        if(!isRevocable(found.assignment))throw fail(409,'assignment_not_revocable');
+        const answer=await callRaw('/revoke','POST',{
+          allocation_id:found.assignment.allocation_id,
+          expected_revision:Number(found.assignment.revision||0),
+          revoked_by:operator,
+          reason,
+        });
         json(res,answer.status,answer.data);return true;
       }
       if(req.method==='POST'&&route==='/task/budget_override'){

@@ -1,6 +1,6 @@
 # 人面动作对账：界面上还剩哪些「该人做、但没人做」的事
 
-状态：2026-11-02 对账完成，两个真缺口已定位（一个建议做、一个建议先不做）。作者：助理 agent。
+状态：2026-11-02 对账完成；两个真缺口已定位，其中一个已做完（§3）。作者：助理 agent。
 
 ## 0. 为什么写这个
 
@@ -47,14 +47,14 @@ Select-String -Path office\src\*.js -Pattern 'review/claim|/revoke|same_provider
 | 传阅开轮/关闭/修订/完成（`circulation:*`） | 有 | 无 | 无 | **不做**：R10 §39 与 `OFFICE-UI-01` 把它划给管理员面，管理员 worker 真的在跑这几步（`admin/worker.py` 的 `start_circulation`） |
 | 分配开轮 / 冻结（`allocation:open|close`） | 有 | 只读列表 | 只读 | **不做**：同上，轮次由管理员 worker 开（`pending_allocation`） |
 | 分配裁决 / 暂缓（`allocation:decide`） | 有 | 有 | 有 | 已上（人也能改管理员给的结果） |
-| **撤销一份尚未 Claim 的分配**（`assignment:revoke`） | 有（`POST /revoke`） | **无** | **无** | **建议做**，见 §3 |
+| **撤销一份尚未 Claim 的分配**（`assignment:revoke`） | 有（`POST /revoke`） | 有（`/allocation/revoke`、`/allocation/assignment`） | 有（任务详情页「这条活定给了谁」） | **已做**，见 §3 |
 | **人审阅**（`review:human_claim`、`review:human_submit`） | 有 | **有**（`/review/claim`、`/review/submit`，`as:1` 即人） | **无** | **建议先不做**，见 §4 |
 | **同厂商审阅豁免**（`review:same_provider`） | 有（`POST /human/review_same_provider`） | **无** | 只显示结果 | 与人审阅同一条线，一起判 |
 
 另：`pool:user_keys`、`relay:letter`、`wording:read` 不在 `api/routes.py` 里（各自模块有自己的
 路由文件），界面上都已经有入口，不在这张表里重复。
 
-## 3. 建议做：撤销一份还没被接走的分配
+## 3. 已做：撤销一份还没被接走的分配
 
 **缺口**：裁决之后，`allocations` 里那一行就定死了（`UNIQUE(round_id, task_id)` 一轮一任务一条
 裁决）。要是裁决给错了人、或者那人一直没接，**界面上没有任何回退手段** —— 只能去 CLI 或直接
@@ -64,13 +64,33 @@ Select-String -Path office\src\*.js -Pattern 'review/claim|/revoke|same_provider
 **为什么值得做**：它是"裁决"这条路上唯一的**纠错**动作。人点了裁决之后没有退路，等于把一个
 需要人判断的动作做成单向门 —— 这正是"门槛 + 让人自愈"要避免的形状。
 
-**落法**（最小闭环）：
+**2026-11-02 已实现**（三处，都在 `office/`）：
 
-- 网关加一条 `POST /api/formal/allocation/revoke`，只收 `task_id` + `reason`，用 operator 身份、
-  走 `call('/revoke', ...)`；带 `X-Office-Group` 的既有作用域校验（任务不在本群就 404）。
-- 界面在分配块的候选/授权行上加「撤销这份授权」，只在 `accepted` 且 `claimed_at` 为空时出现；
-  二次确认里写清"撤销后这条活得重新裁决，撤销不会删除任何产出"。
-- 失败照现有规矩：把平台原话带出来（`409` 说明已经开始跑了，此时该走的是取消/释放，不是撤销）。
+1. `GET /api/formal/allocation/assignment?task_id=…` —— 这条活现在定给了谁，并算出能不能撤。
+   为什么不复用 `/allocation/rounds`：那个读面默认只看**开着的轮**，而裁决过以后轮就是
+   `decided`，恰好在最需要撤销的时候一条都查不到。
+2. `POST /api/formal/allocation/revoke` —— 只收 `task_id` + `reason`（理由**必填**）。**不收**
+   `expected_revision`：那是乐观锁入参，界面手里的快照可能是几十秒前的，拿旧值去撞只会让人看到
+   "修订号不对"；撤销是危险动作，正确做法是**写之前现读一次现状**，用当下的修订号提交。真正的
+   闸门（已 Claim 不许撤、轮次状态）仍在平台那边判，网关不复制它的规则，只挡明显撤不掉的。
+3. 任务详情页多一块「这条活定给了谁」：谁、什么状态、开没开工；能撤时给一句理由输入框 +
+   **两步**确认（第一次点只是把按钮换成「确认撤销」，第二次才发）。已经开工的不给按钮，直接说
+   "要收口请用取消或释放"。
+
+**验过的**：
+
+- 网关单测 4 条（`node --test server/formal-gateway-admin.test.mjs`，15/15 含既有的 11 条）：
+  未接走的可撤且**用现读的修订号**；已开工的 `409 assignment_not_revocable` 且**一次写入都没发**；
+  没理由的 `400` 且不发；没有分配的 `409 assignment_not_found`。
+- 界面回归 `office/scripts/verify-office-allocation-revoke.mjs`（桩数据）：块里写清定给了谁、
+  没理由不发请求、两步确认、发的是 `POST /allocation/revoke` 带理由、平台拒绝时原话回灌且按钮
+  退回未确认、已开工没有按钮。
+- 真平台四条（`X-Office-Group: collab-big-g1`）：读面 `revocable=false / claimed=true`；
+  没理由 `400 allocation_reason_required`；已开工 `409 assignment_not_revocable`；
+  跨群 `404 task_not_in_group`；不存在的任务 `404 resource.not_found`。
+- **没验到的**：真实的"撤掉一份还没接走的分配"happy path —— 这台机器的库里 33 份分配全部已
+  `claimed`，没有可撤的对象；要造一个得先跑完 方案→传阅→开轮→申请→裁决 整条链。这条目前只有
+  后端 3 条测试 + 网关/界面桩数据覆盖。
 
 ## 4. 建议先不做：人审阅
 
