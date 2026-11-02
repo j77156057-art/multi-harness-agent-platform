@@ -200,6 +200,23 @@ const responses = {
     inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
     rosters: { codebuddy: ['hy3', 'step-5-preview'] },
   },
+  // 点「按免费用它」之后，平台回的是**整份新清单**：刚定档的那个已经在可路由的模型里了。
+  // 以前是「标成免费」只改档位、模型仍不可选，所以那时这一步只需要一个空应答。
+  '/pool/declaration': {
+    pool: {
+      upstreams: [],
+      models: [
+        { id: 'qoder/Qwen3.8-Flash', owned_by: 'qoder:Qwen3.8-Flash', upstream: 'qoder:Qwen3.8-Flash', protocol: 'cli', tier: 'free' },
+        { id: 'codebuddy/hy3', owned_by: 'codebuddy:hy3', upstream: 'codebuddy:hy3', protocol: 'cli', tier: 'free' },
+        { id: 'codebuddy/step-5-preview', owned_by: 'codebuddy:step-5-preview', upstream: 'codebuddy:step-5-preview', protocol: 'cli', tier: 'free' },
+        { id: 'gpt-5.6', owned_by: 'codex:geekspace', upstream: 'codex:geekspace', protocol: 'openai_responses', tier: 'metered' },
+      ],
+      usage: { upstreams: {}, consumers: {}, requests: 0, tokens_unknown: 0 },
+      timeline: { bucket: 'hour', hours: 24, buckets: [] },
+      inventory: { tiers: [], checked_at: '2026-10-24T10:00:00+00:00' },
+      rosters: { codebuddy: ['hy3', 'step-5-preview'] },
+    },
+  },
   '/model-selection': {
     selection: { harness_id: MEMBER, model_mode: 'pool', model_id: 'qoder/Qwen3.8-Flash', updated_at: '2026-10-24T11:00:00Z' },
   },
@@ -488,8 +505,16 @@ try {
   assert.ok(codebuddyText.includes('step-5-preview'), 'CLI 说它能用的也摆出来了');
   assert.ok(codebuddyText.includes('没定档'), '没定档的说清楚是「没定档」');
   assert.ok(
-    await codebuddyGroup.locator('button[data-act="declare-model"]').count() >= 2,
-    '没定档的旁边有「标成免费 / 标成收费」两个按钮',
+    await codebuddyGroup.locator('button[data-act="use-undeclared"]').count() >= 2,
+    '没定档的旁边有「按免费用它 / 按收费用它」两个按钮',
+  );
+  const undeclaredLabels = await codebuddyGroup
+    .locator('button[data-act="use-undeclared"]')
+    .allInnerTexts();
+  assert.ok(
+    undeclaredLabels.some((text) => text.includes('按免费用它')) &&
+      undeclaredLabels.some((text) => text.includes('按收费用它')),
+    `两个按钮各自说清按哪一档用：${undeclaredLabels.join(' / ')}`,
   );
 
   // 选一个免费的池子模型再保存 → 平台收到的是那个模型。
@@ -527,22 +552,30 @@ try {
     '探针真的发到了平台',
   );
 
-  // 11. 当场定档：没定档的模型旁边有「标成免费 / 标成收费」。
-  const declare = modelBlock.locator('button[data-act="declare-model"]').first();
-  assert.ok((await declare.count()) === 1, '没定档的模型旁边有「标成…」的按钮');
-  await declare.click();
-  await page.waitForTimeout(1200);
+  // 11. 当场定档：没定档的模型旁边有「按免费用它」—— 那一下就是人对档位说的那句话，
+  //     定档、选中、保存一次做完（以前是「标成免费」只改档位，模型仍然不可选，
+  //     于是五十多个模型"看得见、选不了"）。
+  const useFree = modelBlock.locator('button[data-act="use-undeclared"][data-tier="free"]').first();
+  assert.equal(await useFree.count(), 1, '没定档的模型旁边有「按免费用它」');
+  await useFree.click();
+  await page.waitForTimeout(1500);
   const declared = posted.find((item) => item.path === '/pool/declaration');
   assert.ok(declared, '定档真的发到了平台');
-  assert.ok(declared.body.cli, '说的是哪家的 CLI');
-  assert.ok(declared.body.model, '说的是哪个模型');
-  assert.ok(['free', 'metered'].includes(declared.body.tier), '说的是哪一档');
+  assert.equal(declared.body.cli, 'codebuddy', '说的是哪家的 CLI');
+  assert.equal(declared.body.model, 'step-5-preview', '说的是哪个模型');
+  assert.equal(declared.body.tier, 'free', '说的是哪一档');
+  const afterDeclare = posted.find(
+    (item) => item.path === '/model-selection' && item.body.model_id === 'codebuddy/step-5-preview',
+  );
+  assert.ok(afterDeclare, '定完档顺手就把这个模型选上了，不用再回来点一次');
+  assert.equal(afterDeclare.body.model_mode, 'pool', '走的是额度池');
+  assert.equal(afterDeclare.body.paid_consent, false, '按免费用的不需要点头');
 
-  // 12. 状态栏：平台连不连得上、几个窗口在线。
+  // 12. 状态栏：平台连不连得上、几个窗口在跑。
   const conn = await page.locator('#aoConn').innerText();
   console.log('状态栏:', conn);
   assert.ok(conn.includes('已连接平台'), '状态栏说平台连上了');
-  assert.ok(conn.includes('在线'), '状态栏给出窗口的在线数');
+  assert.ok(/窗口\s*6\s*个在跑/.test(conn), `状态栏给出窗口的在跑数，实际：${conn}`);
 
   // 13. 中途加入新的窗口：窗口页给一个「加入这个项目」，加入后通知管理员。
   const joinButton = page.locator('#aoWorkspace .flat-detail-actions button[data-act="add-member"]');

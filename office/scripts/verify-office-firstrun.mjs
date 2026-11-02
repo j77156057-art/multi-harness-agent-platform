@@ -46,6 +46,11 @@ const base = `http://127.0.0.1:${server.address().port}`;
 
 const ADMIN = 'admin-window';
 // 私聊线程：先是主人问了一句，后来管理员回了。这两条之间的差别就是"在等"那条提示。
+//
+// `recipients` 必须写：私聊页只挑「发给管理员」或「管理员发来的」那一条线
+// （`src/direct-chat.js` 的 `directMessages()`）—— 别的定向消息（平台助手的回答）
+// 也带 `direct` 签名，只按签名挑就会混进来（2026-10-29 实测）。当初这份假数据
+// 没有这个字段，页面把整条线滤掉，于是「在等」一次也没出现过。
 let directThread = [
   {
     created_seq: 1,
@@ -55,6 +60,7 @@ let directThread = [
     body: '在吗？',
     refs: ['direct'],
     mentions: [ADMIN],
+    recipients: [ADMIN],
   },
 ];
 
@@ -194,6 +200,7 @@ try {
       body: '在的。',
       refs: ['direct'],
       mentions: ['office-operator'],
+      recipients: ['office-operator'],
     },
   ];
   await chat.reload();

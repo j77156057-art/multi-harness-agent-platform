@@ -2,6 +2,20 @@ import {chromium} from 'playwright';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 
+import {officeReachable, skip} from './lib/office-url.mjs';
+
+// 这份脚本要的是**另一版页面**：办公室场景预览（默认 5197），不是 4174 上的办公室。
+// 没起的时候不该报"校验失败" —— 那跟被测代码没关系，久了就没人看这个红灯了。
+// 所以跟其余缺环境的脚本一样：一行说清怎么办，退出码 2（`scripts/verify.mjs` 记成跳过）。
+const previewUrl = process.env.OFFICE_PREVIEW_URL || 'http://127.0.0.1:5197/';
+if (!(await officeReachable(previewUrl))) {
+  skip(
+    'verify-anchors.mjs',
+    `${previewUrl} 上没有预览页在跑（它要的是办公室场景预览，不是 4174 的界面）。` +
+      '先起那一版：OFFICE_PREVIEW_URL 指过去，或用它自带的启动方式',
+  );
+}
+
 const output = 'screenshots/anchor-fixes';
 await fs.mkdir(output, {recursive: true});
 const browser = await chromium.launch({headless: true});
@@ -11,7 +25,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('response', response => { if (response.status() >= 400) badResponses.push(response.url()); });
-  await page.goto(process.env.OFFICE_PREVIEW_URL || 'http://127.0.0.1:5197/');
+  await page.goto(previewUrl);
   await page.waitForFunction(() => document.querySelector('#office').classList.contains('godot-active'), {}, {timeout: 45000});
   const frame = page.frames().find(frame => frame.url().includes('/godot/'));
   await frame.waitForFunction(() => window.officeState?.actors?.length === 6);
