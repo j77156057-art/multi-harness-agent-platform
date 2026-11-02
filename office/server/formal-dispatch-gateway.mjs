@@ -74,8 +74,7 @@ export function createFormalGateway(config={}){
     if(!trimmed||trimmed.startsWith('['))throw fail(503,'administrator_credential_unavailable');
     return fs.readFileSync(trimmed,'utf8');
   }
-  async function call(path,body,credential,method,timeoutMs){
-    // `undefined` = the operator; `null`/`''` used to mean "open" by accident,
+  async function call(path,body,credential,method,timeoutMs){    // `undefined` = the operator; `null`/`''` used to mean "open" by accident,
     // so an explicit call site must pass a credential and defaulting is done here,
     // once.
     const source=credential===undefined?config.tokenFile:credential;
@@ -95,6 +94,31 @@ export function createFormalGateway(config={}){
     let data;try{data=JSON.parse(text);}catch{throw fail(502,'invalid_backend_response');}
     if(!response.ok)throw fail(response.status,data.error?.code||'backend_rejected');
     return data;
+  }
+  /**
+   * 转接那两条路由的调用：**不吞**平台给的原因。
+   *
+   * `call()` 把失败压成一个码（`formal_backend_unavailable` 那种），对读接口够用；
+   * 但"这封信为什么没写进去"必须原样给到界面 —— 平台回的是
+   * `{"error": {code, message, details}}`，其中 `details.known` 就是"你能选谁"。
+   * 换成一句码，人就只能猜。
+   */
+  async function relayCall(path,method,body){
+    const token=readCredential(config.tokenFile).trim();
+    if(!/^apt_[a-f0-9]{64}$/.test(token))throw fail(503,'administrator_credential_unavailable');
+    let response;
+    try{
+      response=await fetch(new URL('/api/v1'+path,upstream),{
+        method,
+        headers:{Authorization:`Bearer ${token}`,...(body?{'Content-Type':'application/json'}:{})},
+        ...(body?{body:JSON.stringify(body)}:{}),
+        signal:AbortSignal.timeout(15000),
+        redirect:'error',
+      });
+    }catch{throw fail(503,'formal_backend_unavailable');}
+    const text=await response.text();
+    let data;try{data=JSON.parse(text);}catch{throw fail(502,'invalid_backend_response');}
+    return {status:response.status,ok:response.ok,data};
   }
   /**
    * 让**平台**把机器写的文本洗成人话（一次问一批）。
@@ -596,6 +620,22 @@ export function createFormalGateway(config={}){
         try{ json(res,200,clearRelayProject({root:relayRoot})); }
         catch(error){ throw fail(500, String(error&&error.message||'relay_project_clear_failed')); }
         return true;
+      }
+      if(req.method==='GET'&&route==='/relay/roster'){
+        // 收件人候选：谁是窗口、谁是人。**来源只有一个** —— 平台的库。
+        // 界面若自己猜一份，就会出现"能选、投递时说不认识"。
+        const answer=await relayCall('/relay/roster','GET');
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='POST'&&route==='/relay/letters'){
+        // 人写一封信。作者是**令牌主体本人**（平台按这个身份写「来自 …」），
+        // 这里没有、也不接受"替哪个窗口写"的字段。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>200000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        const answer=await relayCall('/relay/letters','POST',body);
+        // 预检没过时把平台那份原样交回去：里面有原因、也有可选的名单。
+        // 换成一句 `unknown_recipient` 就等于把"改哪个字"这条线索丢了。
+        json(res,answer.status,answer.data);return true;
       }
       if(req.method==='GET'&&route==='/terminal/availability'){
         // 这台机器上终端到底能不能用。不能就照实说原因（多半是 node-pty 没装上），

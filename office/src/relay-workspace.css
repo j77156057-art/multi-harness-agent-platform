@@ -231,3 +231,112 @@
   color: #8b95a1;
   font-size: 12px;
 }
+/* 写信那一块：收件人按「人 / 窗口」分组，人一眼能看出自己在跟谁说话。 */
+.relay-compose .relay-picks {
+  margin: 0.6rem 0;
+  padding: 0.5rem 0.7rem 0.7rem;
+  border: 1px solid #e2ded7;
+  border-radius: 6px;
+}
+
+.relay-compose .relay-picks legend {
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  color: #5f5c56;
+}
+
+.relay-pick-group + .relay-pick-group {
+  margin-top: 0.55rem;
+}
+
+.relay-pick-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.82rem;
+  color: #6b7684;
+}
+
+.relay-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0.9rem 0.3rem 0;
+  font-size: 0.88rem;
+}
+
+/* 正文与「这是回信吗」：标签在上，控件占满一行（长文本要写得下）。 */
+.relay-field {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.relay-field > span {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.85rem;
+  color: #5f5c56;
+}
+
+.relay-field textarea,
+.relay-field select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid #d8d4cd;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.9rem;
+  background: #fff;
+  color: inherit;
+}
+
+.relay-field textarea {
+  resize: vertical;
+  min-height: 6.5rem;
+  line-height: 1.55;
+}
+
+/* 发送那一行：按钮旁边写清"异步" —— 这是新手最容易误会的地方。 */
+.relay-send-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.relay-actions button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.relay-async {
+  font-size: 0.82rem;
+  color: #6b7684;
+}
+
+/* 写不进去时把原因与"可以写谁"一起给出来（门槛 + 回灌，不是一句错误码）。 */
+.relay-feedback {
+  margin-top: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 5px;
+  font-size: 0.86rem;
+}
+
+.relay-feedback p {
+  margin: 0;
+}
+
+.relay-feedback-ok {
+  border: 1px solid #bcd9c2;
+  background: #f2f9f3;
+  color: #1a7f37;
+}
+
+.relay-feedback-bad {
+  border: 1px solid #f0c8a8;
+  background: #fdf5ee;
+  color: #8a4b12;
+}
+
+.relay-feedback .relay-hint {
+  margin-top: 0.35rem;
+}

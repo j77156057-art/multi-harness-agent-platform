@@ -184,11 +184,16 @@ class RelayWorker:
             reason = "第一行缺少「来自 <窗口 id>」，看不出是谁写的"
             self.mailbox.return_letter(letter, reason)
             return {"letter": letter.name, "status": "returned", "reason": reason}
-        known = self.known_recipients()
-        if sender not in known:
-            reason = f"作者「{sender}」不是已登记的窗口"
+        windows = self.known_recipients()
+        # 作者可以是**窗口**，也可以是**人**（`docs/notes/relay-mode.md` §16：界面上
+        # 人以自己的身份写一封信）。两种都必须在名册里 —— 不在就退回，不猜是谁。
+        if sender not in windows and sender not in self.owners:
+            reason = f"作者「{sender}」既不是已登记的窗口，也不是这个人名册里的人"
             self.mailbox.return_letter(letter, reason)
             return {"letter": letter.name, "status": "returned", "reason": reason}
+        # 收件人可以是窗口，也可以是人：人没有 CLI，收的是消息面那一条（见下面的投递）。
+        # 名册在这里合成一份，与 `POST /api/v1/relay/letters` 的预检同源。
+        known = windows | self.owners
 
         plan = parse(body, known=known, admins=self.admins, sender=sender)
         if not plan.ok:
@@ -249,17 +254,22 @@ class RelayWorker:
             # 不写"还发给了谁"的话，收信方会以为这事只有自己知道。
             also_to = [name for name in recipients if name != block.recipient]
             # 收件箱放一份文件：没有 HTTP 能力的 CLI 也能读到，并把线程与跳数写在最上面。
-            self.mailbox.deliver(
-                block.recipient,
-                name=letter.name,
-                text=envelope_for_delivery(
-                    sender=sender,
-                    text=block.body,
-                    thread_id=thread_id,
-                    hop=hop,
-                    also_to=also_to,
-                ),
-            )
+            #
+            # 收件人如果是**人**就没有收件箱可放：人没有 CLI 在轮询，给他一个目录只会
+            # 变成永远没人读的垃圾。人收的是下面那条消息 —— 那也是他在界面上真正看得到
+            # 的东西。
+            if block.recipient in windows:
+                self.mailbox.deliver(
+                    block.recipient,
+                    name=letter.name,
+                    text=envelope_for_delivery(
+                        sender=sender,
+                        text=block.body,
+                        thread_id=thread_id,
+                        hop=hop,
+                        also_to=also_to,
+                    ),
+                )
             # 消息面记一条：界面里看得见，有投递记录，作者是 relay 自己。
             try:
                 self._post_message(

@@ -14,6 +14,7 @@ from app.db.connection import Database
 from app.git.repo import CanonicalRepo
 from app.agenttools import mcp_routes as agenttools_routes
 from app.pool import routes as pool_routes
+from app.relay import routes as relay_routes
 from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT
 from app.wording import routes as wording_routes
 
@@ -119,6 +120,9 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     api.include_router(agenttools_routes.router)
     # 平台自己的"翻译"：把机器写的文本翻成人话（界面上只显示人话）。
     api.include_router(wording_routes.router)
+    # 转接：人写一封信（`docs/notes/relay-mode.md` §16）。作者是令牌主体本人，
+    # 预检与邮局同一套判据，落盘之后由 `app.relay.worker` 投递。
+    api.include_router(relay_routes.router)
     app.include_router(api)
 
     @app.get("/", include_in_schema=False)
