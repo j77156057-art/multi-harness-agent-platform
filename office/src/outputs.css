@@ -229,3 +229,80 @@
 
 .outputs-empty { font-size: 12px; color: #8a94a0; }
 .outputs-error { font-size: 12px; color: #b03a3a; }
+
+/* 与主工作台共用同一套暖纸、墨色、朱橙 tokens。 */
+:root { --ao-bg: #f1efe8; --ao-paper: #fffefa; --ao-border: #d9d7ce; --ao-text: #1c2420; --ao-soft: #505b54; --ao-faint: #606a62; --ao-accent: #b0442b; --ao-display: "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif; }
+.outputs-body { background: var(--ao-bg); color: var(--ao-text); font-family: "Noto Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif; }
+.outputs-shell { max-width: 960px; background: var(--ao-paper); border-color: var(--ao-border); }
+.outputs-head { padding: 28px 28px 20px; border-bottom: 2px solid var(--ao-text); }
+.outputs-head h1 { font-family: var(--ao-display); font-size: 28px; }
+.outputs-head p, .outputs-tools label, .outputs-count { color: var(--ao-soft); }
+.outputs-note { border-color: #ddc3b6; border-radius: 2px; background: #f6e8e1; }
+.outputs-tools select, .outputs-tools button, .outputs-more { border-color: var(--ao-border); border-radius: 2px; background: transparent; color: var(--ao-text); }
+.outputs-list { padding: 24px 28px 36px; }
+.outputs-window { border: 0; border-top: 2px solid var(--ao-text); border-radius: 0; }
+.outputs-window > header { padding: 14px 0; border-bottom-color: var(--ao-border); background: transparent; }
+.outputs-window > header b { font-family: var(--ao-display); font-size: 17px; }
+.outputs-item { padding-inline: 0; border-bottom-color: var(--ao-border); }
+.outputs-words, .outputs-raw, .outputs-more-block { border-color: var(--ao-border); border-radius: 2px; background: var(--ao-bg); }
+.outputs-tag { border-radius: 2px; }
+
+/* v3：交付物档案。窗口是署名栏，任务是标题，尝试是版本，正文保持长文阅读节奏。 */
+:root { --ao-display: "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif; --ao-mono: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+.outputs-body { font-synthesis: weight; }
+.outputs-shell { max-width: 1120px; }
+.outputs-head { padding: 36px 40px 24px; }
+.outputs-kicker { margin: 0 0 14px !important; color: var(--ao-accent) !important; font-family: var(--ao-mono); font-size: 10px; letter-spacing: .14em; }
+.outputs-head h1 { margin-bottom: 10px; font-size: 36px; line-height: 1.25; letter-spacing: -.035em; }
+.outputs-scope { font-family: var(--ao-mono); font-size: 11px; }
+.outputs-note { max-width: 72ch; margin-top: 22px; padding: 0 0 0 14px; border: 0; border-left: 2px solid var(--ao-accent); border-radius: 0; background: transparent; line-height: 1.8; }
+.outputs-head .outputs-tools { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--ao-border); }
+.outputs-tools select, .outputs-tools button { min-height: 34px; }
+.outputs-count { font-family: var(--ao-mono); font-size: 10px; }
+.outputs-list { gap: 48px; padding: 12px 40px 56px; }
+.outputs-window { display: grid; grid-template-columns: 168px minmax(0, 1fr); column-gap: 36px; }
+.outputs-window > header { grid-column: 1; grid-row: 1; display: block; padding: 24px 0; border: 0; }
+.outputs-window > header b { display: block; font-size: 23px; line-height: 1.4; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.outputs-window > header span { display: block; margin-top: 8px; color: var(--ao-faint); font-family: var(--ao-mono); font-size: 10px; }
+.outputs-window > .outputs-item { grid-column: 2; min-width: 0; padding: 24px 0 32px; }
+.outputs-window > .outputs-item + .outputs-item { border-top: 1px solid var(--ao-border); }
+.outputs-item > header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 20px; }
+.outputs-item > header > b { flex-basis: 100%; font-family: var(--ao-display); font-size: 22px; font-weight: 700; line-height: 1.5; letter-spacing: -.015em; overflow-wrap: anywhere; }
+.outputs-item > header time { color: var(--ao-faint); font-family: var(--ao-mono); font-size: 10px; white-space: nowrap; }
+.outputs-tag { padding: 2px 6px; font-family: var(--ao-mono); font-size: 10px; white-space: nowrap; }
+.outputs-attempt { margin-top: 20px; padding-left: 18px; border-left: 1px solid var(--ao-border); }
+.outputs-attempt-head { margin-bottom: 10px; }
+.outputs-attempt-head b { color: var(--ao-soft); font-family: var(--ao-mono); font-size: 10px; letter-spacing: .04em; }
+.outputs-said { gap: 12px; }
+.outputs-said-head { margin-top: 8px; color: var(--ao-accent); font-family: var(--ao-mono); font-size: 10px; letter-spacing: .06em; }
+.outputs-words { margin: 0; padding: 4px 0 4px 18px; border: 0; border-left: 2px solid var(--ao-border); border-radius: 0; background: transparent; font-family: "Noto Sans SC", "Microsoft YaHei UI", "PingFang SC", sans-serif; font-size: 15px; line-height: 1.85; }
+.outputs-words.is-clipped { max-height: 180px; }
+.outputs-raw { border: 0; border-left: 2px solid var(--ao-border); border-radius: 0; background: var(--ao-bg); font-family: var(--ao-mono); }
+.outputs-more-block { border: 0; border-radius: 0; background: transparent; padding: 4px 0; }
+.outputs-more-block > summary, .outputs-more { color: var(--ao-accent); }
+.outputs-said .outputs-tools { padding-left: 20px; }
+.outputs-tools li { line-height: 1.7; }
+.outputs-err { border: 0; border-left: 2px solid #a43b36; border-radius: 0; background: #f8eae6; color: #86332f; }
+.outputs-reason { color: #83502e; line-height: 1.75; }
+.outputs-empty { padding: 48px 0; color: var(--ao-faint); font-size: 14px; }
+.outputs-error { color: #a43b36; line-height: 1.7; }
+
+@media (max-width: 900px) {
+  .outputs-head { padding-inline: 28px; }
+  .outputs-list { padding-inline: 28px; }
+  .outputs-window { grid-template-columns: 132px minmax(0, 1fr); column-gap: 24px; }
+  .outputs-window > header b { font-size: 20px; }
+}
+@media (max-width: 600px) {
+  .outputs-shell { border: 0; }
+  .outputs-head { padding: 28px 20px 20px; }
+  .outputs-head h1 { font-size: 30px; }
+  .outputs-list { padding: 8px 20px 40px; }
+  .outputs-window { display: block; }
+  .outputs-window > header { padding: 20px 0 12px; border-bottom: 1px solid var(--ao-border); }
+  .outputs-window > header b { font-size: 20px; }
+  .outputs-window > .outputs-item { padding-top: 20px; }
+  .outputs-item > header > b { font-size: 20px; }
+  .outputs-item > header time { margin-left: 0; }
+  .outputs-count { margin-left: 0; flex-basis: 100%; }
+}

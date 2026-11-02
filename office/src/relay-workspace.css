@@ -215,6 +215,11 @@
   font-size: 12.5px;
 }
 
+.relay-head h1 { font-family: var(--ao-display); font-size: 30px; }
+.relay-eyebrow { color: var(--ao-accent); font-family: var(--ao-mono); font-size: 10px; }
+.relay-card { border: 0; border-top: 2px solid var(--ao-text); border-radius: 0; background: transparent; padding-inline: 0; }
+.relay-card h2 { font-family: var(--ao-display); font-size: 19px; }
+.relay-thread, .relay-returned, .relay-state, .relay-actions button { border-radius: 2px; }
 .relay-note {
   margin: 0;
   color: #6b7684;

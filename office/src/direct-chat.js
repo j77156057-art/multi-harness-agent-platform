@@ -84,8 +84,9 @@ function render() {
   root.innerHTML = `
     <div class="direct-shell">
       <header class="direct-head">
+        <p class="direct-kicker">DIRECT CORRESPONDENCE / 定向通信</p>
         <h1>${name ? `与 ${escape(name)} 的私聊` : '私聊'}</h1>
-        <p>${id ? `收件人：<b>${escape(id)}</b>` : '平台还没有配置管理员窗口。'}</p>
+        <p class="direct-recipient">${id ? `收件人：<b>${escape(id)}</b>` : '平台还没有配置管理员窗口。'}</p>
         <p class="direct-note">这是<b>定向消息</b>：仅您与管理员可见，其他成员无法读取（平台按收件人过滤）。管理员的回复同样以定向消息发送。</p>
       </header>
       <div class="direct-list" id="directList">
@@ -97,7 +98,7 @@ function render() {
                   const who = mine ? '你' : message.sender_id || '平台';
                   const at = String(message.created_at || '').replace('T', ' ').slice(5, 16);
                   return `<article class="direct-msg ${mine ? 'is-mine' : 'is-admin'}">
-                    <b>${escape(who)}</b><time>${escape(at)}</time>
+                    <header class="direct-meta"><b>${escape(who)}</b><time>${escape(at)}</time></header>
                     <p>${escape(message.body || '')}</p>
                   </article>`;
                 })

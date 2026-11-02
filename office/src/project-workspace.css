@@ -250,3 +250,84 @@ dialog:not([open]) { display: none !important; }
   background: #fff;
   cursor: pointer;
 }
+
+/* ---------------------------------------------------------------- 商业版项目大厅
+   用交付台账而非卡片墙组织内容；项目编号、流程线与真实历史成为识别点。 */
+.project-lobby { background: var(--ao-bg); }
+.project-lobby-body { width: min(1320px, calc(100% - 80px)); grid-template-columns: minmax(0, 1fr) 320px; gap: 56px; padding: 52px 0 40px; }
+.project-lobby-copy { padding-bottom: 40px; border-bottom: 1px solid var(--ao-border-strong); }
+.project-lobby-copy .eyebrow { margin-bottom: 16px; color: var(--ao-accent); font-family: var(--ao-mono); font-size: 10px; letter-spacing: .15em; }
+.project-lobby-copy h1 { font-family: var(--ao-display); font-size: 52px; font-weight: 700; line-height: 1.12; letter-spacing: -.055em; }
+.project-lobby-description { margin-top: 16px; color: var(--ao-text-soft); font-size: 15px; line-height: 1.75; }
+.project-lobby-heading { align-items: flex-start; }
+.project-lobby-actions { padding-top: 24px; gap: 10px; }
+.project-new, .project-connect { min-height: 42px; border-radius: 2px; font-size: 13px; }
+.project-connect { border-color: var(--ao-border-strong); background: transparent; }
+.project-new.primary { border-color: var(--ao-accent); background: var(--ao-accent); }
+.project-lobby-ledger { display: flex; align-items: center; gap: 12px; width: min(440px, 100%); margin-top: 28px; color: var(--ao-text-soft); font-family: var(--ao-mono); font-size: 10px; letter-spacing: .08em; }
+.project-lobby-ledger i { flex: 1; height: 1px; background: var(--ao-border-strong); }
+.project-lobby-ledger span:last-child { color: var(--ao-accent); font-weight: 700; }
+.project-lobby-side { gap: 40px; }
+.project-history, .project-platform, .project-tools { padding: 22px 0 0; border: 0; border-top: 2px solid var(--ao-text); border-radius: 0; background: transparent; box-shadow: none; }
+.project-section-head { padding-bottom: 16px; border-bottom-color: var(--ao-border); }
+.project-section-head h2 { font-family: var(--ao-display); font-size: 21px; font-weight: 700; }
+.project-section-head p { font-size: 12px; }
+.project-section-head > span { border-radius: 0; background: transparent; font-family: var(--ao-mono); font-size: 10px; }
+.project-history-list { padding-top: 0; }
+.project-card { grid-template-columns: 52px minmax(0, 1fr) auto; gap: 18px; min-height: 100px; padding: 18px 10px; border-bottom-color: var(--ao-border); border-radius: 0; }
+.project-card:hover { background: #f8f6ef; }
+.project-card[data-active="1"] { background: var(--ao-paper); box-shadow: inset 3px 0 var(--ao-accent); }
+.project-card-icon { width: 48px; height: 48px; border: 0; border-radius: 0; background: transparent; color: var(--ao-accent); font-family: var(--ao-display); font-size: 26px; font-weight: 700; }
+.project-card-main strong { font-family: var(--ao-display); font-size: 17px; font-weight: 700; }
+.project-card-main span { font-family: var(--ao-mono); font-size: 10px; }
+.project-card-open, .project-card-remove, .project-card-rename, .project-recover { border-radius: 2px; }
+.project-card-open { background: transparent; }
+.project-card-status { border-radius: 2px; font-family: var(--ao-mono); font-size: 10px; }
+.project-card-status.scene { background: #e3ece5; }
+.project-platform-item { border-radius: 0; }
+.project-platform-open { border-radius: 0; }
+.project-empty { align-items: flex-start; padding: 42px 12px; text-align: left; }
+.project-empty strong { font-family: var(--ao-display); font-size: 25px; }
+.project-empty-icon { width: auto; height: auto; margin: 0 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--ao-border-strong); font-family: var(--ao-display); font-size: 64px; font-weight: 700; line-height: 1; }
+.project-empty-icon svg { display: none; }
+.project-empty-icon::before { content: '00'; }
+.project-tools-summary { color: var(--ao-text-soft); }
+.project-tools-actions button { border-radius: 2px; background: transparent; }
+.project-onboarding { position: relative; padding: 32px 28px; border: 0; border-top: 4px solid var(--ao-accent); border-radius: 0; background: var(--ao-sidebar); }
+.project-onboarding-label { color: #d49a87; font-family: var(--ao-mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; }
+.project-onboarding h2 { font-family: var(--ao-display); font-size: 27px; line-height: 1.35; }
+.project-onboarding > p { color: #b8c1b9; }
+.project-lobby-steps { gap: 28px; margin-block: 32px; }
+.project-lobby-steps li { gap: 14px; }
+.project-lobby-steps li > span { width: 28px; height: 28px; border-color: #657269; border-radius: 1px; color: #f4c0ae; font-family: var(--ao-mono); font-size: 10px; }
+.project-lobby-steps strong { font-size: 13px; line-height: 28px; }
+.project-lobby-steps p { color: #aeb8b0; }
+.project-onboarding-status { border-top-color: #48534b; }
+.project-lobby-hint { color: #b8c1b9; }
+.project-lobby-foot { width: min(1320px, calc(100% - 80px)); border-top-color: var(--ao-border-strong); font-family: var(--ao-mono); font-size: 10px; }
+.project-instance-note, .ao-lobby-note { border-radius: 2px; }
+.project-create-dialog, .harness-dialog { border-radius: 4px; }
+.project-create-dialog::backdrop, .harness-dialog::backdrop { backdrop-filter: none; }
+.project-create-head h2, .harness-dialog-head h2 { font-family: var(--ao-display); font-size: 28px; }
+.project-create-body input, .project-create-body select, .project-create-body fieldset, .project-create-close, .harness-card, .endpoint-row, .harness-tools { border-radius: 2px; }
+.project-create-foot { background: var(--ao-surface); }
+
+@media (max-width: 1280px) {
+  .project-lobby-body { width: calc(100% - 64px); grid-template-columns: minmax(0, 1fr) 296px; gap: 40px; padding-top: 44px; }
+  .project-lobby-copy h1 { font-size: 46px; }
+  .project-lobby-foot { width: calc(100% - 64px); }
+}
+@media (max-width: 900px) {
+  .project-lobby-body { grid-template-columns: minmax(0, 1fr); gap: 36px; }
+  .project-onboarding { grid-row: auto; }
+}
+@media (max-width: 760px) {
+  .project-lobby-body { width: calc(100% - 32px); padding-top: 30px; }
+  .project-lobby-copy h1 { font-size: 38px; }
+  .project-lobby-actions { padding-top: 0; }
+  .project-lobby-ledger { gap: 8px; }
+  .project-history, .project-platform, .project-tools { padding: 20px 0 0; }
+  .project-card { grid-template-columns: 42px minmax(0, 1fr) auto; gap: 10px; }
+  .project-card-icon { width: 40px; font-size: 22px; }
+  .project-lobby-foot { width: calc(100% - 32px); }
+}

@@ -201,8 +201,9 @@ function render() {
   root.innerHTML = `
     <div class="outputs-shell">
       <header class="outputs-head">
+        <p class="outputs-kicker">DELIVERY ARCHIVE / 交付物档案</p>
         <h1>各窗口输出记录</h1>
-        <p>${escape(scopeName())} · ${total} 次尝试留下了话</p>
+        <p class="outputs-scope">${escape(scopeName())} · ${total} 次尝试留下了话</p>
         <p class="outputs-note">执行成员每完成一次任务，都会留下一段<b>其自身输出</b>（测试怎么报的错、改了哪些文件、最后写了什么）。这里是这些原文，按窗口摊开；一条活做过几次，这里就摊几次，新的那次在前。</p>
         <div class="outputs-tools">
           <label for="outputsFilter">看</label>

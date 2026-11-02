@@ -1427,7 +1427,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             : '本项目暂无需要你处理的任务。可选择一条任务查看详情，或在左侧选择窗口查看其当前状态。';
     wrap.innerHTML = `
       <div class="flat-head-main">
-        <span class="flat-eyebrow">这个项目的办公室</span>
+        <span class="flat-eyebrow">DELIVERY LEDGER / 项目交付台账</span>
         <h1>${escape(projectName())}</h1>
         <p class="flat-guide">${guide}</p>
         <p class="flat-today">${escape(todayStory())}</p>
@@ -1451,7 +1451,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.error
           ? `<div class="flat-error">
               <b>刚才那一下没成：</b>${escape(state.error)}
-              <button type="button" data-act="dismiss-error">知道了</button>
+              <span class="flat-error-actions"><button type="button" data-act="retry-refresh">重试</button><button type="button" data-act="dismiss-error">知道了</button></span>
             </div>`
           : ''
       }
@@ -2916,7 +2916,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       pane.append(block);
     }
     for (const entry of pendingAllocations) {
-      pane.append(allocationBlock(entry));
+      const block = allocationBlock(entry);
+      pane.append(block);
+      void loadAllocationCandidates(block);
     }
     return pane;
   }
@@ -2927,6 +2929,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 候选来自 `round.applications`（快照冻结下来的那一份），所以人看到的就是
    * "当时摆在桌面上的有谁"—— 这也正是裁决时平台记进 `compared_json` 的那份。
    */
+  function allocationCandidateHtml(app, name) {
+    const material = app.material_version ? ` · 材料 v${app.material_version}` : '';
+    const revision = app.revision ? `申请第 ${app.revision} 版${material}` : '申请版本未记';
+    return `<label class="flat-alloc-cand">
+      <input type="radio" name="${escape(name)}" value="${escape(app.application_id)}">
+      <span>${escape(harnessName(app.harness_id) || app.harness_id)}</span>
+      <small>${escape(revision)}${app.state ? ` · ${escape(app.state)}` : ''}</small>
+      ${app.reason ? `<small>${escape(app.reason)}</small>` : ''}
+    </label>`;
+  }
+
   function allocationBlock({ round, task, applications }) {
     const block = document.createElement('section');
     block.className = 'flat-spec flat-allocation';
@@ -2940,32 +2953,57 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <p class="flat-note">这一轮分配还没定人。${
         named.length ? `方案里原本写的是：${escape(named.join('、'))}。` : ''
       }候选来自成员自己交的申请；定下来只是**邀请**，他自己接受之后才算他的活。</p>
-      ${
-        applications.length
-          ? `<div class="flat-alloc-cands">${applications
-              .map(
-                (app) => `<label class="flat-alloc-cand">
-                  <input type="radio" name="${escape(name)}" value="${escape(app.application_id)}">
-                  <span>${escape(harnessName(app.harness_id) || app.harness_id)}</span>
-                  ${app.reason ? `<small>${escape(app.reason)}</small>` : ''}
-                </label>`,
-              )
-              .join('')}</div>`
-          : '<p class="flat-empty">这一轮还没有成员申请这条活。可以定给方案里写的那个人，但要走「邀请」那条路；这里只能先不分配。</p>'
-      }
+      <div class="flat-alloc-cands" data-alloc-candidates>${applications.map((app) => allocationCandidateHtml(app, name)).join('')}</div>
+      <p class="flat-alloc-sync" data-alloc-sync role="status">正在核对平台最新申请…</p>
       <label class="flat-alloc-reason">理由（选填；「先不分配」时必填）
         <input type="text" data-alloc-reason maxlength="200" placeholder="例：等他把手上那条收尾">
       </label>
       <div class="flat-alert-pick">
-        ${
-          applications.length
-            ? '<button type="button" data-act="alloc-decide">定给他</button>'
-            : ''
-        }
+        <button type="button" data-act="alloc-decide" ${applications.length ? '' : 'hidden'}>定给他</button>
         <button type="button" data-act="alloc-defer">先不分配</button>
       </div>
       <p class="flat-trouble-error" data-alloc-error></p>`;
     return block;
+  }
+
+  /** 用裁决读面核对最新候选；失败时保留轮次快照，不把读失败说成无人申请。 */
+  async function loadAllocationCandidates(block) {
+    if (!block || block.dataset.candidatesLoading === '1') return;
+    const roundId = String(block.dataset.round || '');
+    const taskId = String(block.dataset.task || '');
+    const list = block.querySelector('[data-alloc-candidates]');
+    const note = block.querySelector('[data-alloc-sync]');
+    const decide = block.querySelector('[data-act="alloc-decide"]');
+    if (!list || !note || !roundId || !taskId) return;
+    const picked = list.querySelector('input[type="radio"]:checked')?.value || '';
+    block.dataset.candidatesLoading = '1';
+    if (decide) decide.disabled = true;
+    note.textContent = '正在核对平台最新申请…';
+    try {
+      const data = await api(`/allocation/candidates?round_id=${encodeURIComponent(roundId)}&task_id=${encodeURIComponent(taskId)}`);
+      if (!block.isConnected) return;
+      if (!Array.isArray(data.candidates)) throw new Error('平台回包缺少 candidates');
+      const candidates = data.candidates;
+      const name = `alloc-cand-${taskId.replace(/[^\w-]/g, '_')}`;
+      list.innerHTML = candidates.length
+        ? candidates.map((app) => allocationCandidateHtml(app, name)).join('')
+        : '<p class="flat-empty">平台确认：这一轮还没有成员申请这条活。可以写明原因，先不分配。</p>';
+      if (picked) {
+        const previous = [...list.querySelectorAll('input[type="radio"]')].find((input) => input.value === picked);
+        if (previous) previous.checked = true;
+      }
+      if (decide) decide.hidden = candidates.length === 0;
+      note.textContent = candidates.length
+        ? `已核对平台最新候选，共 ${candidates.length} 个；申请与材料版本如下。`
+        : '已核对平台最新候选：空。';
+    } catch (error) {
+      if (!block.isConnected) return;
+      // 快照来自已成功读取的分配轮；保留它，但明确它尚未完成最新核对。
+      note.innerHTML = `最新申请核对失败：${escape(String((error && error.message) || error))}。当前显示轮次快照。<button type="button" data-act="alloc-candidates-retry">重试</button>`;
+    } finally {
+      block.dataset.candidatesLoading = '';
+      if (decide) decide.disabled = false;
+    }
   }
 
   /**
@@ -4043,13 +4081,24 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (hasAnyTask) list.append(bar);
 
     if (!filtered.length) {
+      const loadFailed = Boolean(state.error) && !state.loaded && !hasAnyTask;
       const empty = document.createElement('p');
       empty.className = 'flat-empty';
-      empty.textContent = hasAnyTask
-        ? '当前筛选条件下没有任务。'
-        : '当前项目暂无任务。'
+      empty.textContent = loadFailed
+        ? '任务暂时无法读取，请重试；这与项目中没有任务不同。'
+        : hasAnyTask
+          ? '当前筛选条件下没有任务。'
+          : '当前项目暂无任务。'
       list.append(empty);
-      if (!hasAnyTask) {
+      if (hasAnyTask || loadFailed) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'flat-back';
+        action.dataset.act = loadFailed ? 'retry-refresh' : 'show-all-tasks';
+        action.textContent = loadFailed ? '重新读取任务' : '查看全部任务';
+        list.append(action);
+      }
+      if (!hasAnyTask && !loadFailed) {
         // 一个任务都没有时，这一栏是**最大的一块空白**，也是第一次用的人最先看的
         // 地方：把三步（装 CLI → 登录 → 配置目标）整块摆在这里，而不是只留一个按钮。
         list.append(firstRunPanel());
@@ -5701,10 +5750,33 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const brief = taskBrief();
     const helps = helpRequests();
     const unclaimed = unclaimedTasks();
+    const waiting = (state.tasks || []).filter((task) =>
+      ['awaiting_human', 'escalated'].includes(String(task.status)),
+    );
+    const decisions = attentionCount() + waiting.length + helps.length + (plan ? 1 : 0) + (state.userKeyPending ? 1 : 0);
 
     wrap.innerHTML = `
+      <header class="flat-rail-head">
+        <p>OPERATIONS / 运维现状</p>
+        <div class="flat-rail-lead${decisions ? ' has-value' : ''}"><strong>${decisions}</strong><span>件待你决策</span></div>
+        <ul class="flat-rail-ledger" aria-label="运维摘要">
+          <li><span>待领取</span><b>${unclaimed.length}</b></li>
+          <li><span>成员求助</span><b>${helps.length}</b></li>
+          <li><span>可执行成员</span><b>${usable.length}</b></li>
+        </ul>
+      </header>
       ${askCard()}
       ${waitingCard()}
+      ${plan ? `<section class="flat-card flat-card-plan">
+        <p class="flat-card-kicker">需要你决策</p>
+        <h3>${cardIcon('stamp')}待批准的方案</h3>
+        <p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 条任务</p>
+        <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
+          translated((plan.document || {}).markdown_path) || fileNameOf((plan.document || {}).markdown_path),
+        )}</p>
+        <button type="button" data-act="approve-plan">批准，开始做</button>
+        <button type="button" data-act="reject-plan" title="驳回方案：退回管理员修订后重新提交">驳回方案</button>
+      </section>` : ''}
       ${
         // 空项目里这张卡只剩"0 条任务 / 暂无方案正文"—— 中间栏已经把同一句话说过了，
         // 摆在这里只是多一块噪音。有方案或有活的时候才有信息量。
@@ -5756,18 +5828,6 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
             }</li>`}</ul>
         </details>
         <button type="button" data-act="open-outputs" title="另开一个窗口，查看各成员的执行输出">查看成员输出</button>
-      </section>
-      <section class="flat-card">
-        <h3>${cardIcon('stamp')}待批准的方案</h3>
-        ${plan
-          ? `<p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 条任务</p>
-             <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
-               translated((plan.document || {}).markdown_path) ||
-                 fileNameOf((plan.document || {}).markdown_path),
-             )}</p>
-             <button type="button" data-act="approve-plan">批准，开始做</button>
-             <button type="button" data-act="reject-plan" title="驳回方案：退回管理员修订后重新提交">驳回方案</button>`
-          : '<p class="flat-empty">暂无待批准的方案。</p>'}
       </section>`;
     return wrap;
   }
@@ -6216,6 +6276,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     const button = event.target.closest('button[data-act]');
     if (!button) return;
+    if (button.dataset.act === 'retry-refresh') {
+      // 保留当前内容并禁用按钮，直到这次真实请求给出成功或失败结果。
+      state.error = null;
+      button.disabled = true;
+      button.textContent = '正在重试…';
+      void refresh();
+      return;
+    }
     // 一次新的动作开始：把上一条"没成"的提示收起来（这次要是再失败，会写新的）。
     if (state.error) {
       state.error = null;
@@ -6290,6 +6358,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'dismiss-member-note') {
       state.memberNote = '';
+      render();
+      return;
+    }
+    if (button.dataset.act === 'show-all-tasks') {
+      state.filter = 'all';
+      state.page = 1;
       render();
       return;
     }
@@ -6463,6 +6537,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'dismiss-trouble') {
       dismissTrouble(button);
+      return;
+    }
+    if (button.dataset.act === 'alloc-candidates-retry') {
+      void loadAllocationCandidates(button.closest('.flat-allocation'));
       return;
     }
     if (button.dataset.act === 'alloc-decide') {
@@ -6766,11 +6844,19 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       //
       // 但**事件**必须跟任务表一起到：按人归堆要知道每条活是谁接的（从领取事件
       // 看），分两批到的话第一屏会先摆成"一堆没人接"，等事件到了再重排 —— 一闪。
-      const [status, tasks, events] = await Promise.all([
-        api('/status').catch(() => null),
-        api('/tasks').catch(() => ({ tasks: [] })),
-        api('/events?limit=400').catch(() => ({ events: [] })),
+      const [statusResult, tasksResult, eventsResult] = await Promise.allSettled([
+        api('/status'),
+        api('/tasks'),
+        api('/events?limit=400'),
       ]);
+      // 任务请求失败不能伪装成「暂无任务」：保留可读错误与重试入口。
+      if (tasksResult.status === 'rejected') {
+        throw new Error(`任务读取失败：${tasksResult.reason?.message || tasksResult.reason || '网络不可用'}`);
+      }
+      const status = statusResult.status === 'fulfilled' ? statusResult.value : null;
+      const tasks = tasksResult.value;
+      const events = eventsResult.status === 'fulfilled' ? eventsResult.value : { events: [] };
+      if (!status) state.error = '平台状态读取失败，任务数据可能不是最新；请重试。';
       state.status = status;
       state.events = events.events || [];
       const all = tasks.tasks || [];
@@ -6816,7 +6902,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 「在跑」只认进程报过到：注册表里的在线是注册那一刻的声明，进程停了它不会变。
       const online = state.availability.filter((item) => item.status === 'online').length;
       onStatus?.({
-        connected: true,
+        connected: Boolean(status?.connected),
         online,
         offline: state.availability.length - online,
       });
@@ -6984,6 +7070,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (snapshot) render();
     });
   }, 800);
+  root.innerHTML = `
+    <div class="flat-loading" role="status" aria-label="正在读取项目任务与交付状态">
+      <div class="flat-loading-head" aria-hidden="true"><span class="flat-skeleton"></span></div>
+      <div class="flat-loading-body" aria-hidden="true">
+        <div class="flat-loading-nav"></div>
+        <div class="flat-loading-main"><span class="flat-skeleton"></span><span class="flat-skeleton"></span><span class="flat-skeleton"></span><span class="flat-skeleton"></span></div>
+        <div class="flat-loading-rail"></div>
+      </div>
+    </div>`;
   void refresh();
 
   return {
