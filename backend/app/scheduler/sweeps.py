@@ -32,6 +32,7 @@ from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeError, WorktreeManager
 from app.lease.service import expire_stale_leases, parse_iso
+from app.merge.outputs import dependency_output_satisfied
 from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
@@ -100,9 +101,9 @@ def sweep_dependencies(
     * **``ready_waiting_deps``** (design §2.1): all upstreams merged →
       ``dependencies_satisfied``; else all upstreams dead-ended →
       ``orphan_detected``; else waited past 2× the upstreams' expected
-      durations → ``block_timeout``; else stay. The output-hash half of the
-      ``dependencies_satisfied`` guard is recorded, not implemented: the MVP
-      has no output registry (proposal §7).
+      durations → ``block_timeout``; else stay. Dependencies with a persisted
+      output contract additionally need the latest live merge's canonical hash;
+      legacy edges with no ``output_name`` keep the merged-only rule.
     * **``blocked`` split parents** (R10 §10 ``all_children_merged``): every
       child merged → ``ready``. Only split parents qualify -- the
       discriminator is a blocked-entry of ``split_parent_blocked``/``split``
@@ -126,7 +127,8 @@ def sweep_dependencies(
     for row in rows:
         task_id = str(row["task_id"])
         upstream = database.read(
-            "SELECT td.child_task_id AS upstream_id, t.status AS status"
+            "SELECT td.parent_task_id, td.child_task_id AS upstream_id, td.output_name,"
+            " t.status AS status"
             "  FROM task_dependencies td"
             "  LEFT JOIN tasks t ON t.task_id = td.child_task_id"
             " WHERE td.parent_task_id = ?",
@@ -136,7 +138,7 @@ def sweep_dependencies(
         all_merged = bool(statuses) and all(
             status == TaskStatus.MERGED.value for status in statuses
         )
-        if all_merged:
+        if all_merged and _dependency_outputs_satisfied(database, upstream, repo):
             if _apply(
                 database,
                 store,
@@ -148,7 +150,7 @@ def sweep_dependencies(
             ):
                 satisfied.append(task_id)
             continue
-        if statuses and all(
+        if not all_merged and statuses and all(
             status in _DEAD_UPSTREAM_STATES or status == TaskStatus.MERGED.value
             for status in statuses
         ):
@@ -1199,6 +1201,22 @@ def _waited_past_block_threshold(database: Database, task_row: Any, now: datetim
         total += minutes if minutes > 0 else default
     threshold = timedelta(minutes=2 * total)
     return now - parse_iso(str(task_row["waiting_since"])) > threshold
+
+
+def _dependency_outputs_satisfied(
+    database: Database, upstream: list[Any], repo: CanonicalRepo | None
+) -> bool:
+    return all(
+        item["output_name"] is None
+        or dependency_output_satisfied(
+            database,
+            parent_task_id=str(item["parent_task_id"]),
+            upstream_task_id=str(item["upstream_id"]),
+            output_name=str(item["output_name"]),
+            repo=repo,
+        )
+        for item in upstream
+    )
 
 
 def _snapshot_tasks(database: Database, snapshot_id: object) -> dict[str, dict[str, Any]]:

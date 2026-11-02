@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,7 @@ from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, GitError, run_git
 from app.human.decisions import open_decision
 from app.merge.gate import evaluate_merge_gate
+from app.merge.outputs import insert_output_registrations, prepare_output_registrations
 from app.spec import EventKind, TaskStatus
 from app.verify.overlay import Overlay, OverlayError, OverlayManager
 from app.verify.profile import VerifyPolicy, VerifyProfile
@@ -169,6 +171,13 @@ class MergeWorker:
                 )
             merge_commit = run_git("rev-parse", "HEAD", cwd=overlay.path).stdout.strip()
             self.repo.import_objects(overlay.path, merge_commit)
+            registrations = prepare_output_registrations(
+                self.database,
+                self.repo,
+                task_id=task_id,
+                attempt_id=attempt_id,
+                merge_commit=merge_commit,
+            )
             self._record_intent("merge", task_id=task_id, idempotency_key=f"merge:{merge_commit}")
             self.repo.update_ref(self.repo.integration_ref, merge_commit)
             self._set_integration_commit(task_id, merge_commit)
@@ -176,7 +185,18 @@ class MergeWorker:
 
             if post_merge is None:
                 self.overlays.recycle(overlay)
-                self._transition(task_id, current=TaskStatus.MERGING, event=EventKind.MERGE_SUCCESS)
+                self._transition(
+                    task_id,
+                    current=TaskStatus.MERGING,
+                    event=EventKind.MERGE_SUCCESS,
+                    after_event=(
+                        lambda conn, seq: insert_output_registrations(
+                            conn, registrations, merged_seq=seq
+                        )
+                        if registrations
+                        else None
+                    ),
+                )
                 return MergeOutcome(
                     status="merged",
                     task_status=TaskStatus.MERGED,
@@ -516,6 +536,7 @@ class MergeWorker:
         current: TaskStatus,
         event: EventKind,
         payload: dict[str, Any] | None = None,
+        after_event: Callable[[Any, int], None] | None = None,
     ) -> TaskStatus:
         with self.database.transaction() as conn:
             task = conn.execute(
@@ -532,6 +553,8 @@ class MergeWorker:
                 payload=payload or {},
                 connection=conn,
             )
+            if after_event is not None:
+                after_event(conn, record.seq)
             return apply_transition(
                 conn,
                 task_id=task_id,

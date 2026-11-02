@@ -9,12 +9,15 @@ order.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from app.claim.service import ClaimRequest, ClaimService
+from app.events.store import EventStore
 from app.scheduler import SWEEPS, run_all_sweeps, sweep_dependencies, sweep_resources
 from app.scheduler.report import SweepReport
 from app.spec import TaskStatus
+from app.tasks.service import SchedulerService
 from tests.claim_support import hold_resource, make_database, seed_project, seed_task
 
 NOW = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
@@ -63,6 +66,150 @@ def test_dependencies_satisfied_moves_the_task_to_ready(tmp_path):
     assert _event_count(database, "T-1", "dependencies_satisfied") == 1
     waiting = database.read("SELECT waiting_since FROM tasks WHERE task_id = 'T-1'")[0]
     assert waiting["waiting_since"] is None
+
+
+def _output_dep_rig(tmp_path):
+    database = _dep_rig(tmp_path, upstream_status=TaskStatus.MERGED.value)
+    contract = {"name": "flag.txt", "type": "code", "schema_version": "v1"}
+    with database.transaction() as conn:
+        conn.execute(
+            "UPDATE task_dependencies SET output_name = 'flag.txt'"
+            " WHERE parent_task_id = 'T-1' AND child_task_id = 'T-UP'"
+        )
+        conn.execute(
+            "INSERT INTO task_attempts(attempt_id, task_id, attempt_no, owner, fencing_epoch,"
+            " head_commit, status, created_at) VALUES ('T-UP.a1', 'T-UP', 1, 'harness-1',"
+            " 1, 'merge-commit', 'merged', ?)",
+            (NOW.isoformat(),),
+        )
+        for task_id, spec in (
+            ("T-UP", {"id": "T-UP", "outputs": [contract]}),
+            (
+                "T-1",
+                {
+                    "id": "T-1",
+                    "consumes": [
+                        {
+                            "task": "T-UP",
+                            "output": "flag.txt",
+                            "type": "code",
+                            "schema_version": "v1",
+                        }
+                    ],
+                },
+            ),
+        ):
+            conn.execute(
+                "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
+                " VALUES (?, 'G-1', 'approved', 'hash', ?)",
+                (f"plan-{task_id}", NOW.isoformat()),
+            )
+            conn.execute(
+                "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash, content_json,"
+                " created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    f"snap-{task_id}",
+                    f"plan-{task_id}",
+                    f"hash-{task_id}",
+                    json.dumps({"tasks": [spec]}),
+                    NOW.isoformat(),
+                ),
+            )
+            conn.execute(
+                "UPDATE tasks SET plan_snapshot_id = ? WHERE task_id = ?",
+                (f"snap-{task_id}", task_id),
+            )
+    merged = EventStore(database).append(
+        event_name="merge_success",
+        aggregate_type="task",
+        aggregate_id="T-UP",
+        actor_type="merge_worker",
+        actor_id="merge-worker-1",
+    )
+    with database.transaction() as conn:
+        conn.execute(
+            'INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,'
+            ' schema_version, actual_hash, "commit", merged_seq)'
+            " VALUES ('out-1', 'T-UP', 'T-UP.a1', 'flag.txt', 'code', 'v1',"
+            " 'sha256:good', 'merge-commit', ?)",
+            (merged.seq,),
+        )
+    return database
+
+
+def _use_canonical_hash(monkeypatch, digest: str) -> None:
+    monkeypatch.setattr(
+        "app.merge.outputs.canonical_output_hash", lambda *args, **kwargs: digest
+    )
+
+
+def test_output_dependency_unlocks_with_a_matching_canonical_hash(tmp_path, monkeypatch):
+    database = _output_dep_rig(tmp_path)
+    _use_canonical_hash(monkeypatch, "sha256:good")
+
+    report = sweep_dependencies(database, NOW)
+
+    assert report.detail["satisfied"] == ["T-1"]
+    assert _status(database, "T-1") == "ready"
+
+
+def test_output_dependency_rejects_a_hash_mismatch(tmp_path, monkeypatch):
+    database = _output_dep_rig(tmp_path)
+    _use_canonical_hash(monkeypatch, "sha256:different")
+
+    report = sweep_dependencies(database, NOW)
+
+    assert report.actions == 0
+    assert _status(database, "T-1") == "ready_waiting_deps"
+    assert _event_count(database, "T-1", "dependencies_satisfied") == 0
+
+
+def test_output_dependency_rejects_a_hash_invalidated_by_revert(tmp_path, monkeypatch):
+    database = _output_dep_rig(tmp_path)
+    _use_canonical_hash(monkeypatch, "sha256:good")
+    EventStore(database).append(
+        event_name="merge_reverted",
+        aggregate_type="task",
+        aggregate_id="T-UP",
+        actor_type="merge_worker",
+        actor_id="merge-worker-1",
+        payload={"reverted_commit": "merge-commit", "revert_commit": "revert-commit"},
+    )
+
+    report = sweep_dependencies(database, NOW)
+
+    assert report.actions == 0
+    assert _status(database, "T-1") == "ready_waiting_deps"
+
+
+def test_plan_materialises_the_dependency_output_name(tmp_path):
+    database = make_database(tmp_path)
+    seed_project(database)
+    SchedulerService(database).create_plan(
+        plan_id="PL-output",
+        group_id="G-1",
+        snapshot={
+            "tasks": [
+                {
+                    "id": "T-UP",
+                    "outputs": [{"name": "flag.txt", "type": "code", "schema_version": "v1"}],
+                },
+                {
+                    "id": "T-1",
+                    "depends_on": ["T-UP"],
+                    "consumes": [
+                        {"output": "flag.txt", "type": "code", "schema_version": "v1"}
+                    ],
+                },
+            ]
+        },
+    )
+
+    row = database.read(
+        "SELECT output_name FROM task_dependencies"
+        " WHERE parent_task_id = 'T-1' AND child_task_id = 'T-UP'"
+    )[0]
+    assert row["output_name"] == "flag.txt"
 
 
 def test_orphan_detection_escalates_when_upstreams_died_without_output(tmp_path):

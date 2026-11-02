@@ -40,7 +40,7 @@ from app.git.diff import PATCH_LIMIT_BYTES, compute_task_diff
 from app.git.repo import CanonicalRepo
 from app.git.worktree import WorktreeManager
 from app.lease.service import iso, parse_iso, release_lease
-from app.plan.validator import PlanError, PlanSpec, PlanValidator
+from app.plan.validator import PlanError, PlanSpec, PlanValidator, TaskSpec
 from app.review_kinds import with_finding_kinds
 from app.security.scan import MESSAGE_CODE, SECURITY_CODE, SecretScanBlocked, scan_for_block
 from app.spec import EventKind, TaskStatus
@@ -117,6 +117,32 @@ def _normalise_refs(refs: list[str] | None) -> list[str]:
 
 def _hash(value: object) -> str:
     return "sha256:" + hashlib.sha256(_canonical(value).encode("utf-8")).hexdigest()
+
+
+def _dependency_output_names(plan: PlanSpec, task: TaskSpec) -> dict[str, str | None]:
+    """Persist the single exact output contract carried by each dependency edge."""
+    specs = {item.task_id: item for item in plan.tasks}
+    output_names: dict[str, str | None] = {}
+    for upstream_id in task.depends_on:
+        upstream = specs[upstream_id]
+        matches = {
+            str(consume.get("output"))
+            for consume in task.consumes
+            if consume.get("task") in (None, upstream_id)
+            and any(
+                consume.get("output") == output.get("name")
+                and consume.get("type") == output.get("type")
+                and consume.get("schema_version") == output.get("schema_version")
+                for output in upstream.outputs
+            )
+        }
+        if len(matches) > 1:
+            raise InvalidInput(
+                f"task {task.task_id} consumes multiple outputs from {upstream_id};"
+                " task_dependencies.output_name supports one"
+            )
+        output_names[upstream_id] = next(iter(matches), None)
+    return output_names
 
 
 def _findings_json(findings: list[dict[str, object]]) -> str | None:
@@ -302,6 +328,7 @@ class SchedulerService:
                 group_id=group_id,
                 snapshot_id=snapshot_id,
                 depends_on=list(task.depends_on),
+                output_names=_dependency_output_names(spec, task),
             )
             item = next(x for x in raw["tasks"] if str(x.get("id", "")).strip() == task.task_id)
             conn.execute(
@@ -379,6 +406,13 @@ class SchedulerService:
                         task_id,
                     ),
                 )
+                task_spec = next(item for item in spec.tasks if item.task_id == task_id)
+                for upstream_id, output_name in _dependency_output_names(spec, task_spec).items():
+                    conn.execute(
+                        "UPDATE task_dependencies SET output_name = ?"
+                        " WHERE parent_task_id = ? AND child_task_id = ?",
+                        (output_name, task_id, upstream_id),
+                    )
         return PlanOutcome(
             plan_id=plan_id,
             snapshot_id=snapshot_id,
@@ -459,6 +493,7 @@ class SchedulerService:
         group_id: str,
         snapshot_id: str,
         depends_on: list[str],
+        output_names: dict[str, str | None],
     ) -> None:
         now = _now()
         existing = conn.execute("SELECT 1 FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
@@ -477,9 +512,9 @@ class SchedulerService:
             # direction is what every reader (the dependency sweeps) assumes;
             # split-closure fixed this insert, which had it inverted and untested.
             conn.execute(
-                "INSERT OR IGNORE INTO task_dependencies(parent_task_id, child_task_id, relation)"
-                " VALUES (?, ?, 'depends_on')",
-                (task_id, upstream),
+                "INSERT OR IGNORE INTO task_dependencies(parent_task_id, child_task_id,"
+                " relation, output_name) VALUES (?, ?, 'depends_on', ?)",
+                (task_id, upstream, output_names[upstream]),
             )
 
     def _approve_one(

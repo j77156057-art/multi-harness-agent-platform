@@ -8,7 +8,9 @@ value.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 
 import pytest
 
@@ -58,6 +60,41 @@ def approve_in_place(chain: Chain) -> None:
     """Take an already-built chain to ``approved`` without a review lease."""
     with chain.database.transaction() as conn:
         conn.execute("UPDATE tasks SET status='approved' WHERE task_id=?", (chain.task_id,))
+
+
+def declare_outputs(chain: Chain, names: list[str]) -> None:
+    snapshot_id = f"snap-{chain.task_id}-outputs"
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
+            " VALUES (?, 'G-1', 'approved', 'hash', datetime('now'))",
+            (f"plan-{chain.task_id}-outputs",),
+        )
+        conn.execute(
+            "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash, content_json,"
+            " created_at) VALUES (?, ?, 'hash', ?, datetime('now'))",
+            (
+                snapshot_id,
+                f"plan-{chain.task_id}-outputs",
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": chain.task_id,
+                                "outputs": [
+                                    {"name": name, "type": "code", "schema_version": "v1"}
+                                    for name in names
+                                ],
+                            }
+                        ]
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            "UPDATE tasks SET plan_snapshot_id = ? WHERE task_id = ?",
+            (snapshot_id, chain.task_id),
+        )
 
 
 def rename_in_worktree(chain: Chain, *, src: str, dst: str) -> str:
@@ -205,6 +242,51 @@ def test_merge_writes_integration_and_marks_the_task_merged(tmp_path):
     }
     assert "merge" in intents, "the merge is recorded as a side effect intent"
     assert "push" in intents, "the publish that put the branch in canonical is recorded too"
+
+
+def test_merge_registers_file_and_directory_hashes_from_the_merge_tree(tmp_path):
+    chain = approve(
+        build_chain(
+            tmp_path,
+            extra_files={"dist/a.txt": "a\n", "dist/nested/b.txt": "b\n"},
+        )
+    )
+    declare_outputs(chain, ["flag.txt", "dist"])
+
+    outcome = worker_for(chain).merge(
+        task_id=chain.task_id,
+        attempt_id=chain.attempt_id,
+        commit=chain.head_commit,
+        branch=chain.branch,
+    )
+
+    rows = chain.database.read(
+        "SELECT * FROM task_outputs WHERE task_id = ? ORDER BY name", (chain.task_id,)
+    )
+    assert [row["name"] for row in rows] == ["dist", "flag.txt"]
+    by_name = {str(row["name"]): row for row in rows}
+    flag_bytes = subprocess.run(
+        ["git", "cat-file", "blob", f"{outcome.merge_commit}:flag.txt"],
+        cwd=chain.repo.path,
+        capture_output=True,
+        check=True,
+    ).stdout
+    assert by_name["flag.txt"]["actual_hash"] == "sha256:" + hashlib.sha256(flag_bytes).hexdigest()
+    manifest_entries = []
+    for path in ("dist/a.txt", "dist/nested/b.txt"):
+        blob = run_git("rev-parse", f"{outcome.merge_commit}:{path}", cwd=chain.repo.path).stdout
+        manifest_entries.append((path.encode(), blob.strip().encode()))
+    manifest = b"".join(path + b"\0" + blob + b"\n" for path, blob in sorted(manifest_entries))
+    assert by_name["dist"]["actual_hash"] == "sha256:" + hashlib.sha256(manifest).hexdigest()
+    merged_seq = chain.database.read(
+        "SELECT seq FROM task_events WHERE aggregate_id = ? AND event_name = 'merge_success'",
+        (chain.task_id,),
+    )[0]["seq"]
+    for row in rows:
+        assert row["attempt_id"] == chain.attempt_id
+        assert row["type"] == "code" and row["schema_version"] == "v1"
+        assert row["commit"] == outcome.merge_commit
+        assert row["merged_seq"] == merged_seq
 
 
 def test_conflict_in_the_tasks_own_files_needs_the_owner(tmp_path):
