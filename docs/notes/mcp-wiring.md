@@ -87,7 +87,50 @@ qoder 还支持 `${VAR:-默认}`）。**但不采用**，理由是同一条：co
 
 所以这一版**只承诺 A 档**，B/C 档的验收脚本与那次真跑，等有人点头再开。
 
+## 7.1 已经做到 B 档的那一家（2026-11-02 实测，零成本）
+
+codex 这一条**已经验到 B 档**，做法值得记下来，因为它是唯一能在不花钱的前提下拿到
+证据的路子：
+
+- 起一个只记账的本地 MCP 端点（`data/mcp-mock/server.mjs`，一行一个 JSON 记下
+  谁来过、带了什么头、`rpc_method` 是什么）；
+- 用适配器**同一套参数**跑一次 codex，只把模型指到一个死端口
+  （`model_providers.deadpool.base_url=http://127.0.0.1:9`）—— 于是它必失败，
+  但**连接 MCP 发生在调模型之前**，证据照样拿到，且一个字节都不会外呼；
+- 结果（`data/mcp-mock/log.jsonl` 三行）：
+
+  | 顺序 | rpc_method | Authorization |
+  |---|---|---|
+  | 1 | `initialize` | `Bearer apt_selfcheck_token_123` |
+  | 2 | `notifications/initialized` | 同上 |
+  | 3 | `tools/list` | 同上 |
+
+  令牌来自**环境变量**（`AP_PLATFORM_MCP_TOKEN`），命令行里只有变量名 —— 与设计一致。
+  紧接着 codex 在死端口上连试 5 次后报 `turn.failed`，退出码 1，这是预期的。
+
+所以 B 档对 codex 成立：**它真的去连了，并把服务端的工具注册进了自己那套**。
+codebuddy / qoder 没有这样验 —— 原因见 §7.2（它们一旦跑起来就是花那个人自己的
+账号额度，任一种变通都要先问）。
+
+## 7.2 一个必须说清的代价：三家接了 MCP，能被平台指到额度池的只有 codex
+
+`codebuddy` 与 `qoder` 的适配器**没有** `route_environment()`（基类返回空），
+也就是说平台没有任何环境变量/参数能把它们指到额度池 —— 它们一旦跑起来就用**那个
+账号自己的额度**。codex 有（`OPENAI_API_KEY` + `-c model_provider=pool`）。
+
+这条不对称在接 MCP 之后更要紧：接上 MCP 的窗口，交付由平台提交，工具那一侧没有
+git 写；而"用什么模型"仍然取决于这家 CLI 能不能被指过去。
+
+## 7.3 免费档做不了 C 档（模型真的调工具）
+
+池子里的免费档（`codebuddy/hy3`、`qoder/Qwen3.8-Flash`、`opencode-cli/*`）**全是
+`protocol: cli` 槽位**：编码 CLI 带着工具定义去接会被直接拒
+（`relay_cli_cannot_use_tools`）。所以"用免费档跑一个编码 CLI 来验 MCP 的 C 档"
+这条路是堵死的，不是没试。C 档只有两条路：那个人自己的账号，或者付费档。
 ## 8. 待确认
 
-1. §7 的那次真跑用哪家、能不能花那个账号的额度 —— 需要人拍板；
-2. 要不要给 pi 也开一条（先得有人证明它那边工具真能调到）。
+1. **C 档要不要做、用谁的钱**：免费档做不了（§7.3），只能走那个人自己的账号或付费档。
+   codex 本机已登录；codebuddy / qoder 也能跑，但一跑就是花那个账号的额度。
+2. 要不要顺手给 codebuddy / qoder 补 `route_environment()`，让它们也**能被指到额度
+   池**（§7.2）。不补，它们接了工具之后的窗口仍然只能用自己的账号。
+3. 要不要给 pi 也开一条（先得有人证明它那边工具真能调到）。
