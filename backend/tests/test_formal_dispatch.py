@@ -74,6 +74,65 @@ def claim(env, task_id, name="codex", key="claim-1"):
     return response.json()
 
 
+def _choose_pool_model(env, harness_id: str, model_id: str) -> None:
+    with env.db.transaction() as conn:
+        conn.execute(
+            "UPDATE harnesses SET model_mode = 'pool', model_id = ? WHERE harness_id = ?",
+            (model_id, harness_id),
+        )
+
+
+def test_dispatch_refuses_a_window_whose_pool_model_is_cli_only(env, monkeypatch):
+    """CLI 档接不了工具定义：任务必须在建出来之前就被拒绝，不能停在 ready。"""
+    from app.pool.service import PoolService
+
+    monkeypatch.setattr(
+        PoolService,
+        "models",
+        lambda self, refresh=False: [
+            {
+                "id": "qoder/DeepSeek-Flash",
+                "upstream": "qoder",
+                "protocol": "cli",
+                "tier": "free",
+            }
+        ],
+    )
+    _choose_pool_model(env, "codex", "qoder/DeepSeek-Flash")
+
+    response = env.client.post("/api/v1/groups/G/dispatch", json=body())
+
+    assert response.status_code == 422, response.text
+    assert "protocol_unsupported" in response.text
+    assert env.db.read("SELECT * FROM tasks") == []
+    # 拒绝发生在写幂等记录之前：人把模型改好之后，同一个 request_id 还能重试。
+    assert env.db.read("SELECT * FROM command_idempotency") == []
+
+
+def test_dispatch_still_accepts_a_window_whose_pool_model_takes_tools(env, monkeypatch):
+    """同一入口不能把能接工具的池子模型也一起挡住。"""
+    from app.pool.service import PoolService
+
+    monkeypatch.setattr(
+        PoolService,
+        "models",
+        lambda self, refresh=False: [
+            {
+                "id": "relay/gpt-5",
+                "upstream": "relay",
+                "protocol": "openai-chat",
+                "tier": "reserve",
+            }
+        ],
+    )
+    _choose_pool_model(env, "codex", "relay/gpt-5")
+
+    response = env.client.post("/api/v1/groups/G/dispatch", json=body())
+
+    assert response.status_code == 200, response.text
+    assert len(env.db.read("SELECT * FROM tasks")) == 1
+
+
 def test_atomic_dispatch_replay_and_conflict(env):
     response = env.client.post("/api/v1/groups/G/dispatch", json=body())
     assert response.status_code == 200, response.text

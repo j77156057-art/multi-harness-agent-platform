@@ -82,6 +82,41 @@ def read_choice(database: Database, harness_id: str) -> ModelChoice | None:
     return _choice_from_row(rows[0])
 
 
+def tool_capability_problem(model_mode: str | None, model_id: str | None) -> str | None:
+    """人指定的池子模型接不了带工具定义的请求时，返回原因；否则 ``None``。
+
+    执行类活永远带工具定义（代理要读写文件）。CLI 档只能回文本，平台在
+    ``/pool/plan`` 里会答 ``protocol_unsupported``，但那时任务已经被派出去了：
+    worker 拿到这个答案只能不领、重试，任务就永久停在 ``ready``。派单入口用
+    同一个判据提前拒绝，让这种窗口在**建任务之前**就报错。
+
+    只看「人明确选了池子里的某个模型」这一种情况（``model_mode='cli'`` 用的是
+    窗口自己 CLI 的模型，能力由那个 CLI 自己保证）。池子读不到时返回 ``None``：
+    入口不因为一次文件读取失败就把派单全堵死，真正的判据在 ``/pool/plan``。
+    """
+    mode = str(model_mode or "")
+    chosen = str(model_id or "")
+    if mode != MODEL_MODE_POOL or not chosen:
+        return None
+    try:
+        from app.pool.service import PoolService
+
+        entries = PoolService().models()
+    except Exception:  # noqa: BLE001 - 见 docstring：读不到就不在入口下结论
+        return None
+    for entry in entries:
+        if str(entry.get("id") or "") != chosen:
+            continue
+        if str(entry.get("protocol") or "") == "cli":
+            return (
+                f"protocol_unsupported: the chosen model {chosen} is a CLI slot and"
+                " cannot accept tool definitions, so this window could never run a"
+                " dispatched task"
+            )
+        return None
+    return None
+
+
 def save_choice(
     database: Database,
     *,

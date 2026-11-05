@@ -72,6 +72,16 @@ def dispatch(
             raise InvalidInput(
                 "target Harness holds no platform credential, so it could never" " claim this task"
             )
+        # 同理，能不能领得到 ≠ 能不能跑得了。人给这个窗口指定的池子模型如果是
+        # CLI 档，它接不了带工具定义的请求：任务派出去后 worker 只会在
+        # /pool/plan 拿到 protocol_unsupported，然后一直停在 ready。入口先拒绝。
+        from app.adapter.model_choice import tool_capability_problem
+
+        tool_problem = tool_capability_problem(member["model_mode"], member["model_id"])
+        if tool_problem is not None:
+            raise InvalidInput(
+                f"{tool_problem}; dispatch was refused before any task was created"
+            )
         if not exclusive_paths or any(
             p.startswith(("/", ".")) or ":" in p or "\\" in p or ".." in p.split("/")
             for p in exclusive_paths
