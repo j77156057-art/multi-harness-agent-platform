@@ -21,6 +21,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.adapter.dispatch import eligible_tasks
 from app.api.app import create_app
 from app.claim.service import (
     OUTCOME_CLAIMED,
@@ -36,7 +37,14 @@ from app.git.worktree import WorktreeManager
 from app.merge.worker import MergeWorker
 from app.tasks.service import SchedulerService
 from app.verify.worker import VerifyWorker
-from tests.claim_support import count, hold_resource, make_database, seed_project, seed_task
+from tests.claim_support import (
+    DEFAULT_GROUP,
+    count,
+    hold_resource,
+    make_database,
+    seed_project,
+    seed_task,
+)
 from tests.git_support import commit_in
 from tests.merge_support import CHECK_FLAG, PROFILE, build_chain, policy, register_harness
 
@@ -463,3 +471,33 @@ def test_list_ready_tasks_surfaces_a_rework(tmp_path):
     assert listed["count"] == 1
     assert listed["tasks"][0]["task_id"] == "T-1"
     assert listed["tasks"][0]["status"] == "changes_requested"
+
+
+def test_a_gated_group_still_lists_and_runs_a_rework(tmp_path, monkeypatch):
+    """§39 门禁只拦**第一份** attempt，返工必须留在 worker 的拉取列表里。
+
+    2026-11-06 E2E 的卡死现场：群开了分配门禁，第一份分配的 ``claimed_at``
+    在开出 attempt 时已经写下；``eligible_tasks`` 却又按门禁去过滤
+    ``changes_requested``。列表侧与 Claim 侧口径不一致 —— worker 拿不到这份返工，
+    ``CLAIM_FOR_REVISION`` 那条"返工不重新分配"的豁免通道永远走不到，任务就停在
+    ``changes_requested``（owner 为空、不在 ready 列表、也没有新分配轮次）。
+    """
+    chain = _failed_chain(tmp_path)
+    monkeypatch.setattr(
+        settings, "allocation_required_groups", frozenset({DEFAULT_GROUP})
+    )
+
+    listed = eligible_tasks(
+        chain.database, harness_id="harness-2", group_id=DEFAULT_GROUP, limit=10
+    )
+
+    assert [row["task_id"] for row in listed] == ["T-1"], (
+        "开了门禁也不能把返工从拉取列表里删掉："
+        "Claim 侧的 CLAIM_FOR_REVISION 刻意不过门禁"
+    )
+
+    item, _worktree, _head = _rework_attempt(chain, tmp_path)
+
+    assert item.attempt_id == "T-1.a2"
+    assert _status(chain.database) == "awaiting_review", "返工要能真的跑完一轮"
+
