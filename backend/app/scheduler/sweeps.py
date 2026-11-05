@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from app.budget.service import BudgetGuard
@@ -30,7 +32,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
 from app.git.repo import CanonicalRepo, run_git
-from app.git.worktree import WorktreeError, WorktreeManager
+from app.git.worktree import WorktreeError, WorktreeManager, _force_rmtree
 from app.lease.service import expire_stale_leases, parse_iso
 from app.merge.outputs import dependency_output_satisfied
 from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
@@ -1261,8 +1263,134 @@ def sweep_budget(
     )
 
 
+#: 孤儿扫描白名单（相对 ``data_dir`` 的父目录，即项目根）。
+#:
+#: 2026-11-06 事故：root 是从「每条 workspace 行的父目录」推导出来的，于是
+#: 一次 sweep 跨 root 删了 75 个目录，包括 ``<tmp>\e2e-real-20261105\wt``
+#: 67 个和 ``.worktrees\codex\wt`` 6 个 —— 那不是本实例该动的东西。
+#: 现在只认这三个显式路径；``<tmp>\*``、``.worktrees\codex\*`` 默认拒绝，
+#: 即使目录存在、为空、且本库恰好有行指向它。
+ORPHAN_ROOT_ALLOWLIST = ("wt", "data/fw", "data/fw-op")
+
+
+def _is_allowed_orphan_root(path: Path) -> bool:
+    base = Path(settings.data_dir).parent
+    allowed = {
+        os.path.normcase(os.path.abspath(str(base / rel)))
+        for rel in ORPHAN_ROOT_ALLOWLIST
+    }
+    return os.path.normcase(os.path.abspath(str(path))) in allowed
+
+
+def _orphan_roots(database: Database) -> list[Path]:
+    """本库真正拥有的、且在白名单内的 root。
+
+    两个条件缺一不可：目录在白名单里，且本库至少有一行 workspace 指向它。
+    空库因此一个 root 都不扫——2026-11-05 的测试库就是回落到真实 ``wt/``
+    才误删了生产目录。
+    """
+    owned = [
+        os.path.normcase(os.path.abspath(str(row["path"])))
+        for row in database.read("SELECT path FROM workspaces")
+    ]
+    roots: list[Path] = []
+    for candidate in (Path(settings.data_dir).parent / rel for rel in ORPHAN_ROOT_ALLOWLIST):
+        if not candidate.is_dir():
+            continue
+        prefix = os.path.normcase(os.path.abspath(str(candidate))) + os.sep
+        if any(path.startswith(prefix) for path in owned):
+            roots.append(candidate)
+    return roots
+
+
+def _recycle_orphan_worktrees(
+    database: Database, roots: list[Path]
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Clean directories under each allow-listed worktree root that no active row owns.
+
+    "目录残留但无租约"：a crash can leave a tree behind after its row was
+    removed.  A *dirty* leftover is never deleted -- it is somebody's
+    unarchived work; it is reported as ``orphans_kept`` every round.  A clean
+    one is bundled (all refs) and only then removed, so commits created in the
+    orphan gitdir are not lost with the directory.
+
+    ``roots`` is the intersection of :data:`ORPHAN_ROOT_ALLOWLIST` with the
+    roots this database has rows for (see :func:`_orphan_roots`).  It is never
+    derived from an arbitrary workspace row's parent again.
+    """
+    active = {
+        os.path.normcase(os.path.abspath(str(row["path"])))
+        for row in database.read("SELECT path FROM workspaces WHERE status = 'active'")
+    }
+    removed: list[str] = []
+    kept: list[dict[str, str]] = []
+    for root in roots:
+        if not root.exists() or not root.is_dir():
+            continue
+        for child in sorted(root.iterdir()):
+            if not child.is_dir() or child.is_symlink() or child.name.endswith(".git"):
+                continue
+            if os.path.normcase(os.path.abspath(str(child))) in active:
+                continue
+            status = run_git("status", "--porcelain", cwd=child, check=False)
+            if status.returncode != 0:
+                kept.append(
+                    {
+                        "path": str(child),
+                        "reason": f"git status failed: {status.stderr.strip()[:200]}",
+                    }
+                )
+                continue
+            if status.stdout.strip():
+                kept.append({"path": str(child), "reason": "uncommitted_changes"})
+                continue
+            archive_root = Path(settings.data_dir) / "archives" / "orphans"
+            archive_root.mkdir(parents=True, exist_ok=True)
+            bundle = archive_root / f"{child.name}-{uuid.uuid4().hex[:8]}.bundle"
+            refs = run_git("for-each-ref", "--format=%(refname)", cwd=child, check=False)
+            head = run_git("rev-parse", "--verify", "HEAD", cwd=child, check=False)
+            if refs.stdout.strip():
+                created = run_git(
+                    "bundle", "create", str(bundle), "--all", cwd=child, check=False
+                )
+            elif head.returncode == 0 and head.stdout.strip():
+                created = run_git(
+                    "bundle", "create", str(bundle), "HEAD", cwd=child, check=False
+                )
+            else:
+                # 无 ref 也无 HEAD：没有可丢的提交，干净目录直接清理。
+                created = None
+            if created is not None and created.returncode != 0:
+                kept.append(
+                    {
+                        "path": str(child),
+                        "reason": f"bundle failed: {created.stderr.strip()[:200]}",
+                    }
+                )
+                continue
+            if created is not None:
+                verified = run_git("bundle", "verify", str(bundle), cwd=child, check=False)
+                if verified.returncode != 0:
+                    kept.append(
+                        {
+                            "path": str(child),
+                            "reason": f"bundle verify failed: {verified.stderr.strip()[:200]}",
+                        }
+                    )
+                    continue
+            gitdir = root / f"{child.name}.git"
+            _force_rmtree(child)
+            if gitdir.exists() and not gitdir.is_symlink():
+                _force_rmtree(gitdir)
+            removed.append(str(child))
+    return removed, kept
+
+
 def sweep_worktree_recycle(
-    database: Database, now: datetime, repo: CanonicalRepo | None = None
+    database: Database,
+    now: datetime,
+    repo: CanonicalRepo | None = None,
+    root: Path | None = None,
 ) -> SweepReport:
     """Recycle worktrees whose attempt is dead (rules-tighten, drill F7).
 
@@ -1297,12 +1425,48 @@ def sweep_worktree_recycle(
         # 没有当前 attempt 的任务，它手上那个 attempt 同样已经死了
         "        OR t.current_attempt_id IS NULL"
         "        OR (t.current_attempt_id IS NOT NULL"
-        "            AND w.attempt_id != t.current_attempt_id))"
-        " ORDER BY w.rowid"
+        "            AND w.attempt_id != t.current_attempt_id)"
+        # 2026-11-05: 8 个历史工位停在 awaiting_review/approved，租约早已
+        # release、lease_until 也早过期，但没有任何规则回收它们。这里按
+        # 「没有活租约 + 租约已过期」回收：归档校验通过才删（见
+        # archive_and_recycle）。awaiting_human/plan_drift/impl_drift 是可
+        # resume 的暂停态，不自动删，等持有人决定。
+        "        OR (t.status NOT IN ('awaiting_human', 'plan_drift', 'impl_drift')"
+        "            AND EXISTS (SELECT 1 FROM leases l"
+        "                         WHERE l.attempt_id = w.attempt_id"
+        "                           AND l.kind = 'development'"
+        "                           AND l.lease_until <= ?)"
+        "            AND NOT EXISTS (SELECT 1 FROM leases l"
+        "                            WHERE l.attempt_id = w.attempt_id"
+        "                              AND l.kind = 'development'"
+        "                              AND l.released_at IS NULL"
+        "                              AND l.lease_until > ?))"
+        # 「目录残留但无租约」：active 行却一行 development lease 都没有，
+        # 说明领取/租约写入在崩溃里丢了，工位是孤儿。
+        "        OR (t.status NOT IN ('awaiting_human', 'plan_drift', 'impl_drift')"
+        "            AND NOT EXISTS (SELECT 1 FROM leases l"
+        "                            WHERE l.attempt_id = w.attempt_id"
+        "                              AND l.kind = 'development'))"
+        "       )"
+        " ORDER BY w.rowid",
+        (now.isoformat(), now.isoformat()),
     )
-    if not rows:
-        return SweepReport("worktree_recycle", 0, {"recycled": [], "skipped": []})
-    manager = WorktreeManager(database, repo or CanonicalRepo.from_settings())
+    # 孤儿扫描只认白名单（ORPHAN_ROOT_ALLOWLIST），并且只扫本库有 workspace
+    # 行的 root。绝不再从任意 workspace 行的父目录推导 —— 2026-11-06 的
+    # <tmp>\* / .worktrees\codex\* 越界删除就是那样来的。
+    # ``root`` 是测试的显式注入，同样要过白名单。
+    if root is not None:
+        explicit_root = Path(root)
+        manager_root = explicit_root
+        roots = [explicit_root] if _is_allowed_orphan_root(explicit_root) else []
+    else:
+        roots = _orphan_roots(database)
+        manager_root = roots[0] if roots else None
+    manager = WorktreeManager(
+        database,
+        repo or CanonicalRepo.from_settings(),
+        root=manager_root,
+    )
     recycled: list[str] = []
     reconciled_missing: list[str] = []
     skipped: list[dict[str, str]] = []
@@ -1316,13 +1480,16 @@ def sweep_worktree_recycle(
             recycled.append(attempt_id)
         except WorktreeError as exc:
             skipped.append({"attempt_id": attempt_id, "reason": str(exc)})
+    orphans_removed, orphans_kept = _recycle_orphan_worktrees(database, roots)
     return SweepReport(
         "worktree_recycle",
-        len(recycled) + len(reconciled_missing),
+        len(recycled) + len(reconciled_missing) + len(orphans_removed),
         {
             "recycled": recycled,
             "reconciled_missing": reconciled_missing,
             "skipped": skipped,
+            "orphans_removed": orphans_removed,
+            "orphans_kept": orphans_kept,
         },
     )
 
