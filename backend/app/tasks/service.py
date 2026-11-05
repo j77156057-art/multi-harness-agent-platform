@@ -71,6 +71,64 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+#: 07 现场：四条 ``task_attempts`` 停在 ``in_progress``，而任务已经 escalated /
+#: abandoned。attempt 的状态是投影，owner 阶段结束时平台必须自己收口，
+#: 不能等 harness 回来汇报（它已经不回来了）。``task_attempts.status`` 是自由
+#: 文本（001_initial.sql 没有枚举），所以这几个值不需要迁移。
+CLOSED_ATTEMPT_STATUSES = frozenset({"abandoned", "escalated", "failed", "released"})
+
+#: 收口**只**认这两个「还没结束」的状态。``claimed`` 是必须收的那一类：
+#: 领取成功但 provision 失败时，attempt 停在 ``claimed``，``start_task`` 从未
+#: 执行，于是永远不是 ``in_progress``。2026-11-06 的 ``seq 2562`` 就是这样——
+#: release 事件落盘、任务回到 ready，attempt 行却停在 ``claimed``、
+#: ``closed_at``/``close_reason`` 全空，事后无法回答「这次 attempt 什么时候、
+#: 为什么结束」。``verifying`` 不在名单里：那是提交后的在途状态，由
+#: ``submit_result`` 自己收口，reconcile 也不能替它收。
+OPEN_ATTEMPT_STATUSES = ("claimed", "in_progress")
+
+
+def close_attempt(
+    conn: sqlite3.Connection,
+    *,
+    attempt_id: str | None,
+    status: str,
+    reason: str,
+    now: datetime | None = None,
+    head_commit: str | None = None,
+) -> bool:
+    """Close an attempt that has not ended yet; idempotent by design.
+
+    ``WHERE status IN ('claimed', 'in_progress')`` is the concurrency guard:
+    two sweepers (or a sweep and a worker) may race to close the same attempt,
+    and only one transition should land. Both statuses are still "open" -- a
+    claimed attempt that never got provisioned has no ``in_progress`` phase at
+    all, which is exactly the 2026-11-06 ``seq 2562`` release (event landed,
+    row left at ``claimed``). ``closed_at`` / ``close_reason`` keep the "when"
+    and "why" on the row itself -- ``task_events`` has a fixed allowlist, so
+    this closes the row without inventing an unregistered event name.
+    """
+    if not attempt_id:
+        return False
+    if status not in CLOSED_ATTEMPT_STATUSES:
+        raise ValueError(f"unknown closed attempt status: {status}")
+    moment = now or datetime.now(UTC)
+    placeholders = ", ".join(["?"] * len(OPEN_ATTEMPT_STATUSES))
+    cursor = conn.execute(
+        "UPDATE task_attempts SET status = ?, head_commit = COALESCE(?, head_commit),"
+        " closed_at = ?, close_reason = ?"
+        f" WHERE attempt_id = ? AND status IN ({placeholders})",
+        (status, head_commit, iso(moment), reason, attempt_id, *OPEN_ATTEMPT_STATUSES),
+    )
+    if cursor.rowcount != 1:
+        return False
+    conn.execute(
+        "UPDATE tasks SET updated_at = ?"
+        " WHERE task_id = (SELECT task_id FROM task_attempts WHERE attempt_id = ?)",
+        (iso(moment), attempt_id),
+    )
+    return True
+
+
 #: R10 §10: the ``split`` edge's current states (``child_created`` is a pseudo
 #: state, so the parent status is unchanged by the edge itself).
 _SPLIT_PARENT_STATES = frozenset({TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED})
@@ -1082,9 +1140,11 @@ class SchedulerService:
             # needs_help / blocked keep both owner and current attempt: R10 §10
             # moves only the status on those edges. (There is no tasks.attempt_id
             # column to write either.)
+            moment = datetime.now(UTC)
             extra: dict[str, object] = (
                 {} if keep_owner else {"owner": None, "current_attempt_id": None}
             )
+            extra["updated_at"] = iso(moment)
             apply_transition(
                 conn,
                 task_id=task_id,
@@ -1094,6 +1154,26 @@ class SchedulerService:
                 extra_sets=extra,
                 state_seq=record.seq,
             )
+            # 07 现场：abandon/release 之后任务已经 abandoned/ready，attempt 却还
+            # 停在 in_progress。收口留在 owner 阶段结束的这两个边上（escalated
+            # 由 sweeps 收口），提交（verifying）由 submit_result 自己写。
+            closing_status = {
+                EventKind.ABANDON: TaskStatus.ABANDONED.value,
+                EventKind.RELEASE: "released",
+            }.get(event)
+            if closing_status is not None:
+                # 关闭原因写**人给的那句话**（release/abandon 的 payload.reason），
+                # 不再只写事件名。2026-11-05 的 pi 事后只能看到
+                # close_reason="release"，得再翻三份日志才知道是
+                # relay_cli_cannot_use_tools；原因本身就是这条账的一部分。
+                stated = payload.get("reason")
+                close_attempt(
+                    conn,
+                    attempt_id=attempt_id,
+                    status=closing_status,
+                    reason=str(stated).strip() if stated else event.value,
+                    now=moment,
+                )
             if release_lease_too:
                 release_lease(conn, task_id=task_id, attempt_id=attempt_id, reason=event.value)
         # 这一轮也消耗了 token（放回队列、放弃都不是「没跑」）：记上。

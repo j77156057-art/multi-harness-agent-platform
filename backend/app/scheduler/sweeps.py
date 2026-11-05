@@ -20,8 +20,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -640,7 +641,56 @@ def _apply(
             extra_sets=extra_sets or {},
             state_seq=record.seq,
         )
+        if event in _ESCALATION_EVENTS:
+            _close_escalated_owner(conn, task_id=task_id, reason=event.value)
         return True
+
+
+#: 所有把任务推进 ``escalated`` 的 sweep 边。07 现场只修了 stuck 一条，但
+#: blocked/aging 同样会升级；漏一条就还会留下 ``escalated + in_progress``。
+_ESCALATION_EVENTS = frozenset(
+    {
+        EventKind.AGING_TIMEOUT,
+        EventKind.BLOCK_TIMEOUT,
+        EventKind.STUCK_THRESHOLD_REACHED,
+        EventKind.ATTEMPT_BUDGET_EXHAUSTED,
+    }
+)
+
+
+def _close_escalated_owner(
+    conn: sqlite3.Connection, *, task_id: str, reason: str
+) -> None:
+    """Close the owner phase of an escalated task: attempt + lease + owner.
+
+    07 现场：``FD-c3fb`` 已 escalated，``task_attempts`` 仍 ``in_progress``，
+    lease ``lease_until=06:56:49`` / ``released_at=null``，owner 还挂着。
+    升级之后没有人再会来续租，所以这三样必须在同一个事务里收口。
+    """
+    from app.lease.service import release_attempt_resources, release_lease
+    from app.tasks.service import close_attempt
+
+    row = conn.execute(
+        "SELECT current_attempt_id FROM tasks WHERE task_id = ?", (task_id,)
+    ).fetchone()
+    attempt_id = None if row is None or row["current_attempt_id"] is None else str(
+        row["current_attempt_id"]
+    )
+    if attempt_id is None:
+        return
+    close_attempt(
+        conn,
+        attempt_id=attempt_id,
+        status="escalated",
+        reason=reason,
+        now=datetime.now(UTC),
+    )
+    release_lease(conn, task_id=task_id, attempt_id=attempt_id, reason=reason)
+    release_attempt_resources(conn, attempt_id=attempt_id, reason=reason)
+    conn.execute(
+        "UPDATE tasks SET owner = NULL, current_attempt_id = NULL WHERE task_id = ?",
+        (task_id,),
+    )
 
 
 def _drift_round(
@@ -1171,6 +1221,13 @@ def _stuck_round(
             extra_sets=extra,
             state_seq=record.seq,
         )
+        conn.execute(
+            "UPDATE tasks SET updated_at = ? WHERE task_id = ?",
+            (now.isoformat(), task_id),
+        )
+        if outcome == "escalated":
+            # 07 现场：这里只改了任务状态，attempt 仍 in_progress、lease 仍挂着。
+            _close_escalated_owner(conn, task_id=task_id, reason=event.value)
         return outcome
 
 

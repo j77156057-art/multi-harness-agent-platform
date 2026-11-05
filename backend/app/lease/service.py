@@ -270,6 +270,20 @@ def expire_stale_leases(
 
             status = TaskStatus(str(task["status"]))
             if status not in OWNER_STATES:
+                # 07 现场：escalated 的这条 task 在这里被 continue 跳过，attempt
+                # 永远停在 in_progress（lease 已释放，人却看到「还在跑」）。
+                # 非 owner 态的 attempt 也要有终态；close_attempt 幂等，已有终态
+                # 时返回 False。
+                if attempt_id is not None:
+                    from app.tasks.service import close_attempt
+
+                    close_attempt(
+                        conn,
+                        attempt_id=str(attempt_id),
+                        status="failed",
+                        reason="lease_expire",
+                        now=moment,
+                    )
                 continue
 
             # 第一段：到期先问人，不判失联。
@@ -312,7 +326,7 @@ def expire_stale_leases(
         # 第二段：宽限期过了还没人回答，才按失联兜底。
         cutoff_grace = iso(moment - timedelta(minutes=settings.lease_uncertain_grace_minutes))
         for row in conn.execute(
-            "SELECT t.task_id, t.current_epoch, d.decision_id FROM tasks t"
+            "SELECT t.task_id, t.current_epoch, t.current_attempt_id, d.decision_id FROM tasks t"
             "  JOIN task_decisions d ON d.task_id = t.task_id"
             " WHERE t.status = ? AND d.scope = 'lease_uncertain' AND d.answer IS NULL"
             "   AND d.decided_seq IS NULL AND t.waiting_since IS NOT NULL"
@@ -346,6 +360,17 @@ def expire_stale_leases(
                 "UPDATE task_decisions SET answer = ?, decided_seq = ? WHERE decision_id = ?",
                 ("超时未确认，平台按失联处理", event.seq, str(row["decision_id"])),
             )
+            # 人没回来，owner 阶段到此结束：attempt 不能继续假装在跑。
+            if row["current_attempt_id"] is not None:
+                from app.tasks.service import close_attempt
+
+                close_attempt(
+                    conn,
+                    attempt_id=str(row["current_attempt_id"]),
+                    status="failed",
+                    reason="lease_expire",
+                    now=moment,
+                )
             transitioned.append(task_id)
 
         escalated = escalate_budget_exhausted(conn, store=store, now=moment)
