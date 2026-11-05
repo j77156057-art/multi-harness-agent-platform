@@ -3,7 +3,7 @@
 import json
 
 from app.allocation.service import authorization_row as allocation_row
-from app.claim.service import ClaimService, allocation_gate_applies
+from app.claim.service import QUEUE_REASON_WORKTREE, ClaimService, allocation_gate_applies
 from app.spec import EventKind, TaskStatus
 from app.tasks.service import Conflict, InvalidInput, SchedulerService, _canonical, _hash
 
@@ -166,24 +166,58 @@ def eligible_tasks(database, *, harness_id: str, group_id: str | None, limit: in
     这里必须和 Claim 用同一个读口径（`authorization_row`），否则成员会拿到一串
     永远领不动的活，反复 Claim 被拒、把日志刷成噪声 —— 上一轮 `WorkRefused`
     的重复实例就是这么来的。
+
+    排队等工位（``worktree_capacity``）的任务也在这里出现，但**只给当初排队的人**：
+    延迟领取的 request_id 属于它，重试同一个 id 才会原地完成领取；别的窗口拿着
+    同一个 id 来会撞 payload hash。若它不在了，queued 的 aging 边界会接手，
+    而不是让一条没有 worker 的 attempt 永远挂着。
     """
     with database.connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM tasks WHERE status IN (?, ?) ORDER BY task_id",
-            (TaskStatus.READY.value, TaskStatus.CHANGES_REQUESTED.value),
+            "SELECT * FROM tasks WHERE status IN (?, ?, ?) ORDER BY task_id",
+            (
+                TaskStatus.READY.value,
+                TaskStatus.CHANGES_REQUESTED.value,
+                TaskStatus.QUEUED.value,
+            ),
         ).fetchall()
         eligible = []
         for row in rows:
             if group_id and row["group_id"] != group_id:
                 continue
+            if row["status"] == TaskStatus.QUEUED.value:
+                if not _deferred_to(conn, row, harness_id):
+                    continue
             if ClaimService.eligibility(conn, row, harness_id)[0]:
                 continue
-            if allocation_gate_applies(row) and not allocation_row(
-                conn,
-                task_id=row["task_id"],
-                harness_id=harness_id,
-                plan_snapshot_id=row["plan_snapshot_id"],
+            # §39 硬规则 2 只拦**第一份** attempt（见 ``ClaimService._grant_claim``：
+            # 返工走 CLAIM_FOR_REVISION，刻意不再过门禁 —— 它继续的是同一份已经被
+            # 授权过的作业）。列表侧必须与 Claim 同一个口径：第一份授权的
+            # ``claimed_at`` 一旦写下，再按门禁过滤 changes_requested 就会把返工
+            # 从 worker 的拉取列表里永久删掉 —— Claim 侧那条豁免通道永远走不到，
+            # 任务钉死在 changes_requested（2026-11-06 E2E 现场）。
+            if (
+                row["status"] != TaskStatus.CHANGES_REQUESTED.value
+                and allocation_gate_applies(row)
+                and not allocation_row(
+                    conn,
+                    task_id=row["task_id"],
+                    harness_id=harness_id,
+                    plan_snapshot_id=row["plan_snapshot_id"],
+                )
             ):
                 continue
             eligible.append(dict(row))
         return eligible[:limit]
+
+
+def _deferred_to(conn, row, harness_id: str) -> bool:
+    """Is this queued task a worktree deferral made by ``harness_id`` itself?"""
+    if row["queue_reason"] != QUEUE_REASON_WORKTREE or row["current_attempt_id"] is not None:
+        return False
+    deferred = conn.execute(
+        "SELECT actor_id FROM task_events WHERE event_name = ? AND aggregate_id = ?"
+        " ORDER BY seq DESC LIMIT 1",
+        (EventKind.CLAIM_DEFERRED_RESOURCE.value, row["task_id"]),
+    ).fetchone()
+    return deferred is not None and str(deferred["actor_id"]) == harness_id

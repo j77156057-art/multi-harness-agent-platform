@@ -20,6 +20,7 @@ import sqlite3
 import stat
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.config import settings
@@ -33,7 +34,30 @@ class WorktreeError(RuntimeError):
 
 
 class WorktreeCapacityExceeded(WorktreeError):
-    """The concurrent worktree cap is reached (R10 §14: queue the task)."""
+    """The concurrent worktree cap is reached (R10 §14: queue the task).
+
+    Carries the same shape the admin-side capacity report uses
+    (``unavailability_reasons`` / ``earliest_available_at``) so a release
+    payload can tell a human *why* the slot is missing and when one frees,
+    instead of only "capacity".
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        limit: int | None = None,
+        active: int | None = None,
+        earliest_available_at: str | None = None,
+        unavailability_reasons: list[str] | tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.limit = limit
+        self.active = active
+        self.earliest_available_at = earliest_available_at
+        self.unavailability_reasons = list(unavailability_reasons)
+
+
 
 
 class WorktreeIsolationError(WorktreeError):
@@ -78,6 +102,107 @@ def _force_rmtree(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _reconcile_vanished_worktrees(conn: sqlite3.Connection) -> list[str]:
+    """Archive active rows whose directory *and* separate gitdir are both gone.
+
+    A crashed cleanup can leave an ``active`` row pointing at nothing.  That row
+    holds no writable resource, so keeping it active would eat a slot forever.
+    A remaining directory (even empty) is deliberately left alone: it may still
+    hold content a human needs to recover.
+    """
+    vanished: list[str] = []
+    rows = conn.execute(
+        "SELECT workspace_id, attempt_id, path FROM workspaces WHERE status = 'active'"
+    ).fetchall()
+    for row in rows:
+        path = Path(str(row["path"]))
+        gitdir = path.parent / f"{path.name}.git"
+        if path.exists() or gitdir.exists():
+            continue
+        conn.execute(
+            "UPDATE workspaces SET status = 'archived' WHERE workspace_id = ?",
+            (str(row["workspace_id"]),),
+        )
+        vanished.append(str(row["attempt_id"]))
+    return vanished
+
+
+def worktree_capacity(
+    conn: sqlite3.Connection,
+    *,
+    now: datetime | None = None,
+    limit: int | None = None,
+    exclude_attempt_id: str | None = None,
+) -> dict[str, object]:
+    """Count worktree slots that a *live* development lease actually holds.
+
+    The old count followed the disk (``path.exists() or gitdir.exists()``),
+    which meant a row left behind by a dead run kept a slot forever: the drill
+    had 8 historical directories, the cap was 8, and every new claim failed
+    with ``WorktreeCapacityExceeded`` even though no attempt was running.
+
+    The three exclusions requested by the 2026-11-05 fix:
+    * expired lease      -> ``l.lease_until > now``;
+    * released lease     -> ``l.released_at IS NULL``;
+    * recycled workspace -> no *archived* workspace may keep the slot.  A live
+      lease on an attempt whose tree was already Archived is data drift; the
+      archived row is authoritative (an attempt with no workspace row at all
+      is the in-flight reservation we *do* count).
+
+    **Counting the lease, not the workspace, is the 2026-11-06 fix.**  The join
+    through ``workspaces`` missed the window between ``claim`` granting the
+    lease and ``start_task`` creating the directory: with cap=1 two claims
+    both saw zero holders (E2E: 17:23:00.443/.588), the loser then died at
+    provision leaving ``close_reason NULL``.  A live development lease *is*
+    the reservation -- it is inserted inside the claim transaction, so the
+    next claim's check (same transaction on the same connection for a batch)
+    sees it.  ``exclude_attempt_id`` is for ``provision`` itself: the caller's
+    own reservation must not lock it out of the slot it already holds.
+
+    ``earliest_available_at`` is the smallest live ``lease_until`` among the
+    holders, so a queued task can say when a slot is expected back.
+    """
+    moment = now or datetime.now(UTC)
+    stamp = moment.isoformat() if isinstance(moment, datetime) else str(moment)
+    _reconcile_vanished_worktrees(conn)
+    rows = conn.execute(
+        "SELECT l.attempt_id AS attempt_id,"
+        "       MAX(l.owner) AS owner,"
+        "       MAX(l.lease_until) AS lease_until,"
+        "       MAX(w.path) AS path"
+        "  FROM leases l"
+        "  LEFT JOIN workspaces w"
+        "    ON w.attempt_id = l.attempt_id AND w.status = 'active'"
+        " WHERE l.kind = 'development'"
+        "   AND l.released_at IS NULL"
+        "   AND l.lease_until > ?"
+        "   AND (? IS NULL OR l.attempt_id <> ?)"
+        "   AND (w.workspace_id IS NOT NULL"
+        "        OR NOT EXISTS (SELECT 1 FROM workspaces x WHERE x.attempt_id = l.attempt_id))"
+        " GROUP BY l.attempt_id"
+        " ORDER BY MIN(l.lease_until)",
+        (stamp, exclude_attempt_id, exclude_attempt_id),
+    ).fetchall()
+    cap = settings.concurrent_worktree if limit is None else limit
+    active = len(rows)
+    at_capacity = active >= cap
+    earliest = str(rows[0]["lease_until"]) if at_capacity and rows else None
+    reasons = [
+        f"{row['attempt_id']} ({row['owner'] or 'unknown'}) holds"
+        f" {row['path'] or 'a slot awaiting provisioning'}"
+        f" until {row['lease_until']}"
+        for row in rows
+    ] if at_capacity else []
+    return {
+        "limit": cap,
+        "active": active,
+        "available_slots": max(0, cap - active),
+        "at_capacity": at_capacity,
+        "earliest_available_at": earliest,
+        "unavailability_reasons": reasons,
+    }
+
+
 class WorktreeManager:
     """Provision, archive and recycle attempt worktrees."""
 
@@ -114,10 +239,21 @@ class WorktreeManager:
             existing = self._find_active(conn, attempt_id=attempt_id)
             if existing is not None:
                 return existing
-            active = self._active_count(conn)
-            if active >= limit:
+            report = worktree_capacity(conn, limit=limit, exclude_attempt_id=attempt_id)
+            if report["at_capacity"]:
+                reasons = list(report["unavailability_reasons"])
+                detail = "; ".join(reasons) if reasons else "no live lease detail"
                 raise WorktreeCapacityExceeded(
-                    f"concurrent worktree cap reached ({active}/{limit})"
+                    f"concurrent worktree cap reached ({report['active']}/{limit});"
+                    f" earliest available at {report['earliest_available_at']}; {detail}",
+                    limit=int(report["limit"]),
+                    active=int(report["active"]),
+                    earliest_available_at=(
+                        str(report["earliest_available_at"])
+                        if report["earliest_available_at"] is not None
+                        else None
+                    ),
+                    unavailability_reasons=reasons,
                 )
 
             self.root.mkdir(parents=True, exist_ok=True)
@@ -190,34 +326,6 @@ class WorktreeManager:
         if rows:
             shared = ", ".join(str(row["path"]) for row in rows)
             raise WorktreeIsolationError(f"writable worktree shared by several attempts: {shared}")
-
-    @staticmethod
-    def _active_count(conn: sqlite3.Connection) -> int:
-        """How many worktrees are really in use.
-
-        A row left behind by a run that died still says ``active`` -- but the
-        directory it points at is gone, so it holds no resource and must not
-        take a slot.  Counting those rows made a machine that had run the
-        platform before unable to start **any** new attempt: the concurrent
-        cap was reached by rows of tasks cancelled weeks earlier, and every
-        claim came back as "no free worktree slot right now".  So the count
-        follows the disk, and a vanished worktree is archived on the way.
-        """
-        rows = conn.execute(
-            "SELECT workspace_id, path FROM workspaces WHERE status = 'active'"
-        ).fetchall()
-        live = 0
-        for row in rows:
-            path = Path(str(row["path"]))
-            gitdir = path.parent / f"{path.name}.git"
-            if path.exists() or gitdir.exists():
-                live += 1
-                continue
-            conn.execute(
-                "UPDATE workspaces SET status = 'archived' WHERE workspace_id = ?",
-                (str(row["workspace_id"]),),
-            )
-        return live
 
     @staticmethod
     def _find_active(conn: sqlite3.Connection, *, attempt_id: str) -> Worktree | None:

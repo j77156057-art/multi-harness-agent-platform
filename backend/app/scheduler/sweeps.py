@@ -233,6 +233,15 @@ def sweep_resources(
     one transaction, reserves the resource, opens the attempt and takes
     ownership (``resource_available`` → ``claimed``). Idempotent by
     construction: a second round finds no queued task and does nothing.
+
+    **Worktree deferrals are deliberately not completed here.**  A worktree
+    lease is only useful to the worker that claimed it: the sweeper can open
+    the attempt but has no harness to run in it, and ``formal_worker`` only
+    discovers tasks through ``list_ready_tasks`` — the 2026-11-06 E2E left
+    such tasks ``claimed`` with no worktree and no harness ever running.  The
+    queued task is instead listed to its own requester (see
+    ``eligible_tasks``); its retried claim completes the deferral in place and
+    goes straight into provisioning.
     """
     rows = database.read(
         "SELECT task_id FROM tasks WHERE status = ? AND queue_reason = ?",

@@ -38,6 +38,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
 from app.git.repo import CanonicalRepo
+from app.git.worktree import worktree_capacity
 from app.lease.service import (
     LeaseGrant,
     grant_lease,
@@ -53,6 +54,10 @@ OUTCOME_QUEUED = "queued"
 OUTCOME_REJECTED = "rejected"
 
 QUEUE_REASON_RESOURCE = "resource"
+#: R10 §14: the concurrent worktree cap is a platform-wide resource.  A first
+#: claim defers with this reason instead of dying at ``provision`` so the task
+#: keeps its place in the queue and can say when a slot is expected back.
+QUEUE_REASON_WORKTREE = "worktree_capacity"
 
 #: ``task_claims.attempt_id`` and ``task_claims.owner`` are NOT NULL in
 #: ``001_initial.sql``, but R10 §11 requires a row for items that never reached
@@ -77,6 +82,7 @@ class RejectCode(StrEnum):
     ATTEMPT_BUDGET_EXHAUSTED = "claim.attempt_budget_exhausted"
     TOKEN_BUDGET_EXHAUSTED = "claim.token_budget_exhausted"
     RESOURCE_UNAVAILABLE = "claim.resource_unavailable"
+    WORKTREE_CAPACITY = "claim.worktree_capacity"
     CONCURRENT_CLAIM = "claim.concurrent_claim"
     BATCH_ABORTED = "claim.batch_aborted"
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
@@ -115,6 +121,11 @@ class ClaimItem:
     base_locked_seq: int | None = None
     queue_reason: str | None = None
     error_code: str | None = None
+    #: Capacity report of a ``queued`` item.  Same names the admin-side
+    #: capacity report uses so a UI can show "why" and "when" without parsing
+    #: the reason string.
+    unavailability_reasons: tuple[str, ...] | None = None
+    earliest_available_at: str | None = None
     replayed: bool = False
     #: F9 (adapter-hardening): the attempt's worktree path once `start_task`
     #: has provisioned it. A fresh claim predates the worktree (NULL); a
@@ -136,6 +147,12 @@ class ClaimItem:
             "base_locked_seq": self.base_locked_seq,
             "queue_reason": self.queue_reason,
             "error_code": self.error_code,
+            "unavailability_reasons": (
+                list(self.unavailability_reasons)
+                if self.unavailability_reasons is not None
+                else None
+            ),
+            "earliest_available_at": self.earliest_available_at,
             "replayed": self.replayed,
             "worktree_path": self.worktree_path,
         }
@@ -317,6 +334,21 @@ class ClaimService:
         # lease token (verify-mvp-04 deferral): a live, unreleased lease gets a
         # freshly minted token, the old one stops working. See _read_items.
         items = self._read_items(conn, request.claim_request_id, reissue_tokens=True)
+        # A queued outcome is not final: it means "capacity was missing when
+        # you asked".  When the same requester asks again (the worker re-lists
+        # its own queued task, see ``eligible_tasks``) the deferral is
+        # completed in this transaction -- the attempt is opened by the very
+        # worker that is about to provision it, so no attempt is left without
+        # a worktree and a harness (2026-11-06 E2E).
+        if any(item.outcome == OUTCOME_QUEUED for item in items):
+            resumed = False
+            for item in items:
+                if item.outcome != OUTCOME_QUEUED:
+                    continue
+                if self._resume_deferred_locked(conn, item.task_id, utc_now()) is not None:
+                    resumed = True
+            if resumed:
+                items = self._read_items(conn, request.claim_request_id, reissue_tokens=True)
         return ClaimResult(
             claim_request_id=request.claim_request_id,
             replayed=True,
@@ -685,6 +717,28 @@ class ClaimService:
                     error_code=RejectCode.TOKEN_BUDGET_EXHAUSTED.value,
                 )
 
+        # R10 §14: the worktree cap is a platform resource.  This check must run
+        # before any state is written so a full cap leaves no owner/attempt/lease
+        # behind.  A first claim parks in ``queued`` with the same shape as the
+        # admin capacity report; a revision has no queued edge and is refused.
+        capacity = worktree_capacity(conn, now=moment, limit=settings.concurrent_worktree)
+        if capacity["at_capacity"]:
+            if required_attempt_id is None:
+                return self._defer(
+                    conn,
+                    request,
+                    task,
+                    task_id=task_id,
+                    reason=QUEUE_REASON_WORKTREE,
+                    moment=moment,
+                    capacity=capacity,
+                )
+            return ClaimItem(
+                task_id=task_id,
+                outcome=OUTCOME_REJECTED,
+                error_code=RejectCode.WORKTREE_CAPACITY.value,
+            )
+
         blocked = self._resource_blocker(
             conn, resources, moment, skip_attempt_id=required_attempt_id
         )
@@ -850,18 +904,28 @@ class ClaimService:
         task_id: str,
         reason: str,
         moment: datetime,
+        capacity: dict[str, object] | None = None,
     ) -> ClaimItem:
-        """Resource capacity unavailable: record the deferral, take nothing.
+        """Capacity unavailable: record the deferral, take nothing.
 
         R10 §11: no owner, no attempt, no lease, no development side effect.
         """
+        payload: dict[str, object] = {
+            "claim_request_id": request.claim_request_id,
+            "queue_reason": reason,
+        }
+        if capacity is not None:
+            payload["unavailability_reasons"] = list(
+                capacity.get("unavailability_reasons", [])
+            )
+            payload["earliest_available_at"] = capacity.get("earliest_available_at")
         event = self.store.append(
             event_name=EventKind.CLAIM_DEFERRED_RESOURCE.value,
             aggregate_type="task",
             aggregate_id=task_id,
             actor_type="harness",
             actor_id=request.harness_id,
-            payload={"claim_request_id": request.claim_request_id, "queue_reason": reason},
+            payload=payload,
             connection=conn,
         )
         current = TaskStatus(str(task["status"]))
@@ -896,6 +960,16 @@ class ClaimService:
             task_id=task_id,
             outcome=OUTCOME_QUEUED,
             queue_reason=reason,
+            unavailability_reasons=(
+                tuple(str(item) for item in capacity.get("unavailability_reasons", []))
+                if capacity is not None
+                else None
+            ),
+            earliest_available_at=(
+                str(capacity["earliest_available_at"])
+                if capacity is not None and capacity.get("earliest_available_at")
+                else None
+            ),
         )
 
     # ---------------------------------------------------------- deferred resume
@@ -917,156 +991,174 @@ class ClaimService:
         """
         moment = now or utc_now()
         with self.database.transaction() as conn:
-            task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
-            if task is None:
-                return None
-            if TaskStatus(str(task["status"])) is not TaskStatus.QUEUED:
-                return None
-            if task["queue_reason"] != QUEUE_REASON_RESOURCE:
-                return None
-            if task["current_attempt_id"] is not None:
-                return None
-            budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
-            if not budget_left and task["budget_override_by"] is None:
-                return None
+            return self._resume_deferred_locked(conn, task_id, moment)
 
-            deferred = conn.execute(
-                "SELECT * FROM task_claims WHERE task_id = ? AND released_at IS NOT NULL"
-                " AND release_reason = ? ORDER BY rowid DESC LIMIT 1",
-                (task_id, f"queued:{QUEUE_REASON_RESOURCE}"),
-            ).fetchone()
-            if deferred is None:
-                return None
-            claim_request_id = str(deferred["claim_request_id"])
+    def _resume_deferred_locked(
+        self, conn: sqlite3.Connection, task_id: str, moment: datetime
+    ) -> ClaimItem | None:
+        """The body of :meth:`resume_deferred` on an already-open write txn.
 
-            event_row = conn.execute(
-                "SELECT actor_id FROM task_events WHERE event_name = ? AND aggregate_id = ?"
-                " ORDER BY seq DESC LIMIT 1",
-                (EventKind.CLAIM_DEFERRED_RESOURCE.value, task_id),
-            ).fetchone()
-            requester = str(event_row["actor_id"]) if event_row is not None else "unknown"
+        Split out so a replay can complete the same deferral inside the
+        caller's transaction -- opening a second connection there would take
+        the write lock against itself.
+        """
+        task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+        if task is None:
+            return None
+        if TaskStatus(str(task["status"])) is not TaskStatus.QUEUED:
+            return None
+        queue_reason = str(task["queue_reason"])
+        if queue_reason not in (QUEUE_REASON_RESOURCE, QUEUE_REASON_WORKTREE):
+            return None
+        if task["current_attempt_id"] is not None:
+            return None
+        budget_left = int(task["attempt_no"]) < int(task["max_attempts"])
+        if not budget_left and task["budget_override_by"] is None:
+            return None
 
-            resources = self._exclusive_resources(conn, task_id, task["plan_snapshot_id"])
-            if self._resource_blocker(conn, resources, moment) is not None:
-                return None
+        deferred = conn.execute(
+            "SELECT * FROM task_claims WHERE task_id = ? AND released_at IS NOT NULL"
+            " AND release_reason = ? ORDER BY rowid DESC LIMIT 1",
+            (task_id, f"queued:{queue_reason}"),
+        ).fetchone()
+        if deferred is None:
+            return None
+        claim_request_id = str(deferred["claim_request_id"])
 
-            attempt_no = int(task["attempt_no"]) + 1
-            attempt_id = f"{task_id}.a{attempt_no}"
-            fencing_epoch = int(task["current_epoch"]) + 1
-            lease_until = (moment + timedelta(seconds=settings.lease_seconds)).isoformat()
-            # budget-guard: a deferred resume is a real dispatch too -- the
-            # hold is re-checked now (budget may have moved since the defer)
-            # and stays queued (returns None) when it no longer fits.
-            budget_limit = task_budget(conn, task_id)
-            budget_amount = 0
-            if budget_limit is not None:
-                budget_amount = reservation_for_claim(budget_limit)
-                if reserve_blocked(conn, task_id=task_id, limit=budget_limit, amount=budget_amount):
-                    raise_incidents(conn, task_id=task_id, now=moment)
-                    return None
-            self._acquire_resources(
-                conn,
-                resources,
-                attempt_id=attempt_id,
-                fencing_epoch=fencing_epoch,
-                lease_until=lease_until,
+        event_row = conn.execute(
+            "SELECT actor_id FROM task_events WHERE event_name = ? AND aggregate_id = ?"
+            " ORDER BY seq DESC LIMIT 1",
+            (EventKind.CLAIM_DEFERRED_RESOURCE.value, task_id),
+        ).fetchone()
+        requester = str(event_row["actor_id"]) if event_row is not None else "unknown"
+
+        resources = self._exclusive_resources(conn, task_id, task["plan_snapshot_id"])
+        if self._resource_blocker(conn, resources, moment) is not None:
+            return None
+        if queue_reason == QUEUE_REASON_WORKTREE:
+            capacity = worktree_capacity(
+                conn, now=moment, limit=settings.concurrent_worktree
             )
-            base_commit = self._integration_head(conn, task_id)
-            event = self.store.append(
-                event_name=EventKind.RESOURCE_AVAILABLE.value,
-                aggregate_type="task",
-                aggregate_id=task_id,
-                actor_type="scheduler",
-                actor_id="sweeper",
-                payload={
-                    "claim_request_id": claim_request_id,
-                    "attempt_id": attempt_id,
-                    "attempt_no": attempt_no,
-                    "fencing_epoch": fencing_epoch,
-                    "requester": requester,
-                },
-                connection=conn,
-            )
-            # The R8 guard of §11, restated for the queued edge: one conditional
-            # UPDATE takes ownership, freezes the base and advances the epoch.
-            cursor = conn.execute(
-                "UPDATE tasks"
-                "   SET status = ?, owner = ?, current_attempt_id = ?, current_epoch = ?,"
-                "       attempt_no = ?, base_commit = ?, queue_reason = NULL,"
-                "       waiting_since = NULL, base_locked_seq = ?, state_changed_seq = ?"
-                " WHERE task_id = ? AND status = ? AND current_attempt_id IS NULL"
-                "   AND (attempt_no < max_attempts OR budget_override_by IS NOT NULL)",
-                (
-                    TaskStatus.CLAIMED.value,
-                    requester,
-                    attempt_id,
-                    fencing_epoch,
-                    attempt_no,
-                    base_commit,
-                    event.seq,
-                    event.seq,
-                    task_id,
-                    TaskStatus.QUEUED.value,
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise ConcurrentStateChange(f"deferred resume lost the race for {task_id}")
+            if capacity["at_capacity"]:
+                return None
 
-            conn.execute(
-                "INSERT INTO task_attempts("
-                "  attempt_id, task_id, attempt_no, owner, fencing_epoch,"
-                "  base_commit, base_locked_seq, head_commit, status, created_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
-                (
-                    attempt_id,
-                    task_id,
-                    attempt_no,
-                    requester,
-                    fencing_epoch,
-                    base_commit,
-                    event.seq,
-                    TaskStatus.CLAIMED.value,
-                    moment.isoformat(),
-                ),
-            )
-            lease: LeaseGrant = grant_lease(
+        attempt_no = int(task["attempt_no"]) + 1
+        attempt_id = f"{task_id}.a{attempt_no}"
+        fencing_epoch = int(task["current_epoch"]) + 1
+        lease_until = (moment + timedelta(seconds=settings.lease_seconds)).isoformat()
+        # budget-guard: a deferred resume is a real dispatch too -- the
+        # hold is re-checked now (budget may have moved since the defer)
+        # and stays queued (returns None) when it no longer fits.
+        budget_limit = task_budget(conn, task_id)
+        budget_amount = 0
+        if budget_limit is not None:
+            budget_amount = reservation_for_claim(budget_limit)
+            if reserve_blocked(conn, task_id=task_id, limit=budget_limit, amount=budget_amount):
+                raise_incidents(conn, task_id=task_id, now=moment)
+                return None
+        self._acquire_resources(
+            conn,
+            resources,
+            attempt_id=attempt_id,
+            fencing_epoch=fencing_epoch,
+            lease_until=lease_until,
+        )
+        base_commit = self._integration_head(conn, task_id)
+        event = self.store.append(
+            event_name=EventKind.RESOURCE_AVAILABLE.value,
+            aggregate_type="task",
+            aggregate_id=task_id,
+            actor_type="scheduler",
+            actor_id="sweeper",
+            payload={
+                "claim_request_id": claim_request_id,
+                "attempt_id": attempt_id,
+                "attempt_no": attempt_no,
+                "fencing_epoch": fencing_epoch,
+                "requester": requester,
+            },
+            connection=conn,
+        )
+        # The R8 guard of §11, restated for the queued edge: one conditional
+        # UPDATE takes ownership, freezes the base and advances the epoch.
+        cursor = conn.execute(
+            "UPDATE tasks"
+            "   SET status = ?, owner = ?, current_attempt_id = ?, current_epoch = ?,"
+            "       attempt_no = ?, base_commit = ?, queue_reason = NULL,"
+            "       waiting_since = NULL, base_locked_seq = ?, state_changed_seq = ?"
+            " WHERE task_id = ? AND status = ? AND current_attempt_id IS NULL"
+            "   AND (attempt_no < max_attempts OR budget_override_by IS NOT NULL)",
+            (
+                TaskStatus.CLAIMED.value,
+                requester,
+                attempt_id,
+                fencing_epoch,
+                attempt_no,
+                base_commit,
+                event.seq,
+                event.seq,
+                task_id,
+                TaskStatus.QUEUED.value,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ConcurrentStateChange(f"deferred resume lost the race for {task_id}")
+
+        conn.execute(
+            "INSERT INTO task_attempts("
+            "  attempt_id, task_id, attempt_no, owner, fencing_epoch,"
+            "  base_commit, base_locked_seq, head_commit, status, created_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+            (
+                attempt_id,
+                task_id,
+                attempt_no,
+                requester,
+                fencing_epoch,
+                base_commit,
+                event.seq,
+                TaskStatus.CLAIMED.value,
+                moment.isoformat(),
+            ),
+        )
+        lease: LeaseGrant = grant_lease(
+            conn,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            owner=requester,
+            fencing_epoch=fencing_epoch,
+            now=moment,
+        )
+        # The deferred row becomes the live claim row again: replaying the
+        # original claim_request_id now answers with the completed attempt
+        # (and rotates its lease token, the 10b recovery path).
+        cursor = conn.execute(
+            "UPDATE task_claims SET attempt_id = ?, owner = ?, released_at = NULL,"
+            " release_reason = NULL WHERE claim_id = ?",
+            (attempt_id, requester, str(deferred["claim_id"])),
+        )
+        if cursor.rowcount != 1:
+            raise ConcurrentStateChange(f"could not reopen the deferred claim for {task_id}")
+        if budget_limit is not None:
+            record_reservation(
                 conn,
                 task_id=task_id,
                 attempt_id=attempt_id,
-                owner=requester,
-                fencing_epoch=fencing_epoch,
+                amount=budget_amount,
                 now=moment,
             )
-            # The deferred row becomes the live claim row again: replaying the
-            # original claim_request_id now answers with the completed attempt
-            # (and rotates its lease token, the 10b recovery path).
-            cursor = conn.execute(
-                "UPDATE task_claims SET attempt_id = ?, owner = ?, released_at = NULL,"
-                " release_reason = NULL WHERE claim_id = ?",
-                (attempt_id, requester, str(deferred["claim_id"])),
-            )
-            if cursor.rowcount != 1:
-                raise ConcurrentStateChange(f"could not reopen the deferred claim for {task_id}")
-            if budget_limit is not None:
-                record_reservation(
-                    conn,
-                    task_id=task_id,
-                    attempt_id=attempt_id,
-                    amount=budget_amount,
-                    now=moment,
-                )
-            return ClaimItem(
-                task_id=task_id,
-                outcome=OUTCOME_CLAIMED,
-                attempt_id=attempt_id,
-                attempt_no=attempt_no,
-                owner=requester,
-                fencing_epoch=fencing_epoch,
-                lease_token=lease.token,
-                lease_until=lease.lease_until,
-                base_commit=base_commit,
-                base_locked_seq=event.seq,
-            )
+        return ClaimItem(
+            task_id=task_id,
+            outcome=OUTCOME_CLAIMED,
+            attempt_id=attempt_id,
+            attempt_no=attempt_no,
+            owner=requester,
+            fencing_epoch=fencing_epoch,
+            lease_token=lease.token,
+            lease_until=lease.lease_until,
+            base_commit=base_commit,
+            base_locked_seq=event.seq,
+        )
 
     def _conditional_claim_update(
         self,
