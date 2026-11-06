@@ -12,7 +12,7 @@
 // 用法：
 //   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-model-test.mjs
 //   $env:OFFICE_MT_MODEL='codebuddy/hy3'      指定要测的模型（默认自动挑）
-//   $env:OFFICE_MT_SHOTS='D:\Temp\shots'      截图目录
+//   $env:OFFICE_MT_SHOTS="$env:TEMP\shots"   截图目录
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

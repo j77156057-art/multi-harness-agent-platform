@@ -13,7 +13,7 @@ const cases = [
   ['wrong host', { ...base, headers: { ...base.headers, host: 'evil.test' } }, { sessionValid: true }, false],
   ['wrong origin', { ...base, headers: { ...base.headers, origin: 'https://evil.test' } }, { sessionValid: true }, false],
   ['client forwarded headers rejected', { ...base, headers: { ...base.headers, 'x-forwarded-host': 'proxy.test' } }, { sessionValid: true }, false],
-  ['trusted local serve headers accepted', { ...base, headers: { ...base.headers, 'x-forwarded-host': 'proxy.test', 'x-forwarded-proto': 'https', 'x-forwarded-for': '100.118.227.31' } }, { sessionValid: true, forwardedProxy: true }, true],
+  ['trusted local serve headers accepted', { ...base, headers: { ...base.headers, 'x-forwarded-host': 'proxy.test', 'x-forwarded-proto': 'https', 'x-forwarded-for': '198.51.100.7' } }, { sessionValid: true, forwardedProxy: true }, true],
   ['cross site rejected', { ...base, headers: { ...base.headers, 'sec-fetch-site': 'cross-site' } }, { sessionValid: true }, false],
   ['write denied', { ...base, method: 'POST' }, { sessionValid: true }, false],
   ['screen disabled', { ...base, url: '/api/screens/health' }, { sessionValid: true }, false],

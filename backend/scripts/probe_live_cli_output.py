@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from app.adapter.harnesses.cli import SubprocessRunner
 
 def main() -> int:
     minutes = float(sys.argv[1]) if len(sys.argv) > 1 else 1.0
-    root = Path("D:/Temp/opencode/live-cli-probe")
+    root = Path(tempfile.gettempdir()) / "opencode" / "live-cli-probe"
     root.mkdir(parents=True, exist_ok=True)
     log = root / "claude.log"
     err = root / "claude.err.log"
