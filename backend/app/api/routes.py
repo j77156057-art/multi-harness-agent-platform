@@ -63,7 +63,7 @@ from app.git.repo import CanonicalRepo
 from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
 from app.merge.worker import MergeWorker
-from app.plan.consistency import goal_scope_warnings
+from app.plan.consistency import ScopeViolation, goal_scope_violations, goal_scope_warnings
 from app.review_doc import build_document
 from app.runtime.driver import RuntimePolicyError, load_runtime_policy
 from app.spec import TaskStatus
@@ -360,6 +360,11 @@ def _plan_scope_warnings(database: Any, plan_id: str) -> list[str]:
     return goal_scope_warnings(_plan_snapshot_tasks(database, plan_id))
 
 
+def _plan_scope_violations(database: Any, plan_id: str) -> list[ScopeViolation]:
+    """approve 的拒绝依据：goal 要动、契约没写的写盘路径。"""
+    return goal_scope_violations(_plan_snapshot_tasks(database, plan_id))
+
+
 def _plan_profile_block(
     database: Any, plan_id: str, repo: CanonicalRepo | None
 ) -> dict[str, Any] | None:
@@ -455,6 +460,32 @@ def approve_plan(
                 ),
             },
         )
+    # 契约外路径必须拒绝。goal 说要改的文件不在 exclusive_paths 里，执行者
+    # 只会在提交时被范围闸门拦下（e16：整轮重跑）——批准层是唯一能在开工前
+    # 把这份自相矛盾摆平的地方。拒绝不改计划状态，补契约后重新 approve。
+    # 先于仓库侧的 profile 检查：这是方案自身的问题，与仓库无关。
+    violations = _plan_scope_violations(database, plan_id)
+    if violations and not body.allow_out_of_contract_paths:
+        denied = [item.path for item in violations]
+        raise ApiError(
+            "plan.scope_out_of_contract",
+            409,
+            "plan not approved: goal mentions paths outside exclusive_paths:"
+            f" {', '.join(denied)}",
+            retryable=False,
+            details={
+                "plan_id": plan_id,
+                "plan_status": "draft",
+                "violations": [item.as_dict() for item in violations],
+                "denied_paths": denied,
+                "summary": "; ".join(item.describe() for item in violations),
+                "next": (
+                    "把路径补进对应任务的 exclusive_paths 后重新 approve；"
+                    "确需放行时在请求体加 allow_out_of_contract_paths=true，"
+                    "放行清单会写进 plan.approve 事件的 scope_override"
+                ),
+            },
+        )
     # 合并检查的入口在被测仓库里存不存在，必须**开工前**就回答。等到模型干完、
     # 合并进 integration 再 ``exit 2`` + revert，是在用半小时换一句早就知道的话。
     profile_block = _plan_profile_block(
@@ -482,16 +513,28 @@ def approve_plan(
         plan_id=plan_id,
         decided_by=body.decided_by,
         decided_by_type=_actor_type(principal),
+        scope_override=(
+            [item.as_dict() for item in violations]
+            if body.allow_out_of_contract_paths
+            else None
+        ),
     )
-    return {
+    response: dict[str, Any] = {
         "plan_id": outcome.plan_id,
         "ready": list(outcome.ready),
         "waiting": list(outcome.waiting),
-        # goal 提到、契约没写的路径：**只提示，不拦**。自然语言的引用天然
-        # 有歧义，硬拒会把一次误读变成卡住的批准；但静默通过等于让执行者
-        # 在提交时才发现（e16），所以必须摆到批准人眼前。
+        # goal 提到、契约没写的路径：默认上面已经拒绝；这里回显的是"批准人
+        # 打开逃生口放行了哪些"，空列表表示没有需要说明的偏离。
         "scope_warnings": _plan_scope_warnings(database, plan_id),
     }
+    if violations and body.allow_out_of_contract_paths:
+        # 只有真的用了逃生口才出现这个字段，未使用时响应形状保持不变。
+        response["scope_override"] = {
+            "applied": True,
+            "paths": [item.path for item in violations],
+            "violations": [item.as_dict() for item in violations],
+        }
+    return response
 
 
 @management.get("/plans/{plan_id}/assignability")
@@ -513,19 +556,33 @@ def plan_assignability(
     profile_block = _plan_profile_block(
         database, plan_id, getattr(request.app.state, "canonical_repo", None)
     )
-    return {
+    # approve 现在会因为"契约外路径"拒绝，预检必须提前说同一句话，否则
+    # `approvable: true` + 紧跟着 409 会让人以为预检坏了。
+    violations = _plan_scope_violations(database, plan_id)
+    response: dict[str, Any] = {
         "plan_id": plan_id,
         "plan_status": str(rows[0]["status"]),
-        "approvable": not blocked and profile_block is None,
+        "approvable": not blocked and profile_block is None and not violations,
         "staged": True,
         "blocked": blocked,
         "profile": profile_block,
         "scope_warnings": _plan_scope_warnings(database, plan_id),
         "next": (
             "全部可派时调用 approve；否则先补齐离线 / 无凭证 / 满载的目标窗口，"
-            "或补上合并检查需要的入口文件"
+            "或补上合并检查需要的入口文件，或把 goal 要动的路径写进"
+            " exclusive_paths"
         ),
     }
+    if violations:
+        response["scope"] = {
+            "ok": False,
+            "violations": [item.as_dict() for item in violations],
+            "next": (
+                "把路径补进 exclusive_paths 后重新预检；确需放行时 approve 带"
+                " allow_out_of_contract_paths=true，放行会写进事件"
+            ),
+        }
+    return response
 
 
 @management.post("/plans/{plan_id}/reject")

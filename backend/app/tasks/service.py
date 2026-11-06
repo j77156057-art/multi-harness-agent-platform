@@ -811,7 +811,12 @@ class SchedulerService:
         )
 
     def approve_plan(
-        self, *, plan_id: str, decided_by: str, decided_by_type: str = "human"
+        self,
+        *,
+        plan_id: str,
+        decided_by: str,
+        decided_by_type: str = "human",
+        scope_override: list[dict[str, object]] | None = None,
     ) -> PlanOutcome:
         """Approve a plan. Tasks move to ready, or ready_waiting_deps.
 
@@ -823,6 +828,12 @@ class SchedulerService:
         must not be defaulted to ``human`` when the caller is an administrator
         harness: the audit trail would then say a human approved a plan that a
         harness actually approved.
+
+        ``scope_override`` is non-empty only when the caller deliberately opened
+        the out-of-contract escape hatch; it is written into every approval
+        event payload so the bypass stays visible in ``task_events``. The gate
+        itself lives in the HTTP layer (``plan.scope_out_of_contract``); keeping
+        it there means an approved plan never silently carries the violation.
         """
         with self.database.transaction() as conn:
             plan = conn.execute("SELECT * FROM plans WHERE plan_id = ?", (plan_id,)).fetchone()
@@ -858,6 +869,7 @@ class SchedulerService:
                     depends_on=depends_on,
                     decided_by=decided_by,
                     decided_by_type=decided_by_type,
+                    scope_override=scope_override,
                 )
                 if event is EventKind.PLAN_APPROVE:
                     ready.append(task_id)
@@ -913,6 +925,7 @@ class SchedulerService:
         depends_on: list[str],
         decided_by: str,
         decided_by_type: str = "human",
+        scope_override: list[dict[str, object]] | None = None,
     ) -> EventKind:
         unmet: list[str] = []
         for upstream in depends_on:
@@ -920,13 +933,18 @@ class SchedulerService:
             if row is None or str(row["status"]) != TaskStatus.MERGED.value:
                 unmet.append(upstream)
         event = EventKind.PLAN_APPROVE_DEPENDENCY_PENDING if unmet else EventKind.PLAN_APPROVE
+        payload: dict[str, object] = {"plan_dependencies_unmet": unmet}
+        if scope_override:
+            # 逃生口的持久痕迹：批准事件本身就带着"哪些路径是契约外放行的"。
+            # 不新增事件名，也不改 allowlist。
+            payload["scope_override"] = list(scope_override)
         record = self.store.append(
             event_name=event.value,
             aggregate_type="task",
             aggregate_id=task_id,
             actor_type=decided_by_type,
             actor_id=decided_by,
-            payload={"plan_dependencies_unmet": unmet},
+            payload=payload,
             connection=conn,
         )
         apply_transition(

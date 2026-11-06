@@ -71,6 +71,10 @@ class CreatePlan(BaseModel):
 class PlanDecision(BaseModel):
     decided_by: str = Field(min_length=1)
     reason: str | None = None
+    #: approve 的逃生口：goal 提到、契约没写的写盘路径默认会让批准被拒。
+    #: 显式置 true 才放行，且放行清单写进 plan.approve 事件的 scope_override，
+    #: 所以"开了几次、放行了什么"在 task_events 里查得到。reject 忽略此字段。
+    allow_out_of_contract_paths: bool = False
 
 
 class ExperienceDecision(BaseModel):

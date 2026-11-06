@@ -6,23 +6,33 @@
 契约自己自相矛盾，代价却由执行者承担。
 
 这里只做一件事：把 goal 里**带动作语境**的路径样 token 抽出来，跟这条任务
-的 ``exclusive_paths`` 对一遍，把"提到了但没写进契约"的路径摆给批准人看。
+的 ``exclusive_paths`` 对一遍，把"提到了但没写进契约"的路径摆出来。
+
+契约：**goal 要动的路径必须落在 ``exclusive_paths`` 里，否则批准被拒绝**
+（``POST /plans/{id}/approve`` → ``plan.scope_out_of_contract``）。拒绝发生在
+批准层，计划保持 draft，补契约后重新 approve 即可，不需要重交方案。
 
 两条纪律：
 
-* **宁可漏报，不要误报。** 批准人一旦被训练成"看到提示就点确定"，提示就
-  等于没有。因此 token 只有在它前面（同一行、约 70 字符内）出现明确动作词时
-  才算数：``via X``、``在 X 里``、``修改 X``、``create X`` …
-* **只提示，不硬拒。** 自然语言引用天然有歧义（"像 index.html 那样"并不是
-  要改它），硬拒会把一次误判变成一次无法继续的批准。真正能确定"跑不起来"
-  的检查（合并 profile 缺入口文件）才在 approve 阶段硬拒，见
-  ``app/api/routes.py::_plan_profile_block``。
+* **宁可漏报，不要误报。** 自然语言引用天然有歧义（"像 index.html 那样"并
+  不是要改它），所以 token 只有在它前面（同一行、约 70 字符内）出现明确动作
+  词时才算数：``via X``、``在 X 里``、``修改 X``、``create X`` …；否定语境
+  直接跳过。误报会把人训练成"看到拒绝就开逃生口"，那比漏报更贵。
+* **只管写盘。** 这里判的是"要动哪个文件/目录"，读路径与运行产物白名单
+  （``is_runtime_artifact``）不在检查范围；没有声明 ``exclusive_paths`` 的任
+  务也没有契约可谈，同样跳过。
+
+逃生口：approve 请求体带 ``allow_out_of_contract_paths: true`` 时放行，但必须
+留痕 —— 违规清单会写进 ``plan.approve`` / ``plan.approve_dependency_pending``
+事件的 payload（``scope_override``），并回显在 approve 响应里。事件是持久的，
+可按 task_id / seq 查；这样"这个洞被常态使用"本身会成为可审计的事实。
 """
 
 from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 
 from app.adapter.scope import is_runtime_artifact, path_in_scope
 
@@ -194,6 +204,54 @@ def _in_contract(path: str, patterns: Sequence[str]) -> bool:
     return any(str(pattern).replace("\\", "/").startswith(path + "/") for pattern in patterns)
 
 
+@dataclass(frozen=True, slots=True)
+class ScopeViolation:
+    """一条"goal 要动、契约没写"的路径。"""
+
+    task_id: str
+    path: str
+    exclusive_paths: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "task_id": self.task_id,
+            "path": self.path,
+            "exclusive_paths": list(self.exclusive_paths),
+        }
+
+    def describe(self) -> str:
+        return (
+            f"{self.task_id}: {self.path!r} is not in exclusive_paths"
+            f" ({', '.join(self.exclusive_paths)})"
+        )
+
+
+def goal_scope_violations(
+    tasks: Sequence[Mapping[str, object]],
+) -> list[ScopeViolation]:
+    """goal 提到、契约没写的写盘路径，按任务/路径逐条列出。
+
+    只在任务声明了 ``exclusive_paths`` 时成立：没有写范围就没有契约可谈，
+    老格式/夹具方案照旧通过。返回值是 approve 拒绝时的依据，也是逃生口要
+    写进事件 payload 的那份清单。
+    """
+    violations: list[ScopeViolation] = []
+    for index, task in enumerate(tasks, start=1):
+        raw_paths = task.get("exclusive_paths")
+        if not isinstance(raw_paths, list | tuple) or not raw_paths:
+            continue
+        patterns = tuple(str(item) for item in raw_paths)
+        task_id = str(task.get("id") or task.get("task_id") or f"#{index}")
+        goal = str(task.get("goal") or "")
+        for path in extract_mentioned_paths(goal):
+            if _in_contract(path, patterns):
+                continue
+            violations.append(
+                ScopeViolation(task_id=task_id, path=path, exclusive_paths=patterns)
+            )
+    return violations
+
+
 def goal_scope_warnings(tasks: Sequence[Mapping[str, object]]) -> list[str]:
     """Paths mentioned by a task goal but absent from its ``exclusive_paths``.
 
@@ -202,22 +260,13 @@ def goal_scope_warnings(tasks: Sequence[Mapping[str, object]]) -> list[str]:
     purpose (see the module docstring).
     """
     warnings: list[str] = []
-    for index, task in enumerate(tasks, start=1):
-        raw_paths = task.get("exclusive_paths")
-        if not isinstance(raw_paths, list | tuple) or not raw_paths:
-            continue
-        patterns = [str(item) for item in raw_paths]
-        task_id = str(task.get("id") or task.get("task_id") or f"#{index}")
-        goal = str(task.get("goal") or "")
-        for path in extract_mentioned_paths(goal):
-            if _in_contract(path, patterns):
-                continue
-            line = (
-                f"task {task_id}: goal mentions {path!r}, which is not in its"
-                f" exclusive_paths ({', '.join(patterns)}); if the work really"
-                " touches it, add it to the contract -- the scope gate will"
-                " otherwise refuse the submission"
-            )
-            if line not in warnings:
-                warnings.append(line)
+    for violation in goal_scope_violations(tasks):
+        line = (
+            f"task {violation.task_id}: goal mentions {violation.path!r}, which"
+            f" is not in its exclusive_paths ({', '.join(violation.exclusive_paths)});"
+            " if the work really touches it, add it to the contract -- the scope"
+            " gate will otherwise refuse the submission"
+        )
+        if line not in warnings:
+            warnings.append(line)
     return warnings
