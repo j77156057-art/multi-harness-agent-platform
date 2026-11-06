@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 from app.adapter.formal_worker import (
+    OutOfScopeSubmission,
     _classify_failure,
     build_goal,
     human_failure_reason,
@@ -50,6 +51,19 @@ def _cli_failed(stderr: str = "", stdout: str = "") -> CliFailed:
 
 
 # --------------------------------------------------------------- 分类
+
+
+def test_an_out_of_scope_submission_is_not_retryable_and_names_the_path():
+    """越界是产物的问题，重试只会再写同一个越界文件；原因里必须带路径。"""
+    retryable, reason = _classify_failure(
+        OutOfScopeSubmission(["README.md"], ["probe/pi-scope/"]),
+        task=_task(),
+        manager=None,
+        attempt_id="T-1.a1",
+    )
+
+    assert retryable is False
+    assert reason == "out_of_scope: README.md"
 
 
 def test_a_provider_failure_is_retryable():

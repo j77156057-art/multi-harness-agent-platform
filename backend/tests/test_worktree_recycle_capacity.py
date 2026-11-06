@@ -9,9 +9,12 @@ the archive only packed committed branches.
 
 from __future__ import annotations
 
+import json
+import tarfile
 import threading
 from datetime import UTC, datetime, timedelta
 
+import pytest
 
 from app.adapter.dispatch import eligible_tasks
 from app.claim.service import (
@@ -21,6 +24,7 @@ from app.claim.service import (
 )
 from app.git.repo import run_git
 from app.git.worktree import (
+    WorktreeArchiveVerificationError,
     WorktreeManager,
     worktree_capacity,
 )
@@ -92,6 +96,76 @@ def test_expired_lease_slot_is_recycled_and_capacity_returns(tmp_path, monkeypat
         (first.attempt_id, "archived"),
         (second.attempt_id, "active"),
     ]
+
+
+def test_dirty_expired_slot_archives_every_file_before_deleting(tmp_path, monkeypatch):
+    """未提交的 modified + untracked 必须进归档，校验通过才删目录。"""
+    _archive_root(tmp_path, monkeypatch)
+    monkeypatch.setattr("app.config.settings.concurrent_worktree", 1)
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    commit_in(worktree, filename="a.txt", content="hello\n", message="feat: a")
+    (worktree.path / "a.txt").write_text("hello changed\n", encoding="utf-8")
+    (worktree.path / "frontend").mkdir()
+    (worktree.path / "frontend" / "one.html").write_text("<html>1</html>\n", encoding="utf-8")
+    (worktree.path / "frontend" / "two.js").write_text("console.log(2)\n", encoding="utf-8")
+    (worktree.path / ".env.test").write_text("SECRET=no\n", encoding="utf-8")
+    with fixture.database.transaction() as conn:
+        conn.execute("UPDATE tasks SET status = 'in_progress' WHERE task_id = 'T-1'")
+    _expire_lease(fixture.database, item.attempt_id)
+
+    disk_bytes = (worktree.path / "a.txt").read_bytes()
+    report = sweep_worktree_recycle(
+        fixture.database, datetime.now(UTC), repo=fixture.repo, root=fixture.manager.root
+    )
+
+    assert report.detail["recycled"] == [item.attempt_id]
+    checkpoint = tmp_path / "data" / "archives" / item.attempt_id
+    suffix = item.attempt_id.rsplit(".", 1)[-1]
+    modified_tar = checkpoint / f"checkpoint-{suffix}.modified.tar"
+    untracked_tar = checkpoint / f"checkpoint-{suffix}.untracked.tar"
+    dirty = checkpoint / f"checkpoint-{suffix}.dirty.diff"
+    manifest = json.loads((checkpoint / "manifest.json").read_text(encoding="utf-8"))
+
+    with tarfile.open(modified_tar) as archive:
+        modified_names = set(archive.getnames())
+        archived = archive.extractfile("a.txt").read()
+    assert modified_names == {"a.txt"}
+    assert archived == disk_bytes, "snapshot is byte-identical to the disk"
+    with tarfile.open(untracked_tar) as archive:
+        untracked_names = set(archive.getnames())
+    assert untracked_names == {"frontend/one.html", "frontend/two.js"}
+    assert ".env.test" not in untracked_names
+    assert "hello changed" in dirty.read_text(encoding="utf-8")
+    assert manifest["modified_files"] == ["a.txt"]
+    assert manifest["untracked_files"] == ["frontend/one.html", "frontend/two.js"]
+    assert manifest["excluded_secret_paths"] == [".env.test"]
+    assert not worktree.path.exists()
+
+
+def test_archive_verification_failure_keeps_the_tree(tmp_path, monkeypatch):
+    """人为让校验失败 → 目录保留、行仍 active、抛错，不许先删。"""
+    _archive_root(tmp_path, monkeypatch)
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    (worktree.path / "keep.txt").write_text("must survive\n", encoding="utf-8")
+
+    def broken_verify(self, **kwargs):
+        raise WorktreeArchiveVerificationError("injected verification failure")
+
+    monkeypatch.setattr(WorktreeManager, "_verify_archive", broken_verify)
+    with pytest.raises(WorktreeArchiveVerificationError):
+        fixture.manager.archive_and_recycle(attempt_id=item.attempt_id)
+
+    assert worktree.path.exists(), "verification failure must not delete the tree"
+    assert (worktree.path / "keep.txt").exists()
+    rows = fixture.database.read("SELECT status FROM workspaces")
+    assert [row["status"] for row in rows] == ["active"]
+    assert fixture.database.read(
+        "SELECT COUNT(*) AS n FROM artifacts WHERE attempt_id = ?", (item.attempt_id,)
+    )[0]["n"] == 0, "the failed recycle rolled the archive rows back"
 
 
 def test_capacity_full_queues_claim_with_reason_and_earliest(tmp_path, monkeypatch):
@@ -283,7 +357,7 @@ def test_two_concurrent_claims_cannot_share_one_unprovisioned_slot(tmp_path, mon
         == 0
     )
     open_attempts = fixture.database.read(
-        "SELECT attempt_id FROM task_attempts WHERE status = 'claimed'"
+        "SELECT attempt_id FROM task_attempts WHERE close_reason IS NULL"
     )
     assert [row["attempt_id"] for row in open_attempts] == [winner.attempt_id]
     assert loser.attempt_id is None and loser.lease_token is None

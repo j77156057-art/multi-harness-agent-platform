@@ -13,14 +13,17 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import os
 import re
 import shutil
 import sqlite3
 import stat
+import tarfile
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from fnmatch import fnmatchcase
 from pathlib import Path
 
 from app.config import settings
@@ -58,6 +61,8 @@ class WorktreeCapacityExceeded(WorktreeError):
         self.unavailability_reasons = list(unavailability_reasons)
 
 
+class WorktreeArchiveVerificationError(WorktreeError):
+    """The archive does not prove every file survived; the tree must stay."""
 
 
 class WorktreeIsolationError(WorktreeError):
@@ -100,6 +105,46 @@ def _force_rmtree(path: Path) -> None:
             with contextlib.suppress(OSError):
                 os.chmod(os.path.join(root, name), stat.S_IWRITE)
     shutil.rmtree(path, ignore_errors=True)
+
+
+#: 归档脏工作时必须挡住的敏感文件。07 现场：worktree 里留着成员自己造的
+#: ``.env`` / 私钥时，归档 tar 会把它们原样带进 ``data/archives`` —— 归档目录
+#: 是平台长期保留、可被人翻看的地方，不能变成凭证泄漏的二次入口。
+_SECRET_PATTERNS = (".env*", "*.key", "*.pem", "id_rsa*", "*.p12")
+
+
+def _is_secret_path(path: str) -> bool:
+    """Match the secret patterns against the file name (not the directory)."""
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return any(fnmatchcase(name, pattern) for pattern in _SECRET_PATTERNS)
+
+
+def _unquote_path(path: str) -> str:
+    """Undo git's C-style quoting of a path (same rule as the scope check)."""
+    text = path.strip()
+    if len(text) < 2 or not text.startswith('"') or not text.endswith('"'):
+        return text
+    body = text[1:-1]
+    out = bytearray()
+    index = 0
+    while index < len(body):
+        char = body[index]
+        if char == "\\" and body[index + 1 : index + 4].isdigit():
+            try:
+                out.append(int(body[index + 1 : index + 4], 8))
+                index += 4
+                continue
+            except ValueError:
+                pass
+        out.extend(char.encode("utf-8"))
+        index += 1
+    return out.decode("utf-8", errors="replace")
+
+
+def _artifact_id(attempt_id: str, kind: str) -> str:
+    """Deterministic id so a timeout snapshot and a later recycle dedupe."""
+    digest = hashlib.sha256(f"{attempt_id}:{kind}".encode("utf-8")).hexdigest()
+    return "art-" + digest[:32]
 
 
 def _reconcile_vanished_worktrees(conn: sqlite3.Connection) -> list[str]:
@@ -415,28 +460,53 @@ class WorktreeManager:
             run_git("bundle", "create", str(bundle), branch, cwd=path)
             verify = run_git("bundle", "verify", str(bundle), cwd=path, check=False)
             if verify.returncode != 0:
-                raise WorktreeError(
+                raise WorktreeArchiveVerificationError(
                     f"bundle verification failed for {attempt_id}: {verify.stderr.strip()}"
                 )
             head = run_git("rev-parse", branch, cwd=path).stdout.strip()
             diff = run_git("diff", f"{base}..{head}", cwd=path).stdout
             patch.write_text(diff, encoding="utf-8")
 
+            # 07 现场：成员写出的文件停在 worktree 里没提交，回收前只打了
+            # base..head，四条任务的 patch 全是 0 字节。删除之前先把未提交与
+            # 未跟踪的工作快照下来（manifest 标 deliverable=false），否则回收
+            # 就等于把唯一的证据一起删掉。
+            snapshot = self._snapshot_uncommitted(
+                row=row,
+                path=path,
+                attempt_id=attempt_id,
+                target_root=target_root,
+                bundle=bundle,
+                patch=patch,
+            )
+            # 回收的最后一道门槛：bundle 能还原提交，快照里的每个字节都要和
+            # 磁盘上的一致；校验不过就直接抛错，行还是 active、目录还在。
+            self._verify_archive(
+                path=path,
+                attempt_id=attempt_id,
+                bundle=bundle,
+                patch=patch,
+                snapshot=snapshot,
+            )
+
             conn.execute(
                 "UPDATE workspaces SET status = 'archived' WHERE workspace_id = ?",
                 (str(row["workspace_id"]),),
             )
-            for kind, uri, digest_source in (
-                ("git_bundle", bundle, bundle),
-                ("patch", patch, patch),
-            ):
-                payload = digest_source.read_bytes()
+            artifacts: list[tuple[str, Path, str]] = [
+                ("git_bundle", bundle, f"art-{uuid.uuid4().hex}"),
+                ("patch", patch, f"art-{uuid.uuid4().hex}"),
+            ]
+            if snapshot is not None:
+                artifacts.extend(snapshot["artifacts"])
+            for kind, uri, artifact_id in artifacts:
+                payload = uri.read_bytes()
                 conn.execute(
                     "INSERT OR IGNORE INTO artifacts(artifact_id, task_id, attempt_id,"
                     " kind, uri, hash, size_bytes, redaction_state)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?, 'clear')",
                     (
-                        f"art-{uuid.uuid4().hex}",
+                        artifact_id,
                         str(row["task_id"]),
                         attempt_id,
                         kind,
@@ -455,6 +525,354 @@ class WorktreeManager:
         return ArchiveResult(
             attempt_id=attempt_id, bundle=bundle, patch=patch, size_bytes=bundle.stat().st_size
         )
+
+    # ----------------------------------------------------- uncommitted snapshot
+
+    def checkpoint(
+        self, *, attempt_id: str, archive_root: Path | None = None
+    ) -> dict[str, object] | None:
+        """Snapshot uncommitted work but keep the worktree (timeout path).
+
+        超时的那条路故意保留 attempt 和 worktree（租约内可以重跑继续）。
+        但保留不等于不用留证据：如果租约到期后清扫器回收，脏工作就会跟着
+        消失。这里在超时的一刻先落一份快照，回收时再落一份（同名覆盖，
+        artifact 行按确定性 id 去重）。
+        """
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM workspaces WHERE attempt_id = ? AND status = 'active'",
+                (attempt_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            path = Path(str(row["path"]))
+            target_root = (
+                Path(archive_root)
+                if archive_root is not None
+                else Path(settings.data_dir) / "archives"
+            )
+            if not path.exists():
+                return None
+            self._heal_config(path)
+            snapshot = self._snapshot_uncommitted(
+                row=row, path=path, attempt_id=attempt_id, target_root=target_root
+            )
+            if snapshot is None:
+                return None
+            for kind, uri, artifact_id in snapshot["artifacts"]:
+                payload = uri.read_bytes()
+                conn.execute(
+                    "INSERT OR IGNORE INTO artifacts(artifact_id, task_id, attempt_id,"
+                    " kind, uri, hash, size_bytes, redaction_state)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, 'clear')",
+                    (
+                        artifact_id,
+                        str(row["task_id"]),
+                        attempt_id,
+                        kind,
+                        str(uri),
+                        "sha256:" + hashlib.sha256(payload).hexdigest(),
+                        len(payload),
+                    ),
+                )
+            return {
+                "status": "archived",
+                "deliverable": False,
+                "reason": "uncommitted_worktree",
+                "dirty_diff": str(snapshot["dirty_diff"]),
+                "modified_archive": (
+                    str(snapshot["modified_archive"]) if snapshot["modified_archive"] else None
+                ),
+                "modified_files": snapshot["modified_files"],
+                "deleted_files": snapshot["deleted_files"],
+                "untracked_archive": (
+                    str(snapshot["untracked_archive"]) if snapshot["untracked_archive"] else None
+                ),
+                "untracked_files": snapshot["untracked_files"],
+                "manifest": str(snapshot["manifest"]),
+                "excluded_secret_paths": snapshot["excluded_secret_paths"],
+            }
+
+    def _snapshot_uncommitted(
+        self,
+        *,
+        row: sqlite3.Row,
+        path: Path,
+        attempt_id: str,
+        target_root: Path,
+        bundle: Path | None = None,
+        patch: Path | None = None,
+    ) -> dict[str, object] | None:
+        """Write the dirty diff / untracked tar / manifest of an attempt.
+
+        Returns ``None`` when the worktree is clean: a clean attempt needs no
+        non-deliverable evidence, and the existing archive test asserts the
+        artifact set is exactly ``git_bundle`` + ``patch`` for that case.
+        """
+        status_lines = [
+            line
+            for line in run_git("status", "--porcelain", cwd=path).stdout.splitlines()
+            if line.strip()
+        ]
+        if not status_lines:
+            return None
+
+        suffix = attempt_id.rsplit(".", 1)[-1] if "." in attempt_id else attempt_id
+        root = target_root / attempt_id
+        root.mkdir(parents=True, exist_ok=True)
+        dirty_diff = root / f"checkpoint-{suffix}.dirty.diff"
+        modified_tar = root / f"checkpoint-{suffix}.modified.tar"
+        untracked_tar = root / f"checkpoint-{suffix}.untracked.tar"
+        manifest_path = root / "manifest.json"
+
+        tracked_changes: list[str] = []
+        excluded: list[str] = []
+        for line in status_lines:
+            if line[:2].strip() == "??":
+                continue  # untracked is enumerated file-by-file below
+            item = line[3:].strip()
+            if " -> " in item:
+                item = item.rsplit(" -> ", 1)[1]
+            item = _unquote_path(item).replace("\\", "/")
+            if not item or item.endswith("/"):
+                continue
+            if _is_secret_path(item):
+                excluded.append(item)
+                continue
+            tracked_changes.append(item)
+
+        # 完整 diff（staged + unstaged 对 HEAD）。未跟踪文件不在 diff 里，
+        # 因此另有 untracked tar + manifest 清单。
+        dirty_diff.write_text(
+            run_git("diff", "HEAD", cwd=path).stdout, encoding="utf-8"
+        )
+
+        modified_files: list[str] = []
+        deleted_files: list[str] = []
+        for item in sorted(set(tracked_changes)):
+            source = path / item
+            if source.is_file() or source.is_symlink():
+                modified_files.append(item)
+            else:
+                deleted_files.append(item)
+        if modified_files:
+            # 文件快照而不只是 diff：二进制文件、换行、diff 无法表达的字节
+            # 都要能原样还原。
+            with tarfile.open(modified_tar, "w") as archive:
+                for item in modified_files:
+                    source = path / item
+                    if source.is_file() or source.is_symlink():
+                        archive.add(source, arcname=item)
+
+        untracked = [
+            _unquote_path(line).replace("\\", "/")
+            for line in run_git(
+                "ls-files", "--others", "--exclude-standard", cwd=path
+            ).stdout.splitlines()
+            if line.strip()
+        ]
+        untracked_files = [item for item in untracked if not _is_secret_path(item)]
+        excluded.extend(item for item in untracked if _is_secret_path(item))
+        if untracked_files:
+            # 排除在**打包时**生效：敏感文件根本不进 tar，不是打包后再删。
+            with tarfile.open(untracked_tar, "w") as archive:
+                for item in sorted(set(untracked_files)):
+                    source = path / item
+                    if source.is_file():
+                        archive.add(source, arcname=item)
+
+        changed_files = sorted(set(tracked_changes) | set(untracked_files))
+        entries: list[dict[str, object]] = []
+        if bundle is not None:
+            entries.append(
+                {"kind": "git_bundle", "path": str(bundle), "deliverable": True}
+            )
+        if patch is not None:
+            entries.append({"kind": "patch", "path": str(patch), "deliverable": True})
+        entries.append(
+            {
+                "kind": "checkpoint_dirty",
+                "path": str(dirty_diff),
+                "deliverable": False,
+                "reason": "uncommitted_worktree",
+                "bytes": dirty_diff.stat().st_size,
+            }
+        )
+        if modified_tar.exists():
+            entries.append(
+                {
+                    "kind": "checkpoint_modified",
+                    "path": str(modified_tar),
+                    "deliverable": False,
+                    "reason": "uncommitted_worktree",
+                    "files": modified_files,
+                }
+            )
+        if untracked_tar.exists():
+            entries.append(
+                {
+                    "kind": "checkpoint_untracked",
+                    "path": str(untracked_tar),
+                    "deliverable": False,
+                    "reason": "uncommitted_worktree",
+                    "files": sorted(set(untracked_files)),
+                }
+            )
+        manifest = {
+            "attempt_id": attempt_id,
+            "task_id": str(row["task_id"]),
+            "branch": str(row["branch"]),
+            "created_at": datetime.now(UTC).isoformat(),
+            "deliverable": False,
+            "reason": "uncommitted_worktree",
+            "entries": entries,
+            "changed_files": changed_files,
+            "modified_files": modified_files,
+            "deleted_files": deleted_files,
+            "untracked_files": sorted(set(untracked_files)),
+            "excluded_secret_paths": sorted(set(excluded)),
+        }
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        artifacts: list[tuple[str, Path, str]] = []
+        if dirty_diff.stat().st_size > 0:
+            artifacts.append(
+                (
+                    "checkpoint_dirty",
+                    dirty_diff,
+                    _artifact_id(attempt_id, "checkpoint_dirty"),
+                )
+            )
+        if modified_tar.exists():
+            artifacts.append(
+                (
+                    "checkpoint_modified",
+                    modified_tar,
+                    _artifact_id(attempt_id, "checkpoint_modified"),
+                )
+            )
+        if untracked_tar.exists():
+            artifacts.append(
+                (
+                    "checkpoint_untracked",
+                    untracked_tar,
+                    _artifact_id(attempt_id, "checkpoint_untracked"),
+                )
+            )
+        return {
+            "dirty_diff": dirty_diff,
+            "modified_archive": modified_tar if modified_tar.exists() else None,
+            "modified_files": modified_files,
+            "deleted_files": deleted_files,
+            "changed_files": changed_files,
+            "untracked_archive": untracked_tar if untracked_tar.exists() else None,
+            "untracked_files": sorted(set(untracked_files)),
+            "manifest": manifest_path,
+            "excluded_secret_paths": sorted(set(excluded)),
+            "artifacts": artifacts,
+        }
+
+    def _verify_archive(
+        self,
+        *,
+        path: Path,
+        attempt_id: str,
+        bundle: Path,
+        patch: Path,
+        snapshot: dict[str, object] | None,
+    ) -> None:
+        """Prove the archive can restore the tree before anything is deleted.
+
+        Checks, in order:
+        1. ``git bundle verify`` (commits are restorable);
+        2. every tracked modified file has a byte-identical entry in
+           ``checkpoint_modified.tar``;
+        3. every untracked file has a byte-identical entry in
+           ``checkpoint_untracked.tar``;
+        4. every deleted file has a non-empty diff (its content is gone from
+           disk, so the diff is the only record).
+
+        Any mismatch raises :class:`WorktreeArchiveVerificationError`; the
+        caller has not updated the row or removed the directory at that point.
+        """
+        if not bundle.is_file():
+            raise WorktreeArchiveVerificationError(
+                f"bundle missing for {attempt_id}: {bundle}"
+            )
+        verify = run_git("bundle", "verify", str(bundle), cwd=path, check=False)
+        if verify.returncode != 0:
+            raise WorktreeArchiveVerificationError(
+                f"bundle verification failed for {attempt_id}: {verify.stderr.strip()}"
+            )
+        if snapshot is None:
+            return
+
+        manifest_path = Path(str(snapshot["manifest"]))
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise WorktreeArchiveVerificationError(
+                f"manifest unreadable for {attempt_id}: {exc}"
+            ) from exc
+        if manifest.get("attempt_id") != attempt_id:
+            raise WorktreeArchiveVerificationError(
+                f"manifest belongs to {manifest.get('attempt_id')}, not {attempt_id}"
+            )
+
+        checks = (
+            ("checkpoint_modified", snapshot.get("modified_archive"), manifest.get("modified_files", [])),
+            ("checkpoint_untracked", snapshot.get("untracked_archive"), manifest.get("untracked_files", [])),
+        )
+        for kind, archive_path, files in checks:
+            expected = [str(item) for item in files]
+            if not expected:
+                continue
+            if archive_path is None or not Path(str(archive_path)).is_file():
+                raise WorktreeArchiveVerificationError(
+                    f"{kind} missing {len(expected)} file(s) for {attempt_id}"
+                )
+            with tarfile.open(str(archive_path), "r") as archive:
+                members = {
+                    name.replace("\\", "/"): member for name, member in
+                    ((name, archive.getmember(name)) for name in archive.getnames())
+                }
+                for item in expected:
+                    if _is_secret_path(item):
+                        raise WorktreeArchiveVerificationError(
+                            f"{kind} unexpectedly contains secret path {item}"
+                        )
+                    member = members.get(item.replace("\\", "/"))
+                    if member is None:
+                        raise WorktreeArchiveVerificationError(
+                            f"{kind} does not contain {item} for {attempt_id}"
+                        )
+                    source = path / item
+                    if not source.exists():
+                        raise WorktreeArchiveVerificationError(
+                            f"{item} vanished before archive verification"
+                        )
+                    extracted = archive.extractfile(member)
+                    if extracted is None:
+                        raise WorktreeArchiveVerificationError(
+                            f"{kind} member {item} is not a regular file"
+                        )
+                    archived_bytes = extracted.read()
+                    disk_bytes = source.read_bytes()
+                    if hashlib.sha256(archived_bytes).hexdigest() != hashlib.sha256(
+                        disk_bytes
+                    ).hexdigest():
+                        raise WorktreeArchiveVerificationError(
+                            f"{kind} bytes differ for {item} in {attempt_id}"
+                        )
+
+        for item in [str(entry) for entry in manifest.get("deleted_files", [])]:
+            deleted = run_git("diff", "HEAD", "--", item, cwd=path, check=False)
+            if deleted.returncode != 0 or not deleted.stdout.strip():
+                raise WorktreeArchiveVerificationError(
+                    f"deleted file {item} has no diff in {attempt_id}"
+                )
 
     @staticmethod
     def _heal_config(path: Path) -> str | None:

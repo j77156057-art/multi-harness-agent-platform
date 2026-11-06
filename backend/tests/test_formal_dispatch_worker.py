@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.adapter.formal_worker import ScopedRunner
+from app.adapter.formal_worker import OutOfScopeSubmission, ScopedRunner
 from app.adapter.verify_artifact import verify
 from app.git.repo import run_git
 
@@ -66,6 +66,28 @@ def test_platform_commit_rejects_an_out_of_scope_dirty_path(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="outside exclusive_paths"):
         runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
+    assert run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip() == base
+
+
+def test_out_of_scope_refusal_names_the_path_and_the_allowed_scope(tmp_path: Path):
+    """07 现场只报「dirty path outside exclusive_paths」，人不知道是哪个文件。"""
+    run_git("init", str(tmp_path))
+    run_git("commit", "--allow-empty", "-m", "seed", cwd=tmp_path)
+    base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
+    (tmp_path / "README.md").write_text("escape", encoding="utf-8")
+    runner = ScopedRunner(
+        {"exclusive_paths": ["probe/pi-scope/"]}, base, platform_commit=True
+    )
+    import sys
+
+    with pytest.raises(OutOfScopeSubmission) as info:
+        runner.run([sys.executable, "-c", "pass"], cwd=tmp_path, timeout_seconds=10)
+
+    exc = info.value
+    assert exc.paths == ["README.md"]
+    assert exc.allowed == ["probe/pi-scope/"]
+    assert "README.md" in str(exc)
+    assert "allowed: probe/pi-scope/" in str(exc)
     assert run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip() == base
 
 

@@ -172,3 +172,127 @@ def test_long_task_ids_do_not_lengthen_the_physical_path(tmp_path):
     )
     assert result.bundle.exists() and result.bundle.stat().st_size > 0
     assert not worktree.path.exists(), "cleanup still works under a deep root"
+
+
+def _attempt_suffix(attempt_id: str) -> str:
+    return attempt_id.rsplit(".", 1)[-1] if "." in attempt_id else attempt_id
+
+
+def test_recycle_archives_uncommitted_and_untracked_work(tmp_path):
+    """07 现场：回收只打了 base..head，四条任务的 patch 全是 0 字节。
+
+    这里在真实 git worktree 上造出「已提交 + 已跟踪未提交 + 未跟踪」三种改动，
+    跑真实的 archive_and_recycle，断言脏工作被快照下来、敏感文件不进 tar。
+    """
+    import json
+    import tarfile
+
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    commit_in(worktree, filename="a.txt", content="hello\n", message="feat: a")
+    # 已跟踪但没提交的改动：这是 dirty diff 要抓的部分。
+    (worktree.path / "a.txt").write_text("hello changed\n", encoding="utf-8")
+    # 未跟踪的交付物：这是 tar 要抓的部分。
+    (worktree.path / "frontend").mkdir()
+    for name in ("one.html", "two.js", "three.css"):
+        (worktree.path / "frontend" / name).write_text(name, encoding="utf-8")
+    # 敏感文件：必须不进 tar。
+    (worktree.path / ".env.test").write_text("SECRET=do-not-archive\n", encoding="utf-8")
+
+    archive_root = fixture.rest / "archives"
+    result = fixture.manager.archive_and_recycle(
+        attempt_id=item.attempt_id, archive_root=archive_root
+    )
+    assert result.bundle.exists() and result.bundle.stat().st_size > 0
+
+    suffix = _attempt_suffix(item.attempt_id)
+    checkpoint = archive_root / item.attempt_id
+    dirty = checkpoint / f"checkpoint-{suffix}.dirty.diff"
+    untracked = checkpoint / f"checkpoint-{suffix}.untracked.tar"
+    manifest = json.loads((checkpoint / "manifest.json").read_text(encoding="utf-8"))
+
+    assert dirty.stat().st_size > 0
+    assert "hello changed" in dirty.read_text(encoding="utf-8")
+    with tarfile.open(untracked) as archive:
+        names = archive.getnames()
+    assert {"frontend/one.html", "frontend/two.js", "frontend/three.css"} <= set(names)
+    assert ".env.test" not in names, "secret files must be excluded at packaging time"
+
+    assert manifest["deliverable"] is False
+    assert manifest["reason"] == "uncommitted_worktree"
+    assert manifest["excluded_secret_paths"] == [".env.test"]
+    entries = {entry["kind"]: entry for entry in manifest["entries"]}
+    assert entries["checkpoint_dirty"]["deliverable"] is False
+    assert entries["checkpoint_untracked"]["reason"] == "uncommitted_worktree"
+
+    with fixture.database.connect() as conn:
+        kinds = {
+            str(row["kind"])
+            for row in conn.execute(
+                "SELECT kind FROM artifacts WHERE attempt_id = ?", (item.attempt_id,)
+            )
+        }
+    assert {
+        "git_bundle",
+        "patch",
+        "checkpoint_dirty",
+        "checkpoint_modified",
+        "checkpoint_untracked",
+    } == kinds
+    assert not worktree.path.exists()
+
+
+def test_checkpoint_captures_timeout_work_without_recycling(tmp_path):
+    """超时分支必须保留 worktree，同时把半成品快照下来。"""
+    import tarfile
+
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    commit_in(worktree, filename="a.txt", content="hello\n", message="feat: a")
+    (worktree.path / "a.txt").write_text("partial\n", encoding="utf-8")
+    (worktree.path / "out").mkdir()
+    for name in ("one.py", "two.py", "three.py"):
+        (worktree.path / "out" / name).write_text("partial\n", encoding="utf-8")
+    (worktree.path / ".env").write_text("TOKEN=do-not-archive\n", encoding="utf-8")
+
+    snapshot = fixture.manager.checkpoint(
+        attempt_id=item.attempt_id, archive_root=fixture.rest / "archives"
+    )
+
+    assert snapshot is not None
+    assert snapshot["deliverable"] is False
+    assert snapshot["untracked_files"] == ["out/one.py", "out/three.py", "out/two.py"]
+    with tarfile.open(snapshot["untracked_archive"]) as archive:
+        names = archive.getnames()
+    assert {name for name in names} == {"out/one.py", "out/three.py", "out/two.py"}
+    assert ".env" not in names
+    assert worktree.path.exists(), "timeout keeps the worktree for replay"
+    assert (worktree.path / ".env").exists()
+
+
+def test_archive_keeps_the_worktree_when_a_secret_is_the_only_dirty_file(tmp_path):
+    """只有敏感文件脏时，不能因为「没有可归档内容」就丢掉 manifest 证据。"""
+    import json
+
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    (worktree.path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+
+    archive_root = fixture.rest / "archives"
+    fixture.manager.archive_and_recycle(
+        attempt_id=item.attempt_id, archive_root=archive_root
+    )
+    manifest = json.loads(
+        (archive_root / item.attempt_id / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["deliverable"] is False
+    assert manifest["excluded_secret_paths"] == [".env"]
+    assert not (
+        archive_root
+        / item.attempt_id
+        / f"checkpoint-{_attempt_suffix(item.attempt_id)}.untracked.tar"
+    ).exists()
+

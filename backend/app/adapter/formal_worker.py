@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import re
 import shutil
 import time
@@ -12,29 +13,32 @@ from pathlib import Path
 
 import httpx
 
-from app.adapter import cli_output
-from app.adapter import presence
+from app.adapter import cli_output, presence
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
 from app.adapter.harnesses.cli import (
     CliFailed,
     CliHarnessWorker,
     CliRunResult,
     CliUnavailable,
+    HarnessStalled,
     HarnessTimeout,
     ProviderRoute,
+    ProviderUnavailable,
     SubprocessRunner,
     runner_accepts,
 )
 from app.adapter.harnesses.codebuddy import CodeBuddyAdapter
 from app.adapter.harnesses.codex import CodexAdapter
 from app.adapter.harnesses.generic import GenericCliAdapter, load_declarations
+
 # 市面上常见的十个 CLI：契约与限制写在 market_cli 里的一份规格表上。
 from app.adapter.harnesses.market_cli import MARKET_ADAPTERS
 from app.adapter.harnesses.opencode import OpenCodeAdapter
 from app.adapter.harnesses.pi import PiAdapter
 from app.adapter.harnesses.platform import PlatformToolsAdapter
 from app.adapter.harnesses.qoder import QoderAdapter
-from app.adapter.scope import path_in_scope
+from app.adapter.prerequisites import check_harness_prerequisites
+from app.adapter.scope import is_runtime_artifact, path_in_scope
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
@@ -155,6 +159,27 @@ def adapter_for_harness(client, harness_id: str):
     return build_adapter(base_harness_id(harness_id), client, harness_id=harness_id)
 
 
+class OutOfScopeSubmission(RuntimeError):
+    """The platform's scope gate refused a deliverable.
+
+    07 现场只写了一句 ``platform commit refused: dirty path outside
+    exclusive_paths``：人不知道是哪个文件、允许范围是什么，只能把整轮重跑
+    一遍去猜。异常对象带上路径与允许范围，事件、failure JSON 和界面都能
+    直接显示「谁越界、界在哪」。
+    """
+
+    def __init__(self, paths: list[str], allowed: list[str], *, stage: str = "dirty") -> None:
+        self.paths = [path.replace("\\", "/") for path in paths]
+        self.allowed = [path.replace("\\", "/") for path in allowed]
+        self.stage = stage
+        shown = ", ".join(self.paths[:8]) or "(unknown)"
+        scope = ", ".join(self.allowed) or "(none)"
+        super().__init__(
+            f"platform commit refused: {stage} path outside exclusive_paths:"
+            f" {shown} (allowed: {scope})"
+        )
+
+
 class ScopedRunner(SubprocessRunner):
     def __init__(
         self,
@@ -175,6 +200,9 @@ class ScopedRunner(SubprocessRunner):
         #: 一个 CLI 的配置文件不该让整个交付被判成"留了脏东西"；反过来，
         #: 真实交付物想躲进这里也不行 —— 见 ``_transient_names`` 的拒绝条件。
         self._transient = transient or (lambda: ())
+        #: 本次执行里被**跳过**的运行产物（信息，不是失败）。随结果进入
+        #: ``task.submit`` 的 payload，供事后区分「运行产生的东西」与「越界」。
+        self.notes: list[str] = []
 
     def _commits_for_harness(self) -> bool:
         decision = self._platform_commit
@@ -224,20 +252,34 @@ class ScopedRunner(SubprocessRunner):
             return result
         if self._commits_for_harness():
             self._commit_uncommitted_scope(cwd)
-        changed = run_git("diff", "--name-only", f"{self.base}..HEAD", cwd=cwd).stdout.splitlines()
+        raw_changed = run_git(
+            "diff", "--name-only", f"{self.base}..HEAD", cwd=cwd
+        ).stdout.splitlines()
+        changed = [path for path in raw_changed if not is_runtime_artifact(path)]
         paths = self.spec["exclusive_paths"]
         transient = self._transient_names()
-        dirty = "\n".join(
-            line
-            for line in run_git("status", "--porcelain", cwd=cwd).stdout.strip().splitlines()
-            if self._line_path(line) not in transient
-        )
+        runtime_dirty: list[str] = []
+        dirty_lines: list[str] = []
+        for line in run_git("status", "--porcelain", cwd=cwd).stdout.strip().splitlines():
+            path = self._line_path(line)
+            if path in transient:
+                continue
+            if is_runtime_artifact(path):
+                # 运行产物不是交付，也不该让一次合格的活被判成"工作树没清干净"。
+                runtime_dirty.append(path)
+                continue
+            dirty_lines.append(line)
+        for path in raw_changed:
+            if is_runtime_artifact(path):
+                runtime_dirty.append(path)
+        if runtime_dirty:
+            self._note_skipped(set(runtime_dirty))
         # Name the condition that fired. The old single sentence ("dirty, empty
         # or out-of-scope") made a scope-rule bug look like a member mistake and
         # cost a full re-run to tell the two apart.
         reasons: list[str] = []
-        if dirty:
-            reasons.append("uncommitted changes: " + "; ".join(dirty.splitlines()[:3]))
+        if dirty_lines:
+            reasons.append("uncommitted changes: " + "; ".join(dirty_lines[:3]))
         if not changed:
             reasons.append(f"no committed change against base {self.base}")
         out_of_scope = [p for p in changed if not path_in_scope(p, paths)]
@@ -250,8 +292,29 @@ class ScopedRunner(SubprocessRunner):
                 result.stdout,
                 result.stderr + "\nRefused: " + "; ".join(reasons) + "\n",
                 result.duration_seconds,
+                notes=tuple(self.notes),
             )
-        return result
+        return CliRunResult(
+            result.argv,
+            result.returncode,
+            result.stdout,
+            result.stderr,
+            result.duration_seconds,
+            notes=tuple(self.notes),
+        )
+
+    def _note_skipped(self, paths: set[str]) -> None:
+        """记一条**信息**（不是失败）：这些运行产物既不算越界，也不进提交。
+
+        事件名不能新造（``EventKind`` 是封闭的，见 ``app/spec.py`` 与 ``docstate``
+        的 M 集合断言）。所以它走已有 ``task.submit`` 事件的 payload 字段
+        ``runtime_artifacts_skipped`` —— 一次提交里有什么被跳过、为什么跳过，
+        事后查得到，且不会把"运行产生的东西"记成"成员越界"。
+        """
+        for path in sorted(paths):
+            note = f"runtime artifact skipped (not committed): {path}"
+            if note not in self.notes:
+                self.notes.append(note)
 
     def _commit_uncommitted_scope(self, cwd: Path) -> None:
         """Submit an authorized Claude result without granting Claude Git access."""
@@ -265,6 +328,8 @@ class ScopedRunner(SubprocessRunner):
             return
         paths = self.spec["exclusive_paths"]
         changed_paths: list[str] = []
+        out_of_scope: list[str] = []
+        runtime_skipped: set[str] = set()
         for line in status:
             path = line[3:].strip()
             if " -> " in path:
@@ -283,18 +348,42 @@ class ScopedRunner(SubprocessRunner):
             )
             for candidate in candidates:
                 candidate = candidate.replace("\\", "/")
-                if not candidate or not path_in_scope(candidate, paths):
-                    raise RuntimeError(
-                        "platform commit refused: dirty path outside exclusive_paths"
-                    )
+                if not candidate:
+                    continue
+                if is_runtime_artifact(candidate):
+                    # .pyc / __pycache__ / .pytest_cache / *.log：运行产物，不进
+                    # commit，也不判越界。它们出现只说明代码跑过，不说明成员
+                    # 想改契约外的文件（e16 的 3 条 .pyc 正是这一类）。
+                    runtime_skipped.add(candidate)
+                    continue
+                if not path_in_scope(candidate, paths):
+                    # 收集所有越界路径再抛：只报第一个会让人以为改一个文件就够。
+                    out_of_scope.append(candidate)
+                    continue
                 changed_paths.append(candidate)
-        run_git("add", "--", *sorted(set(changed_paths)), cwd=cwd)
+        if out_of_scope:
+            raise OutOfScopeSubmission(out_of_scope, paths, stage="dirty")
+        if runtime_skipped:
+            self._note_skipped(runtime_skipped)
+        if changed_paths:
+            run_git("add", "--", *sorted(set(changed_paths)), cwd=cwd)
         staged = [
             _unquote_git_path(path)
             for path in run_git("diff", "--cached", "--name-only", cwd=cwd).stdout.splitlines()
         ]
-        if not staged or any(not path_in_scope(path, paths) for path in staged):
-            raise RuntimeError("platform commit refused: staged path outside exclusive_paths")
+        # 适配器（或它自己的 git）可能已经把运行产物 add 进索引了。提交侧
+        # 不能把它们带进 commit：从索引里撤掉，再按"不存在"处理。
+        staged_runtime = [path for path in staged if is_runtime_artifact(path)]
+        if staged_runtime:
+            run_git("reset", "--", *sorted(staged_runtime), cwd=cwd)
+            self._note_skipped(set(staged_runtime))
+            staged = [path for path in staged if path not in staged_runtime]
+        staged_out_of_scope = [path for path in staged if not path_in_scope(path, paths)]
+        if staged_out_of_scope:
+            raise OutOfScopeSubmission(staged_out_of_scope, paths, stage="staged")
+        if not staged:
+            # 只有运行产物：没有可提交的交付物，交给上层按"没有变更"判。
+            return
         self._commit_with_retry(cwd)
 
     def _commit_with_retry(self, cwd: Path, *, attempts: int = 4) -> None:
@@ -325,6 +414,7 @@ def ask_pool_plan(
     attempt_no: int,
     platform_url: str,
     token: str,
+    needs_tools: bool = False,
 ) -> dict[str, object]:
     """Ask the platform where this attempt's model calls should go.
 
@@ -341,6 +431,7 @@ def ask_pool_plan(
                 "task_id": task_id,
                 "harness_id": harness_id,
                 "attempt_no": attempt_no,
+                "needs_tools": needs_tools,
             },
         )
         if response.status_code >= 400:
@@ -1039,6 +1130,24 @@ def _provider_outage_hint(exc: BaseException) -> str:
     return f"（模型用不了：{line[:160]}）"
 
 
+def _relay_refusal(text: str) -> dict[str, object] | None:
+    """The ``retryable`` verdict the relay put in the response body, if any.
+
+    The pool answers a refusal with a JSON object on stderr, e.g.
+    ``502: {"code": "relay_cli_cannot_use_tools", ..., "retryable": false}``.
+    Only the field is read; the prose around it is not matched (a message that
+    merely *mentions* the word must not change the verdict).
+    """
+    verdict = re.search(r'"retryable"\s*:\s*(true|false)', text)
+    if verdict is None:
+        return None
+    code = re.search(r'"code"\s*:\s*"([^"]+)"', text)
+    return {
+        "retryable": verdict.group(1) == "true",
+        "code": code.group(1) if code is not None else "",
+    }
+
+
 def _classify_failure(
     exc: BaseException,
     *,
@@ -1060,18 +1169,42 @@ def _classify_failure(
       Those end as ``abandoned``: retrying them would only burn the budget
       again.
     """
+    if isinstance(exc, OutOfScopeSubmission):
+        # 越界是**产物**的问题，不是通道的问题：重试只会再写同一个越界文件。
+        # 原因里带上具体路径，人可以直接去改范围或改产物。
+        return False, "out_of_scope: " + ", ".join(exc.paths)
     if isinstance(exc, CliFailed):
         stderr = str(exc.result.stderr or "")
         if "Refused:" in stderr:
             # The platform refused the submission: the deliverable is out of
             # scope. A retry would produce the same refusal.
             return False, "the platform refused the submission (out of scope)"
+        refusal = _relay_refusal(stderr)
+        if refusal is not None and refusal["retryable"] is False:
+            # 2026-11-05（FD-cdf70117146f4319）：中继回 502
+            # `relay_cli_cannot_use_tools`，响应自己写着 retryable:false，可
+            # 分类逻辑当时只认 stderr 里的 `Refused:`，于是把同一句拒绝又烧了
+            # 三次预算。这个字段是**通道自己**的裁决，必须照办。
+            return False, (
+                "the relay refused this attempt without retrying"
+                f" ({refusal['code'] or 'relay_refused'}, retryable:false)"
+            )
         return True, "the harness CLI failed before it could deliver"
+    if isinstance(exc, ProviderUnavailable):
+        return False, (
+            "no model can serve this attempt's tools "
+            f"({exc.reason_code or 'protocol_unsupported'})"
+        )
     if isinstance(exc, WorktreeCapacityExceeded):
         # 没有空闲工位**不是这条活的错**：平台现在腾不出手。判死会让一条好活
         # 因为"别人占着位子"而消失。正确做法是把占位还回去、任务留在队列，
         # 等容量松开再被领走（跟 provider 类失败同一条路：release）。
-        return True, "the platform has no free worktree slot right now (capacity)"
+        # 原因里带最早可用时间：否则人只看到 "capacity"，不知道等多久。
+        earliest = exc.earliest_available_at
+        suffix = f"; earliest available at {earliest}" if earliest else ""
+        return True, (
+            "the platform has no free worktree slot right now (capacity)" + suffix
+        )
     if isinstance(exc, CliUnavailable):
         # The binary is not on PATH: the same window would fail the same way.
         # 带上适配器自己给的原因（"缺 AMP_API_KEY"这类），否则人只知道
@@ -1081,6 +1214,10 @@ def _classify_failure(
         return False, f"the harness CLI is not available on this host{suffix}"
     if isinstance(exc, HarnessTimeout):
         return True, "the harness CLI ran out of time"
+    if isinstance(exc, HarnessStalled):
+        # 进程活着但三项进展信号（输出字节 / CPU / output_tokens）全部停住：
+        # 把工位还给队列，换一次重试就能拿到断点报告，而不是再等一个 1800 秒。
+        return True, f"the harness CLI stalled for {getattr(exc, 'stalled_seconds', 0):.0f}s"
     budget = int(task.get("max_attempts") or 0)
     used = int(task.get("attempt_no") or 0)
     if budget and used >= budget:
@@ -1226,9 +1363,49 @@ def run_one(
     manager = WorktreeManager(database, repo)
     service = SchedulerService(database)
     captured = {}
+    # 交付验收：先看这条任务自己的派单字段，再退回部署默认。
+    # 派单字段（快照里的 ``acceptance_gate``）优先，且 false 也**压过**部署
+    # 开关：并行任务各自带自己的开关，一条活的项目不会误伤另一条。
+    from app.acceptance.flow_gate import (
+        PROFILE as ACCEPTANCE_PROFILE,
+    )
+    from app.acceptance.flow_gate import (
+        ExperienceAcceptanceGate,
+    )
+
+    gate_config = spec.get("acceptance_gate")
+    if isinstance(gate_config, dict):
+        dispatch_enabled = gate_config.get("enabled")
+        dispatch_profile = str(gate_config.get("profile") or "")
+        if dispatch_enabled:
+            if dispatch_profile != ACCEPTANCE_PROFILE:
+                # 派单说验收、平台却不认识这套判据：这里必须拒绝执行，而不是
+                # 悄悄跳过（dispatch 已经校验过，走到这里只能是快照被人改了）。
+                raise RuntimeError(
+                    f"dispatch acceptance profile {dispatch_profile!r} is not {ACCEPTANCE_PROFILE}"
+                )
+            gate_enabled, gate_profile = True, dispatch_profile
+        else:
+            gate_enabled, gate_profile = False, ""
+    else:
+        # 老派单没写字段：部署开关是缺省行为（删掉它会让老调用方全坏）。
+        gate_profile = os.environ.get("AP_ACCEPTANCE_PROFILE", "").strip()
+        gate_enabled = gate_profile == ACCEPTANCE_PROFILE
+    acceptance_rejected: tuple[type[BaseException], ...] = ()
+    gate = None
+    if gate_enabled:
+        from app.acceptance.flow_gate import AcceptanceRejected
+
+        gate = ExperienceAcceptanceGate(
+            task_id=task["task_id"],
+            expected_paths=[str(path) for path in (spec.get("exclusive_paths") or [])],
+        )
+        acceptance_rejected = (AcceptanceRejected,)
 
     def provision(item):
         captured.update(item)
+        if gate is not None:
+            gate.attempt_id = str(item.get("attempt_id") or "")
         scoped_runner.base = item["base_commit"] or service.repo_head(manager)
         result = service.start_task(
             task_id=item["task_id"],
@@ -1282,7 +1459,16 @@ def run_one(
         attempt_no=int(task.get("attempt_no") or 0) + 1,
         platform_url=platform_url,
         token=token,
+        # 执行类活必然带工具定义（read/edit/write 或该 CLI 自己的工具面）。
+        # 平台据此在**开流之前**排除 CLI 档，而不是让中继回 502。
+        needs_tools=True,
     )
+    if plan.get("mode") == "unavailable":
+        raise ProviderUnavailable(
+            str(plan.get("reason") or "no model can serve this attempt's tools"),
+            reason_code=str(plan.get("reason_code") or ""),
+            required_tools=tuple(str(item) for item in plan.get("required_tools") or ()),
+        )
     if plan.get("mode") == "pool":
         protocol = getattr(adapter, "pool_protocol", "openai")
         base_path = str(
@@ -1327,12 +1513,53 @@ def run_one(
             # the task back in the queue, not end it.
             abandon_on_failure=False,
             env=route_env or None,
+            acceptance_gate=gate,
         )
+    except acceptance_rejected as exc:
+        # 验收退回一次后仍不合格：交付不进 publish/submit，任务在这里收成终态。
+        # 原因（缺哪条路径、差多少字、命中哪个禁词/骨架下标）随 abandon 写进事件轨迹，
+        # 同时留一份完整记录在 evidence 目录。
+        attempt_id = captured.get("attempt_id")
+        record = exc.record
+        # 结构化记录跟 abandon 一起交给平台：状态机事件与验收记录表里都能
+        # 读到退回计数、缺项和终态，不用去翻 evidence 目录。
+        adapter.abandon(
+            task_id=task["task_id"], reason=exc.abandon_reason(), acceptance=record
+        )
+        recycled: dict[str, object] = {"status": "archived"}
+        if attempt_id:
+            with contextlib.suppress(Exception):
+                manager.archive_and_recycle(attempt_id=str(attempt_id))
+        failure = {
+            "task_id": task["task_id"],
+            "harness_id": harness_id,
+            "error_type": "AcceptanceRejected",
+            "error": str(exc),
+            "acceptance": record,
+            "workspace_recycle": recycled,
+            "scope": "delivery written and committed by the executor, rejected by acceptance; not published",
+        }
+        (evidence / f"{task['task_id']}.failure.json").write_text(
+            json.dumps(failure, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (evidence / f"{task['task_id']}.acceptance.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        raise
     except HarnessTimeout as exc:
         # R10-fix-15: a deadline kill keeps the attempt and its worktree. Within
         # the lease a rerun with the same claim_request_id replays the claim and
         # continues in the same workspace; after the lease the existing
         # stale/reclaiming sweep takes over. Partial work is still never submitted.
+        #
+        # 但「保留工作区和 attempt」不等于「不用留证据」：07 现场两条 CodeBuddy
+        # 超时后回收时 patch 是 0 字节，半成品全丢。这里只追加快照，不动
+        # attempt / worktree 的保留策略。
+        attempt_id = captured.get("attempt_id")
+        checkpoint: dict[str, object] | None = None
+        if attempt_id:
+            with contextlib.suppress(Exception):
+                checkpoint = manager.checkpoint(attempt_id=str(attempt_id))
         failure = {
             "task_id": task["task_id"],
             "harness_id": harness_id,
@@ -1343,6 +1570,7 @@ def run_one(
             "stdout_tail": exc.stdout,
             "stderr_tail": exc.stderr,
             "workspace_recycle": {"status": "preserved"},
+            "checkpoint": checkpoint,
             "resumable": {
                 "claim_request_id": claim_request_id,
                 "attempt_id": captured.get("attempt_id"),
@@ -1414,6 +1642,31 @@ def run_one(
                 else "real local CLI failure; attempt was abandoned by the worker"
             ),
         }
+        if isinstance(exc, OutOfScopeSubmission):
+            failure.update(
+                {
+                    "out_of_scope_paths": exc.paths,
+                    "allowed_paths": exc.allowed,
+                    "scope": (
+                        "out of scope: the deliverable touched paths outside"
+                        " exclusive_paths; the attempt was abandoned by the worker"
+                    ),
+                }
+            )
+        if isinstance(exc, HarnessStalled):
+            failure.update(
+                {
+                    "duration_seconds": exc.duration_seconds,
+                    "stalled_seconds": exc.stalled_seconds,
+                    "stdout": exc.stdout,
+                    "stderr": exc.stderr,
+                    "scope": (
+                        "the harness process stayed alive but made no progress"
+                        " (no output bytes, CPU time or output_tokens growth);"
+                        " the task went back to the queue with a breakpoint report"
+                    ),
+                }
+            )
         if isinstance(exc, CliFailed):
             failure.update(
                 {
@@ -1449,8 +1702,12 @@ def run_one(
                 "changed_files": outcome.changed_files,
                 "cli_returncode": outcome.cli.returncode,
                 "duration_seconds": outcome.cli.duration_seconds,
+                # 上游给了 finish_reason 就记；没给写 null，不拿别的指标反推。
+                "finish_reason": outcome.finish_reason,
+                "finish_reason_source": "upstream" if outcome.finish_reason else "unavailable",
                 "publish": outcome.publish,
                 "submit": outcome.submit,
+                "acceptance": outcome.acceptance,
                 "scope": f"real local {harness_id} execution; structural verification; human acceptance pending",
             },
             ensure_ascii=False,
@@ -1535,12 +1792,42 @@ def main():
         help="member CLI deadline for one attempt (default: AP_HARNESS_TIMEOUT_SECONDS, else 3600)",
     )
     args = parser.parse_args()
-    base_harness_id(args.harness_id)
+    base_id = base_harness_id(args.harness_id)
     if args.task_id is not None and args.attempt_no is None:
         raise SystemExit("--task-id requires --attempt-no (the claim to replay)")
     once = args.once or args.task_id is not None
     if settings.auth_mode != "enforce":
         raise SystemExit("formal worker requires enforce authentication")
+    # 启动前置条件：缺了就立刻退出并说清原因，绝不带着缺陷进 ready 池接活。
+    failures = check_harness_prerequisites(base_id)
+    if failures:
+        print(
+            json.dumps(
+                {
+                    "status": "worker_prerequisite_missing",
+                    "harness_id": args.harness_id,
+                    "reason": failures[0].code,
+                    "detail": failures[0].detail,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        raise SystemExit(2)
+    if base_id == "codebuddy":
+        # 正向信号：真实 worker 进程自己通过前置检查，日志里可核验。
+        print(
+            json.dumps(
+                {
+                    "status": "worker_prerequisites_ok",
+                    "harness_id": args.harness_id,
+                    "checked": "codebuddy_git_bash",
+                    "git_bash": os.environ.get("CODEBUDDY_CODE_GIT_BASH_PATH"),
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
     if args.canonical_repo is not None:
         # 立刻转成绝对路径：这个值会被当成 git 的远端传给 `git fetch`，而 fetch 是在
         # **工作树里**跑的 —— 相对路径于是相对工作树解析，报「does not appear to be
