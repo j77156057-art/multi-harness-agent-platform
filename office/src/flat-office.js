@@ -7499,7 +7499,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       return;
     }
     if (button.dataset.act === 'open-admin-chat') {
-      if (!adminDialog.open) adminDialog.showModal();
+      // 用 show() 而不是 showModal()：这个面板是**边聊边看**的，不是必须处理完
+      // 才能做别的事的表单。模态会把整页推进 inert —— 2026-11-05 的 human-sim
+      // 里「批准，开始做」就是这样被它拦了 15 次（P2-8）。
+      // 层叠交给 CSS 的 fixed + z-index；不再进 top layer，所以点得到后面的按钮。
+      if (!adminDialog.open) adminDialog.show();
       syncAdminDialog();
       return;
     }

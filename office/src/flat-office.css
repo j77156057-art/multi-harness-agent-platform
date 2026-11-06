@@ -1265,6 +1265,17 @@
 
 .flat-dialog[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
 
+/* 「与管理员对话」是**非模态**浮层：人一边等管理员回话，一边还要在运维抽屉里
+   批准方案 / 处理求助（P2-8 —— 模态时「批准，开始做」被拦截 15 次）。
+   非模态 <dialog> 不在 top layer，也不按 inset:0 居中，位置会跟着静态流掉到页面
+   末尾；所以这里自己定位成 fixed 居中，并压过顶栏（40）、低于终端面板（60）。 */
+.flat-admin-chat[open] {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  z-index: 45;
+}
+
 .flat-dialog-head {
   display: flex;
   align-items: flex-start;
