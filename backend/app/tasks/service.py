@@ -76,15 +76,19 @@ def _now() -> str:
 #: abandoned。attempt 的状态是投影，owner 阶段结束时平台必须自己收口，
 #: 不能等 harness 回来汇报（它已经不回来了）。``task_attempts.status`` 是自由
 #: 文本（001_initial.sql 没有枚举），所以这几个值不需要迁移。
-CLOSED_ATTEMPT_STATUSES = frozenset({"abandoned", "escalated", "failed", "released"})
+CLOSED_ATTEMPT_STATUSES = frozenset(
+    {"abandoned", "escalated", "failed", "released", "merged", "cancelled"}
+)
 
 #: 收口**只**认这两个「还没结束」的状态。``claimed`` 是必须收的那一类：
 #: 领取成功但 provision 失败时，attempt 停在 ``claimed``，``start_task`` 从未
 #: 执行，于是永远不是 ``in_progress``。2026-11-06 的 ``seq 2562`` 就是这样——
 #: release 事件落盘、任务回到 ready，attempt 行却停在 ``claimed``、
 #: ``closed_at``/``close_reason`` 全空，事后无法回答「这次 attempt 什么时候、
-#: 为什么结束」。``verifying`` 不在名单里：那是提交后的在途状态，由
-#: ``submit_result`` 自己收口，reconcile 也不能替它收。
+#: 为什么结束」。``verifying`` 不在名单里：那是提交后的在途状态，归状态机
+#: （:func:`finish_attempt`）在任务离开 verifying 时收口；reconcile 拿不到
+#: verify 的结论，不能替它写。2026-11-05 那 8 条卡在 verifying 的 attempt
+#: 恰恰是因为当时没有任何路径替它收口 —— 根因和修法见 ``finish_attempt``。
 OPEN_ATTEMPT_STATUSES = ("claimed", "in_progress")
 
 
@@ -119,6 +123,58 @@ def close_attempt(
         " closed_at = ?, close_reason = ?"
         f" WHERE attempt_id = ? AND status IN ({placeholders})",
         (status, head_commit, iso(moment), reason, attempt_id, *OPEN_ATTEMPT_STATUSES),
+    )
+    if cursor.rowcount != 1:
+        return False
+    conn.execute(
+        "UPDATE tasks SET updated_at = ?"
+        " WHERE task_id = (SELECT task_id FROM task_attempts WHERE attempt_id = ?)",
+        (iso(moment), attempt_id),
+    )
+    return True
+
+
+#: 状态机收口认的「attempt 还没结束」名单。比 :data:`OPEN_ATTEMPT_STATUSES`
+#: 多一个 ``verifying``：那个常量属于 reconcile 的契约，故意不替在途提交收口；
+#: 状态机这边相反 —— 任务一旦离开 ``verifying``（verify 通过、判失败、超时
+#: 升级），这次提交就已有结论，必须在这里落 ``closed_at``。2026-11-05 的 8 条
+#: attempt 就是停在这个缝里：任务已到 awaiting_review/approved，attempt 还是
+#: ``verifying`` 且 ``closed_at`` 为空，之后没有任何路径会再碰它。
+TRANSITION_ATTEMPT_STATUSES = ("claimed", "in_progress", "verifying")
+
+
+def finish_attempt(
+    conn: sqlite3.Connection,
+    *,
+    attempt_id: str | None,
+    status: str,
+    reason: str,
+    now: datetime | None = None,
+) -> bool:
+    """Close an attempt because the task state machine left its owning state.
+
+    这是状态机唯一的收口入口（:func:`app.claim.transitions.apply_transition`
+    调用）。与 :func:`close_attempt` 的分工：
+
+    * ``close_attempt`` 是 reconcile/sweep 的兜底，只碰 ``claimed`` /
+      ``in_progress``，绝不替在途的 ``verifying`` 写结论；
+    * ``finish_attempt`` 只在任务已经完成状态迁移之后调用，因此可以把
+      ``verifying`` 一并收口 —— 那时 verify 的结论已经落盘（passed / failed /
+      timeout），attempt 不可能再被使用。
+
+    Idempotent: the conditional UPDATE matches only a row that is still open.
+    """
+    if not attempt_id:
+        return False
+    if status not in CLOSED_ATTEMPT_STATUSES:
+        raise ValueError(f"unknown closed attempt status: {status}")
+    moment = now or datetime.now(UTC)
+    placeholders = ", ".join(["?"] * len(TRANSITION_ATTEMPT_STATUSES))
+    cursor = conn.execute(
+        "UPDATE task_attempts SET status = ?, closed_at = ?, close_reason = ?"
+        f" WHERE attempt_id = ? AND closed_at IS NULL"
+        f" AND status IN ({placeholders})",
+        (status, iso(moment), reason, attempt_id, *TRANSITION_ATTEMPT_STATUSES),
     )
     if cursor.rowcount != 1:
         return False
@@ -1468,6 +1524,13 @@ class SchedulerService:
                 {} if keep_owner else {"owner": None, "current_attempt_id": None}
             )
             extra["updated_at"] = iso(moment)
+            # 关闭原因写**人给的那句话**（release/abandon 的 payload.reason），
+            # 不再只写事件名。2026-11-05 的 pi 事后只能看到
+            # close_reason="release"，得再翻三份日志才知道是
+            # relay_cli_cannot_use_tools；原因本身就是这条账的一部分。
+            # 收口动作本身在 apply_transition 里统一做（见
+            # ``app.claim.transitions`` 的终态清单），这里只把人的原话递过去。
+            stated = payload.get("reason")
             apply_transition(
                 conn,
                 task_id=task_id,
@@ -1476,27 +1539,8 @@ class SchedulerService:
                 expected_epoch=fencing_epoch,
                 extra_sets=extra,
                 state_seq=record.seq,
+                attempt_close_reason=str(stated).strip() if stated else None,
             )
-            # 07 现场：abandon/release 之后任务已经 abandoned/ready，attempt 却还
-            # 停在 in_progress。收口留在 owner 阶段结束的这两个边上（escalated
-            # 由 sweeps 收口），提交（verifying）由 submit_result 自己写。
-            closing_status = {
-                EventKind.ABANDON: TaskStatus.ABANDONED.value,
-                EventKind.RELEASE: "released",
-            }.get(event)
-            if closing_status is not None:
-                # 关闭原因写**人给的那句话**（release/abandon 的 payload.reason），
-                # 不再只写事件名。2026-11-05 的 pi 事后只能看到
-                # close_reason="release"，得再翻三份日志才知道是
-                # relay_cli_cannot_use_tools；原因本身就是这条账的一部分。
-                stated = payload.get("reason")
-                close_attempt(
-                    conn,
-                    attempt_id=attempt_id,
-                    status=closing_status,
-                    reason=str(stated).strip() if stated else event.value,
-                    now=moment,
-                )
             if release_lease_too:
                 release_lease(conn, task_id=task_id, attempt_id=attempt_id, reason=event.value)
         # 这一轮也消耗了 token（放回队列、放弃都不是「没跑」）：记上。
