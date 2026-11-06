@@ -45,7 +45,8 @@ from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeCapacityExceeded, WorktreeManager
 from app.review_kinds import REVIEW_FINDING_HEADINGS, REVIEW_FINDING_KINDS, group_findings
 from app.tasks.service import SchedulerService
-from app.verify.profile import VerifyPolicy
+from app.verify.formal_artifact import PROFILE_NAME as FORMAL_ARTIFACT_PROFILE
+from app.verify.formal_artifact import build_formal_artifact_policy
 from app.verify.worker import VerifyWorker
 
 ADAPTER_TYPES = {
@@ -1715,21 +1716,7 @@ def run_one(
         ),
         encoding="utf-8",
     )
-    policy = VerifyPolicy.from_mapping(
-        {
-            "command_roots": ["python"],
-            "profiles": {
-                "formal-artifact": {
-                    "command": [
-                        "python",
-                        str(Path(__file__).with_name("verify_artifact.py")),
-                        json.dumps(spec["exclusive_paths"]),
-                    ],
-                    "timeout_seconds": 30,
-                }
-            },
-        }
-    )
+    policy = build_formal_artifact_policy(spec["exclusive_paths"])
     verification = VerifyWorker(
         database,
         repo,
@@ -1741,7 +1728,7 @@ def run_one(
         attempt_id=outcome.attempt_id,
         commit=outcome.commit,
         base_commit=captured.get("base_commit"),
-        verify_profile="formal-artifact",
+        verify_profile=FORMAL_ARTIFACT_PROFILE,
         fencing_epoch=captured["fencing_epoch"],
     )
     print(

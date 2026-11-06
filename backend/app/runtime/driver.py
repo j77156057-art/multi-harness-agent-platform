@@ -35,10 +35,18 @@ from pathlib import Path
 
 from app.config import settings
 from app.db.connection import Database
+from app.events.store import EventStore
 from app.git.repo import CanonicalRepo
 from app.merge.gate import MergeGateRejected
 from app.merge.worker import HealthRecheck, MergeError, MergeWorker
 from app.spec import TaskStatus
+from app.verify.formal_artifact import (
+    PROFILE_NAME as FORMAL_ARTIFACT_PROFILE,
+)
+from app.verify.formal_artifact import (
+    FormalArtifactUnavailable,
+    build_formal_artifact_policy,
+)
 from app.verify.profile import (
     DEFAULT_POLICY_PATH,
     ProfileResolution,
@@ -57,6 +65,12 @@ CONCURRENT_VERIFY_CAP = 3
 #: queue exists; a blocked candidate does not consume the budget, so a stuck
 #: head of the line cannot starve the rest.
 MAX_MERGES_PER_ROUND = 1
+
+#: The R10 event allowlist is closed, so an unresolvable verify profile is
+#: recorded with the observation event that already means "verify could not
+#: start".  Writing it is what makes the skip survive a restart: the round
+#: report alone is memory-only.
+VERIFY_PROFILE_UNRESOLVED_EVENT = "verify_resource_blocked"
 
 
 class RuntimePolicyError(ValueError):
@@ -218,6 +232,9 @@ class VerifyCandidate:
     base_commit: str | None
     verify_profile: str
     fencing_epoch: int
+    #: Set when the profile was resolved from the task contract (the dynamic
+    #: ``formal-artifact`` profile) instead of the static runtime registry.
+    policy: VerifyPolicy | None = None
 
     def as_json(self) -> dict[str, object]:
         return {
@@ -247,9 +264,23 @@ class MergeCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class _TaskContract:
+    """The snapshot fields that decide how a task is verified."""
+
+    verify_profile: str | None
+    exclusive_paths: tuple[object, ...] | None
+
+
+@dataclass(frozen=True, slots=True)
 class Skipped:
     task_id: str
     reason: str
+    attempt_id: str | None = None
+    verify_profile: str | None = None
+    #: ``True`` only for "the snapshot names a profile the runtime cannot
+    #: resolve".  Scan is read-only, so the durable record is written by
+    #: ``run_once``; this flag says which skips deserve one.
+    durable: bool = False
 
     def as_json(self) -> dict[str, object]:
         return {"task_id": self.task_id, "reason": self.reason}
@@ -379,7 +410,8 @@ class RuntimeDriver:
                     Skipped(task_id, "attempt has not published a commit (publish before verify)")
                 )
                 continue
-            profile = self._snapshot_profile(task_id)
+            contract = self._snapshot_contract(task_id)
+            profile = contract.verify_profile if contract is not None else None
             if profile is None:
                 verify_skipped.append(
                     Skipped(
@@ -389,15 +421,21 @@ class RuntimeDriver:
                     )
                 )
                 continue
+            resolved_policy: VerifyPolicy | None = None
             if profile not in self.policy.verify.profiles:
-                verify_skipped.append(
-                    Skipped(
-                        task_id,
-                        f"verify profile {profile!r} is not in the runtime policy;"
-                        f" registered: {sorted(self.policy.verify.profiles)}",
+                try:
+                    resolved_policy = self._resolve_unregistered_profile(profile, contract)
+                except FormalArtifactUnavailable as exc:
+                    verify_skipped.append(
+                        Skipped(
+                            task_id,
+                            self._unresolved_profile_reason(profile, exc),
+                            attempt_id=str(attempt_id),
+                            verify_profile=profile,
+                            durable=True,
+                        )
                     )
-                )
-                continue
+                    continue
             if self._passed_receipt(
                 task_id=task_id,
                 attempt_id=str(attempt_id),
@@ -417,6 +455,7 @@ class RuntimeDriver:
                     base_commit=None if base_commit is None else str(base_commit),
                     verify_profile=profile,
                     fencing_epoch=int(row["current_epoch"]),
+                    policy=resolved_policy,
                 )
             )
 
@@ -490,6 +529,7 @@ class RuntimeDriver:
 
     def run_once(self) -> RoundReport:
         scan = self.scan()
+        self._record_skips(scan.verify_skipped)
         verify_runs = self._run_verifies(scan.verify_candidates)
         merge_runs = self._run_merges(scan.merge_candidates)
         return RoundReport(scan=scan, verify=verify_runs, merge=merge_runs)
@@ -509,7 +549,7 @@ class RuntimeDriver:
         worker = VerifyWorker(
             Database(self.database.path),
             self.repo,
-            self.policy.verify,
+            candidate.policy or self.policy.verify,
             overlay_root=self.overlay_root,
             evidence_root=self.evidence_root,
             runner=self.runner,
@@ -588,7 +628,7 @@ class RuntimeDriver:
 
     # ------------------------------------------------------------- internals
 
-    def _snapshot_profile(self, task_id: str) -> str | None:
+    def _snapshot_contract(self, task_id: str) -> _TaskContract | None:
         rows = self.database.read(
             "SELECT ps.content_json"
             "  FROM tasks t"
@@ -609,12 +649,92 @@ class RuntimeDriver:
                 continue
             if str(item.get("id", "")).strip() != task_id:
                 continue
-            profile = item.get("verify_profile")
-            if profile is None:
-                return None
-            text = str(profile).strip()
-            return text or None
+            raw_profile = item.get("verify_profile")
+            profile = None
+            if raw_profile is not None:
+                text = str(raw_profile).strip()
+                profile = text or None
+            paths = item.get("exclusive_paths")
+            return _TaskContract(
+                verify_profile=profile,
+                exclusive_paths=tuple(paths) if isinstance(paths, list) else None,
+            )
         return None
+
+    def _resolve_unregistered_profile(
+        self, profile: str, contract: _TaskContract | None
+    ) -> VerifyPolicy:
+        """Resolve a profile the static registry does not declare.
+
+        Today only ``formal-artifact`` is resolvable: its command is the task's
+        own ``exclusive_paths``, so the snapshot is the missing input.  Any
+        other name stays unresolved -- guessing a command is what R10 §16
+        forbids.
+        """
+        if profile != FORMAL_ARTIFACT_PROFILE:
+            raise FormalArtifactUnavailable(
+                f"no resolver is registered for verify profile {profile!r}"
+            )
+        if contract is None:
+            raise FormalArtifactUnavailable("the task has no plan snapshot")
+        return build_formal_artifact_policy(contract.exclusive_paths)
+
+    def _unresolved_profile_reason(self, profile: str, exc: Exception) -> str:
+        if profile == FORMAL_ARTIFACT_PROFILE:
+            return (
+                f"verify profile {profile!r} is not in the runtime policy and could not be"
+                f" resolved from the task's exclusive_paths: {exc}"
+            )
+        return (
+            f"verify profile {profile!r} is not in the runtime policy and has no resolver;"
+            f" registered: {sorted(self.policy.verify.profiles)}"
+        )
+
+    def _record_skips(self, skips: tuple[Skipped, ...]) -> None:
+        """Write one durable event per unresolvable profile, at most once.
+
+        ``scan`` is called by ``--check`` too, so nothing is written there.
+        Dedupe is "same task + same reason": the reason text is stable for an
+        immutable snapshot, so a 10-second loop cannot fill the event log.  An
+        existing event is the record; a later round only re-reads it.
+        """
+        store: EventStore | None = None
+        for item in skips:
+            if not item.durable:
+                continue
+            if store is None:
+                store = EventStore(self.database)
+            with self.database.transaction() as conn:
+                rows = conn.execute(
+                    "SELECT payload_json FROM task_events"
+                    " WHERE event_name = ? AND aggregate_type = 'task' AND aggregate_id = ?",
+                    (VERIFY_PROFILE_UNRESOLVED_EVENT, item.task_id),
+                ).fetchall()
+                seen = False
+                for row in rows:
+                    try:
+                        payload = json.loads(str(row["payload_json"]))
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(payload, Mapping) and payload.get("reason") == item.reason:
+                        seen = True
+                        break
+                if seen:
+                    continue
+                store.append(
+                    event_name=VERIFY_PROFILE_UNRESOLVED_EVENT,
+                    aggregate_type="task",
+                    aggregate_id=item.task_id,
+                    actor_type="runtime",
+                    actor_id="runtime-driver",
+                    payload={
+                        "task_id": item.task_id,
+                        "attempt_id": item.attempt_id,
+                        "verify_profile": item.verify_profile,
+                        "reason": item.reason,
+                    },
+                    connection=conn,
+                )
 
     def _passed_receipt(
         self, *, task_id: str, attempt_id: str, commit: str, verify_profile: str
