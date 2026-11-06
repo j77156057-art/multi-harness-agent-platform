@@ -49,3 +49,12 @@ canonical.git.ensure.lock
 
 # 转接模式的信箱（运行时产物：outbox/inbox/archive/returned）
 /relay/
+
+# 现场证据目录（当前约 74MB）：审计快照、测试分片日志、E2E 报告、复验输出。
+# 生成方式：排查/回归时由命令直接写到 artifacts/<topic>-<YYYYMMDD>/ 或
+# artifacts/<name>.log，例如
+#   python -m pytest <files> 2>&1 | Set-Content artifacts\fs-g0.log
+#   python -m pytest --collect-only -q   # 收集数对账
+# 这些是「当时看到的东西」，不是源码，也不该当补丁提交；需要长期保留的
+# 结论请回填到 docs/ 或任务卡，整个目录只在本机保留。
+/artifacts/
