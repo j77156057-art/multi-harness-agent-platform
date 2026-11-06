@@ -144,11 +144,11 @@ CodeBuddy 在 Windows 上找不到 Git Bash 时不会报错，只会在 stderr �
 gemini --help | Select-String 'approval-mode|output-format|skip-trust'
 
 # 没装的，装到临时前缀（不动全局环境）
-npm install --prefix D:\Temp\probe-qwen @qwen-code/qwen-code
-D:\Temp\probe-qwen\node_modules\.bin\qwen.cmd --help
+npm install --prefix <tmp>\probe-qwen @qwen-code/qwen-code
+<tmp>\probe-qwen\node_modules\.bin\qwen.cmd --help
 
 # Python 的：看包内源码比看 README 准
-pip download --no-deps -d D:\Temp\whl aider-chat    # 注意解释器版本，见上
+pip download --no-deps -d <tmp>\whl aider-chat    # 注意解释器版本，见上
 ```
 
-`D:\Temp\probe-*` 是临时目录，随时可删；没有做过任何全局安装。
+`<tmp>\probe-*` 是临时目录，随时可删；没有做过任何全局安装。
