@@ -87,6 +87,10 @@ def test_request_help_mints_the_help_id_it_validates_against(tmp_path):
     )
     payload = json.loads(event["payload_json"])
     assert payload["help_id"] == help_id and payload["reason"] == "schema 不确定"
+    assert "help_requested" not in _event_names(database), (
+        "求助只有 request_help 一个发出名；help_requested 是 R10 §10 登记的旧名，"
+        "平台从未写入过它，前端也只认 request_help"
+    )
 
 
 def test_accept_help_records_the_collaborator_without_moving_the_task(tmp_path):

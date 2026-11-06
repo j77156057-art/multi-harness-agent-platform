@@ -326,3 +326,35 @@ def test_a_direct_message_without_a_recipient_is_refused(tmp_path):
         },
     )
     assert response.status_code == 422, response.text
+
+
+def test_the_event_read_api_speaks_one_name_for_help_requests(tmp_path):
+    """求助事件对外只有一个名字：`request_help`。
+
+    R10 §10 还登记着旧名 `help_requested`，但平台从来没有写入方。万一某个旧库里
+    留着这样一行，读接口要把它折成动作名 —— 否则每个读事件的人（办公室、成员
+    动态表）都得自己记两个名字，而其中一个永远不会再出现。
+    """
+    from app.events.store import EventStore
+
+    client, database = make_client(tmp_path)
+    _prepare(client)
+    EventStore(database).append(
+        event_name="help_requested",
+        aggregate_type="task",
+        aggregate_id="T-1",
+        actor_type="harness",
+        actor_id="h1",
+        payload={"help_id": "help-legacy", "reason": "旧库里的行"},
+    )
+
+    page = client.get("/api/v1/tasks/T-1/events").json()
+    legacy = [
+        event
+        for event in page["events"]
+        if (event["payload"] or {}).get("help_id") == "help-legacy"
+    ]
+    assert [event["event_name"] for event in legacy] == ["request_help"]
+
+    everything = client.get("/api/v1/events").json()["events"]
+    assert "help_requested" not in {event["event_name"] for event in everything}

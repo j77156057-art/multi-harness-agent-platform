@@ -3655,6 +3655,14 @@ def events(
     return _event_page(service, since_seq=since_seq, limit=limit, task_id=None)
 
 
+#: 事件的对外唯一名。
+#:
+#: R10 §10 还登记着一个旧名 `help_requested`（needs_help → needs_help 的自环），
+#: 但平台从来没有写入方：求助的唯一发出名是 `request_help`。名字的收口放在**读接口**
+#: 这一处 —— 库里存什么还是什么（历史行照旧读得出来），读事件的人只见到动作名。
+EVENT_NAME_ALIASES = {"help_requested": "request_help"}
+
+
 def _event_page(
     service: SchedulerService, *, since_seq: int, limit: int, task_id: str | None
 ) -> dict[str, Any]:
@@ -3664,7 +3672,7 @@ def _event_page(
     rows = [
         {
             "seq": event.seq,
-            "event_name": event.event_name,
+            "event_name": EVENT_NAME_ALIASES.get(event.event_name, event.event_name),
             "aggregate_type": event.aggregate_type,
             "aggregate_id": event.aggregate_id,
             "actor_type": event.actor_type,

@@ -6,7 +6,7 @@
 //   2. 右栏有「任务书」，打开后是方案定稿的正文；
 //   3. 右栏有「成员」，打开动态表后：提交/返修/放弃/通过率/中位耗时都按平台事件算，
 //      平台自己的执行者（sweeper 之类）不算成员；
-//   4. 成员求助列的是**还没结论**的 help_requested，已经有 help_resolved 的不算。
+//   4. 成员求助列的是**还没结论**的 request_help，已经有 help_resolved 的不算。
 //
 // 只读脚本：API 全部拦截，不往正式平台写任何东西。
 import { chromium } from 'playwright';
@@ -30,8 +30,8 @@ try {
     { seq: 5, event_name: 'submit_result', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'claude-code', payload: {}, created_at: '2026-10-22T10:12:00' },
     { seq: 5, event_name: 'claim', aggregate_type: 'task', aggregate_id: 'FD-2', actor_type: 'harness', actor_id: 'claude-code', payload: {}, created_at: '2026-10-22T10:15:00' },
     { seq: 6, event_name: 'abandon', aggregate_type: 'task', aggregate_id: 'FD-2', actor_type: 'harness', actor_id: 'claude-code', payload: {}, created_at: '2026-10-22T10:20:00' },
-    { seq: 7, event_name: 'help_requested', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'claude-code', payload: { help_id: 'help-1', reason: '接口签名对不上，需要人确认' }, created_at: '2026-10-22T10:21:00' },
-    { seq: 8, event_name: 'help_requested', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'opencode', payload: { help_id: 'help-2', reason: '依赖装不上' }, created_at: '2026-10-22T10:22:00' },
+    { seq: 7, event_name: 'request_help', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'claude-code', payload: { help_id: 'help-1', reason: '接口签名对不上，需要人确认' }, created_at: '2026-10-22T10:21:00' },
+    { seq: 8, event_name: 'request_help', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'opencode', payload: { help_id: 'help-2', reason: '依赖装不上' }, created_at: '2026-10-22T10:22:00' },
     { seq: 9, event_name: 'help_resolved', aggregate_type: 'task', aggregate_id: 'FD-1', actor_type: 'harness', actor_id: 'opencode', payload: { help_id: 'help-2' }, created_at: '2026-10-22T10:25:00' },
   ];
 

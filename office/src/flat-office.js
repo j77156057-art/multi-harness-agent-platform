@@ -819,7 +819,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.median ?? 1e9) - (b.median ?? 1e9) || b.submissions - a.submissions);
   }
 
-  /** 成员的求助：平台事件里的 help_requested，去掉已经有结论的。 */
+  /**
+   * 成员的求助：平台事件里的求助，去掉已经有结论的。
+   *
+   * 平台上求助只有一个发出名：`request_help`。R10 §10 里登记的旧名
+   * `help_requested` 从来没有写入方；万一某个旧库里还留着，后端读接口
+   * （`_event_page`）会把它折成 `request_help` 再出来。所以这里只认一个名字 ——
+   * 两个都认会让"旧名还在用"这件事在页面上永远成立。
+   */
   function helpRequests() {
     const events = state.events || [];
     const titleOf = new Map((state.tasks || []).map((task) => [task.task_id, task.title || task.task_id]));
@@ -829,7 +836,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
       const helpId = payload.help_id;
       if (!helpId) continue;
-      if (event.event_name === 'help_requested') {
+      if (event.event_name === 'request_help') {
         requested.set(helpId, {
           helpId,
           taskId: event.aggregate_id,

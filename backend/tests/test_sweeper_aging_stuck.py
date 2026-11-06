@@ -132,7 +132,7 @@ def test_a_new_event_resets_the_stuck_counter(tmp_path):
     from app.events.store import EventStore
 
     EventStore(database).append(
-        event_name="help_requested",
+        event_name="request_help",
         aggregate_type="task",
         aggregate_id="T-1",
         actor_type="harness",
