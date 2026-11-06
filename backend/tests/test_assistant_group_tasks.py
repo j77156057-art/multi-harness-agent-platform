@@ -146,9 +146,28 @@ def test_the_items_carry_only_what_is_needed_to_recognise_a_row():
     result = registry["group.tasks"].call({})
 
     item = result["unclaimed"]["items"][0]
-    assert set(item) == {"task_id", "title", "status"}
+    assert set(item) == {"task_id", "title", "status", "next_action"}
     assert "goal" not in item
     assert "exclusive_paths" not in item
+
+
+def test_every_item_says_the_current_step_and_next_actor():
+    client = Client([
+        _task(1, status="awaiting_review"),
+        _task(2, owner="qoder-member-1", status="changes_requested"),
+        _task(3, status="merged"),
+    ])
+
+    registry = build_registry(client, group_id=GROUP, author_id="office-assistant")
+    result = registry["group.tasks"].call({})
+
+    items = result["claimed"]["items"] + result["unclaimed"]["items"]
+    by_id = {item["task_id"]: item["next_action"] for item in items}
+    assert "待验收" in by_id["FD-0000000000000001"]
+    assert "审核人" in by_id["FD-0000000000000001"]
+    assert "qoder-member-1" in by_id["FD-0000000000000002"]
+    assert "重新提交" in by_id["FD-0000000000000002"]
+    assert "流程完成" in by_id["FD-0000000000000003"]
 
 
 def test_paging_is_passed_through_to_the_platform():

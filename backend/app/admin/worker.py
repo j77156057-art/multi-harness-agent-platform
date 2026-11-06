@@ -36,7 +36,8 @@ import httpx
 
 from app.adapter import presence
 from app.adapter.harnesses.cli import ProviderRoute
-from app.admin.service import AdminHarnessError, AdminService
+from app.admin.experience import ExperienceStore, ExperienceStoreError
+from app.admin.service import AdminHarnessError, AdminService, task_category_for_spec
 from app.relay.supervisor import ensure_relay_worker, relay_enabled
 from app.config import settings
 from app.db.connection import Database
@@ -341,6 +342,7 @@ class AdminWorker:
         admin_harness_id: str,
         state: WorkerState,
         state_path: Path,
+        experience: ExperienceStore | None = None,
         dry_run: bool = False,
         replay_latest: bool = False,
         review_rounds: int = 1,
@@ -356,7 +358,10 @@ class AdminWorker:
         #: How many circulation rounds a plan must go through before it is
         #: finalised (§39: "已完成轮数达到配置轮数" is what freezes the snapshot).
         self.review_rounds = max(1, int(review_rounds))
-        self.admin = AdminService(database, harness_id=admin_harness_id)
+        self.experience = experience or ExperienceStore(
+            Path(settings.data_dir) / "admin" / "experience.json"
+        )
+        self.admin = AdminService(database, harness_id=admin_harness_id, experience=self.experience)
         # attempt key -> monotonic deadline; not persisted (a restart may retry
         # once, which is fine, but a hot loop must not invoke the model).
         self._review_cooldowns: dict[str, float] = {}
@@ -1841,6 +1846,8 @@ class AdminWorker:
         target: str,
         dead: str,
         token: str = "",
+        goal_override: str = "",
+        reason_override: str = "",
     ) -> None:
         context = self.client.get(f"/adapter/context/{task_id}")
         spec = context.get("spec") or {}
@@ -1859,6 +1866,8 @@ class AdminWorker:
             reason = f"原执行者 {dead} 上一轮没能交出交付物，重新派一次"
         else:
             reason = f"管理员将该任务改派给负载较低的窗口：{dead or '原执行者'} → {target}"
+        if reason_override:
+            reason = reason_override
         if self.dry_run:
             print(
                 json.dumps(
@@ -1896,7 +1905,7 @@ class AdminWorker:
                 # A message-driven request brings its own sequence number.
                 "request_id": f"admin-reassign-{task_id}-{count}" + (f"-{token}" if token else ""),
                 "title": spec.get("title") or task.get("title") or task_id,
-                "goal": self._goal_with_handoff(
+                "goal": goal_override.strip() or self._goal_with_handoff(
                     spec.get("goal") or task.get("title") or task_id, task_id
                 ),
                 "harness_id": target,
@@ -2046,6 +2055,122 @@ class AdminWorker:
             self.state.reviewed_attempts.append(key)
             self.state.save(self.state_path)
 
+    def _record_experience(
+        self,
+        task: dict[str, Any],
+        spec: dict[str, Any],
+        *,
+        merged: bool,
+        verdict: dict[str, Any] | None = None,
+        diff_hash: str = "",
+        merge_commit: str = "",
+    ) -> None:
+        """验收/合并落账后才写经验；经验存储故障不反噬主交付流程。"""
+        project = str(spec.get("project_label") or _title_project(task) or self.group_id)
+        executor = (
+            str(task.get("owner") or task.get("executor") or "")
+            or next(iter(_assigned_ids(task)), "unassigned")
+        )
+        summary = json.dumps(
+            {
+                "title": spec.get("title") or task.get("title"),
+                "goal": spec.get("goal"),
+                "exclusive_paths": spec.get("exclusive_paths"),
+                "acceptance": spec.get("acceptance"),
+            },
+            ensure_ascii=False,
+        )[:1900]
+        verdict = verdict or {}
+        findings = verdict.get("findings") or []
+        try:
+            if merged:
+                self.experience.record_merged(
+                    project=project,
+                    task_category=task_category_for_spec(spec),
+                    executor=executor,
+                    spec_summary=summary,
+                    result=f"已合并；merge_commit={merge_commit or '未返回'}",
+                    contract_id=str(task.get("task_id") or ""),
+                    diff_hash=diff_hash,
+                )
+            else:
+                finding_text = "；".join(
+                    str(item.get("message") or "").strip()
+                    for item in findings
+                    if isinstance(item, dict) and str(item.get("message") or "").strip()
+                )[:1800]
+                finding_text = finding_text or "验收返修，未提供具体意见"
+                failure_class = str(verdict.get("failure_class") or "unknown")
+                correction = str(verdict.get("correction") or "").strip()[:1800]
+                self.experience.record_request_changes(
+                    project=project,
+                    task_category=task_category_for_spec(spec),
+                    executor=executor,
+                    spec_summary=summary,
+                    findings_summary=finding_text,
+                    root_cause=f"验收未通过（{failure_class}）：{finding_text}",
+                    action=correction or "按验收 findings 返修；未提供进一步修正建议",
+                    result="验收结论 request_changes，进入返修或改派流程",
+                    contract_id=str(task.get("task_id") or ""),
+                    diff_hash=diff_hash,
+                )
+        except (ExperienceStoreError, TypeError, ValueError, OSError) as exc:
+            print(
+                json.dumps(
+                    {"experience_error": str(exc), "task_id": task.get("task_id")},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
+    def _handle_rework(
+        self,
+        task: dict[str, Any],
+        verdict: dict[str, Any],
+    ) -> None:
+        """验收失败后的分拣与修正；只自动处理不改变已批验收的提示词问题。"""
+        task_id = str(task["task_id"])
+        failure_class = str(verdict.get("failure_class") or "unknown")
+        correction = str(verdict.get("correction") or "").strip()
+        labels = {
+            "spec": "规格问题",
+            "prompt": "提示词问题",
+            "execution": "执行问题",
+            "unknown": "证据不足，未分类",
+        }
+        self._post_admin_message(
+            f"{task_id} 验收未通过，管理员归因：{labels[failure_class]}。"
+            + (f"修正建议：{correction}" if correction else "")
+        )
+        if failure_class == "execution":
+            # review/submit 已把任务置于 changes_requested；原窗口按 findings 返修，
+            # 不另造一条修正通道，也不把执行错误误改写成规格。
+            return
+        if failure_class == "spec":
+            self._post_admin_message(
+                f"{task_id} 涉及已批准的验收规格，平台未自动改写。请群主确认上述修正后，"
+                "通过现有方案修订与批准流程重新下发。"
+            )
+            return
+        if failure_class != "prompt":
+            self._post_admin_message(f"{task_id} 证据不足，未自动改派；请先补充失败证据。")
+            return
+        revised_goal = str(verdict.get("revised_goal") or "").strip()
+        target = str(task.get("owner") or "") or next(iter(_assigned_ids(task)), "")
+        if not revised_goal or target not in self.admin.assignable_harnesses():
+            self._post_admin_message(
+                f"{task_id} 缺少完整修订目标或原执行窗口不可领取，未自动重派。"
+            )
+            return
+        self._reassign_one(
+            task_id,
+            task,
+            target,
+            target,
+            goal_override=revised_goal,
+            reason_override="验收发现 worker 提示词缺口；保留已批准验收与路径，修订目标后重新派发",
+        )
+
     def _review_one(self, task: dict[str, Any], attempt_id: str) -> None:
         task_id = str(task["task_id"])
         # Read the frozen evidence and ask the model BEFORE taking the review
@@ -2099,10 +2224,31 @@ class AdminWorker:
             ),
             flush=True,
         )
+        spec = context.get("spec") or {}
         if verdict["verdict"] == "approve":
-            self._merge_after_approval(task_id=task_id, commit=str(claim["reviewed_commit"]))
+            merged = self._merge_after_approval(
+                task_id=task_id, commit=str(claim["reviewed_commit"])
+            )
+            if merged and merged.get("status") == "merged":
+                self._record_experience(
+                    task,
+                    spec,
+                    merged=True,
+                    verdict=verdict,
+                    diff_hash=str(claim["reviewed_commit"]),
+                    merge_commit=str(merged.get("merge_commit") or ""),
+                )
+        else:
+            self._record_experience(
+                task,
+                spec,
+                merged=False,
+                verdict=verdict,
+                diff_hash=str(claim["reviewed_commit"]),
+            )
+            self._handle_rework(task, verdict)
 
-    def _merge_after_approval(self, *, task_id: str, commit: str) -> None:
+    def _merge_after_approval(self, *, task_id: str, commit: str) -> dict[str, Any] | None:
         """审核通过之后，**管理员自己**把这条活送进主树。
 
         主人 2026-10-31 的要求：审核通过的话管理员负责合并到主树。此前审批一过就由
@@ -2157,6 +2303,7 @@ class AdminWorker:
             ),
             flush=True,
         )
+        return result
 
     # ------------------------------------------------------------------ misc
 

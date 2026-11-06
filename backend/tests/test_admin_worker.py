@@ -8,8 +8,11 @@ failure must never produce a submitted review verdict.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 
+from app.admin.experience import ExperienceStore
 from app.admin.service import AdminHarnessError
 from app.admin.worker import (
     AdminWorker,
@@ -31,9 +34,54 @@ class FakeAdmin:
         self.assignable = ["member-window"]
         self.credentials = {"member-window": True, "admin-window": True}
         self.dispatched: set[str] = set()
+        # harness_id -> 活着的租约数；用来把某个候选窗口造“忙”。
+        self.busy: dict[str, int] = {}
 
     def assignable_harnesses(self):
         return list(self.assignable)
+
+    def harness_capacity(self):
+        rows = []
+        for harness_id in self.assignable:
+            active = int(self.busy.get(harness_id, 0))
+            limit = 1
+            rows.append(
+                {
+                    "harness_id": harness_id,
+                    "active_leases": active,
+                    "ready_tasks": 0,
+                    "max_parallel_tasks": limit,
+                    "load": active,
+                    "available_slots": max(0, limit - active),
+                    "idle": active == 0,
+                    "at_capacity": active >= limit,
+                    "earliest_available_at": (
+                        "2026-01-01T00:00:00+00:00" if active else None
+                    ),
+                }
+            )
+        return rows
+
+    def unavailability_reasons(self, harness_id):
+        if not self.credentials.get(harness_id, False):
+            return ["no_credential"]
+        row = next(
+            (item for item in self.harness_capacity() if item["harness_id"] == harness_id),
+            None,
+        )
+        if row is None:
+            return ["not_registered"]
+        if row["at_capacity"]:
+            return [f"full ({row['active_leases']}/{row['max_parallel_tasks']})"]
+        return []
+
+    def earliest_available_at(self):
+        stamps = [
+            item["earliest_available_at"]
+            for item in self.harness_capacity()
+            if item["earliest_available_at"]
+        ]
+        return min(stamps) if stamps else None
 
     def harness_has_credential(self, harness_id):
         return bool(self.credentials.get(harness_id, False))
@@ -196,6 +244,7 @@ def _worker(tmp_path, monkeypatch, *, admin, client, dry_run=False):
         admin_harness_id="admin-window",
         state=WorkerState(),
         state_path=state_path,
+        experience=ExperienceStore(tmp_path / "experience.json"),
         dry_run=dry_run,
     )
 
@@ -683,6 +732,303 @@ def test_review_claim_and_submit_use_the_model_verdict(tmp_path, monkeypatch):
     assert client.submissions[0]["verdict"] == "approve"
     assert client.submissions[0]["reviewed_commit"] == "deadbeef"
     assert admin.review_calls[0]["project_name"] == "DEMO"
+    records = worker.experience.records()
+    assert len(records) == 1 and records[0]["kind"] == "merged"
+    assert records[0]["project"] == "DEMO"
+    assert records[0]["contract_id"] == "FD-1"
+    assert records[0]["diff_hash"] == "deadbeef"
+    assert records[0]["action"] and records[0]["result"]
+    assert records[0]["scope"] == "project"
+
+
+def test_prompt_failure_revises_the_goal_and_redispatches_through_admin_routes(
+    tmp_path, monkeypatch
+):
+    verdict = {
+        "verdict": "request_changes",
+        "findings": [{"message": "目标漏了保留入口的要求"}],
+        "failure_class": "prompt",
+        "correction": "补全目标后重派",
+        "revised_goal": "补一条说明，并保留既有入口",
+    }
+    admin = FakeAdmin(verdict=verdict)
+    task = {
+        "task_id": "FD-1",
+        "attempt_id": "FD-1.a1",
+        "owner": "member-window",
+        "title": "DEMO · 补一条说明",
+        "status": "awaiting_review",
+        "assigned_harness_ids": ["member-window"],
+    }
+    client = FakeClient(
+        tasks=[task],
+        context={"spec": {
+            "title": task["title"],
+            "goal": "补一条说明",
+            "exclusive_paths": ["docs/demo.md"],
+            "acceptance": "说明存在且既有入口未删除",
+        }},
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker._review_one(task, "FD-1.a1")
+
+    assert client.submissions[0]["verdict"] == "request_changes"
+    assert client.dispatches[0]["goal"] == verdict["revised_goal"]
+    assert client.dispatches[0]["acceptance"] == "说明存在且既有入口未删除"
+    assert client.dispatches[0]["exclusive_paths"] == ["docs/demo.md"]
+    assert client.dispatches[0]["decided_by"] == "admin-window"
+    assert any("提示词问题" in message["body"] for message in client.messages)
+    records = worker.experience.records()
+    assert len(records) == 1 and records[0]["kind"] == "request_changes"
+    assert records[0]["task_category"] == "docs"
+    assert records[0]["project"] == "DEMO"
+    assert records[0]["root_cause"].startswith("验收未通过（prompt）")
+    assert records[0]["action"] == "补全目标后重派"
+    assert records[0]["contract_id"] == "FD-1"
+    assert records[0]["diff_hash"] == "deadbeef"
+
+
+def test_prompt_repair_runs_through_real_api_sqlite_and_git(tmp_path, monkeypatch):
+    """实跑边界：真 FastAPI/SQLite/Git，只有管理员模型判定用脚本替身。"""
+    from fastapi.testclient import TestClient
+
+    from app.api.app import create_app
+    from app.auth.tokens import TokenService
+    from app.config import settings
+    from tests.api_support import (
+        advance_to_awaiting_review,
+        scheduler,
+        worktree_manager,
+    )
+    from tests.merge_support import build_chain, register_harness
+
+    chain = build_chain(tmp_path)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({"admin-window"}))
+    register_harness(chain.database, "admin-window", provider="qoder")
+    register_harness(chain.database, "member-window", provider="tencent")
+    tokens = TokenService(chain.database)
+    admin_token = tokens.issue(subject_type="harness", subject_id="admin-window")
+    member_token = tokens.issue(subject_type="harness", subject_id="member-window")
+    human_token = tokens.issue(subject_type="human", subject_id="office-operator")
+    api = TestClient(create_app(chain.database, chain.repo), base_url="http://127.0.0.1")
+
+    def post(path, body, token):
+        return api.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+
+    assert post("/api/v1/projects", {"project_id": "P-live", "name": "DEMO"}, human_token).status_code == 200
+    assert post(
+        "/api/v1/projects/P-live/groups", {"group_id": "G-live", "name": "g"}, human_token
+    ).status_code == 200
+    dispatched = post(
+        "/api/v1/groups/G-live/dispatch",
+        {
+            "request_id": "admin-live-1",
+            "title": "DEMO · 补一条说明",
+            "goal": "补一条说明",
+            "harness_id": "member-window",
+            "decided_by": "admin-window",
+            "exclusive_paths": ["work.txt"],
+            "acceptance": "work.txt 存在且包含任务 id",
+        },
+        admin_token,
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    task_id = dispatched.json()["task_id"]
+    claimed = post(
+        "/api/v1/adapter/claim",
+        {
+            "claim_request_id": "claim-live-1",
+            "harness_id": "member-window",
+            "task_ids": [task_id],
+        },
+        member_token,
+    )
+    assert claimed.status_code == 200, claimed.text
+    attempt = claimed.json()["items"][0]
+    manager = worktree_manager(tmp_path, chain.database)
+    scheduler(chain.database).start_task(
+        task_id=task_id,
+        attempt_id=attempt["attempt_id"],
+        fencing_epoch=attempt["fencing_epoch"],
+        worktrees=manager,
+    )
+    advance_to_awaiting_review(
+        api,
+        chain.database,
+        tmp_path,
+        task_id=task_id,
+        attempt_id=attempt["attempt_id"],
+        fencing_epoch=attempt["fencing_epoch"],
+        manager=manager,
+        headers={"Authorization": f"Bearer {member_token}"},
+    )
+
+    class LiveClient:
+        def get(self, path, **params):
+            response = api.get(
+                "/api/v1" + path,
+                params=params or None,
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert response.status_code < 400, response.text
+            return response.json()
+
+        def post(self, path, body):
+            response = post("/api/v1" + path, body, admin_token)
+            assert response.status_code < 400, response.text
+            return response.json()
+
+    verdict = {
+        "verdict": "request_changes",
+        "findings": [{"message": "目标漏了任务 id 要求"}],
+        "failure_class": "prompt",
+        "correction": "补全目标后重派",
+        "revised_goal": "补一条说明，内容必须包含任务 id",
+    }
+    worker = AdminWorker(
+        client=LiveClient(),
+        database=chain.database,
+        group_id="G-live",
+        admin_harness_id="admin-window",
+        state=WorkerState(),
+        state_path=tmp_path / "worker.json",
+        experience=ExperienceStore(tmp_path / "admin" / "experience.json"),
+    )
+    worker.admin = FakeAdmin(verdict=verdict)
+    task = LiveClient().get(f"/tasks/{task_id}")
+
+    worker._review_one(task, attempt["attempt_id"])
+
+    remaining = LiveClient().get(f"/groups/G-live/tasks")["tasks"]
+    new_task_id = next(row["task_id"] for row in remaining if row["task_id"] != task_id)
+    new_context = LiveClient().get(f"/adapter/context/{new_task_id}")
+    assert new_context["spec"]["goal"] == verdict["revised_goal"]
+    assert new_context["spec"]["acceptance"][0]["description"] == "work.txt 存在且包含任务 id"
+    assert LiveClient().get(f"/tasks/{task_id}")["status"] == "cancelled"
+    # 同一真实验收结果若因重投再次落账，必须合并计数而不是增加第二条经验。
+    head_commit = chain.database.read(
+        "SELECT head_commit FROM task_attempts WHERE attempt_id = ?", (attempt["attempt_id"],)
+    )[0]["head_commit"]
+    worker._record_experience(
+        task,
+        LiveClient().get(f"/adapter/context/{task_id}")["spec"],
+        merged=False,
+        verdict=verdict,
+        diff_hash=str(head_commit),
+    )
+    records = worker.experience.records()
+    assert len(records) == 1 and records[0]["kind"] == "request_changes"
+    assert records[0]["occurrence_count"] == 2
+
+    # 同项目、同类别的第二条任务只召回陈列；返回本身不含任何提示词注入动作。
+    recalled = LiveClient().get(f"/tasks/{new_task_id}/experiences")
+    assert recalled["presentation_only"] is True
+    assert recalled["prompt_injection"] == "disabled"
+    assert recalled["project"] == "DEMO" and recalled["task_category"] == "docs"
+    assert len(recalled["experiences"]) == 1
+    assert recalled["experiences"][0]["contract_id"] == task_id
+    assert recalled["experiences"][0]["occurrence_count"] == 2
+
+
+def test_abandon_writes_experience_through_real_api(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.api.app import create_app
+    from app.auth.tokens import TokenService
+    from app.config import settings
+    from tests.api_support import scheduler, worktree_manager
+    from tests.merge_support import build_chain, register_harness
+
+    chain = build_chain(tmp_path)
+    monkeypatch.setattr(settings, "data_dir", tmp_path)
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    monkeypatch.setattr(settings, "admin_subjects", frozenset({"admin-window"}))
+    register_harness(chain.database, "admin-window", provider="qoder")
+    register_harness(chain.database, "member-window", provider="tencent")
+    tokens = TokenService(chain.database)
+    admin_token = tokens.issue(subject_type="harness", subject_id="admin-window")
+    member_token = tokens.issue(subject_type="harness", subject_id="member-window")
+    human_token = tokens.issue(subject_type="human", subject_id="office-operator")
+    api = TestClient(create_app(chain.database, chain.repo), base_url="http://127.0.0.1")
+
+    def post(path, body, token):
+        response = api.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    post("/api/v1/projects", {"project_id": "P-live", "name": "DEMO"}, human_token)
+    post("/api/v1/projects/P-live/groups", {"group_id": "G-live", "name": "g"}, human_token)
+    dispatched = post("/api/v1/groups/G-live/dispatch", {
+        "request_id": "admin-abandon-1",
+        "title": "DEMO · 放弃路径经验",
+        "goal": "补一条说明",
+        "harness_id": "member-window",
+        "decided_by": "admin-window",
+        "exclusive_paths": ["abandon.txt"],
+        "acceptance": "abandon.txt 存在",
+    }, admin_token)
+    task_id = dispatched["task_id"]
+    claimed = post("/api/v1/adapter/claim", {
+        "claim_request_id": "claim-abandon-1",
+        "harness_id": "member-window",
+        "task_ids": [task_id],
+    }, member_token)
+    attempt = claimed["items"][0]
+    scheduler(chain.database).start_task(
+        task_id=task_id,
+        attempt_id=attempt["attempt_id"],
+        fencing_epoch=attempt["fencing_epoch"],
+        worktrees=worktree_manager(tmp_path, chain.database),
+    )
+
+    abandoned = post("/api/v1/adapter/abandon", {
+        "task_id": task_id,
+        "attempt_id": attempt["attempt_id"],
+        "fencing_epoch": attempt["fencing_epoch"],
+        "reason": "执行环境缺少必要依赖",
+    }, member_token)
+
+    assert abandoned["experience_recorded"] is True
+    (record,) = ExperienceStore(tmp_path / "admin" / "experience.json").records()
+    assert record["kind"] == "abandoned"
+    assert record["root_cause"] == "执行环境缺少必要依赖"
+    assert record["contract_id"] == task_id
+    assert record["executor"] == "member-window"
+    response = api.get(
+        f"/api/v1/tasks/{task_id}/experiences",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["experiences"][0]["kind"] == "abandoned"
+
+
+def test_spec_failure_waits_for_owner_reapproval_instead_of_rewriting_acceptance(
+    tmp_path, monkeypatch
+):
+    admin = FakeAdmin(verdict={
+        "verdict": "request_changes",
+        "findings": [{"message": "验收与目标冲突"}],
+        "failure_class": "spec",
+        "correction": "请群主重审验收条款",
+    })
+    task = {
+        "task_id": "FD-1",
+        "attempt_id": "FD-1.a1",
+        "owner": "member-window",
+        "title": "DEMO · 补一条说明",
+        "status": "awaiting_review",
+        "assigned_harness_ids": ["member-window"],
+    }
+    client = FakeClient(tasks=[task])
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker._review_one(task, "FD-1.a1")
+
+    assert client.dispatches == []
+    assert any("未自动改写" in message["body"] for message in client.messages)
 
 
 def test_model_failure_never_submits_a_review(tmp_path, monkeypatch):
@@ -827,6 +1173,80 @@ def test_a_task_whose_executor_cannot_claim_is_re_pointed(tmp_path, monkeypatch)
     # 群里说清楚为什么改派
     assert client.messages
     assert "改派" in client.messages[0]["body"]
+
+
+def test_a_busy_member_is_skipped_in_favour_of_an_idle_one(tmp_path, monkeypatch, capsys):
+    """忙碌成员（有活租约）不接新活；同样能领活时优先挑真正空闲的那个。
+
+    实测踩过：只按 ``ready`` 数排队，结果把一个已经挂着租约的窗口当成空闲，
+    新活派过去就排在那条没跑完的任务后面。
+    """
+    admin = FakeAdmin()
+    admin.assignable = ["busy-member", "idle-member"]
+    admin.credentials = {
+        "busy-member": True,
+        "idle-member": True,
+        "dead-window": False,
+    }
+    admin.busy = {"busy-member": 1}
+    admin.dispatched = {"FD-dead"}
+    client = FakeClient(
+        tasks=[
+            {
+                "task_id": "FD-dead",
+                "status": "ready",
+                "assigned_harness_ids": ["dead-window"],
+                "title": "写一份说明",
+            }
+        ],
+        context={
+            "task": {"task_id": "FD-dead"},
+            "spec": {
+                "id": "FD-dead",
+                "title": "写一份说明",
+                "goal": "写一份说明",
+                "exclusive_paths": ["docs/说明.md"],
+                "acceptance": [{"id": "A-1", "check": "human", "description": "说明写清楚"}],
+            },
+        },
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker.reassign_dead_tasks()
+
+    assert [item["harness_id"] for item in client.dispatches] == ["idle-member"]
+    assert client.cancels, "改派必须真的发生了"
+    assert "busy-member" not in json.dumps(client.dispatches, ensure_ascii=False)
+
+
+def test_no_idle_member_means_no_new_task_and_an_explicit_refusal(tmp_path, monkeypatch, capsys):
+    """全忙时不创建新任务，并把「最早什么时候有空」说清楚。"""
+    admin = FakeAdmin()
+    admin.assignable = ["busy-member"]
+    admin.credentials = {"busy-member": True, "dead-window": False}
+    admin.busy = {"busy-member": 1}
+    admin.dispatched = {"FD-dead"}
+    client = FakeClient(
+        tasks=[
+            {
+                "task_id": "FD-dead",
+                "status": "ready",
+                "assigned_harness_ids": ["dead-window"],
+                "title": "写一份说明",
+            }
+        ],
+        context={"task": {"task_id": "FD-dead"}, "spec": {"id": "FD-dead", "title": "x"}},
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker.reassign_dead_tasks()
+
+    assert client.dispatches == []
+    assert client.cancels == []
+    printed = capsys.readouterr().out
+    refusal = json.loads(printed.strip().splitlines()[-1])
+    assert refusal["reassign_deferred"] == "no idle window"
+    assert refusal["earliest_available_at"] == "2026-01-01T00:00:00+00:00"
 
 
 def test_a_task_whose_executor_can_claim_is_left_alone(tmp_path, monkeypatch):

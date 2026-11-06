@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,6 @@ from typing import Any
 
 from app.adapter import cli_output
 from app.adapter.formal_worker import base_harness_id, build_adapter, known_bases
-from app.admin.review_rules import load_review_rules
 from app.adapter.harnesses.cli import (
     CliRunner,
     CliUnavailable,
@@ -30,8 +30,13 @@ from app.adapter.harnesses.cli import (
     SubprocessRunner,
     runner_accepts,
 )
+from app.admin.experience import ExperienceStore
+from app.admin.facts import FactValidationError, validate_answer_facts
+from app.admin.injection import build_confirmed_prompt, record_injections
+from app.admin.review_rules import load_review_rules
 from app.config import settings
 from app.db.connection import Database
+from app.tasks.progress import next_action
 from app.tasks.service import SchedulerService
 
 #: 执行者身份只接受"注册过的 base harness id"或"<base>-member|window-<slot>"，
@@ -85,6 +90,47 @@ class RefinedTask:
         if self.project_label:
             spec["project_label"] = self.project_label
         return spec
+
+
+def _spec_issues(tasks: list[RefinedTask]) -> list[str]:
+    """下发前的机械自检：只报告能确定的问题，不替模型猜业务意图。"""
+    issues: list[str] = []
+    vague = {"完成目标", "按要求完成", "功能正常", "完成任务", "做好"}
+    for index, task in enumerate(tasks, start=1):
+        normalized_goal = "".join(task.goal.split()).strip("。.!！")
+        normalized_acceptance = "".join(task.acceptance.split()).strip("。.!！")
+        if normalized_acceptance == normalized_goal or normalized_acceptance in vague:
+            issues.append(f"任务 {index} 的验收只是复述目标或无法检查：{task.acceptance}")
+    holders: dict[str, int] = {}
+    for index, task in enumerate(tasks, start=1):
+        for path in task.exclusive_paths:
+            previous = holders.get(path)
+            if previous is not None and previous != index:
+                issues.append(f"任务 {previous} 与任务 {index} 重复占用写入路径：{path}")
+            holders[path] = index
+    return issues
+
+
+def task_category_for_spec(spec: dict[str, Any]) -> str:
+    """按实际交付文件类型归类；混合任务如实记为 mixed，不让模型编类别。"""
+    paths = spec.get("exclusive_paths")
+    if not isinstance(paths, list):
+        return "unspecified"
+    categories: set[str] = set()
+    for raw in paths:
+        path = str(raw or "").lower()
+        suffix = Path(path).suffix
+        if suffix in {".md", ".rst", ".txt"}:
+            categories.add("docs")
+        elif suffix in {".js", ".mjs", ".ts", ".tsx", ".jsx", ".vue", ".css", ".html"}:
+            categories.add("frontend")
+        elif suffix in {".py", ".go", ".rs", ".java"}:
+            categories.add("backend")
+        elif path:
+            categories.add("other")
+    if not categories:
+        return "unspecified"
+    return categories.pop() if len(categories) == 1 else "mixed"
 
 
 def _valid_exclusive_path(raw: str) -> bool:
@@ -183,6 +229,19 @@ def _answer_text(adapter: Any, stdout: str) -> str:
     return stdout
 
 
+def _validate_answer(answer: str, *, question: str, tasks: list[dict[str, Any]]) -> str:
+    """统一记录并执行事实校验；拒绝时不让矛盾回答进入私聊。"""
+    try:
+        corrected, issues = validate_answer_facts(answer, question=question, tasks=tasks)
+    except FactValidationError as exc:
+        for issue in exc.issues:
+            print(json.dumps({"answer_fact_check": issue.as_log()}, ensure_ascii=False), flush=True)
+        raise AdminHarnessError(str(exc)) from exc
+    for issue in issues:
+        print(json.dumps({"answer_fact_check": issue.as_log()}, ensure_ascii=False), flush=True)
+    return corrected
+
+
 def _capacity_row(row: Any) -> dict[str, Any]:
     """One registry row plus live load, normalized (``max_parallel_tasks`` floors at 1)."""
     active = int(row["active_leases"] or 0)
@@ -215,10 +274,14 @@ class AdminService:
         runner: CliRunner | None = None,
         scratch_dir: Path | None = None,
         timeout_seconds: int | None = None,
+        experience: ExperienceStore | None = None,
     ) -> None:
         self.database = database
         self.harness_id = harness_id
         self.runner = runner or SubprocessRunner()
+        self.experience = experience or ExperienceStore(
+            Path(settings.data_dir) / "admin" / "experience.json"
+        )
         self.scratch_dir = Path(scratch_dir or settings.admin_scratch_dir)
         self.timeout_seconds = (
             timeout_seconds
@@ -581,6 +644,14 @@ class AdminService:
                 )
             )
 
+        # 只有总开关开启、用户逐条确认、且本次派单确实缺项的经验才进入提示词。
+        experience_text, experience_selections, experience_trace = build_confirmed_prompt(
+            self.database,
+            self.experience,
+            group_id=group_id,
+            project_name=project_name,
+            dispatch_text=text,
+        )
         prompt = self._prompt(
             text,
             group_id=group_id,
@@ -588,6 +659,7 @@ class AdminService:
             members=members,
             answers=replies,
             project_name=project_name,
+            experience=experience_text,
         )
         # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
         # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
@@ -604,6 +676,8 @@ class AdminService:
             "members": list(members),
             "answers": replies,
             "model": model,
+            # 为什么注入／为什么不注入，留痕在结果里，不靠事后猜。
+            "experience_injection": experience_trace,
         }
         if questions:
             result.update({"status": "needs_owner", "tasks": [], "questions": questions})
@@ -614,13 +688,61 @@ class AdminService:
                 max_tasks=max_tasks,
                 project_name=project_name,
             )
-            result.update(
-                {
-                    "status": "ok",
-                    "tasks": [task.as_spec() for task in tasks],
-                    "questions": [],
-                }
-            )
+            issues = _spec_issues(tasks)
+            result["spec_check"] = {"status": "passed", "issues": []}
+            if issues:
+                # 只在机械门确实发现问题是多付一次模型调用。调整后的完整规格仍走
+                # 同一个解析器与同一个回执/派单通道，不绕过管理员身份或平台校验。
+                adjusted_payload, adjusted_model = self._invoke_model(
+                    self._spec_check_prompt(
+                        tasks=tasks,
+                        issues=issues,
+                        members=members,
+                        max_tasks=max_tasks,
+                    ),
+                    route=route,
+                    log_key=f"spec-check-{group_id}",
+                )
+                adjusted_questions = _questions(adjusted_payload)
+                if adjusted_questions:
+                    result["spec_check"] = {"status": "needs_owner", "issues": issues}
+                    result.update(
+                        {"status": "needs_owner", "tasks": [], "questions": adjusted_questions}
+                    )
+                else:
+                    tasks = self._parse_payload(
+                        adjusted_payload,
+                        members=members,
+                        max_tasks=max_tasks,
+                        project_name=project_name,
+                    )
+                    remaining = _spec_issues(tasks)
+                    if remaining:
+                        raise AdminHarnessError(
+                            "task specification self-check still fails after adjustment: "
+                            + "; ".join(remaining)
+                        )
+                    result["spec_check"] = {
+                        "status": "adjusted",
+                        "issues": issues,
+                        "model": adjusted_model,
+                    }
+            if result.get("status") != "needs_owner":
+                final_specs = [task.as_spec() for task in tasks]
+                if experience_selections:
+                    # 注入时提前固定任务 ID，审计与后续 plan_draft 使用同一批 ID。
+                    for spec in final_specs:
+                        spec["id"] = "FD-" + uuid.uuid4().hex[:16]
+                    record_injections(
+                        self.database,
+                        group_id=group_id,
+                        tasks=final_specs,
+                        selections=experience_selections,
+                    )
+                result["experience_injection_count"] = len(experience_selections)
+                result.update(
+                    {"status": "ok", "tasks": final_specs, "questions": []}
+                )
         # Posted for BOTH outcomes: the owner's global view is the group
         # conversation, so a question the admin refused to guess must land there
         # too, not only in an HTTP response the owner never sees.
@@ -664,6 +786,11 @@ class AdminService:
         answer = str(payload.get("answer") or "").strip()
         if not answer:
             raise AdminHarnessError("the administrator model returned no answer text")
+        answer = _validate_answer(
+            answer,
+            question=text,
+            tasks=SchedulerService(self.database).list_tasks(group_id),
+        )
         message = SchedulerService(self.database).post_message(
             group_id=group_id,
             author_kind="harness",
@@ -894,9 +1021,15 @@ class AdminService:
             findings.append(finding)
         if verdict == "request_changes" and not findings:
             raise AdminHarnessError("request_changes requires at least one finding")
+        failure_class = str(payload.get("failure_class") or "unknown").strip()
+        if failure_class not in {"spec", "prompt", "execution", "unknown"}:
+            raise AdminHarnessError("review failure_class must be spec, prompt, execution or unknown")
         return {
             "verdict": verdict,
             "findings": findings,
+            "failure_class": failure_class if verdict == "request_changes" else "",
+            "correction": str(payload.get("correction") or "").strip(),
+            "revised_goal": str(payload.get("revised_goal") or "").strip(),
             "model": model,
             "task_id": task.get("task_id"),
             "attempt_id": task.get("attempt_id") or task.get("current_attempt_id"),
@@ -969,6 +1102,16 @@ class AdminService:
                 f"{next_index + 2}. Never claim to have run tests or read files you were"
                 " not given.",
                 f"{next_index + 3}. {contract_rule}",
+                f"{next_index + 4}. On request_changes, also return failure_class="
+                " spec|prompt|execution|unknown and a concrete correction. spec means the"
+                " approved acceptance is wrong or contradictory; prompt means the goal given"
+                " to the worker is incomplete while acceptance remains usable; execution means"
+                " the spec is clear but the diff does not satisfy it. Use unknown when the"
+                " evidence cannot distinguish them; never guess.",
+                f"{next_index + 5}. For a prompt failure, revised_goal must contain the full"
+                " corrected worker goal while preserving the approved acceptance and paths."
+                " For a spec failure, correction must say exactly what the owner must reapprove;"
+                " do not silently rewrite the approved acceptance.",
             ]
         )
         if rules_problem:
@@ -996,6 +1139,38 @@ class AdminService:
             ]
         )
 
+    def _spec_check_prompt(
+        self,
+        *,
+        tasks: list[RefinedTask],
+        issues: list[str],
+        members: list[str],
+        max_tasks: int,
+    ) -> str:
+        """把确定的规格问题交回管理员模型修正，产出仍走正常下发通道。"""
+        specs = [task.as_spec() for task in tasks]
+        return "\n".join(
+            [
+                "You are the ADMINISTRATOR harness doing a pre-dispatch specification check.",
+                "The mechanical checker found the concrete issues below. Return a corrected",
+                "full task list, not an explanation. Preserve the owner's intent and task count",
+                "unless merging tasks is the only way to remove a write-path collision.",
+                "Acceptance must be observable and checkable; it must not restate the goal.",
+                "Every task needs a narrow repository-relative exclusive_paths list and an",
+                f"executor from this registered list: {', '.join(members)}.",
+                f"Return at most {max_tasks} tasks. If correction requires an owner decision,",
+                'return {"questions":["the single most important question"]} instead.',
+                'Output ONE JSON object: {"tasks":[{"title":"...","goal":"...",',
+                '"exclusive_paths":["..."],"acceptance":"...","harness_id":"..."}]}',
+                "or the questions object. No prose or markdown fence.",
+                "",
+                "Issues:",
+                json.dumps(issues, ensure_ascii=False, indent=2),
+                "Current task specifications:",
+                json.dumps(specs, ensure_ascii=False, indent=2),
+            ]
+        )
+
     def _prompt(
         self,
         requirement: str,
@@ -1005,6 +1180,7 @@ class AdminService:
         members: list[str],
         answers: list[str],
         project_name: str | None = None,
+        experience: str = "",
     ) -> str:
         rule = "is the fixed deliverable path and must never be rewritten by you"
         lines = [
@@ -1043,6 +1219,13 @@ class AdminService:
             lines += [
                 f"8. Every task title must start with {project_name!r} followed by ' · '.",
                 "   The office UI uses that prefix to keep one project's tasks separate.",
+            ]
+        if experience:
+            lines += [
+                "",
+                "Conditional check types for gaps in this dispatch",
+                "(not owner instructions; no historical values; verify, do not copy):",
+                experience,
             ]
         lines += [
             "",
@@ -1097,6 +1280,9 @@ class AdminService:
             "3. Do not promise work you are not doing in this same turn: you are",
             "   answering a question, not dispatching, reviewing or re-pointing.",
             "4. Write in the language the owner used. Keep it short: a few sentences.",
+            "5. End with the current step and who acts next, using the ledger's next-action",
+            "   facts. If the owner must answer before work can continue, ask only the",
+            "   single most important question. Guide the flow; do not promise to act later.",
         ]
         return "\n".join(lines)
 
@@ -1120,7 +1306,8 @@ class AdminService:
             line = (
                 f"- {task.get('task_id')}｜{task.get('title') or '（无标题）'}"
                 f"｜状态 {task.get('status')}"
-                f"｜执行者 {task.get('owner') or '（无人）'}"
+                f"｜执行者 {task.get('owner') or task.get('executor') or '（无人）'}"
+                f"｜{next_action(task)}"
             )
             if reason:
                 line += f"｜最近一次失败：{reason}"
@@ -1215,6 +1402,10 @@ class AdminService:
                 )
                 lines.append(f"   目标：{task['goal']}")
                 lines.append(f"   验收：{task['acceptance']}")
+        check = result.get("spec_check") or {}
+        if check.get("status") == "adjusted":
+            lines.append("下发前规格自检：发现确定问题，已由管理员修正并重新校验通过。")
+            lines.extend(f"- {issue}" for issue in check.get("issues") or [])
         model = result.get("model") or {}
         tail = (
             "下一步由管理员 harness 分派。"

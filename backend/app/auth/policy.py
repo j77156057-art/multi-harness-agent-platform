@@ -115,6 +115,8 @@ POLICY: dict[str, frozenset[str]] = {
     # `task:attempt_budget_override` 同一个套路：决定行就是审计线索。
     # 只给人：机器替人点头等于没有这条痕迹。
     "task:confirm_release": frozenset({HUMAN}),
+    # 经验确认、忽略、撤销与总开关：只能由人操作，机器不能替人点头。
+    "experience:decide": frozenset({HUMAN}),
     # 传阅（方案互审）。`circulation:start` 是 §39 的创建边（管理员发布草案+名单+轮数）。
     "circulation:start": frozenset({HUMAN}),
     "circulation:close": frozenset({HUMAN}),

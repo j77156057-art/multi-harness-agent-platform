@@ -13,6 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.tasks.progress import next_action
+
 #: Identifiers handed to tools are validated: a task id or recipient is a
 #: short token, never a path, never a shell word.
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
@@ -310,6 +312,7 @@ def build_registry(
                 "task_id": row.get("task_id"),
                 "title": _clip(str(row.get("title") or ""), 60),
                 "status": state,
+                "next_action": next_action(row),
             }
             holder = str(row.get("owner") or "")
             if holder:

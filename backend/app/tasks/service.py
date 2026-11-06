@@ -922,15 +922,26 @@ class SchedulerService:
         )
 
     def abandon(
-        self, *, task_id: str, attempt_id: str, fencing_epoch: int, reason: str
+        self,
+        *,
+        task_id: str,
+        attempt_id: str,
+        fencing_epoch: int,
+        reason: str,
+        acceptance: dict[str, object] | None = None,
     ) -> dict[str, object]:
+        payload: dict[str, object] = {"reason": reason}
+        if acceptance is not None:
+            # 结构化验收记录随 abandon 事件一起落盘：事件轨迹里能直接读到
+            # 退回次数、每轮缺项和 attempt 终态。
+            payload["acceptance"] = acceptance
         return self._owner_transition(
             task_id=task_id,
             attempt_id=attempt_id,
             fencing_epoch=fencing_epoch,
             event=EventKind.ABANDON,
             allowed=None,
-            payload={"reason": reason},
+            payload=payload,
             keep_owner=False,
             release_lease_too=True,
         )
@@ -1125,6 +1136,27 @@ class SchedulerService:
                 raise Conflict(
                     f"{task_id} is {guard.status.value}; {event.value} needs {allowed.value}"
                 )
+            acceptance = payload.get("acceptance")
+            if isinstance(acceptance, dict):
+                # 验收放弃的记录与状态迁移同一事务落盘；事件 payload 里也带
+                # receipt_id，事后从事件接口能直接追到完整缺项。
+                from app.acceptance.receipts import record_acceptance
+
+                rounds = acceptance.get("rounds") or []
+                commit = str((rounds[-1] or {}).get("commit") or "") if rounds else ""
+                payload = {
+                    **payload,
+                    "acceptance": {
+                        **acceptance,
+                        "receipt": record_acceptance(
+                            conn,
+                            task_id=task_id,
+                            attempt_id=attempt_id,
+                            commit=commit or "unknown",
+                            record=acceptance,
+                        ),
+                    },
+                }
             record = self.store.append(
                 event_name=event.value,
                 aggregate_type="task",
@@ -2236,13 +2268,20 @@ class SchedulerService:
         return None if not rows else dict(rows[0])
 
     def list_tasks(self, group_id: str, *, status: str | None = None) -> list[dict]:
+        # owner 是当前租约持有者，提交交付时会清空；executor 是实际做过当前/
+        # 最近一轮的人，必须另取，不能把释放租约误报成“没有执行者”。
+        projection = (
+            "SELECT tasks.*, (SELECT ta.owner FROM task_attempts ta"
+            " WHERE ta.task_id = tasks.task_id"
+            " ORDER BY ta.attempt_no DESC LIMIT 1) AS executor FROM tasks"
+        )
         if status is None:
             rows = self.database.read(
-                "SELECT * FROM tasks WHERE group_id = ? ORDER BY task_id", (group_id,)
+                projection + " WHERE group_id = ? ORDER BY task_id", (group_id,)
             )
         else:
             rows = self.database.read(
-                "SELECT * FROM tasks WHERE group_id = ? AND status = ? ORDER BY task_id",
+                projection + " WHERE group_id = ? AND status = ? ORDER BY task_id",
                 (group_id, status),
             )
         tasks = [dict(row) for row in rows]
@@ -2261,6 +2300,8 @@ class SchedulerService:
                 project_label = fields.get("project_label")
                 if project_label:
                     task["project_label"] = project_label
+                if fields.get("exclusive_paths"):
+                    task["exclusive_paths"] = list(fields["exclusive_paths"])
             # Why the task fell over.  The office's「失败与接手」panel has to
             # say *why*, not just "abandoned": the reason is the last
             # abandon/release event, read in one query for the whole list.
@@ -2318,7 +2359,7 @@ class SchedulerService:
             f" WHERE snapshot_id IN ({placeholders})",
             tuple(sorted(snapshot_ids)),
         )
-        titles: dict[str, dict[str, str | None]] = {}
+        titles: dict[str, dict[str, object]] = {}
         for row in rows:
             try:
                 snapshot = json.loads(str(row["content_json"]))
@@ -2351,6 +2392,11 @@ class SchedulerService:
                             str(project_label).strip()
                             if isinstance(project_label, str) and project_label.strip()
                             else None
+                        ),
+                        "exclusive_paths": (
+                            [str(path) for path in spec.get("exclusive_paths") or []]
+                            if isinstance(spec.get("exclusive_paths"), list)
+                            else []
                         ),
                     }
         return titles

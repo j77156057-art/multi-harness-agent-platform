@@ -39,6 +39,16 @@ class PlanDecision(BaseModel):
     reason: str | None = None
 
 
+class ExperienceDecision(BaseModel):
+    decided_by: str = Field(min_length=1, max_length=120)
+    action: Literal["confirm", "ignore", "revoke"]
+
+
+class ExperienceInjectionSwitch(BaseModel):
+    decided_by: str = Field(min_length=1, max_length=120)
+    enabled: bool
+
+
 class ModelSelectionRequest(BaseModel):
     """人给某个窗口指定的模型来源（自带 / 额度池里的哪个模型）。
 
@@ -103,6 +113,8 @@ class AttemptAction(BaseModel):
     attempt_id: str
     fencing_epoch: int
     reason: str = ""
+    #: 验收失败放弃时随事件一起落盘的结构化记录（退回计数 / 缺项 / attempt 状态）。
+    acceptance: dict[str, Any] | None = None
 
 
 class ReportBlockedRequest(BaseModel):

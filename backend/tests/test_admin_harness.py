@@ -15,13 +15,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.adapter.harnesses.cli import CliRunResult
-from app.admin.service import AdminHarnessError, AdminService, extract_json_object
+from app.admin.experience import ExperienceStore
+from app.admin.service import (
+    AdminHarnessError,
+    AdminService,
+    PLATFORM_ASSISTANT_HARNESS_ID,
+    extract_json_object,
+)
 from app.api.app import create_app
 from app.auth.policy import decide
 from app.auth.tokens import Principal, TokenService
@@ -77,6 +84,18 @@ class ScriptedRunner:
         )
 
 
+class SequenceRunner(ScriptedRunner):
+    """多次模型调用按顺序回答，用来验证真的发生了规格调整。"""
+
+    def __init__(self, payloads):
+        super().__init__(stdout="")
+        self._payloads = iter(payloads)
+
+    def run(self, argv, **kwargs):
+        self.stdout = _envelope(next(self._payloads))
+        return super().run(argv, **kwargs)
+
+
 def _envelope(payload: dict) -> str:
     """One CLI JSON line for either envelope shape.
 
@@ -120,7 +139,8 @@ ADMIN_WINDOW = "qoder-window-admin"
 
 
 def _refine_service(
-    chain, runner, *, admin: str = ADMIN_WINDOW, scratch: Path | None = None
+    chain, runner, *, admin: str = ADMIN_WINDOW, scratch: Path | None = None,
+    experience: ExperienceStore | None = None,
 ) -> AdminService:
     """细化服务的夹具：默认管理员是一个注册过的窗口，且通道固定为 qoder。"""
     register_harness(chain.database, admin, provider="qoder")
@@ -131,6 +151,7 @@ def _refine_service(
         runner=runner,
         scratch_dir=scratch or chain.tmp_path / "admin-scratch",
         timeout_seconds=30,
+        experience=experience,
     )
 
 
@@ -273,6 +294,68 @@ def test_refine_returns_validated_specs_and_records_the_event(tmp_path):
     assert "补一份启动说明" in receipt["body"] and MEMBER in receipt["body"]
 
 
+def test_refine_does_not_inject_unconfirmed_experience(tmp_path):
+    chain = _admin_chain(tmp_path)
+    experience = ExperienceStore(tmp_path / "experience.json")
+    for project in ("P-one", "P-two"):
+        experience.record_request_changes(
+            project=project,
+            task_category="docs",
+            executor=MEMBER,
+            spec_summary="写启动说明",
+            findings_summary="缺少三条启动步骤的验收",
+        )
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+
+    _refine_service(chain, runner, experience=experience).refine(
+        requirement="帮我加一份启动说明", group_id=DEFAULT_GROUP
+    )
+
+    prompt = runner.calls[0]["argv"][-1]
+    assert "可复用的跨项目经验" not in prompt
+    assert "P-one、P-two" not in prompt
+    assert "缺少三条启动步骤的验收" not in prompt
+    assert "not a fact about this project" not in prompt
+
+
+def test_refine_self_check_adjusts_an_uncheckable_spec_before_dispatch(tmp_path):
+    chain = _admin_chain(tmp_path)
+    bad = {
+        "tasks": [{
+            **SPEC["tasks"][0],
+            "acceptance": SPEC["tasks"][0]["goal"],
+        }]
+    }
+    runner = SequenceRunner([bad, SPEC])
+
+    result = _refine_service(chain, runner).refine(
+        requirement="帮我加一份启动说明", group_id=DEFAULT_GROUP
+    )
+
+    assert len(runner.calls) == 2
+    assert "验收只是复述目标" in runner.calls[1]["argv"][-1]
+    assert result["spec_check"]["status"] == "adjusted"
+    assert result["tasks"][0]["acceptance"] == SPEC["tasks"][0]["acceptance"]
+    receipt = chain.database.read(
+        "SELECT body FROM task_messages WHERE group_id = ?", (DEFAULT_GROUP,)
+    )[0]
+    assert "下发前规格自检" in receipt["body"]
+
+
+def test_refine_self_check_rejects_a_second_still_broken_spec(tmp_path):
+    chain = _admin_chain(tmp_path)
+    bad = {
+        "tasks": [{
+            **SPEC["tasks"][0],
+            "acceptance": SPEC["tasks"][0]["goal"],
+        }]
+    }
+    runner = SequenceRunner([bad, bad])
+
+    with pytest.raises(AdminHarnessError, match="still fails after adjustment"):
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+
+
 def test_refine_asks_the_owner_instead_of_guessing(tmp_path):
     """The admin refusing to guess is a normal outcome, not an error.
 
@@ -322,6 +405,42 @@ def test_a_member_without_a_credential_is_not_offered_work(tmp_path):
     prompt = runner.calls[0]["argv"][-1]
     assert MEMBER in prompt
     assert "codebuddy" not in prompt
+
+
+def test_capacity_counts_only_leases_that_are_still_live(tmp_path):
+    """容量按 ``lease_until`` 算：一条过期但没被清扫的租约不能永久占着窗口。"""
+    chain = _admin_chain(tmp_path)
+    service = AdminService(chain.database, harness_id=PLATFORM_ASSISTANT_HARNESS_ID)
+    now = datetime.now(UTC)
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO leases(lease_id, task_id, attempt_id, kind, owner, token_hash,"
+            " fencing_epoch, lease_until, grant_wall, grant_mono, boot_id, released_at)"
+            " VALUES ('lease-probe', 'T-1', NULL, 'development', ?, 'tok', 1, ?, ?, 0,"
+            " 'boot', NULL)",
+            (MEMBER, (now - timedelta(minutes=5)).isoformat(), now.isoformat()),
+        )
+
+    def member_row():
+        return next(
+            item for item in service.harness_capacity() if item["harness_id"] == MEMBER
+        )
+
+    assert member_row()["active_leases"] == 0
+    assert member_row()["at_capacity"] is False
+    assert MEMBER in service.assignable_harnesses()
+
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "UPDATE leases SET lease_until = ? WHERE lease_id = 'lease-probe'",
+            ((now + timedelta(minutes=5)).isoformat(),),
+        )
+
+    assert member_row()["active_leases"] == 1
+    assert member_row()["at_capacity"] is True
+    assert MEMBER not in service.assignable_harnesses()
+    reasons = service.unavailability_reasons(MEMBER)
+    assert any(reason.startswith("full") for reason in reasons)
 
 
 def test_refine_refuses_when_no_member_can_claim(tmp_path):
@@ -888,6 +1007,30 @@ def test_review_normalizes_string_findings(tmp_path):
     ]
 
 
+def test_review_classifies_rework_and_keeps_the_correction(tmp_path):
+    service, runner = _review_service(
+        tmp_path,
+        {
+            "verdict": "request_changes",
+            "findings": ["worker 没看到必须保留既有入口的要求"],
+            "failure_class": "prompt",
+            "correction": "补全目标中的既有入口约束后重新派发",
+            "revised_goal": "在 docs/demo.md 写说明，并保留既有入口",
+        },
+    )
+    task, spec, diff, verification = _review_inputs()
+
+    result = service.review(
+        task=task, spec=spec, diff=diff, verification=verification, project_name="DEMO"
+    )
+
+    assert result["failure_class"] == "prompt"
+    assert result["revised_goal"].endswith("保留既有入口")
+    prompt = " ".join(str(part) for part in runner.calls[0]["argv"])
+    assert "spec|prompt|execution|unknown" in prompt
+    assert "preserving the approved acceptance" in prompt
+
+
 def _revise_service(tmp_path, payload):
     """The administrator's folding step: same service, a scripted model answer."""
     runner = ScriptedRunner(stdout=_envelope(payload))
@@ -1137,6 +1280,38 @@ def test_the_private_answer_reads_the_ledger_and_is_told_not_to_invent(tmp_path)
     assert "T-1" in prompt
     assert "Never invent" in prompt
     assert "为什么被放弃" in prompt
+    assert "current step and who acts next" in prompt
+    assert "下一步：审核人领取审阅并裁决" in prompt
+
+
+def test_private_answer_never_claims_no_executor_when_the_attempt_has_one(tmp_path):
+    """提交释放租约不等于没有执行者；错误模型措辞也要被事实门纠正。"""
+    chain = _admin_chain(tmp_path)
+    task = chain.service.list_tasks(DEFAULT_GROUP)[0]
+    assert task["owner"] is None
+    assert task["executor"] == "harness-1"
+    runner = ScriptedRunner(stdout=_envelope({
+        "answer": "任务 T-1 当前待验收，尚无执行者。下一步由审核人领取审阅并裁决。"
+    }))
+    service = _refine_service(chain, runner)
+    assert "执行者 harness-1" in service._task_ledger(DEFAULT_GROUP)
+    assert "（无人）" not in service._task_ledger(DEFAULT_GROUP)
+
+    result = service.answer(
+        question="现在在哪一步？下一步谁做什么？",
+        group_id=DEFAULT_GROUP,
+        asker="office-operator",
+    )
+
+    assert "尚无执行者" not in result["answer"]
+    assert "执行者为 harness-1" in result["answer"]
+    assert "待验收" in result["answer"]
+    assert "审核人领取审阅并裁决" in result["answer"]
+    posted = chain.database.read(
+        "SELECT body FROM task_messages WHERE group_id = ? ORDER BY created_seq DESC LIMIT 1",
+        (DEFAULT_GROUP,),
+    )[0]
+    assert posted["body"] == result["answer"]
 
 
 def test_a_private_answer_without_text_fails_closed(tmp_path):

@@ -22,7 +22,20 @@ from app.adapter.harnesses.generic import declared_base_templates
 from app.adapter.models import configured_model
 from app.adapter.protocol import HarnessRegistration
 from app.adapter.registry import HarnessRegistry, RegistrationConflict, capabilities_from
-from app.admin.service import AdminService
+from app.admin.experience import ExperienceStore, ExperienceStoreError
+from app.admin.injection import (
+    confirmation_for,
+    decide_experience,
+    injection_enabled,
+    injection_status,
+    injections_for_task,
+    set_injection_enabled,
+)
+from app.admin.service import (
+    PLATFORM_ASSISTANT_HARNESS_ID,
+    AdminService,
+    task_category_for_spec,
+)
 from app.allocation.service import AllocationService
 from app.api import schemas
 from app.api.auth_deps import (
@@ -1246,12 +1259,36 @@ def abandon(
     bind_task_owner(
         principal, task_id=body.task_id, key="task:abandon", database=database, request=request
     )
-    return service.abandon(
+    outcome = service.abandon(
         task_id=body.task_id,
         attempt_id=body.attempt_id,
         fencing_epoch=body.fencing_epoch,
         reason=body.reason,
+        acceptance=body.acceptance,
     )
+    # 放弃是本次执行的真实失败结果；stale/lease 超时仍可重试，不在此写经验。
+    try:
+        task = service.get_task(body.task_id)
+        spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
+        attempt = database.read(
+            "SELECT owner, head_commit FROM task_attempts WHERE attempt_id = ? AND task_id = ?",
+            (body.attempt_id, body.task_id),
+        )
+        project, category, summary = _experience_context(task, spec)
+        ExperienceStore(Path(settings.data_dir) / "admin" / "experience.json").record_abandoned(
+            project=project,
+            task_category=category,
+            executor=str(attempt[0]["owner"]) if attempt else "unassigned",
+            spec_summary=summary,
+            reason=body.reason,
+            contract_id=body.task_id,
+            diff_hash=str(attempt[0]["head_commit"] or "") if attempt else "",
+        )
+        outcome["experience_recorded"] = True
+    except (ExperienceStoreError, TypeError, ValueError, OSError):
+        # 主状态已经成功变更；返回显式失败标记，不反噬、不伪装已落盘。
+        outcome["experience_recorded"] = False
+    return outcome
 
 
 # ------------------------------------------------------------------- human
@@ -2266,9 +2303,127 @@ def list_groups(
     return {"groups": service.list_groups(project_id=project_id)}
 
 
+@management.post("/experience-injection")
+def change_experience_injection(
+    body: schemas.ExperienceInjectionSwitch,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("experience:decide"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="experience:decide", database=database, request=request
+    )
+    return set_injection_enabled(database, enabled=body.enabled, decided_by=body.decided_by)
+
+
+@management.post("/tasks/{task_id}/experiences/{experience_id}/decision")
+def decide_task_experience(
+    task_id: str,
+    experience_id: str,
+    body: schemas.ExperienceDecision,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("experience:decide"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="experience:decide", database=database, request=request
+    )
+    task = service.get_task(task_id)
+    spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
+    project, category, _ = _experience_context(task, spec)
+    confirmation = decide_experience(
+        database,
+        ExperienceStore(Path(settings.data_dir) / "admin" / "experience.json"),
+        task=task,
+        project=project,
+        task_category=category,
+        experience_id=experience_id,
+        action=body.action,
+        decided_by=body.decided_by,
+    )
+    return {"confirmation": confirmation, "injection_layer": "admin_dispatch"}
+
+
+def _experience_context(task: dict[str, Any], spec: dict[str, Any]) -> tuple[str, str, str]:
+    title = str(spec.get("title") or task.get("title") or task.get("task_id") or "")
+    title_project = title.split(" · ", 1)[0] if " · " in title else ""
+    project = str(
+        spec.get("project_label") or task.get("project_label") or title_project
+        or task.get("group_id") or "unspecified"
+    )
+    summary = json.dumps(
+        {
+            "title": title,
+            "goal": spec.get("goal"),
+            "exclusive_paths": spec.get("exclusive_paths"),
+            "acceptance": spec.get("acceptance"),
+        },
+        ensure_ascii=False,
+    )[:1900]
+    return project, task_category_for_spec(spec), summary
+
+
 @read.get("/tasks/{task_id}")
 def get_task(task_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.get_task(task_id)
+
+
+@read.get("/tasks/{task_id}/experiences")
+def task_experiences(
+    task_id: str,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    include_cross_project: Annotated[bool, Query()] = False,
+) -> dict[str, Any]:
+    """任务详情里的候选经验；只有另行确认且总开关开启才会进入管理员派单。"""
+    task = service.get_task(task_id)
+    spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
+    project, category, _ = _experience_context(task, spec)
+    records = ExperienceStore(
+        Path(settings.data_dir) / "admin" / "experience.json"
+    ).recall(
+        project=project,
+        task_category=category,
+        include_cross_project=include_cross_project,
+    )
+    experiences = []
+    for record in records:
+        experiences.append(
+            {
+                **record,
+                "confirmation": confirmation_for(
+                    database, task_id=task_id, experience_id=record["experience_id"]
+                ),
+            }
+        )
+    enabled = injection_enabled(database)
+    return {
+        "task_id": task_id,
+        "project": project,
+        "task_category": category,
+        "presentation_only": True,
+        "prompt_injection": "confirmed_only" if enabled else "disabled",
+        "injection_layer": "admin_dispatch",
+        "injection_enabled": enabled,
+        "experiences": experiences,
+    }
+
+
+@read.get("/experience-injection")
+def read_experience_injection(database: DatabaseDep) -> dict[str, Any]:
+    return injection_status(database)
+
+
+@read.get("/tasks/{task_id}/experience-injections")
+def task_experience_injections(
+    task_id: str, service: SchedulerDep, database: DatabaseDep
+) -> dict[str, Any]:
+    service.get_task(task_id)
+    return {
+        "task_id": task_id,
+        "injections": injections_for_task(database, task_id),
+    }
 
 
 @read.get("/tasks/{task_id}/decisions")
