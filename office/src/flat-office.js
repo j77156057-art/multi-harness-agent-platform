@@ -5184,7 +5184,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /**
    * 路径只留文件名。
    *
-   * 界面上印一整条 `D:\study\tools\agent\new agent\.worktrees\mavis\data\...`
+   * 界面上印一整条 `C:\path\to\repo\.worktrees\mavis\data\...`
    * 是给写代码的人看的，不是给看进度的人看的 —— 而且它把整张卡片撑变形了。
    * 完整路径留在 title 里（鼠标悬上去能看到）。
    */

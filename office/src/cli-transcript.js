@@ -60,7 +60,7 @@ const shortPath = (value) => {
 /**
  * 输出里的绝对路径压成短形式。
  *
- * `D:\study\tools\agent\new agent\wt\69d9\x.md` → `wt\69d9\x.md`：
+ * `C:\path\to\repo\wt\69d9\x.md` → `wt\69d9\x.md`：
  * 整条绝对路径是给写代码的人看的 —— 它把卡片撑变形，而且没人靠它找文件。
  * 认不出来的路径原样留着（不猜、不改内容）。
  */
