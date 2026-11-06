@@ -27,7 +27,10 @@ from pathlib import Path
 from typing import Any
 
 from app.budget.service import BudgetGuard
-from app.claim.service import QUEUE_REASON_RESOURCE, ClaimService
+from app.claim.service import (
+    QUEUE_REASON_RESOURCE,
+    ClaimService,
+)
 from app.claim.transitions import apply_transition
 from app.config import settings
 from app.db.connection import Database
@@ -372,6 +375,63 @@ def sweep_stuck(
         len(escalated) + len(to_human),
         {"escalated": escalated, "awaiting_human": to_human},
     )
+
+
+def sweep_ready_unclaimed(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """Ready 了却没人领：提醒人，**不替人改派**。
+
+    两类都要提醒，因为处置方式不同：
+
+    * ``no_candidate``：当前没有任何在线、有凭证、未满载的窗口能领；
+    * ``candidate_idle``：有窗口能领，但一直没人动（常见于"总有人会捡"的错觉）。
+
+    去重按任务一份通知（``task_decisions``、scope=``ready_unclaimed``），重复提醒
+    的间隔记在 ``ready_unclaimed_reminders``。改派有专门的运维入口，这里只提醒，
+    避免把活从正在排队的窗口手里抢走。
+    """
+    threshold = timedelta(minutes=settings.ready_unclaimed_minutes)
+    interval = timedelta(minutes=settings.ready_unclaimed_reminder_minutes)
+    claimable = _claimable_windows(database, now)
+    notified: list[str] = []
+    for row in database.read(
+        "SELECT task_id, waiting_since, assigned_harness_ids_json FROM tasks"
+        " WHERE status = ? AND waiting_since IS NOT NULL",
+        (TaskStatus.READY.value,),
+    ):
+        task_id = str(row["task_id"])
+        since = parse_iso(row["waiting_since"])
+        if since is None or now - since < threshold:
+            continue
+        targets = _assigned_targets(row["assigned_harness_ids_json"])
+        waiting_targets = [target for target in targets if target in claimable]
+        if not targets:
+            reason = "candidate_idle" if claimable else "no_candidate"
+        else:
+            reason = "candidate_idle" if waiting_targets else "no_candidate"
+        fingerprint = json.dumps(
+            {"targets": targets, "reason": reason}, sort_keys=True
+        )
+        waited = max(0, int((now - since).total_seconds() // 60))
+        question = _ready_unclaimed_question(
+            task_id=task_id,
+            reason=reason,
+            waited_minutes=waited,
+            targets=targets,
+            claimable=claimable,
+        )
+        if _remind_ready_unclaimed(
+            database,
+            task_id=task_id,
+            reason=reason,
+            fingerprint=fingerprint,
+            question=question,
+            now=now,
+            interval=interval,
+        ):
+            notified.append(task_id)
+    return SweepReport("ready_unclaimed", len(notified), {"notified": notified})
 
 
 def sweep_verify_lease(
@@ -1113,6 +1173,130 @@ def _merge_recovery_round(
             state_seq=record.seq,
         )
         return outcome
+
+
+_READY_UNCLAIMED_SCOPE = "ready_unclaimed"
+_READY_UNCLAIMED_OPTIONS = json.dumps(["改派", "继续等", "取消任务"], ensure_ascii=False)
+
+
+def _assigned_targets(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    try:
+        parsed = json.loads(str(raw))
+    except (TypeError, ValueError):
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _claimable_windows(database: Database, now: datetime) -> list[str]:
+    """Online + 已登记 + 有凭证 + 未满载（按 lease_until 算，过期租约不算占用）。"""
+    rows = database.read(
+        "SELECT h.harness_id, COALESCE(r.max_parallel_tasks, 1) AS max_parallel_tasks,"
+        " (SELECT COUNT(*) FROM leases l WHERE l.owner = h.harness_id"
+        "  AND l.kind = 'development' AND l.released_at IS NULL AND l.lease_until > ?)"
+        "  AS active_leases,"
+        " (SELECT COUNT(*) FROM auth_tokens t WHERE t.subject_type = 'harness'"
+        "  AND t.subject_id = h.harness_id AND t.revoked_at IS NULL) AS credentials"
+        " FROM harnesses h LEFT JOIN harness_registrations r ON"
+        "  r.harness_id = h.harness_id"
+        "  AND r.registration_version = h.registration_version"
+        " WHERE h.status = 'online' AND h.registration_version IS NOT NULL",
+        (now.isoformat(),),
+    )
+    return [
+        str(row["harness_id"])
+        for row in rows
+        if int(row["credentials"]) > 0
+        and int(row["active_leases"]) < max(1, int(row["max_parallel_tasks"]))
+    ]
+
+
+def _ready_unclaimed_question(
+    *,
+    task_id: str,
+    reason: str,
+    waited_minutes: int,
+    targets: list[str],
+    claimable: list[str],
+) -> str:
+    if reason == "no_candidate":
+        detail = "当前没有任何在线、有凭证、未满载的窗口能领取"
+        if targets:
+            detail += f"（目标：{', '.join(targets)}）"
+    else:
+        who = ", ".join(targets) if targets else ", ".join(claimable)
+        detail = f"有可领取窗口（{who}）但一直没人动"
+    return (
+        f"任务 {task_id} 已 ready {waited_minutes} 分钟仍未开工：{detail}。"
+        " 现在改派、继续等，还是取消？"
+    )
+
+
+def _remind_ready_unclaimed(
+    database: Database,
+    *,
+    task_id: str,
+    reason: str,
+    fingerprint: str,
+    question: str,
+    now: datetime,
+    interval: timedelta,
+) -> bool:
+    """写/更新一条人工通知；同指纹且在间隔内不重复提醒。"""
+    existing = database.read(
+        "SELECT fingerprint, notified_at, reminder_count"
+        " FROM ready_unclaimed_reminders WHERE task_id = ?",
+        (task_id,),
+    )
+    if existing:
+        row = existing[0]
+        if str(row["fingerprint"]) == fingerprint:
+            last = parse_iso(row["notified_at"])
+            if last is not None and now - last < interval:
+                return False
+            count = int(row["reminder_count"]) + 1
+        else:
+            # 原因或目标变了：重新计数，这是一条新的通知。
+            count = 1
+    else:
+        count = 1
+    moment = now.isoformat()
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO ready_unclaimed_reminders"
+            " (task_id, reason, fingerprint, notified_at, reminder_count)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(task_id) DO UPDATE SET reason = excluded.reason,"
+            " fingerprint = excluded.fingerprint, notified_at = excluded.notified_at,"
+            " reminder_count = excluded.reminder_count",
+            (task_id, reason, fingerprint, moment, count),
+        )
+        decision = conn.execute(
+            "SELECT decision_id FROM task_decisions"
+            " WHERE task_id = ? AND scope = ? AND answer IS NULL",
+            (task_id, _READY_UNCLAIMED_SCOPE),
+        ).fetchone()
+        if decision is None:
+            conn.execute(
+                "INSERT INTO task_decisions(decision_id, task_id, attempt_id, actor,"
+                " question, options_json, answer, scope, expires_at, decided_seq,"
+                " superseded_by) VALUES (?, ?, NULL, 'sweeper', ?, ?, NULL, ?, NULL, NULL, NULL)",
+                (
+                    f"dec-{uuid.uuid4().hex}",
+                    task_id,
+                    question,
+                    _READY_UNCLAIMED_OPTIONS,
+                    _READY_UNCLAIMED_SCOPE,
+                ),
+            )
+        else:
+            # 同一条通知只更新问法（第几次提醒、现在什么原因），不堆一屏重复问题。
+            conn.execute(
+                "UPDATE task_decisions SET question = ? WHERE decision_id = ?",
+                (question, str(decision["decision_id"])),
+            )
+    return True
 
 
 def _stuck_round(

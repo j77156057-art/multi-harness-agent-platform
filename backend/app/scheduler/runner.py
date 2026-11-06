@@ -30,6 +30,7 @@ from app.scheduler.sweeps import (
     sweep_human_wait_timeout,
     sweep_merge_recovery,
     sweep_project_trash,
+    sweep_ready_unclaimed,
     sweep_resources,
     sweep_review_lease,
     sweep_stuck,
@@ -59,6 +60,9 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("aging", sweep_aging),
     ("blocked_sla", sweep_blocked_sla),
     ("stuck", sweep_stuck),
+    # ready 无人领取的提醒紧跟 stuck：刚被前序 sweep 停到 ready 的任务，
+    # 在同一轮就能被看到「仍然没人领」。
+    ("ready_unclaimed", sweep_ready_unclaimed),
     ("verify_lease", sweep_verify_lease),
     ("verify_queue", sweep_verify_queue),
     ("review_lease", sweep_review_lease),

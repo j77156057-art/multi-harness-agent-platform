@@ -7,10 +7,17 @@ and assert the counts between rounds, not just the final transition.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from app.claim.service import ClaimRequest, ClaimService
-from app.scheduler import sweep_aging, sweep_blocked_sla, sweep_stuck
+from app.config import settings
+from app.scheduler import (
+    sweep_aging,
+    sweep_blocked_sla,
+    sweep_ready_unclaimed,
+    sweep_stuck,
+)
 from app.spec import TaskStatus
 from tests.api_support import make_client
 from tests.claim_support import make_database, seed_project, seed_task
@@ -188,3 +195,118 @@ def test_the_heartbeat_route_stores_the_progress_hash(tmp_path):
     assert response.status_code == 200, response.text
     stored = database.read("SELECT progress_hash FROM tasks WHERE task_id = 'T-1'")[0]
     assert stored["progress_hash"] == "h-route-1"
+
+
+# ----------------------------------------------------------- ready_unclaimed
+
+
+def _ready_waiting(tmp_path, *, waited_minutes: int = 20, assigned: list[str] | None = None):
+    database = _watched_rig(
+        tmp_path, status=TaskStatus.READY, waited_minutes=waited_minutes
+    )
+    if assigned is not None:
+        with database.transaction() as conn:
+            conn.execute(
+                "UPDATE tasks SET assigned_harness_ids_json = ? WHERE task_id = 'T-1'",
+                (json.dumps(assigned),),
+            )
+    return database
+
+
+def _online_window(database, harness_id: str = "H-1") -> None:
+    """一个在线、已登记、有凭证、未满载的窗口。"""
+    moment = NOW.isoformat()
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO harnesses(harness_id, provider, adapter, status,"
+            " registration_version, created_at) VALUES (?, 'local', 'cli', 'online', 'v1', ?)",
+            (harness_id, moment),
+        )
+        conn.execute(
+            "INSERT INTO harness_registrations(registration_id, harness_id,"
+            " registration_version, provider, adapter, adapter_version,"
+            " max_parallel_tasks, created_at) VALUES (?, ?, 'v1', 'local', 'cli', 'v1', 1, ?)",
+            (f"reg-{harness_id}", harness_id, moment),
+        )
+        conn.execute(
+            "INSERT INTO auth_tokens(token_hash, subject_type, subject_id, created_at)"
+            " VALUES (?, 'harness', ?, ?)",
+            (f"tok-{harness_id}", harness_id, moment),
+        )
+
+
+def _decisions(database, task_id: str = "T-1") -> list[dict[str, object]]:
+    return [
+        dict(row)
+        for row in database.read(
+            "SELECT * FROM task_decisions WHERE task_id = ? AND scope = 'ready_unclaimed'",
+            (task_id,),
+        )
+    ]
+
+
+def test_a_ready_task_with_no_claimable_window_is_reported(tmp_path):
+    database = _ready_waiting(tmp_path)
+
+    report = sweep_ready_unclaimed(database, NOW)
+
+    assert report.sweep == "ready_unclaimed"
+    assert report.actions == 1
+    assert report.detail["notified"] == ["T-1"]
+    decision = _decisions(database)[0]
+    assert decision["answer"] is None
+    assert "没有任何在线、有凭证、未满载的窗口" in decision["question"]
+    # 只提醒，不改派：任务仍是 ready，sweep 也不写任务事件。
+    assert _status(database) == "ready"
+    assert _event_count(database, "ready_unclaimed") == 0
+
+
+def test_a_ready_task_inside_the_threshold_is_left_alone(tmp_path):
+    database = _ready_waiting(tmp_path, waited_minutes=5)
+
+    assert sweep_ready_unclaimed(database, NOW).actions == 0
+    assert _decisions(database) == []
+
+
+def test_an_idle_window_that_never_claims_is_also_reported(tmp_path):
+    database = _ready_waiting(tmp_path)
+    _online_window(database)
+
+    report = sweep_ready_unclaimed(database, NOW)
+
+    assert report.detail["notified"] == ["T-1"]
+    assert "一直没人动" in _decisions(database)[0]["question"]
+    reminder = database.read(
+        "SELECT reason FROM ready_unclaimed_reminders WHERE task_id = 'T-1'"
+    )[0]
+    assert reminder["reason"] == "candidate_idle"
+
+
+def test_the_reminder_is_not_repeated_inside_the_interval(tmp_path):
+    database = _ready_waiting(tmp_path)
+
+    first = sweep_ready_unclaimed(database, NOW)
+    second = sweep_ready_unclaimed(database, NOW + timedelta(minutes=1))
+
+    assert first.actions == 1
+    assert second.actions == 0
+    reminder = database.read(
+        "SELECT reminder_count FROM ready_unclaimed_reminders WHERE task_id = 'T-1'"
+    )[0]
+    assert reminder["reminder_count"] == 1
+    assert len(_decisions(database)) == 1, "one open question, not a stack of copies"
+
+
+def test_the_reminder_repeats_once_the_interval_has_passed(tmp_path):
+    database = _ready_waiting(tmp_path)
+    sweep_ready_unclaimed(database, NOW)
+    later = NOW + timedelta(minutes=settings.ready_unclaimed_reminder_minutes + 1)
+
+    report = sweep_ready_unclaimed(database, later)
+
+    assert report.detail["notified"] == ["T-1"]
+    reminder = database.read(
+        "SELECT reminder_count FROM ready_unclaimed_reminders WHERE task_id = 'T-1'"
+    )[0]
+    assert reminder["reminder_count"] == 2
+    assert len(_decisions(database)) == 1, "still the same single open question"

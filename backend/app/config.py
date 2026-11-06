@@ -90,6 +90,14 @@ class Settings:
         self.block_sla_minutes: int = int(os.environ.get("AP_BLOCK_SLA_MINUTES", "60"))
         self.review_wait_sla_minutes: int = int(os.environ.get("AP_REVIEW_WAIT_SLA_MINUTES", "60"))
         self.reclaim_grace_minutes: int = int(os.environ.get("AP_RECLAIM_GRACE_MINUTES", "10"))
+        # ready 任务超过该分钟数没人领取：没有候选 / 有候选但没人动，都要提醒。
+        self.ready_unclaimed_minutes: int = int(
+            os.environ.get("AP_READY_UNCLAIMED_MINUTES", "10")
+        )
+        # 同一条任务的重复提醒间隔（按 (任务, 目标, 原因) 去重）。
+        self.ready_unclaimed_reminder_minutes: int = int(
+            os.environ.get("AP_READY_UNCLAIMED_REMINDER_MINUTES", "30")
+        )
         self.stuck_sweeps: int = int(os.environ.get("AP_STUCK_SWEEPS", "3"))
         self.stuck_human_sweeps: int = int(os.environ.get("AP_STUCK_HUMAN_SWEEPS", "5"))
         self.escalation_backoff_multiplier: float = float(
