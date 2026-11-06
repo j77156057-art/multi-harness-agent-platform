@@ -1108,7 +1108,7 @@ def test_a_revision_may_not_turn_a_relative_path_into_an_absolute_one(tmp_path):
                 {
                     "title": "补一份作品页",
                     "goal": "写 portfolio/index.html",
-                    "exclusive_paths": ["D:\\study\\tools\\agent\\new agent\\portfolio\\index.html"],
+                    "exclusive_paths": ["C:\\repo\\portfolio\\index.html"],
                     "acceptance": "portfolio/index.html 存在",
                     "harness_id": MEMBER,
                 }
@@ -1129,7 +1129,7 @@ def test_a_revision_may_not_turn_a_relative_path_into_an_absolute_one(tmp_path):
         plan_id="plan-1",
         goal="写一张作品页",
         tasks=original,
-        reviews=[{"harness_id": "reader-1", "body": "仓库根是 D:\\study\\tools\\agent\\new agent"}],
+        reviews=[{"harness_id": "reader-1", "body": "仓库根是 C:\\repo"}],
     )
     assert revised[0]["exclusive_paths"] == ["portfolio/index.html"]
     # The rule is also in the prompt, so the model is told before it answers.

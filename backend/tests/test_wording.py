@@ -47,7 +47,7 @@ def test_a_harness_id_becomes_its_registered_name() -> None:
 
 
 def test_an_absolute_path_becomes_its_file_name() -> None:
-    result = service.translate("D:\\study\\tools\\agent\\plan-6baef64d-r1.md", kind="path")
+    result = service.translate("C:\\path\\to\\plan-6baef64d-r1.md", kind="path")
     assert result["translated"] is True
     assert result["text"] == "plan-6baef64d-r1.md"
 
