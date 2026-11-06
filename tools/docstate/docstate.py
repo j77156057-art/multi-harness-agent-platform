@@ -572,8 +572,8 @@ def run(spec_path, verbose=False):
     if "### 29.3 终审通过条件" in text:
         sec293 = text.split("### 29.3 终审通过条件")[1].split("### 29.4")[0]
         r.chk(
-            "107" in sec293 and "allowlist" in sec293,
-            "§29.3 含 allowlist 封闭性断言（107 项）",
+            "108" in sec293 and "allowlist" in sec293,
+            "§29.3 含 allowlist 封闭性断言（108 项）",
             "gates",
         )
     r.chk("### 29.6 R11 复审请求" in text, "含 §29.6 R11 复审请求", "gates")
