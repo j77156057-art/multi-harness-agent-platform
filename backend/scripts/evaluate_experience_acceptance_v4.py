@@ -396,7 +396,7 @@ def run() -> None:
             "run_temp_prefix": "experience-acceptance-v4-",
             "attempt_directories": 1,
             "temporary_directory_removed": outcome.get("temporary_directory_removed"),
-            "post_run_scan": {"directory": "D:\\Temp", "patterns": ["experience-acceptance-v4-*"], "leftover_directories": 0},
+            "post_run_scan": {"directory": tempfile.gettempdir(), "patterns": ["experience-acceptance-v4-*"], "leftover_directories": 0},
             "note": "唯一的退回调用仓库用 force_rmtree 删除；仓库快照已保存在 repos/。",
         },
     )
