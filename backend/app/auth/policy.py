@@ -57,6 +57,9 @@ POLICY: dict[str, frozenset[str]] = {
     "task:report_blocked": frozenset({HARNESS}),
     "task:accept_help": frozenset({HARNESS}),
     "task:reject_help": frozenset({HARNESS}),
+    # 帮手销假（needs_help → in_progress）：和 accept/reject 一样不绑所有者，
+    # 谁把忙帮完谁来关；状态与 help_id 由服务层在同一事务里复核。
+    "task:resolve_help": frozenset({HARNESS}),
     "task:split": frozenset({HARNESS}),
     "task:release": frozenset({HARNESS}),
     "task:abandon": frozenset({HARNESS}),

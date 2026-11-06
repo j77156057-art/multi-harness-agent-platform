@@ -233,6 +233,21 @@ class HttpAdapter(HarnessAdapter):
             },
         )
 
+    def resolve_help(self, *, task_id: str, help_id: str) -> dict[str, Any]:
+        """§10 销假：帮手把活帮完后关掉求助，任务回到 ``in_progress``。
+
+        和 accept/reject 一样不绑所有者 —— 谁帮的谁关，求助者不必在线。
+        """
+        return self._post(
+            "resolve_help",
+            "/adapter/resolve_help",
+            {
+                "task_id": task_id,
+                "help_id": help_id,
+                "harness_id": self.registration.harness_id,
+            },
+        )
+
     def split_task(
         self, *, task_id: str, child_specs: list[dict[str, Any]], idempotency_key: str
     ) -> dict[str, Any]:

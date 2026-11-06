@@ -146,6 +146,55 @@ def test_help_votes_need_the_open_help_id_on_a_parked_task(tmp_path):
     assert "help_accepted" not in _event_names(database)
 
 
+def test_resolve_help_lets_a_collaborator_close_it_without_stealing_the_owner(tmp_path):
+    database = _rig(tmp_path)
+    service = _service(database)
+    help_id = str(
+        service.request_help(task_id="T-1", attempt_id="T-1.a1", fencing_epoch=1, reason="?")[
+            "help_id"
+        ]
+    )
+    before = _task(database)
+
+    result = service.resolve_help(task_id="T-1", help_id=help_id, collaborator="harness-2")
+
+    after = _task(database)
+    assert result["event"] == "help_resolved"
+    assert after["status"] == "in_progress", "销假是真的状态跃迁，不是自环"
+    assert after["owner"] == before["owner"] == "harness-1"
+    assert after["current_attempt_id"] == before["current_attempt_id"] == "T-1.a1"
+    assert after["current_epoch"] == before["current_epoch"], "帮手不接管租约"
+    assert after["state_changed_seq"] > before["state_changed_seq"]
+    (event,) = database.read("SELECT * FROM task_events WHERE event_name = 'help_resolved'")
+    assert json.loads(event["payload_json"]) == {"help_id": help_id, "collaborator": "harness-2"}
+    assert event["actor_id"] == "harness-2", "记账是**帮手**，不是求助者"
+
+
+def test_resolve_help_refuses_a_task_that_is_not_waiting_for_help(tmp_path):
+    database = _rig(tmp_path)
+
+    with pytest.raises(Conflict):
+        _service(database).resolve_help(
+            task_id="T-1", help_id="help-anything", collaborator="harness-2"
+        )
+
+    assert "help_resolved" not in _event_names(database)
+
+
+def test_resolve_help_refuses_a_stale_help_id(tmp_path):
+    database = _rig(tmp_path)
+    service = _service(database)
+    service.request_help(task_id="T-1", attempt_id="T-1.a1", fencing_epoch=1, reason="?")
+    before = _task(database)
+
+    with pytest.raises(Conflict):
+        service.resolve_help(task_id="T-1", help_id="help-stale", collaborator="harness-2")
+
+    after = _task(database)
+    assert after["status"] == before["status"] == "needs_help"
+    assert "help_resolved" not in _event_names(database)
+
+
 # ------------------------------------------------------------------ split
 
 
@@ -316,6 +365,15 @@ def test_the_three_verbs_over_http(tmp_path):
     except AdapterError as exc:
         wrong = exc.code
     assert wrong == "request.conflict", "the wire refuses a stale help_id"
+
+    before = _task(database, "T-1")
+    resolved = collaborator.resolve_help(task_id="T-1", help_id=help_id)
+    assert resolved["event"] == "help_resolved"
+    after = _task(database, "T-1")
+    assert after["status"] == "in_progress", "销假把求助者放回 in_progress"
+    assert after["owner"] == before["owner"] == "harness-1", "帮手不接管所有者"
+    assert after["current_attempt_id"] == before["current_attempt_id"]
+    assert after["current_epoch"] == before["current_epoch"], "帮手不接管租约"
 
     split = collaborator.split_task(
         task_id="T-2",

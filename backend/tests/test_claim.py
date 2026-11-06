@@ -19,6 +19,7 @@ from app.claim.service import (
     RejectCode,
     canonical_payload_hash,
 )
+from app.tasks.service import SchedulerService
 from tests.claim_support import (
     count,
     event_names,
@@ -408,3 +409,55 @@ def test_claim_reports_a_missing_task_as_rejected(database):
     assert result.outcome == OUTCOME_REJECTED
     assert result.items[0].error_code == RejectCode.TASK_NOT_FOUND.value
     assert count(database, "SELECT COUNT(*) FROM task_claims") == 0
+
+
+# ------------------------------------------------- 黑板：当前领取的计时起点
+
+
+def _board_row(database, task_id="T-1"):
+    rows = [row for row in SchedulerService(database).list_tasks("G-1") if row["task_id"] == task_id]
+    assert len(rows) == 1
+    return rows[0]
+
+
+def test_list_tasks_projects_the_live_claim_start_and_drops_it_on_release(database):
+    """黑板「已做 X 分钟」的起点：只有**还没释放**的那次领取才算。
+
+    交出去之后再拿 claim 的时间冒充，会让历史任务永远显示「已做 0 分钟」，
+    所以释放后必须回到 NULL，页面才有机会显示「—」。
+    """
+    seed_task(database)
+    claim_one(database)
+
+    live = database.read("SELECT claimed_at FROM task_claims WHERE task_id = 'T-1'")[0]["claimed_at"]
+    assert _board_row(database)["claimed_at"] == live
+
+    with database.transaction() as conn:
+        conn.execute(
+            "UPDATE task_claims SET released_at = ?, release_reason = 'submitted' WHERE task_id = 'T-1'",
+            (datetime.now(UTC).isoformat(),),
+        )
+
+    assert _board_row(database)["claimed_at"] is None
+
+
+def test_list_tasks_never_projects_an_already_released_claim(database):
+    """反例：只有释放过的领取时，投影必须是空的，不能取最近那条已释放的。"""
+    seed_task(database)
+    claimed = datetime.now(UTC) - timedelta(minutes=30)
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO task_claims(claim_id, task_id, attempt_id, owner, claimed_at,"
+            " released_at, release_reason) VALUES ('claim-old', 'T-1', 'T-1.a1',"
+            " 'harness-1', ?, ?, 'abandoned')",
+            (claimed.isoformat(), (claimed + timedelta(minutes=5)).isoformat()),
+        )
+
+    assert _board_row(database)["claimed_at"] is None
+
+    # 再来一次新的领取：投影取新的，不会退回到那条已释放的旧记录。
+    claim_one(database, request_id="cr-2")
+    fresh = database.read(
+        "SELECT claimed_at FROM task_claims WHERE released_at IS NULL AND task_id = 'T-1'"
+    )[0]["claimed_at"]
+    assert _board_row(database)["claimed_at"] == fresh != claimed.isoformat()

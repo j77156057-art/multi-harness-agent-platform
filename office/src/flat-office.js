@@ -231,13 +231,16 @@ function projectScope() {
 
 /** 一眼看清"现在怎样"：草案 / 待领取 / 进行中 / 待审 / 失败 / 已完成。 */
 function countBy(tasks) {
-  const counts = { draft: 0, waiting: 0, active: 0, review: 0, failed: 0, done: 0 };
+  const counts = { draft: 0, waiting: 0, active: 0, review: 0, help: 0, failed: 0, done: 0 };
   for (const task of tasks) {
     const status = String(task.status || '');
     if (DRAFT_STATES.has(status)) counts.draft += 1;
     else if (WAITING_STATES.has(status)) counts.waiting += 1;
     else if (['claimed', 'in_progress', 'verifying'].includes(status)) counts.active += 1;
     else if (['awaiting_review', 'changes_requested', 'escalated', 'awaiting_human'].includes(status)) counts.review += 1;
+    // 求助是「有人被卡住、等人来帮」，既不是待领取也不是执行中；单独一档，
+    // 和筛选条上的「待协助」同一个口径。
+    else if (status === 'needs_help') counts.help += 1;
     else if (FAILED_STATES.has(status) || REJECTED_STATES.has(status)) counts.failed += 1;
     else if (status === 'merged') counts.done += 1;
   }
@@ -1476,6 +1479,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (state.filter === 'failed') return FAILED_STATES.has(task.status);
       if (state.filter === 'waiting') return WAITING_STATES.has(task.status);
       if (state.filter === 'active') return ['claimed', 'in_progress', 'verifying'].includes(task.status);
+      // 求援中的活单独一档：它不属于"执行中"（人已经停手等人搭把），
+      // 也不属于"待处理"（那不是等评审）。管理员看这一档就知道谁卡住了。
+      if (state.filter === 'help') return task.status === 'needs_help';
       if (state.filter === 'review') return ['awaiting_review', 'changes_requested', 'escalated', 'awaiting_human'].includes(task.status);
       return true;
     });
@@ -1660,6 +1666,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <li class="${counts.waiting ? 'has-value' : ''}"><span>待领取</span><b>${counts.waiting}</b></li>
         <li class="${counts.active ? 'has-value' : ''}"><span>执行中</span><b>${counts.active}</b></li>
         <li class="is-review ${counts.review ? 'has-value' : ''}"><span>待处理</span><b>${counts.review}</b></li>
+        <li class="${counts.help ? 'has-value' : ''}"><span>待协助</span><b>${counts.help}</b></li>
         <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>未完成</span><b>${counts.failed}</b></li>
         <li class="${counts.done ? 'has-value' : ''}"><span>完成了</span><b>${counts.done}</b></li>
       </ul>
@@ -1704,6 +1711,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       (state.selected?.task_id === task.task_id ? ' is-selected' : '');
     const reason = task.last_failure?.reason ? ` · ${reasonText(task.last_failure.reason)}` : '';
     const stamp = task.updated_at ? ` · ${escape(timeAgo(task.updated_at))}更新` : '';
+    // 黑板：只有**当前那次领取还没释放**时才有计时起点。有人接着但算不出起点
+    // （历史任务，claim 早已释放）时写「已做 —」；无人领取就不加这一段，
+    // 免得每一行都挂一条没有意义的「—」。绝不拿 0 分钟或负数冒充。
+    const worked = workedFor(task) || (task.owner ? '已做 —' : '');
     const holds = whoHolds(task);
     const who = whoWord(task, holds);
     const parts = titleParts(task);
@@ -1713,7 +1724,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <span class="flat-task-title">${escape(parts.main)}</span>
       ${parts.sub ? `<span class="flat-task-sub">${escape(parts.sub)}</span>` : ''}
       <span class="flat-task-meta">${isRunning(task) ? '<i class="flat-pulse" title="正在执行"></i>' : ''}${whoPart}${whoPart ? ' · ' : ''}${escape(attemptWord(task))}${escape(reason)}</span>
-      <span class="flat-task-foot">${stamp}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看最后一次输出 ↓</span>` : ''}</span>`;
+      <span class="flat-task-foot">${stamp}${worked ? ` · ${worked}` : ''}${reason ? `<span class="flat-task-jump" data-jump="log" data-task="${escape(task.task_id)}">看最后一次输出 ↓</span>` : ''}</span>`;
     row.addEventListener('click', (event) => {
       if (event.target.closest('[data-jump="log"]')) return;
       void select(task.task_id);
@@ -4687,6 +4698,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ['waiting', '待领取'],
       ['active', '执行中'],
       ['review', '待处理'],
+      ['help', '待协助'],
       ['failed', '未完成'],
     ]) {
       const button = document.createElement('button');
@@ -5215,6 +5227,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
     if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)} 天前`;
     return timeOf(value);
+  }
+
+  /**
+   * 黑板上的「已做多久」：从**当前那次领取**算起（平台的 `task_claims.claimed_at`）。
+   * 没有 claimed_at 就是没有计时起点（还没人领，或已经交出去了），页面显示「—」；
+   * 起点在未来（两边时钟偏差）也按「—」处理 —— 不显示 0 分钟，更不显示负数。
+   */
+  function workedFor(task) {
+    if (!task.claimed_at) return '';
+    const start = new Date(task.claimed_at);
+    if (Number.isNaN(start.getTime())) return '';
+    const seconds = (Date.now() - start.getTime()) / 1000;
+    if (!Number.isFinite(seconds) || seconds < 0) return '';
+    if (seconds < 60) return '已做 <1 分钟';
+    if (seconds < 3600) return `已做 ${Math.floor(seconds / 60)} 分钟`;
+    if (seconds < 86400) return `已做 ${Math.floor(seconds / 3600)} 小时`;
+    return `已做 ${Math.floor(seconds / 86400)} 天`;
   }
 
   /**
@@ -6756,7 +6785,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         <h3>${cardIcon('people')}成员求助</h3>
         ${helps.length
           ? `<p class="flat-note">${helps.length} 条求助待处理</p>
-             <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span></li>`).join('')}</ul>`
+             <ul class="flat-list">${helps.slice(0, 4).map((item) => `<li><b>${escape(item.owner || '未知')}</b><span>${escape(clip(item.reason || '（没写原因）', 40))}</span><span>${escape(clip(item.title, 28))}</span><button type="button" data-act="resolve-help" data-task="${escape(item.taskId)}" data-help="${escape(item.helpId)}" title="帮手把忙帮完后关掉这条求助，任务回到进行中">已解决</button></li>`).join('')}</ul>`
           : '<p class="flat-empty">暂无待处理求助。</p>'}
         <button type="button" data-act="open-members">查看成员执行情况</button>
       </section>
@@ -7453,6 +7482,15 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           });
         }
       }
+      return;
+    }
+    if (button.dataset.act === 'resolve-help' && button.dataset.task && button.dataset.help) {
+      // 帮手销假：接口不接受浏览器自报的身份，网关用进程里的成员凭证去调。
+      // 成功后 refresh() 会让这条求助从卡上消失（`help_resolved` 就是"有结论了"）。
+      void doAction('/task/help/resolve', {
+        route: '/task/help/resolve',
+        body: { task_id: button.dataset.task, help_id: button.dataset.help },
+      });
       return;
     }
     if (button.dataset.act === 'open-members') {

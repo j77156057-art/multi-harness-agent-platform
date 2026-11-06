@@ -84,13 +84,13 @@ const reasonText = reason => {
 const escapeAttr = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));const personaFor = id => PERSONAS[baseOf(id)] || PERSONAS[id] || '按自己的节奏推进。';
 
 function loadStore({ fresh = false } = {}) {
-  if (fresh) return { samples: {}, observed: {}, events: [], backlog: {}, reminders: {} };
+  if (fresh) return { samples: {}, events: [], backlog: {}, reminders: {} };
   try {
     const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (parsed && typeof parsed === 'object') return { samples: parsed.samples || {}, observed: parsed.observed || {},
+    if (parsed && typeof parsed === 'object') return { samples: parsed.samples || {},
       events: parsed.events || [], backlog: parsed.backlog || {}, reminders: parsed.reminders || {} };
   } catch { /* 记录损坏时从空开始，不中断巡检 */ }
-  return { samples: {}, observed: {}, events: [], backlog: {}, reminders: {} };
+  return { samples: {}, events: [], backlog: {}, reminders: {} };
 }
 function saveStore(db) {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch { /* 存储不可用时只保留内存记录 */ }
@@ -144,6 +144,10 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   let availability = [];
   // 可用性读不到时要说"读不到"，不能装作"没有窗口"——两者含义完全不同。
   let availabilityError = null;
+  // 平台按群算好的能力指标（`/api/formal/stats`）。这是「谁干得好」唯一的
+  // 数据源：此前那套浏览器采样只在面板开着时记录，换台机器就是另一套结论。
+  let platformStats = null;
+  let statsError = null;
   // 平台自己的额度池：池子里有哪些额度、谁的额度被谁花了。
   let pool = null;
   let poolError = null;
@@ -197,7 +201,6 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   // 是否把停滞报给管理员由人点按钮，助手不自动替管理员做决定。
   function patrol(now) {
     const events = [];
-    const bump = owner => (db.observed[owner] || (db.observed[owner] = { submissions: 0, reworks: 0, abandons: 0, durations: [] }));
     for (const task of tasks) {
       const key = `${task.task_id}|${task.attempt_id || '-'}|${task.epoch || 0}`;
       const sig = `${task.status}|${task.owner || '-'}|${task.receipt_id || '-'}`;
@@ -209,14 +212,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       if (history.length > SAMPLE_CAP) history.splice(0, history.length - SAMPLE_CAP);
       if (!prev) continue;
       events.push({ at: now, from: prev.status, to: task.status, harness: owner, task_id: task.task_id, title: task.title || task.task_id });
-      // 只在可核验的状态跃迁上记观测：自报进度不进入能力指标。
-      if (ACTIVE.has(prev.status) && task.status === 'awaiting_review' && owner) {
-        const obs = bump(owner); obs.submissions += 1;
-        const started = history.find(item => ACTIVE.has(item.status));
-        if (started) { obs.durations.push(Math.round((now - started.at) / 1000)); if (obs.durations.length > 20) obs.durations.shift(); }
-      }
-      if (task.status === 'changes_requested' && owner) bump(owner).reworks += 1;
-      if (['abandoned', 'stale'].includes(task.status) && owner) bump(owner).abandons += 1;
+      // 能力指标只认平台 `/stats`（按事件、领取窗口与评审记录聚合）。这里不再
+      // 另记一份"本页看到的"——它是按打开页面的时间采的，换浏览器就丢，还会和
+      // 平台口径对不上。`samples` 留着，只服务停滞巡检。
     }
     db.events = events.concat(db.events).slice(0, 40);
     saveStore(db);
@@ -258,13 +256,23 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       .map(item => ({ ...item, name: names.get(item.harness_id) || item.harness_id }));
     const outOfScopeAvailability = availability.length - scopedAvailability.length;
 
+    // 「谁干得好」只读平台口径（`/stats`）：提交数、返工归属、放弃、一次过率与
+    // 中位耗时都由平台从事件与领取窗口算，两台机器看到的是同一份。读不到时
+    // 保持空值并让面板写出错误，不拿浏览器采样顶上 —— 那样两台机器会各说各话。
+    const statsById = new Map((platformStats || []).map(item => [String(item.harness_id), item]));
     const ranking = [...load.keys()].map(id => {
-      const o = db.observed[id] || { submissions: 0, reworks: 0, abandons: 0, durations: [] };
-      const total = o.submissions + o.reworks + o.abandons;
-      const sorted = [...o.durations].sort((a, b) => a - b);
-      const median = sorted.length ? sorted[Math.floor(sorted.length / 2)] : null;
-      return { id, name: names.get(id) || id, submissions: o.submissions, reworks: o.reworks, abandons: o.abandons,
-        total, median, score: total ? o.submissions / total : null, ...load.get(id) };
+      const stat = statsById.get(String(id));
+      const submissions = stat ? Number(stat.submissions) || 0 : 0;
+      const reworks = stat ? Number(stat.reworks) || 0 : 0;
+      const abandons = stat ? Number(stat.abandons) || 0 : 0;
+      const total = submissions + reworks + abandons;
+      const median = stat && stat.median_duration_seconds !== null && stat.median_duration_seconds !== undefined
+        ? Number(stat.median_duration_seconds) : null;
+      const passRate = stat && stat.first_pass_rate !== null && stat.first_pass_rate !== undefined
+        ? Number(stat.first_pass_rate) : null;
+      return { id, name: names.get(id) || id, submissions, reworks, abandons,
+        merged: stat ? Number(stat.merged) || 0 : 0,
+        total, median, score: passRate, ...load.get(id) };
     }).sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || (a.median ?? 1e9) - (b.median ?? 1e9) || b.submissions - a.submissions);
 
     const inflight = tasks.filter(t => ACTIVE.has(t.status)).map(task => {
@@ -674,20 +682,29 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     body.append(planSection);
 
     // 3. 能力观测
-    const rank = section('谁干得好', '只统计平台回执上的可核验跃迁（提交/返修/放弃）。这是观测指标，不是能力认证，也不是许可。');
+    const rank = section('谁干得好', '数据来自平台 `/stats`（提交 / 返工 / 放弃事件、评审记录与领取窗口聚合），不是本页采样；换台机器看到的是同一份。这是观测指标，不是能力认证，也不是许可。');
+    if (statsError) {
+      const p = document.createElement('p'); p.className = 'agent-note';
+      p.textContent = `平台口径暂时读不到（${statsError}），这里不拿本页采样顶替。`;
+      rank.append(p);
+    }
     // 全零的成员没有可看的指标，列出来只会把「本项目」撑成一长串名字。
-    const measured = ranking.filter(r => r.total > 0);
-    if (!measured.length) { const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '本项目还没有可核验的跃迁可统计。'; rank.append(p); }
-    const rankTable = document.createElement('table'); rankTable.className = 'agent-table';
-    rankTable.innerHTML = '<thead><tr><th>#</th><th>窗口</th><th>提交</th><th>返修</th><th>放弃</th><th>通过率</th><th>中位耗时</th></tr></thead>';
-    const rbody = document.createElement('tbody');
-    measured.forEach((r, index) => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${index + 1}</td><td>${escapeAttr(r.name)}</td><td>${r.submissions}</td><td>${r.reworks}</td><td>${r.abandons}</td>
-        <td>${r.score === null ? '未知' : Math.round(r.score * 100) + '%'}</td><td>${r.median === null ? '未知' : r.median + 's'}</td>`;
-      rbody.append(tr);
-    });
-    rankTable.append(rbody); rank.append(rankTable); body.append(rank);
+    const measured = ranking.filter(r => r.total > 0 || r.merged > 0);
+    if (!measured.length) {
+      const p = document.createElement('p'); p.className = 'agent-note'; p.textContent = '本项目还没有可核验的跃迁可统计。'; rank.append(p);
+    } else {
+      const rankTable = document.createElement('table'); rankTable.className = 'agent-table';
+      rankTable.innerHTML = '<thead><tr><th>#</th><th>窗口</th><th>提交</th><th>返修</th><th>放弃</th><th>一次过</th><th>中位耗时</th></tr></thead>';
+      const rbody = document.createElement('tbody');
+      measured.forEach((r, index) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${index + 1}</td><td>${escapeAttr(r.name)}</td><td>${r.submissions}</td><td>${r.reworks}</td><td>${r.abandons}</td>
+          <td>${r.score === null ? '未知' : Math.round(r.score * 100) + '%'}</td><td>${r.median === null ? '未知' : r.median + 's'}</td>`;
+        rbody.append(tr);
+      });
+      rankTable.append(rbody); rank.append(rankTable);
+    }
+    body.append(rank);
 
     // 4. 需要管理员处理的线索 —— 这里只给判断与上报，不做分工动作。
     const plan = section('要管理员处理的事',
@@ -1034,12 +1051,13 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
 
   async function refresh() {
     try {
-      const [status, list, avail, poolData, planData] = await Promise.all([
+      const [status, list, avail, poolData, planData, statsData] = await Promise.all([
         api('/status'),
         api('/tasks'),
         api('/availability').catch(error => ({ availability: [], error: String(error && error.message || error) })),
         api('/pool').catch(error => ({ error: String(error && error.message || error) })),
         api('/plan').catch(error => ({ error: String(error && error.message || error) })),
+        api('/stats').catch(error => ({ error: String(error && error.message || error) })),
       ]);
       connected = Boolean(status.connected);
       harnesses = status.harnesses || [];
@@ -1049,6 +1067,9 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       poolError = poolData && poolData.error ? poolData.error : null;
       planDoc = planData && planData.draft ? planData : null;
       planError = planData && planData.error ? planData.error : null;
+      // 能力指标只认平台：读不到就明确说读不到，绝不退回浏览器采样冒充真值。
+      platformStats = Array.isArray(statsData?.harnesses) ? statsData.harnesses : null;
+      statsError = statsData && statsData.error ? statsData.error : null;
       const groupTasks = list.tasks || [];
       groupTaskCount = groupTasks.length;
       // `/tasks` 是按 group 返回的：同一个群里并列着别的项目。先按当前项目的
@@ -1097,7 +1118,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     // 而不是去调用一个从未存在过的 `debug()`（那条断言因此在按钮全禁用时是死代码）。
     adminRecipient,
     tasks: tasks.length, inFlight: snapshot?.inflight.length ?? null,
-    samples: Object.keys(db.samples).length, observed: db.observed, suggestions: snapshot?.suggestions.length ?? null,
+    samples: Object.keys(db.samples).length, suggestions: snapshot?.suggestions.length ?? null,
     backlog: snapshot?.derived ?? null, manual: snapshot?.manual ?? null, reminders: db.reminders,
     deadQueues: snapshot?.deadQueues ?? null, dupes: snapshot?.dupes ?? null,
     dedup: (snapshot?.dupes ?? []).map(d => { const i = dedupPlan(d, snapshot.load); return { title: d.title, keep: i.keep.task_id, keepStatus: i.keep.status, reportOnly: i.rest.map(t => t.task_id) }; }),

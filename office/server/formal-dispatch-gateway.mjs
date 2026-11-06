@@ -385,6 +385,9 @@ export function createFormalGateway(config={}){
    supersedes:t.supersedes||null,
    // 时间戳：办公室要按"最近更新"排序、要让人看见一条活多久没动了。
    created_at:t.created_at||null,updated_at:t.updated_at||null,
+   // 黑板「已做多久」：当前还没释放的那次领取。为空表示这条活现在没有计时
+   // 起点（待领取，或早就交出去了）——页面显示「—」，不拿 0 分钟冒充。
+   claimed_at:t.claimed_at||null,
    // 验收（只读展示）：结论、退回次数、回执 id、终态原因、截断后的轮次/缺口。
    // 整份 receipt **不透传**，上限见 acceptanceView（最多 5 轮 / 8 条 / 每条 120 字）。
    acceptance_state:acceptance?.acceptance_state??t.acceptance_state??null,
@@ -614,6 +617,12 @@ export function createFormalGateway(config={}){
           return {...safeTask(t,acceptanceView(t,acceptanceRaw)),...(await call('/tasks/'+id+'/verification'))};
         }));
         json(res,200,{tasks});return true;
+      }
+      if(req.method==='GET'&&route==='/stats'){
+        // 能力报表的**真值**：平台按群聚合事件、领取窗口与评审记录，办公室不再
+        // 自己采样（采样只在页面开着时有效、换浏览器就丢）。只读，原样透传。
+        if([...url.searchParams.keys()].length)throw fail(400,'unexpected_query');
+        json(res,200,await call('/groups/'+encodeURIComponent(groupId)+'/stats'));return true;
       }
       if(req.method==='GET'&&route==='/outputs'){
         // **每个窗口都说了什么**：一次请求看完本群所有活、每一次尝试的 CLI 原话。
@@ -1094,6 +1103,23 @@ export function createFormalGateway(config={}){
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||typeof body.task_id!=='string'||!ident(body.task_id))throw fail(400,'invalid_task_fields');
         const result=await call('/human/attempt_budget_override',{task_id:body.task_id,decided_by:operator,reason:body.reason||''});
+        json(res,200,result);return true;
+      }
+      if(req.method==='POST'&&route==='/task/help/resolve'){
+        // 帮手销假（`needs_help → in_progress`）。平台侧 `task:resolve_help` 只放
+        // HARNESS，且 `bind_declared` 要求调用者的身份就是体里那个 `harness_id`；
+        // 所以身份取**办公室进程里的成员凭证**（服务端读盘），不收浏览器自报的 id。
+        // 求助者本人不必在线，谁把忙帮完谁来关。
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||typeof body.task_id!=='string'||!ident(body.task_id))throw fail(400,'invalid_task_fields');
+        if(typeof body.help_id!=='string'||!ident(body.help_id))throw fail(400,'invalid_help_fields');
+        const harnessId=await memberScope();
+        const result=await call(
+          '/adapter/resolve_help',
+          {task_id:body.task_id,help_id:body.help_id,harness_id:harnessId},
+          memberToken,
+        );
         json(res,200,result);return true;
       }
       if(req.method==='POST'&&route==='/plan/approve'){

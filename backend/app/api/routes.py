@@ -1566,6 +1566,29 @@ def reject_help(
     )
 
 
+@adapter.post("/resolve_help")
+def resolve_help(
+    body: schemas.HelpVoteRequest,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("task:resolve_help"),
+) -> dict[str, Any]:
+    """§10 ``help_resolved``; the **collaborator** closes it, not the owner.
+
+    Same no-owner-scope shape as accept/reject: any registered member may
+    answer a help request, and the service re-checks the state and the open
+    ``help_id`` inside one transaction, so a stale id or a task that already
+    moved on is a 409 rather than a silent overwrite.
+    """
+    bind_declared(
+        principal, body.harness_id, key="task:resolve_help", database=database, request=request
+    )
+    return service.resolve_help(
+        task_id=body.task_id, help_id=body.help_id, collaborator=body.harness_id
+    )
+
+
 @adapter.post("/split_task")
 def split_task(
     body: schemas.SplitTaskRequest,
@@ -2982,6 +3005,18 @@ def list_tasks(
         "offset": offset,
         "has_more": offset + len(window) < total,
     }
+
+
+@read.get("/groups/{group_id}/stats")
+def group_stats(group_id: str, service: SchedulerDep) -> dict[str, Any]:
+    """Per-harness facts for the capability report (read-only).
+
+    Computed from the platform's own records -- submissions, rework
+    attribution, abandons, first-pass rate and median claim duration -- so the
+    office no longer has to sample transitions in the browser. An empty group
+    answers zeros, not an error.
+    """
+    return service.group_stats(group_id)
 
 
 @read.get("/groups/{group_id}/plans")

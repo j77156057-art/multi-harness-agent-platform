@@ -1205,6 +1205,63 @@ class SchedulerService:
             event=EventKind.HELP_REJECTED,
         )
 
+    def resolve_help(self, *, task_id: str, help_id: str, collaborator: str) -> dict[str, object]:
+        """R10 §10 ``needs_help -> in_progress`` (``help_resolved``).
+
+        The caller is deliberately **not** the owner: the guard is "a
+        collaborator closes the request", and the solver may be any member of
+        the group. Two hard checks keep it honest:
+
+        * the task is in ``needs_help`` (restated in the conditional UPDATE,
+          so a concurrent close loses instead of overwriting);
+        * ``help_id`` names the task's most recent help request -- a stale id
+          from an older round is a conflict, not a no-op.
+
+        The owner/attempt stay untouched (the owner kept the lease through
+        ``needs_help``); only the status and ``updated_at`` move.
+        """
+        with self.database.transaction() as conn:
+            task = conn.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+            if task is None:
+                raise NotFound(f"unknown task: {task_id}")
+            status = TaskStatus(str(task["status"]))
+            if status is not TaskStatus.NEEDS_HELP:
+                raise Conflict(
+                    f"{task_id} is {status.value}; {EventKind.HELP_RESOLVED.value} needs needs_help"
+                )
+            row = conn.execute(
+                "SELECT payload_json FROM task_events"
+                " WHERE aggregate_id = ? AND event_name = ? ORDER BY seq DESC LIMIT 1",
+                (task_id, EventKind.REQUEST_HELP.value),
+            ).fetchone()
+            payload = {} if row is None else json.loads(str(row["payload_json"]))
+            if payload.get("help_id") != help_id:
+                raise Conflict(f"{task_id} has no open help request {help_id}")
+            record = self.store.append(
+                event_name=EventKind.HELP_RESOLVED.value,
+                aggregate_type="task",
+                aggregate_id=task_id,
+                actor_type="harness",
+                actor_id=collaborator,
+                payload={"help_id": help_id, "collaborator": collaborator},
+                connection=conn,
+            )
+            apply_transition(
+                conn,
+                task_id=task_id,
+                current=status,
+                event=EventKind.HELP_RESOLVED,
+                expected_epoch=int(task["current_epoch"]),
+                extra_sets={"updated_at": iso(datetime.now(UTC))},
+                state_seq=record.seq,
+            )
+            return {
+                "task_id": task_id,
+                "help_id": help_id,
+                "event": EventKind.HELP_RESOLVED.value,
+                "seq": record.seq,
+            }
+
     def _help_vote(
         self, *, task_id: str, help_id: str, collaborator: str, event: EventKind
     ) -> dict[str, object]:
@@ -2626,7 +2683,13 @@ class SchedulerService:
         projection = (
             "SELECT tasks.*, (SELECT ta.owner FROM task_attempts ta"
             " WHERE ta.task_id = tasks.task_id"
-            " ORDER BY ta.attempt_no DESC LIMIT 1) AS executor FROM tasks"
+            " ORDER BY ta.attempt_no DESC LIMIT 1) AS executor,"
+            # 黑板「已做多久」：**当前还没释放**的那次领取。任务一旦交出去
+            # （提交/放弃/释放）claim 就带上 released_at，这里回 NULL，页面显示
+            # 「—」——历史任务没有可算的计时起点，不能拿 0 分钟冒充。
+            " (SELECT tc.claimed_at FROM task_claims tc"
+            " WHERE tc.task_id = tasks.task_id AND tc.released_at IS NULL"
+            " ORDER BY tc.claimed_at DESC LIMIT 1) AS claimed_at FROM tasks"
         )
         if status is None:
             rows = self.database.read(
@@ -2662,6 +2725,135 @@ class SchedulerService:
             if failure:
                 task["last_failure"] = failure
         return tasks
+
+    def group_stats(self, group_id: str) -> dict:
+        """Per-harness facts for the capability report (read-only).
+
+        Everything here comes from the write path's own records, not from a
+        page's sampling: ``submit_result`` (actor = the owner who handed it
+        in), ``request_changes`` (the review row names the attempt whose owner
+        has to redo it), ``abandon``, ``task_claims`` (duration), and
+        ``task_attempts`` (attempt rounds for the first-pass rate). A group
+        with no tasks returns empty lists and zero totals -- never an error.
+        """
+
+        def rows(sql: str, params: tuple = ()) -> list[dict]:
+            return [dict(row) for row in self.database.read(sql, params)]
+
+        members: dict[str, dict] = {}
+
+        def member(harness_id: str) -> dict:
+            entry = members.get(harness_id)
+            if entry is None:
+                entry = members[harness_id] = {
+                    "harness_id": harness_id,
+                    "submissions": 0,
+                    "reworks": 0,
+                    "abandons": 0,
+                    "merged": 0,
+                    "first_pass": 0,
+                    "durations": [],
+                }
+            return entry
+
+        # 谁在这个群里出现过：做过某一轮的人，或交过/放弃过活的人。
+        for row in rows(
+            "SELECT DISTINCT ta.owner AS harness_id FROM task_attempts ta"
+            " JOIN tasks t ON t.task_id = ta.task_id"
+            " WHERE t.group_id = ? AND ta.owner IS NOT NULL AND ta.owner <> ''",
+            (group_id,),
+        ):
+            member(str(row["harness_id"]))
+
+        for row in rows(
+            "SELECT e.actor_id AS harness_id, COUNT(*) AS n FROM task_events e"
+            " JOIN tasks t ON t.task_id = e.aggregate_id"
+            " WHERE t.group_id = ? AND e.event_name = 'submit_result'"
+            " AND e.actor_id <> '' GROUP BY e.actor_id",
+            (group_id,),
+        ):
+            member(str(row["harness_id"]))["submissions"] = int(row["n"])
+
+        # 返工归属看**被退的那一轮是谁做的**：事件里的 actor 是评审方，拿它当
+        # 「返工数」会把账记到评审人头上。reviews.attempt_id → task_attempts.owner
+        # 才是要重做的人。
+        for row in rows(
+            "SELECT ta.owner AS harness_id, COUNT(*) AS n FROM task_events e"
+            " JOIN tasks t ON t.task_id = e.aggregate_id"
+            " JOIN reviews r ON r.review_id = json_extract(e.payload_json, '$.review_id')"
+            " JOIN task_attempts ta ON ta.attempt_id = r.attempt_id"
+            " WHERE t.group_id = ? AND e.event_name = 'request_changes'"
+            " AND ta.owner IS NOT NULL AND ta.owner <> '' GROUP BY ta.owner",
+            (group_id,),
+        ):
+            member(str(row["harness_id"]))["reworks"] = int(row["n"])
+
+        for row in rows(
+            "SELECT e.actor_id AS harness_id, COUNT(*) AS n FROM task_events e"
+            " JOIN tasks t ON t.task_id = e.aggregate_id"
+            " WHERE t.group_id = ? AND e.event_name = 'abandon'"
+            " AND e.actor_id <> '' GROUP BY e.actor_id",
+            (group_id,),
+        ):
+            member(str(row["harness_id"]))["abandons"] = int(row["n"])
+
+        # 一次过：合入的活里第一轮就成的比例。轮次取 attempts 上的 attempt_no。
+        for row in rows(
+            "SELECT ta.owner AS harness_id, COUNT(*) AS merged,"
+            " SUM(CASE WHEN ta.attempt_no = 1 THEN 1 ELSE 0 END) AS first_pass"
+            " FROM tasks t JOIN task_attempts ta ON ta.attempt_id = t.current_attempt_id"
+            " WHERE t.group_id = ? AND t.status = 'merged'"
+            " AND ta.owner IS NOT NULL AND ta.owner <> '' GROUP BY ta.owner",
+            (group_id,),
+        ):
+            entry = member(str(row["harness_id"]))
+            entry["merged"] = int(row["merged"] or 0)
+            entry["first_pass"] = int(row["first_pass"] or 0)
+
+        # 耗时：一次领取从拿到到交出去。还没释放的 claim 不算（人还在做）。
+        for row in rows(
+            "SELECT ta.owner AS harness_id,"
+            " (julianday(c.released_at) - julianday(c.claimed_at)) * 86400.0 AS seconds"
+            " FROM task_claims c JOIN tasks t ON t.task_id = c.task_id"
+            " JOIN task_attempts ta ON ta.attempt_id = c.attempt_id"
+            " WHERE t.group_id = ? AND c.released_at IS NOT NULL"
+            " AND c.claimed_at IS NOT NULL"
+            " AND ta.owner IS NOT NULL AND ta.owner <> ''",
+            (group_id,),
+        ):
+            member(str(row["harness_id"]))["durations"].append(float(row["seconds"]))
+
+        totals = {
+            "submissions": 0,
+            "reworks": 0,
+            "abandons": 0,
+            "merged": 0,
+            "first_pass": 0,
+        }
+        out: list[dict] = []
+        for entry in members.values():
+            durations = sorted(entry.pop("durations"))
+            if durations:
+                middle = len(durations) // 2
+                median = (
+                    durations[middle]
+                    if len(durations) % 2
+                    else (durations[middle - 1] + durations[middle]) / 2
+                )
+            else:
+                median = None
+            merged = entry["merged"]
+            entry["first_pass_rate"] = (
+                entry["first_pass"] / merged if merged else None
+            )
+            entry["median_duration_seconds"] = (
+                None if median is None else round(median, 1)
+            )
+            for key in totals:
+                totals[key] += int(entry[key])
+            out.append(entry)
+        out.sort(key=lambda item: (-item["submissions"], item["harness_id"]))
+        return {"group_id": group_id, "harnesses": out, "totals": totals}
 
     def _last_failures(self, tasks: list[dict]) -> dict[str, dict]:
         """The newest failure/abandon reason per task, in one query."""
