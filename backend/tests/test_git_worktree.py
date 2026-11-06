@@ -272,6 +272,60 @@ def test_checkpoint_captures_timeout_work_without_recycling(tmp_path):
     assert (worktree.path / ".env").exists()
 
 
+def test_a_real_harness_timeout_still_archives_bundle_and_patch(tmp_path):
+    """真的挂住一个子进程，走完「超时 → checkpoint → 清扫器归档」整条路。
+
+    之前 checkpoint 与 archive 各自有测试，但没有一个用例证明**真实子进程
+    被 deadline 杀掉之后**证据还能落盘。这里不模拟异常类型：用
+    SubprocessRunner 起一个 sleep 的子进程，由其真实超时抛 HarnessTimeout，
+    再按 worker 超时分支做 checkpoint、按 sweeper 做 archive，最后从磁盘
+    核对 patch 里有已提交的改动、快照里有未提交的文件。
+    """
+    import sys
+    import time
+
+    from app.adapter.harnesses.cli import HarnessTimeout, SubprocessRunner
+
+    fixture = make_fixture(tmp_path)
+    item = seed_and_claim(fixture)
+    worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
+    commit_in(worktree, filename="a.txt", content="hello\n", message="feat: a")
+    (worktree.path / "half-done.txt").write_text("partial\n", encoding="utf-8")
+
+    runner = SubprocessRunner(poll_seconds=0.05)
+    started = time.monotonic()
+    with pytest.raises(HarnessTimeout) as caught:
+        runner.run(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=worktree.path,
+            timeout_seconds=0.5,
+        )
+    assert caught.value.duration_seconds >= 0.4
+    assert time.monotonic() - started < 10, "deadline really kills the child"
+
+    archive_root = fixture.rest / "archives"
+    snapshot = fixture.manager.checkpoint(
+        attempt_id=item.attempt_id, archive_root=archive_root
+    )
+    assert snapshot is not None and snapshot["deliverable"] is False
+    assert worktree.path.exists(), "timeout keeps the worktree for replay"
+
+    result = fixture.manager.archive_and_recycle(
+        attempt_id=item.attempt_id, archive_root=archive_root
+    )
+    assert result.bundle.stat().st_size > 0
+    assert "+hello" in result.patch.read_text(encoding="utf-8")
+    assert not worktree.path.exists()
+
+    kinds = {
+        str(row["kind"])
+        for row in fixture.database.read(
+            "SELECT kind FROM artifacts WHERE attempt_id = ?", (item.attempt_id,)
+        )
+    }
+    assert {"git_bundle", "patch", "checkpoint_untracked"} <= kinds
+
+
 def test_archive_keeps_the_worktree_when_a_secret_is_the_only_dirty_file(tmp_path):
     """只有敏感文件脏时，不能因为「没有可归档内容」就丢掉 manifest 证据。"""
     import json

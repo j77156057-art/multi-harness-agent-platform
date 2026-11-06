@@ -20,7 +20,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.adapter.formal_worker import ProviderUnavailable, _classify_failure
+import pytest
+
+from app.adapter.formal_worker import ProviderUnavailable, _classify_failure, ask_pool_plan
 from app.adapter.harnesses.cli import CliFailed, CliRunResult
 from app.auth.tokens import TokenService
 from app.claim.service import ClaimRequest, ClaimService
@@ -357,5 +359,60 @@ def test_provider_unavailable_is_not_retryable():
         attempt_id="T-1.a1",
     )
 
+    assert retryable is False
+    assert "protocol_unsupported" in reason
+
+
+def test_the_worker_asks_with_needs_tools_and_refuses_before_running():
+    """复验「派单之后人才把窗口改成 CLI 档」这条边。
+
+    批准时窗口还能接工具，之后人改了模型绑定；worker 开跑前必须带着
+    ``needs_tools=true`` 再问一次平台，拿到 unavailable 后**不发起执行**、
+    也不烧 attempt（ProviderUnavailable 分类为不可重试），任务留在队列里，
+    由 ready_unclaimed sweep 带着原因提醒。
+    """
+    seen: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {
+                "mode": "unavailable",
+                "reason": "no model can serve this attempt's tools",
+                "reason_code": "protocol_unsupported",
+                "required_tools": list(TOOLS),
+            }
+
+    class _Client:
+        def get(self, path: str, params: dict[str, object] | None = None):
+            seen["path"] = path
+            seen.update(params or {})
+            return _Response()
+
+    plan = ask_pool_plan(
+        _Client(),
+        task_id="T-1",
+        harness_id="w-1",
+        attempt_no=2,
+        platform_url="http://platform",
+        token="window-token",
+        needs_tools=True,
+    )
+
+    assert seen["path"] == "/api/v1/pool/plan"
+    assert seen["needs_tools"] is True, "worker 必须把执行类活的工具需求带上"
+    assert plan["mode"] == "unavailable"
+    error = ProviderUnavailable(
+        str(plan["reason"]),
+        reason_code=str(plan["reason_code"]),
+        required_tools=tuple(plan["required_tools"]),
+    )
+    retryable, reason = _classify_failure(
+        error,
+        task={"task_id": "T-1", "max_attempts": 3, "attempt_no": 1},
+        manager=None,
+        attempt_id="T-1.a1",
+    )
     assert retryable is False
     assert "protocol_unsupported" in reason

@@ -29,6 +29,7 @@ from app.adapter import model_choice
 from app.api.auth_deps import DatabaseDep, Principal, require_for
 from app.api.errors import ApiError
 from app.pool import user_keys
+from app.pool.request_log import log_pool_request
 from app.pool.routing import plan_attempt
 from app.pool.service import PoolError, PoolService, invalidate_discovery
 from app.pool.sources import (
@@ -320,6 +321,7 @@ def pool_chat_completions(
     payload: dict[str, Any], principal: _guard("harness:pool"), request: Request
 ) -> Any:
     """Serve an OpenAI chat completion from the pool."""
+    log_pool_request("/pool/v1/chat/completions", payload)
     service = _service()
     if payload.get("stream"):
         # Where it would go is decided **before** the stream starts: a refusal
@@ -343,6 +345,7 @@ def pool_messages(
     payload: dict[str, Any], principal: _guard("harness:pool"), request: Request
 ) -> Any:
     """Serve an Anthropic messages request from the pool (the Claude CLI's protocol)."""
+    log_pool_request("/pool/v1/messages", payload)
     return _service().messages(payload, consumer=_consumer(principal))
 
 
@@ -358,6 +361,7 @@ def pool_responses(
     Anthropic upstream, or by passing the chain's own stream through.
     """
     service = _service()
+    log_pool_request("/pool/v1/responses", payload)
     if payload.get("stream"):
         service.route(str(payload.get("model") or ""))
         return StreamingResponse(
