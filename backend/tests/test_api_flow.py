@@ -45,7 +45,13 @@ def test_full_path_over_http_with_two_scaffolded_transitions(tmp_path):
     assert client.post("/api/v1/groups/G-1/plans", json=client_plan).status_code == 200
     approval = client.post("/api/v1/plans/PL-2/approve", json={"decided_by": "human-1"})
     assert approval.status_code == 200, approval.text
-    assert approval.json() == {"plan_id": "PL-2", "ready": ["A"], "waiting": ["B"]}
+    assert approval.json() == {
+        "plan_id": "PL-2",
+        "ready": ["A"],
+        "waiting": ["B"],
+        # goal 里没写路径，就没有"提到但没写进契约"的东西可提醒。
+        "scope_warnings": [],
+    }
 
     # 领取
     claimed = client.post(

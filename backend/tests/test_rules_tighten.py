@@ -258,16 +258,23 @@ def test_capacity_comes_back_after_recycle(tmp_path, monkeypatch):
     _archive_root(tmp_path, monkeypatch)
     monkeypatch.setattr("app.config.settings.concurrent_worktree", 1)
     chain = build_chain(tmp_path)
-    # A genuine attempt row for T-2: workspaces.attempt_id is a FK, and the
-    # real order is claim (mints the attempt) then start_task (provisions).
+    # Claim T-2 while the slot is still free (claim mints the attempt row), then
+    # put T-1's released lease back to a live one so the *provision* sees the
+    # only slot occupied.  This is the real order: claim, then start_task.
     seed_task(chain.database, task_id="T-2")
     item = (
         ClaimService(chain.database)
         .claim(ClaimRequest(claim_request_id="cr-cap", harness_id="harness-1", task_ids=("T-2",)))
         .items[0]
     )
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "UPDATE leases SET released_at = NULL WHERE attempt_id = ?"
+            " AND kind = 'development'",
+            (chain.attempt_id,),
+        )
 
-    with pytest.raises(WorktreeCapacityExceeded):
+    with pytest.raises(WorktreeCapacityExceeded) as caught:
         chain.manager.provision(
             task_id="T-2",
             attempt_id=str(item.attempt_id),
@@ -275,6 +282,7 @@ def test_capacity_comes_back_after_recycle(tmp_path, monkeypatch):
             harness="harness-1",
             base_commit=chain.base_commit,
         )
+    assert caught.value.earliest_available_at is not None
 
     with chain.database.transaction() as conn:
         conn.execute("UPDATE tasks SET status = 'merged' WHERE task_id = 'T-1'")

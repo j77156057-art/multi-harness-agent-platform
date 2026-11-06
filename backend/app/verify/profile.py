@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -150,3 +150,148 @@ DEFAULT_POLICY_PATH = PROJECT_ROOT / "verify-profiles.json"
 
 def load_default_policy() -> VerifyPolicy:
     return VerifyPolicy.from_file(DEFAULT_POLICY_PATH)
+
+
+#: 命令里那些「仓库内文件」常见的后缀。只认这些，是为了不把
+#: `pytest -q`、`npm run build` 这类没有路径的命令误判成缺失入口。
+_SCRIPT_SUFFIXES = (
+    ".py",
+    ".pyw",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".sh",
+    ".ps1",
+    ".rb",
+    ".pl",
+)
+
+
+def profile_entry_paths(profile: VerifyProfile) -> list[str]:
+    """The repository-relative files a profile command needs to exist.
+
+    2026-11-05 的实际事故（FD-045eb96438124aae）：合并闸门跑平台自带的
+    ``docs-check``（``python backend/app/verify/docs_profile.py``），而被测
+    仓库的合并前后两棵树里都没有这个脚本，于是每次都是 ``exit 2``。命令本身
+    没错，错在**没人先问一句「这个仓库里有这个入口吗」**。这里把入口文件从
+    argv 里抽出来，approve 阶段就能问这一句。
+
+    只抽**看起来像仓库内脚本**的 token：跳过 flag、环境赋值、变量/通配符、
+    URL 与绝对路径。抽不到就返回空 —— 宁可漏报（这条检查只是第一道闸），
+    也不要把 ``python -c`` 的代码串当成文件。
+    """
+    entries: list[str] = []
+    for token in profile.command[1:]:
+        text = str(token).strip()
+        if not text or text.startswith("-"):
+            continue
+        if any(marker in text for marker in ("=", "$", "%", "{", "}", "*", "?", "://")):
+            continue
+        if text.startswith(("/", "\\")) or (len(text) > 1 and text[1] == ":"):
+            continue
+        lowered = text.lower()
+        if not lowered.endswith(_SCRIPT_SUFFIXES):
+            continue
+        normalized = text.replace("\\", "/")
+        if normalized not in entries:
+            entries.append(normalized)
+    return entries
+
+
+def missing_profile_entries(
+    policy: VerifyPolicy, name: str | None, exists: Callable[[str], bool]
+) -> list[str]:
+    """Which of ``name``'s entry files are absent according to ``exists``."""
+    if name is None or name not in policy.profiles:
+        return []
+    return [path for path in profile_entry_paths(policy.profiles[name]) if not exists(path)]
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileResolution:
+    """Where a merge check's profile came from, and where it will run.
+
+    ``repo_source`` 是**目标工作树**的路径（仓库自带 ``verify-profiles.json``
+    时），不是平台仓库的路径；``execution_dir`` 是命令真正的工作目录。
+    两者都进事件 payload：只有「读错仓库」和「仓库确实缺入口」在日志里能
+    分开，revert 才不会变成一种盲目的仪式。
+    """
+
+    name: str | None
+    profile: VerifyProfile | None
+    repo_source: str | None
+    policy_file: str | None
+    execution_dir: str
+    origin: str
+
+    def as_payload(self) -> dict[str, object]:
+        return {
+            "integration_profile": self.name,
+            "repo_source": self.repo_source,
+            "policy_file": self.policy_file,
+            "execution_dir": self.execution_dir,
+            "profile_origin": self.origin,
+        }
+
+
+def resolve_worktree_policy(
+    platform_policy: VerifyPolicy,
+    *,
+    platform_source: Path | str | None,
+    integration_profile: str | None,
+    worktree: Path | str,
+) -> ProfileResolution:
+    """Resolve the profile against **the tree the command will run in**.
+
+    ``load_runtime_policy`` 读的是平台仓库 ``integration`` 里的 profile；合并闸门
+    跑的却是合并提交的 overlay。两者不是同一棵树，2026-11-05 的 045e 就是在这
+    个缝里读到了平台自己的 ``docs-check``。这里只读 ``worktree``：
+
+    * 树里有 ``verify-profiles.json`` → 它是 profile 的来源，``profile_origin``
+      为 ``repository``；
+    * 没有 → 用平台的 profile 兜底，``profile_origin`` 为 ``platform``。
+
+    无论哪种，``repo_source`` 都是**这棵树**的路径，绝不是平台仓库的路径 ——
+    045e 的 payload 之所以看不出问题，就是因为它写的是 ``null``：既不能证明
+    "检查跑在哪"，也让「读错仓库」和「仓库确实缺入口」长得一模一样。
+    """
+    root = Path(worktree)
+    name = integration_profile
+    policy = platform_policy
+    repo_source: str | None = str(root)
+    policy_file = str(platform_source) if platform_source is not None else None
+    origin = "platform"
+    repo_file = root / "verify-profiles.json"
+    if repo_file.is_file():
+        try:
+            raw = json.loads(repo_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise VerifyPolicyError(f"repository policy {repo_file} is unreadable: {exc}") from exc
+        if not isinstance(raw, Mapping):
+            raise VerifyPolicyError(f"repository policy {repo_file} must be a JSON object")
+        merged = platform_policy.as_mapping()
+        base_profiles = dict(merged["profiles"])  # type: ignore[arg-type]
+        merged["profiles"] = {**base_profiles, **dict(raw.get("profiles") or {})}
+        merged["version"] = str(raw.get("version", platform_policy.version))
+        policy = VerifyPolicy.from_mapping(merged)
+        declared = raw.get("integration_profile")
+        name = str(declared).strip() if declared else integration_profile
+        repo_source = str(root)
+        policy_file = str(repo_file)
+        origin = "repository"
+    if name is None:
+        name = next(iter(policy.profiles), None)
+    if name is not None and name not in policy.profiles:
+        raise VerifyPolicyError(
+            f"integration_profile {name!r} is not declared in {policy_file}; "
+            f"registered: {sorted(policy.profiles)}"
+        )
+    return ProfileResolution(
+        name=name,
+        profile=policy.profiles[name] if name is not None else None,
+        repo_source=repo_source,
+        policy_file=policy_file,
+        execution_dir=str(root),
+        origin=origin,
+    )

@@ -717,6 +717,56 @@ def test_plan_events_record_the_real_actor_type(tmp_path, monkeypatch):
     ]
 
 
+def test_approving_a_plan_whose_target_is_offline_is_refused_and_stays_draft(tmp_path):
+    """可执行性在 approve 前校验：目标 offline 就拒绝，方案仍是 draft。
+
+    只把方案「存下来」的阶段看不出目标窗口死没死；approve 会直接把任务推进
+    ready，之后它只能排队等人发现。这里钉住：拒绝 + 明确原因 + 不改变计划状态，
+    窗口补齐后同一份方案还能直接 approve（不用重新提交）。
+    """
+    chain = _admin_chain(tmp_path)
+    client = TestClient(create_app(chain.database, chain.repo), base_url=LOOPBACK)
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE harnesses SET status = 'offline' WHERE harness_id = ?", (MEMBER,))
+
+    published = client.post(
+        "/api/v1/groups/G-1/plans",
+        json={
+            "plan_id": "PL-OFF",
+            "snapshot": {
+                "tasks": [
+                    {"id": "T-OFF", "title": "补说明", "assigned_harness_ids": [MEMBER]}
+                ]
+            },
+        },
+    )
+    assert published.status_code == 200, published.text
+
+    preflight = client.get("/api/v1/plans/PL-OFF/assignability")
+    assert preflight.status_code == 200, preflight.text
+    assert preflight.json()["approvable"] is False
+    assert preflight.json()["plan_status"] == "draft"
+
+    refused = client.post("/api/v1/plans/PL-OFF/approve", json={"decided_by": "ops"})
+    assert refused.status_code == 409, refused.text
+    error = refused.json()["error"]
+    assert error["code"] == "plan.targets_unavailable"
+    assert error["details"]["staged"] is True
+    blocked = error["details"]["blocked"][0]
+    assert blocked["task_id"] == "T-OFF" and blocked["harness_id"] == MEMBER
+    assert any("offline" in reason for reason in blocked["reasons"])
+    task = chain.database.read("SELECT status FROM tasks WHERE task_id = 'T-OFF'")[0]
+    assert task["status"] == "draft", "被拒的 approve 不得把任务推进 ready"
+
+    # 目标补齐后：同一份 draft 方案直接 approve，不需要重新提交。
+    with chain.database.transaction() as conn:
+        conn.execute("UPDATE harnesses SET status = 'online' WHERE harness_id = ?", (MEMBER,))
+    assert client.get("/api/v1/plans/PL-OFF/assignability").json()["approvable"] is True
+    approved = client.post("/api/v1/plans/PL-OFF/approve", json={"decided_by": "ops"})
+    assert approved.status_code == 200, approved.text
+    assert "T-OFF" in approved.json()["ready"]
+
+
 def test_formal_dispatch_records_the_admin_harness_as_actor(tmp_path, monkeypatch):
     """The administrator self-loop dispatches through the same route as a human.
 

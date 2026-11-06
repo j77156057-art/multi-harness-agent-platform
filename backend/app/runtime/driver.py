@@ -39,7 +39,13 @@ from app.git.repo import CanonicalRepo
 from app.merge.gate import MergeGateRejected
 from app.merge.worker import HealthRecheck, MergeError, MergeWorker
 from app.spec import TaskStatus
-from app.verify.profile import DEFAULT_POLICY_PATH, VerifyPolicy, VerifyPolicyError
+from app.verify.profile import (
+    DEFAULT_POLICY_PATH,
+    ProfileResolution,
+    VerifyPolicy,
+    VerifyPolicyError,
+    resolve_worktree_policy,
+)
 from app.verify.worker import CommandRunner, VerifyWorker
 
 #: R10 §16 fixes the concurrent verify cap at 3; ``settings.concurrent_verify``
@@ -66,6 +72,25 @@ class RuntimePolicy:
     #: ``verify-profiles.json`` (``integration:verify-profiles.json``). The
     #: command-root allowlist still comes from ``source``.
     repo_source: str | None = None
+    #: 平台那份 policy（未并入仓库 integration 的版本）。合并闸门要按**目标树**
+    #: 重新解析 profile，必须以它为基线，否则会把 integration 的旧结论带过去。
+    platform_verify: VerifyPolicy | None = None
+    platform_integration_profile: str | None = None
+
+    def resolve_for_worktree(self, worktree: Path) -> ProfileResolution:
+        """Resolve the merge-check profile against the tree it will run in."""
+        base = self.platform_verify if self.platform_verify is not None else self.verify
+        integration = (
+            self.platform_integration_profile
+            if self.platform_verify is not None
+            else self.integration_profile
+        )
+        return resolve_worktree_policy(
+            base,
+            platform_source=self.source,
+            integration_profile=integration,
+            worktree=worktree,
+        )
 
     def effective_integration_profile(self) -> str | None:
         """The profile the merge worker will actually run.
@@ -157,6 +182,8 @@ def load_runtime_policy(
         raise RuntimePolicyError(f"runtime policy is unusable: {exc}") from exc
     name = raw.get("integration_profile")
     integration = str(name).strip() if name else None
+    platform_policy = policy
+    platform_integration = integration
     repo_source: str | None = None
     if repo is not None:
         found = _repo_policy_mapping(repo, policy)
@@ -178,6 +205,8 @@ def load_runtime_policy(
         integration_profile=integration,
         source=resolved,
         repo_source=repo_source,
+        platform_verify=platform_policy,
+        platform_integration_profile=platform_integration,
     )
 
 

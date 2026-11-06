@@ -21,7 +21,7 @@ from app.agenttools.floor import Floor
 from app.agenttools.registry import build_registry
 from app.auth.tokens import TokenService
 from app.config import settings
-from tests.api_support import bootstrap, make_client, publish_plan
+from tests.api_support import bootstrap, make_client, publish_plan, seed_repository_profile
 
 
 def _tools(tmp_path: Path) -> dict:
@@ -168,6 +168,10 @@ def _register(database, harness_id: str) -> None:
 def _ready_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """A claimed attempt that owns a real worktree directory."""
     client, database = make_client(tmp_path)
+    # F3：approve 之前先问「合并检查在这棵树里跑不跑得起来」。临时仓库本身
+    # 没有 profile，这里声明一个能跑的 no-op，让本文件的主题（MCP 工具面）
+    # 不被合并策略的检查拦住。
+    seed_repository_profile(client, tmp_path)
     bootstrap(client)
     publish_plan(
         client,

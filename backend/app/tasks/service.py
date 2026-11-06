@@ -759,6 +759,23 @@ class SchedulerService:
                 )
             if not completion.get("commit"):
                 raise InvalidInput("completion.commit is required")
+            # 验收记录先落盘（同一事务）：评审 receipt 与看板都从这里读，
+            # 不再只靠交付轨迹里的 completion 自述。
+            acceptance = completion.get("acceptance")
+            if isinstance(acceptance, dict):
+                from app.acceptance.receipts import record_acceptance
+
+                completion = dict(completion)
+                completion["acceptance"] = {
+                    **acceptance,
+                    "receipt": record_acceptance(
+                        conn,
+                        task_id=task_id,
+                        attempt_id=attempt_id,
+                        commit=str(completion["commit"]),
+                        record=acceptance,
+                    ),
+                }
             record = self.store.append(
                 event_name=EventKind.SUBMIT_RESULT.value,
                 aggregate_type="task",

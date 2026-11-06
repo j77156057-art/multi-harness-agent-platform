@@ -360,11 +360,26 @@ class VerifyWorker:
         changed: list[tuple[str, str]],
         empty_diff: bool = False,
     ) -> VerifyOutcome:
+        # 评审 receipt 里挂验收摘要：评审人（和看板）在这一张纸上就能读到
+        # 退回次数、每轮缺项和 attempt 终态，不必再翻交付轨迹。
+        acceptance = None
+        try:
+            from app.acceptance.receipts import acceptance_for
+
+            acceptance = acceptance_for(
+                self.database,
+                task_id=job.task_id,
+                attempt_id=job.attempt_id,
+                commit=job.commit,
+            )
+        except Exception:  # noqa: BLE001 - 没有验收记录不该阻断结构校验
+            acceptance = None
         receipt = {
             "receipt_id": f"rc-{uuid.uuid4().hex}",
             "task_id": job.task_id,
             "attempt_id": job.attempt_id,
             "job_id": job.job_id,
+            "acceptance": acceptance,
             "commit": job.commit,
             "base_commit": job.base_commit,
             "baseline_exit_code": baseline_exit_code,

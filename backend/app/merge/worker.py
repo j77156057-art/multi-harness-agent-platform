@@ -114,6 +114,14 @@ class HealthRecheck:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class IntegrationCheck:
+    """One integration-check run: did it fail, and where did it run."""
+
+    failure: str | None
+    payload: dict[str, Any]
+
+
 class MergeWorker:
     def __init__(
         self,
@@ -123,6 +131,7 @@ class MergeWorker:
         policy: VerifyPolicy | None = None,
         overlay_root: Path | None = None,
         runner: CommandRunner | None = None,
+        policy_resolver: Callable[[Path], object] | None = None,
     ) -> None:
         self.database = database
         self.repo = repo
@@ -130,6 +139,9 @@ class MergeWorker:
         self.overlays = OverlayManager(repo, overlay_root)
         self.runner: CommandRunner = runner or default_runner
         self.store = EventStore(database)
+        #: 用**目标工作树**重新解析 profile（见 ``RuntimePolicy.resolve_for_worktree``）。
+        #: 传 None 时退回 ``policy``（单 profile 的旧路径，测试也在用）。
+        self.policy_resolver = policy_resolver
 
     # ---------------------------------------------------------------- merge
 
@@ -183,12 +195,13 @@ class MergeWorker:
             self._set_integration_commit(task_id, merge_commit)
             post_merge = self._run_integration_check(overlay, merge_commit)
 
-            if post_merge is None:
+            if post_merge.failure is None:
                 self.overlays.recycle(overlay)
                 self._transition(
                     task_id,
                     current=TaskStatus.MERGING,
                     event=EventKind.MERGE_SUCCESS,
+                    payload=post_merge.payload,
                     after_event=(
                         lambda conn, seq: insert_output_registrations(
                             conn, registrations, merged_seq=seq
@@ -207,7 +220,8 @@ class MergeWorker:
                 overlay,
                 task_id=task_id,
                 merge_commit=merge_commit,
-                reason=post_merge,
+                reason=post_merge.failure,
+                check_payload=post_merge.payload,
             )
         finally:
             if overlay.path.exists():
@@ -333,7 +347,13 @@ class MergeWorker:
     # --------------------------------------------------------------- revert
 
     def _revert_recovery(
-        self, overlay: Overlay, *, task_id: str, merge_commit: str, reason: str
+        self,
+        overlay: Overlay,
+        *,
+        task_id: str,
+        merge_commit: str,
+        reason: str,
+        check_payload: dict[str, Any] | None = None,
     ) -> MergeOutcome:
         """R10 §21: the only write allowed while integration_health is red."""
         self._set_health(task_id, HEALTH_RED)
@@ -347,6 +367,7 @@ class MergeWorker:
                 task_id,
                 current=TaskStatus.MERGING,
                 event=EventKind.MERGE_POST_COMMIT_FAILURE_ESCALATED,
+                payload=check_payload,
             )
             return MergeOutcome(
                 status="revert_failed",
@@ -363,6 +384,7 @@ class MergeWorker:
                 task_id,
                 current=TaskStatus.MERGING,
                 event=EventKind.MERGE_POST_COMMIT_FAILURE_ESCALATED,
+                payload=check_payload,
             )
             return MergeOutcome(
                 status="revert_invalid",
@@ -381,17 +403,22 @@ class MergeWorker:
         self._append_event(
             "merge_reverted",
             task_id=task_id,
-            payload={"reverted_commit": merge_commit, "revert_commit": revert_commit},
+            payload={
+                "reverted_commit": merge_commit,
+                "revert_commit": revert_commit,
+                **(check_payload or {}),
+            },
         )
 
         self._set_health(task_id, HEALTH_RETESTING)
         still_failing = self._run_integration_check(overlay, revert_commit)
-        if still_failing is not None:
+        if still_failing.failure is not None:
             self._set_health(task_id, HEALTH_ESCALATED)
             self._transition(
                 task_id,
                 current=TaskStatus.MERGING,
                 event=EventKind.MERGE_POST_COMMIT_FAILURE_ESCALATED,
+                payload=still_failing.payload,
             )
             return MergeOutcome(
                 status="revert_red",
@@ -404,7 +431,10 @@ class MergeWorker:
 
         self._set_health(task_id, HEALTH_GREEN)
         next_status = self._transition(
-            task_id, current=TaskStatus.MERGING, event=EventKind.MERGE_POST_COMMIT_FAILURE
+            task_id,
+            current=TaskStatus.MERGING,
+            event=EventKind.MERGE_POST_COMMIT_FAILURE,
+            payload=check_payload,
         )
         return MergeOutcome(
             status="reverted",
@@ -417,20 +447,71 @@ class MergeWorker:
 
     # ------------------------------------------------------------- internals
 
-    def _run_integration_check(self, overlay: Overlay, commit: str) -> str | None:
-        """Run the integration profile at ``commit``; None means it passed."""
-        _, profile = self._integration_profile()
+    def _run_integration_check(self, overlay: Overlay, commit: str) -> IntegrationCheck:
+        """Run the integration profile at ``commit``, against the target tree.
+
+        045e 落盘的 ``repo_source`` 是 ``null``：事后只能看到 ``revert_red``，
+        分不清「仓库确实缺脚本」和「读错仓库」。现在这两个坐标都写进 payload：
+        ``repo_source`` 是**这次检查的目标工作树**（永远不是平台仓库），
+        ``execution_dir`` 是命令实际的工作目录；profile 究竟来自仓库自己的
+        ``verify-profiles.json`` 还是平台兜底，由 ``profile_origin`` 说明。
+        """
+        payload: dict[str, Any] = {"execution_dir": str(overlay.path)}
+        name: str | None = None
+        profile: VerifyProfile | None = None
+        if self.policy_resolver is not None:
+            try:
+                resolution = self.policy_resolver(overlay.path)
+            except Exception as exc:  # noqa: BLE001 - an unusable policy is a failed check, not a crash
+                payload.update(
+                    {
+                        "integration_profile": None,
+                        "repo_source": str(overlay.path),
+                        "profile_origin": "unresolved",
+                    }
+                )
+                return IntegrationCheck(
+                    failure=f"integration profile could not be resolved: {exc}", payload=payload
+                )
+            as_payload = getattr(resolution, "as_payload", None)
+            if callable(as_payload):
+                payload.update(as_payload())
+            name = getattr(resolution, "name", None)
+            profile = getattr(resolution, "profile", None)
+        else:
+            name, profile = self._integration_profile()
+            payload.update(
+                {
+                    "integration_profile": name,
+                    # 没有注入 resolver 的老调用方：仍然把“跑在哪棵树”写上，
+                    # 不让 payload 退回 045e 那种 null —— 那正是看不出问题的地方。
+                    "repo_source": str(overlay.path),
+                    "policy_file": None,
+                    "profile_origin": "policy",
+                }
+            )
         if profile is None:
-            return None
+            return IntegrationCheck(failure=None, payload=payload)
         run_git("checkout", "--detach", commit, cwd=overlay.path, check=False)
         result = self.runner(profile, overlay.path)
+        payload.update(
+            {
+                "timed_out": bool(result.timed_out),
+                "env_error": result.env_error,
+                "exit_code": result.exit_code,
+            }
+        )
         if result.timed_out:
-            return "integration check timed out"
+            return IntegrationCheck(failure="integration check timed out", payload=payload)
         if result.env_error is not None:
-            return f"integration check could not run: {result.env_error}"
+            return IntegrationCheck(
+                failure=f"integration check could not run: {result.env_error}", payload=payload
+            )
         if result.exit_code != 0:
-            return f"integration check exited {result.exit_code}"
-        return None
+            return IntegrationCheck(
+                failure=f"integration check exited {result.exit_code}", payload=payload
+            )
+        return IntegrationCheck(failure=None, payload=payload)
 
     def _integration_profile(self) -> tuple[str | None, VerifyProfile | None]:
         """The one profile the merge gate runs, and its name.
@@ -501,19 +582,19 @@ class MergeWorker:
         except OverlayError as exc:
             raise MergeError(f"could not prepare a recheck tree: {exc}") from exc
         try:
-            problem = self._run_integration_check(overlay, tip)
+            check = self._run_integration_check(overlay, tip)
         finally:
             if overlay.path.exists():
                 self.overlays.recycle(overlay)
 
-        if problem is not None:
+        if check.failure is not None:
             return HealthRecheck(
                 project_id=project_id,
                 status=status,
                 commit=tip,
                 profile=name,
                 result="failed",
-                detail=problem,
+                detail=check.failure,
                 applied=False,
             )
 

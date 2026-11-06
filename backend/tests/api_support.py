@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -61,6 +62,56 @@ def publish_plan(
     response = client.post(f"/api/v1/groups/{group_id}/plans", json=body)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+def commit_files_to_integration(
+    repo: CanonicalRepo, tmp_path: Path, files: dict[str, str], *, tag: str
+) -> str:
+    """Point the integration branch at a commit carrying ``files``."""
+    work = tmp_path / f"integration-{tag}"
+    work.mkdir(parents=True, exist_ok=True)
+    run_git("init", "--initial-branch", "integration", str(work))
+    head = repo.ref_commit(repo.integration_ref)
+    assert head is not None, "ensure() seeds an integration commit"
+    run_git("fetch", "--no-tags", str(repo.path), head, cwd=work)
+    run_git("checkout", "-b", "integration", "FETCH_HEAD", cwd=work)
+    for name, content in files.items():
+        target = work / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    run_git("add", *files, cwd=work)
+    run_git("commit", "-m", f"chore: {tag}", cwd=work)
+    commit = run_git("rev-parse", "HEAD", cwd=work).stdout.strip()
+    repo.import_objects(work, commit)
+    repo.update_ref(repo.integration_ref, commit)
+    return commit
+
+
+def seed_repository_profile(
+    client: TestClient, tmp_path: Path, *, name: str = "repo-check"
+) -> str:
+    """Give the test repository a runnable integration profile of its own.
+
+    F3 makes approve refuse when the merge-check profile cannot run in the
+    repository. A temp repository has no profile at all, so tests that only
+    care about *other* behaviour declare this no-op profile and move on.
+    """
+    repo = client.app.state.canonical_repo
+    document = json.dumps(
+        {
+            "version": "1",
+            "integration_profile": name,
+            "profiles": {
+                name: {
+                    "command": ["python", "-c", "raise SystemExit(0)"],
+                    "timeout_seconds": 30,
+                }
+            },
+        }
+    )
+    return commit_files_to_integration(
+        repo, tmp_path, {"verify-profiles.json": document}, tag="repo-profile"
+    )
 
 
 def worktree_manager(tmp_path: Path, database: Database) -> WorktreeManager:

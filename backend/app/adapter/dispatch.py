@@ -1,6 +1,8 @@
 """Human dispatch using existing immutable plans and approval transitions."""
 
 import json
+import os
+from typing import Any
 
 from app.allocation.service import authorization_row as allocation_row
 from app.claim.service import QUEUE_REASON_WORKTREE, ClaimService, allocation_gate_applies
@@ -11,6 +13,75 @@ from app.tasks.service import Conflict, InvalidInput, SchedulerService, _canonic
 #: so another task may continue it.  A task that is still running cannot be
 #: taken over -- that would be two owners of one piece of work.
 _SUPERSEDABLE_STATUSES = frozenset({"cancelled", "abandoned", "stale", "changes_requested"})
+
+#: 这个平台装得下、且能运行时核对冻结身份的验收判据。派单里写了别的名字
+#: 一律拒绝：一个平台不认识的 profile 如果被静默忽略，等于关掉了验收。
+KNOWN_ACCEPTANCE_PROFILES = frozenset({"experience-v5"})
+_ACCEPTANCE_KEYS = frozenset({"enabled", "profile", "description"})
+
+
+def resolve_acceptance(acceptance: str | dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """把派单里的 ``acceptance`` 拆成「人类验收说明」与「派单级验收开关」。
+
+    字符串是旧口径：那是人写的验收说明，不携带开关，验收行为继续由部署默认
+    决定（老调用方不受影响）。对象是新口径，优先级高于部署默认：
+
+    * ``enabled`` 只认 ``bool``；``"false"`` / ``0`` / ``null`` 一律拒绝，
+      绝不静默当 false —— 否则把一次写错参数变成"这个活不要验收"。
+    * ``profile`` 写了就必须是本平台认识的判据名；写了不认识的名字同样拒绝。
+    * ``enabled=true`` 且没写 ``profile`` 时取部署默认 ``AP_ACCEPTANCE_PROFILE``；
+      部署也没配就拒绝（宁可派不出去，也不要一条没人验的活）。
+    """
+    if isinstance(acceptance, str):
+        return acceptance, None
+    if not isinstance(acceptance, dict):
+        raise InvalidInput(
+            "acceptance 必须是字符串（旧口径验收说明）或对象 {enabled, profile}"
+        )
+    unknown = sorted(set(acceptance) - _ACCEPTANCE_KEYS)
+    if unknown:
+        raise InvalidInput(
+            "acceptance 含未知字段：" + ", ".join(unknown) + "（只接受 enabled/profile/description）"
+        )
+    if "enabled" not in acceptance:
+        raise InvalidInput("acceptance.enabled 必填（布尔值）")
+    enabled = acceptance["enabled"]
+    if not isinstance(enabled, bool):
+        raise InvalidInput(
+            "acceptance.enabled 必须是布尔值，收到 "
+            f"{type(enabled).__name__}（{enabled!r}）；不要用字符串/数字代替"
+        )
+    profile = acceptance.get("profile")
+    if profile is not None:
+        if not isinstance(profile, str) or not profile.strip():
+            raise InvalidInput("acceptance.profile 必须是非空字符串")
+        profile = profile.strip()
+        if profile not in KNOWN_ACCEPTANCE_PROFILES:
+            raise InvalidInput(
+                f"acceptance.profile 指向不存在的判据：{profile}"
+                f"（可用：{'、'.join(sorted(KNOWN_ACCEPTANCE_PROFILES))}）"
+            )
+    if enabled:
+        profile = profile or os.environ.get("AP_ACCEPTANCE_PROFILE", "").strip()
+        if not profile:
+            raise InvalidInput(
+                "acceptance.enabled=true 但没有给 profile，部署也没有默认"
+                " AP_ACCEPTANCE_PROFILE"
+            )
+        if profile not in KNOWN_ACCEPTANCE_PROFILES:
+            raise InvalidInput(
+                f"部署默认验收判据不存在：{profile}"
+                f"（可用：{'、'.join(sorted(KNOWN_ACCEPTANCE_PROFILES))}）"
+            )
+    description = acceptance.get("description")
+    if description is not None and not isinstance(description, str):
+        raise InvalidInput("acceptance.description 必须是字符串")
+    text = (description or "").strip() or (
+        f"交付必须通过 {profile} 判据验收（派单级开关）"
+        if enabled
+        else "按派单要求交付并提交（本任务未开启自动验收）"
+    )
+    return text, {"enabled": enabled, "profile": profile}
 
 
 def dispatch(
@@ -23,10 +94,13 @@ def dispatch(
     harness_id: str,
     decided_by: str,
     exclusive_paths: list[str],
-    acceptance: str,
+    acceptance: str | dict[str, Any],
     decided_by_type: str = "human",
     supersedes: str | None = None,
 ) -> dict:
+    # 派单字段先解析：非法值在这里拒绝（422），不会写进方案，也不会悄悄
+    # 退回部署开关。
+    acceptance_text, acceptance_gate = resolve_acceptance(acceptance)
     payload = {
         "group_id": group_id,
         "title": title,
@@ -34,7 +108,9 @@ def dispatch(
         "harness_id": harness_id,
         "decided_by": decided_by,
         "exclusive_paths": exclusive_paths,
-        "acceptance": acceptance,
+        # 幂等摘要要覆盖开关本身：同一个 request_id 用不同开关重放算冲突，
+        # 不当作同一条派单。
+        "acceptance": acceptance_gate if acceptance_gate is not None else acceptance_text,
     }
     # The lineage is part of the request's content, so it belongs in the
     # digest -- but only when there is one: a request without a lineage must
@@ -116,12 +192,18 @@ def dispatch(
             "require_human_assign": True,
             "capabilities": ["coding"],
             "exclusive_paths": exclusive_paths,
-            "acceptance": [{"id": "MVP-API-001", "check": "human", "description": acceptance}],
+            "acceptance": [
+                {"id": "MVP-API-001", "check": "human", "description": acceptance_text}
+            ],
             "risk": "medium",
             "expected_duration_min": 30,
             "budget_tokens": 0,
             "verify_profile": "formal-artifact",
         }
+        if acceptance_gate is not None:
+            # 派单级开关进**快照**：执行器（worker）从快照读，不读部署环境；
+            # 这样并行的两条活各自带自己的开关，部署默认只给没写字段的老派单用。
+            spec["acceptance_gate"] = acceptance_gate
         if supersedes:
             # The lineage goes into the **snapshot**: the snapshot is the
             # task's immutable contract, so "this task takes over that one"

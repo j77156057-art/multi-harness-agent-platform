@@ -60,13 +60,15 @@ from app.config import settings
 from app.db.connection import Database
 from app.git.publish import PublishProxy
 from app.git.repo import CanonicalRepo
-from app.merge.worker import MergeWorker
-from app.runtime.driver import load_runtime_policy
 from app.human.service import HumanOpsService
 from app.lease.service import renew_lease
+from app.merge.worker import MergeWorker
+from app.plan.consistency import goal_scope_warnings
 from app.review_doc import build_document
+from app.runtime.driver import RuntimePolicyError, load_runtime_policy
 from app.spec import TaskStatus
 from app.tasks.service import NotFound, SchedulerService
+from app.verify.profile import profile_entry_paths
 
 
 def _guard(key: str):
@@ -188,6 +190,142 @@ def create_plan(
     }
 
 
+def _plan_assignment_blocks(
+    database: Any, plan_id: str
+) -> list[dict[str, Any]]:
+    """哪些目标窗口现在接不了活，以及为什么。
+
+    方案在 submit 阶段只是「存下来」；真正派活发生在 approve。如果目标窗口
+    此刻 offline / 没凭证 / 满载，approve 之后任务会直接进 ready，然后卡在队列
+    里等人发现 —— 这就是「可执行性」要在 approve 前校验的原因。
+
+    只检查**显式写了** ``assigned_harness_ids`` 的任务：没写目标的活由分配轮次
+    再选人，这里不该替它拍板。计划不存在/没有快照时返回空，让 ``approve_plan``
+    自己抛它的 NotFound/Conflict。
+    """
+    rows = database.read(
+        "SELECT content_json FROM plan_snapshots WHERE plan_id = ?"
+        " ORDER BY created_at DESC LIMIT 1",
+        (plan_id,),
+    )
+    if not rows:
+        return []
+    try:
+        raw = json.loads(str(rows[0]["content_json"]))
+    except (TypeError, ValueError):
+        return []
+    # 中立身份（平台助手）只用来回答「这个窗口自身可不可派」，不掺管理员的
+    # provider 交叉评审；那个限制是管理员自己的事。
+    admin = AdminService(database, harness_id=PLATFORM_ASSISTANT_HARNESS_ID)
+    # 判据就是派单用的同一个集合：``assignable_harnesses()``。原因取
+    # ``unavailability_reasons()`` 只为了让人看懂是哪一种（它覆盖不到的情况
+    # 退回 ``not_assignable``，而不是当成可派）。
+    # 工作请求必带 read/edit/write 工具定义，所以候选窗口必须能接收工具定义：
+    # CLI 档窗口在这里就被排除，而不是等 approver 点完、成员领了活、pool 层
+    # 开流前才用 502 ``relay_cli_cannot_use_tools`` 拒掉（2026-11-05 pi）。
+    assignable = set(admin.assignable_harnesses(needs_tools=True))
+    blocked: list[dict[str, Any]] = []
+    for item in raw.get("tasks") or ():
+        if not isinstance(item, dict):
+            continue
+        task_id = str(item.get("id") or "")
+        for target in item.get("assigned_harness_ids") or ():
+            harness_id = str(target)
+            if harness_id in assignable:
+                continue
+            reasons = list(admin.unavailability_reasons(harness_id))
+            capability = admin.tool_capability_problem(harness_id)
+            if capability is not None:
+                reasons.append(capability)
+            blocked.append(
+                {
+                    "task_id": task_id,
+                    "harness_id": harness_id,
+                    "reasons": reasons or ["not_assignable"],
+                }
+            )
+    return blocked
+
+
+def _plan_snapshot_tasks(database: Any, plan_id: str) -> list[dict[str, Any]]:
+    rows = database.read(
+        "SELECT content_json FROM plan_snapshots WHERE plan_id = ?"
+        " ORDER BY created_at DESC LIMIT 1",
+        (plan_id,),
+    )
+    if not rows:
+        return []
+    try:
+        raw = json.loads(str(rows[0]["content_json"]))
+    except (TypeError, ValueError):
+        return []
+    tasks = raw.get("tasks") if isinstance(raw, dict) else None
+    return [item for item in tasks or () if isinstance(item, dict)]
+
+
+def _plan_scope_warnings(database: Any, plan_id: str) -> list[str]:
+    """goal 里提到、``exclusive_paths`` 里没写的路径（e16 的那类矛盾）。"""
+    return goal_scope_warnings(_plan_snapshot_tasks(database, plan_id))
+
+
+def _plan_profile_block(
+    database: Any, plan_id: str, repo: CanonicalRepo | None
+) -> dict[str, Any] | None:
+    """approve 前先问一句：这份合并检查在被测仓库里跑得起来吗？
+
+    045e 的代价是：模型干了半小时、合并写进 integration、闸门 ``exit 2``、
+    再 revert。真正的问题在**开头**就能看见 —— 被测仓库里根本没有 profile
+    要跑的那个入口文件（``backend/app/verify/docs_profile.py``）。命令没错，
+    错的是让它在一棵没有这个脚本的树上跑。
+
+    只做**入口文件存在性**检查，不执行 ``--help``/dry-run：那会在批准阶段
+    运行被测仓库的代码，把一次静态判断变成一次有副作用的执行。
+    """
+    tasks = _plan_snapshot_tasks(database, plan_id)
+    # 没有声明交付落点的老格式/夹具方案不在这里判：没有写范围，就没有"这个
+    # 仓库该跑哪份检查"的契约可言（派单前的窗口检查仍然照常做）。
+    if not any(item.get("exclusive_paths") for item in tasks):
+        return None
+    if repo is None:
+        return None
+    commit = repo.ref_commit(repo.integration_ref)
+    if commit is None:
+        # 仓库还是空的：没有可检查的 integration 树，等有内容再说。
+        return None
+    try:
+        policy = load_runtime_policy(settings.runtime_policy_file, repo=repo)
+    except RuntimePolicyError as exc:
+        return {
+            "profile": None,
+            "repo": str(repo.path),
+            "integration_commit": commit,
+            "missing": [],
+            "detail": f"runtime policy is unusable: {exc}",
+        }
+    name = policy.effective_integration_profile()
+    profile = policy.verify.profiles.get(name) if name else None
+    if profile is None:
+        return None
+    missing = [
+        path
+        for path in profile_entry_paths(profile)
+        if repo.read_file(repo.integration_ref, path) is None
+    ]
+    if not missing:
+        return None
+    return {
+        "profile": name,
+        "repo": str(repo.path),
+        "integration_commit": commit,
+        "missing": missing,
+        "detail": (
+            f"integration profile {name!r} needs {', '.join(missing)} in the repository,"
+            " but the integration tree does not contain it; the merge gate would fail"
+            " after the work is done"
+        ),
+    }
+
+
 @management.post("/plans/{plan_id}/approve")
 def approve_plan(
     plan_id: str,
@@ -200,6 +338,54 @@ def approve_plan(
     bind_declared(
         principal, body.decided_by, key="plan:approve", database=database, request=request
     )
+    blocked = _plan_assignment_blocks(database, plan_id)
+    if blocked:
+        # 拒绝**不**改计划状态：它仍是 draft，目标窗口补齐后直接再 approve 即可。
+        # 不把人卡在「重新提交方案」上，也不替人做降级派单。
+        summary = "; ".join(
+            f"{item['task_id']}→{item['harness_id']}: {', '.join(item['reasons'])}"
+            for item in blocked
+        )
+        raise ApiError(
+            "plan.targets_unavailable",
+            409,
+            "plan not approved: assigned targets cannot take work",
+            retryable=False,
+            details={
+                "plan_id": plan_id,
+                "plan_status": "draft",
+                "staged": True,
+                "blocked": blocked,
+                "summary": summary,
+                "next": (
+                    "补齐目标窗口（上线 / 配置凭证 / 等待空闲）后再次 approve；"
+                    "方案仍是 draft，不需要重新提交"
+                ),
+            },
+        )
+    # 合并检查的入口在被测仓库里存不存在，必须**开工前**就回答。等到模型干完、
+    # 合并进 integration 再 ``exit 2`` + revert，是在用半小时换一句早就知道的话。
+    profile_block = _plan_profile_block(
+        database, plan_id, getattr(request.app.state, "canonical_repo", None)
+    )
+    if profile_block:
+        raise ApiError(
+            "plan.profile_unrunnable",
+            409,
+            "plan not approved: the integration check cannot run in this repository",
+            retryable=False,
+            details={
+                "plan_id": plan_id,
+                "plan_status": "draft",
+                "staged": True,
+                **profile_block,
+                "next": (
+                    "在被测仓库的 integration 树里补上 profile 需要的入口文件，"
+                    "或在仓库的 verify-profiles.json 里声明一个跑得起来的"
+                    " integration_profile；方案仍是 draft，修好后再 approve"
+                ),
+            },
+        )
     outcome = service.approve_plan(
         plan_id=plan_id,
         decided_by=body.decided_by,
@@ -209,6 +395,44 @@ def approve_plan(
         "plan_id": outcome.plan_id,
         "ready": list(outcome.ready),
         "waiting": list(outcome.waiting),
+        # goal 提到、契约没写的路径：**只提示，不拦**。自然语言的引用天然
+        # 有歧义，硬拒会把一次误读变成卡住的批准；但静默通过等于让执行者
+        # 在提交时才发现（e16），所以必须摆到批准人眼前。
+        "scope_warnings": _plan_scope_warnings(database, plan_id),
+    }
+
+
+@management.get("/plans/{plan_id}/assignability")
+def plan_assignability(
+    plan_id: str,
+    request: Request,
+    database: DatabaseDep,
+    _principal: _guard("plan:approve"),
+) -> dict[str, Any]:
+    """只读预检：目标窗口与合并检查现在能不能接活（approve 前的「暂存」路径）。
+
+    approve 会拒绝，但拒绝不该让人以为方案坏了 —— 这里把同一份判断先摆出来，
+    人可以先修窗口/补 profile、方案原样留在 draft，攒齐了再 approve。
+    """
+    rows = database.read("SELECT status FROM plans WHERE plan_id = ?", (plan_id,))
+    if not rows:
+        raise ApiError("resource.not_found", 404, f"unknown plan: {plan_id}")
+    blocked = _plan_assignment_blocks(database, plan_id)
+    profile_block = _plan_profile_block(
+        database, plan_id, getattr(request.app.state, "canonical_repo", None)
+    )
+    return {
+        "plan_id": plan_id,
+        "plan_status": str(rows[0]["status"]),
+        "approvable": not blocked and profile_block is None,
+        "staged": True,
+        "blocked": blocked,
+        "profile": profile_block,
+        "scope_warnings": _plan_scope_warnings(database, plan_id),
+        "next": (
+            "全部可派时调用 approve；否则先补齐离线 / 无凭证 / 满载的目标窗口，"
+            "或补上合并检查需要的入口文件"
+        ),
     }
 
 
@@ -1488,8 +1712,16 @@ def human_merge(
             details={"commit": commit, "branch": branch},
         )
 
-    policy = load_runtime_policy(settings.runtime_policy_file, repo=repo).merge_policy()
-    worker = MergeWorker(database, repo, policy=policy)
+    runtime_policy = load_runtime_policy(settings.runtime_policy_file, repo=repo)
+    worker = MergeWorker(
+        database,
+        repo,
+        policy=runtime_policy.merge_policy(),
+        # 闸门必须按**目标工作树**重新解析 profile（那是命令真正要跑的那棵树），
+        # 而不是平台仓库 integration 里那份。见 045e：repo_source 为 null 时
+        # 检查的根本不是被测仓库。
+        policy_resolver=runtime_policy.resolve_for_worktree,
+    )
     outcome = worker.merge(
         task_id=body.task_id,
         attempt_id=str(attempt_id),
@@ -2542,8 +2774,28 @@ def task_verification(task_id: str, service: SchedulerDep, database: DatabaseDep
         "head_exit_code",
         "failure_reason",
         "verify_profile",
+        # 评审 receipt 的验收摘要（退回计数 / 缺项 / attempt 终态）。
+        "acceptance",
     )
     return {"verification": {key: receipt.get(key) for key in fields}}
+
+
+@read.get("/tasks/{task_id}/acceptance")
+def task_acceptance(task_id: str, service: SchedulerDep, database: DatabaseDep):
+    """看板读验收状态：任务行上的三个字段 + 最近几次验收记录。
+
+    没有验收记录（未开启验收，或还没交付）时如实返回空列表，不猜。
+    """
+    task = service.get_task(task_id)
+    from app.acceptance.receipts import acceptance_history
+
+    return {
+        "task_id": task_id,
+        "state": task.get("acceptance_state"),
+        "retries": task.get("acceptance_retries"),
+        "receipt_id": task.get("acceptance_receipt_id"),
+        "receipts": acceptance_history(database, task_id=task_id, limit=10),
+    }
 
 
 @read.get("/groups/{group_id}/tasks")

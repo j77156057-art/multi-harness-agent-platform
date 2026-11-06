@@ -7,7 +7,7 @@ would be a second definition that drifts.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -94,7 +94,10 @@ class FormalDispatchRequest(BaseModel):
     harness_id: str = Field(min_length=1, max_length=100)
     decided_by: str = Field(min_length=1)
     exclusive_paths: list[str] = Field(min_length=1, max_length=50)
-    acceptance: str = Field(min_length=1, max_length=4000)
+    #: 字符串 = 旧口径的验收说明；对象 = 派单级验收开关。字段级校验放在
+    #: ``dispatch()`` 里做，是为了拒绝时能说清「enabled 不是布尔 / profile 不存在」，
+    #: 而不是把非法值悄悄当成 false 放过去。
+    acceptance: Annotated[str, Field(min_length=1, max_length=4000)] | dict[str, Any]
     #: The task this one takes over (a re-point).  Optional; the platform
     #: checks that it exists, is in the same group, and is no longer live.
     supersedes: str | None = Field(default=None, min_length=1, max_length=64)
