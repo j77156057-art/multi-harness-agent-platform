@@ -69,6 +69,70 @@ const BASE_ADAPTERS={
 const windowIdFor=(base, value)=>typeof base==='string' && typeof value==='string' &&
   new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}-(member|window)-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$`).test(value);
 
+// 验收（acceptance）只是**只读摘要**：页面要显"结论 / 退回次数 / 终态原因 / 缺口"。
+//
+// 平台那份 acceptance receipt 很大：每轮都带 `checks`、`changed_files`、`frozen`，
+// 缺口里还带 `skeleton_context`（命中词前后的原文），一条活能到几十 KB。整份
+// 塞给浏览器没有用，还会把任务列表拖慢。所以只放评审要看的那几项，并按上限截断：
+//   · rounds 最多留最近 5 轮
+//   · gaps 最多 8 条
+//   · 每条文本最多 120 字
+// 截掉多少条写进 `acceptance_truncated`，页面照着说"还有 N 条，见接口"。
+// 完整内容走 `GET /api/formal/tasks/{id}/acceptance`（平台原样返回，最多 10 条回执）。
+const ACCEPTANCE_LIMITS = Object.freeze({ rounds: 5, gaps: 8, text: 120 });
+
+/** 一条文本字段：超长就截断并**明确标出来**（别让人以为原文就这么点）。 */
+const acceptanceText = (value) => {
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  return text.length > ACCEPTANCE_LIMITS.text
+    ? `${text.slice(0, ACCEPTANCE_LIMITS.text)}…（已截断）`
+    : text;
+};
+
+/** 缺口只留：哪项检查、哪个文件/词/行、平台写的那句原因。 */
+const acceptanceGap = (gap = {}) => ({
+  check: acceptanceText(gap.check),
+  path: acceptanceText(gap.path),
+  token: acceptanceText(gap.token),
+  line: Number.isInteger(gap.line) ? gap.line : null,
+  detail: acceptanceText(gap.detail),
+});
+
+/** 轮次只留：第几轮、结论、commit、缺口条数（不放 checks/changed_files）。 */
+const acceptanceRound = (round = {}) => ({
+  round: Number.isInteger(round.round) ? round.round : null,
+  verdict: acceptanceText(round.verdict),
+  commit: acceptanceText(round.commit),
+  gap_count: Array.isArray(round.gaps) ? round.gaps.length : 0,
+});
+
+/**
+ * 任务行 + 平台的 `/tasks/{id}/acceptance` 返回 → 页面上屏的验收摘要。
+ *
+ * `payload` 是平台接口原样返回（可能读不到，那就是 null）。任务行上已经有
+ * `acceptance_state / acceptance_retries / acceptance_receipt_id`，优先信它；
+ * `finish_reason`、`rounds`、`gaps` 只在回执里有。
+ */
+export function acceptanceView(task = {}, payload = null) {
+  const latest = Array.isArray(payload?.receipts) ? payload.receipts[0] : null;
+  const gaps = Array.isArray(latest?.gaps) ? latest.gaps : [];
+  const rounds = Array.isArray(latest?.rounds) ? latest.rounds : [];
+  const keptRounds = rounds.slice(-ACCEPTANCE_LIMITS.rounds);
+  return {
+    acceptance_state: task.acceptance_state ?? latest?.attempt_state ?? null,
+    acceptance_retries: task.acceptance_retries ?? latest?.retries ?? null,
+    acceptance_receipt_id: task.acceptance_receipt_id ?? latest?.receipt_id ?? null,
+    finish_reason: latest?.finish_reason ?? null,
+    acceptance_rounds: keptRounds.map(acceptanceRound),
+    acceptance_gaps: gaps.slice(0, ACCEPTANCE_LIMITS.gaps).map(acceptanceGap),
+    acceptance_truncated: {
+      rounds_omitted: Math.max(rounds.length - keptRounds.length, 0),
+      gaps_omitted: Math.max(gaps.length - ACCEPTANCE_LIMITS.gaps, 0),
+    },
+  };
+}
+
 export function createFormalGateway(config={}){
   const enabled=Boolean(config.upstream&&config.tokenFile&&config.project&&config.group);
   let upstream;
@@ -82,6 +146,7 @@ export function createFormalGateway(config={}){
   // without it the admin-only routes answer 503 and every owner route keeps
   // working exactly as before.
   const adminEnabled=Boolean(config.adminTokenFile);
+  const memberEnabled=Boolean(config.memberTokenFile);
   const json=(res,status,data)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data));};
   // One credential rescue helper: a file path is any string that is not already
   // a token, so both shapes work and a mis-typed `[object Object]` fails loudly
@@ -122,8 +187,8 @@ export function createFormalGateway(config={}){
    * `{"error": {code, message, details}}`，其中 `details.known` 就是"你能选谁"。
    * 换成一句码，人就只能猜。
    */
-  async function callRaw(path,method,body){
-    const token=readCredential(config.tokenFile).trim();
+  async function callRaw(path,method,body,credential){
+    const token=readCredential(credential===undefined?config.tokenFile:credential).trim();
     if(!/^apt_[a-f0-9]{64}$/.test(token))throw fail(503,'administrator_credential_unavailable');
     let response;
     try{
@@ -291,7 +356,21 @@ export function createFormalGateway(config={}){
     adminId=auth.subject.id;
     return adminId;
   };
-  const safeTask=t=>({task_id:t.task_id,title:t.title,group_id:t.group_id,status:t.status,owner:t.owner,
+  // 普通成员的申请身份固定在这个办公室进程里，不由浏览器选择。
+  // 令牌只读在服务端；平台 whoami 同时确认“是这个 harness、就是这个 id”。
+  let memberToken=null,memberId=null;
+  const memberScope=async()=>{
+    if(!memberEnabled)throw fail(503,'formal_member_not_configured');
+    if(memberId)return memberId;
+    const token=readCredential(config.memberTokenFile).trim();
+    if(!/^apt_[a-f0-9]{64}$/.test(token))throw fail(503,'member_credential_unavailable');
+    const auth=await call('/auth/whoami',undefined,token);
+    if(auth.mode!=='enforce'||auth.subject?.type!=='harness')throw fail(503,'formal_member_authentication_required');
+    if(config.memberId&&auth.subject.id!==config.memberId)throw fail(503,'formal_member_identity_mismatch');
+    memberToken=token;memberId=auth.subject.id;
+    return memberId;
+  };
+  const safeTask=(t,acceptance)=>({task_id:t.task_id,title:t.title,group_id:t.group_id,status:t.status,owner:t.owner,
     assigned_harness_ids:JSON.parse(t.assigned_harness_ids_json||'[]'),attempt_id:t.current_attempt_id,
     attempt_no:t.attempt_no,max_attempts:t.max_attempts,budget_override_by:t.budget_override_by,
     escalated_at:t.escalated_at,state_changed_seq:t.state_changed_seq,
@@ -302,7 +381,16 @@ export function createFormalGateway(config={}){
    // The lineage: which task this one takes over (a platform fact).
    supersedes:t.supersedes||null,
    // 时间戳：办公室要按"最近更新"排序、要让人看见一条活多久没动了。
-   created_at:t.created_at||null,updated_at:t.updated_at||null});
+   created_at:t.created_at||null,updated_at:t.updated_at||null,
+   // 验收（只读展示）：结论、退回次数、回执 id、终态原因、截断后的轮次/缺口。
+   // 整份 receipt **不透传**，上限见 acceptanceView（最多 5 轮 / 8 条 / 每条 120 字）。
+   acceptance_state:acceptance?.acceptance_state??t.acceptance_state??null,
+   acceptance_retries:acceptance?.acceptance_retries??t.acceptance_retries??null,
+   acceptance_receipt_id:acceptance?.acceptance_receipt_id??t.acceptance_receipt_id??null,
+   finish_reason:acceptance?.finish_reason??null,
+   acceptance_rounds:acceptance?.acceptance_rounds||[],
+   acceptance_gaps:acceptance?.acceptance_gaps||[],
+   acceptance_truncated:acceptance?.acceptance_truncated||null});
   /**
    * 把**工单**和平台追加的**现场报告**拆开。
    *
@@ -368,7 +456,7 @@ export function createFormalGateway(config={}){
    const outputRoute=/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route);
    // `/installers` 带自己的两个开关（要不要跑版本命令、问哪个系统），在它自己那段里逐个校验；
    // 这里是**全局**白名单，漏了它就会在进路由之前被 400 掉。
-   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates','/allocation/assignment','/projects'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
+   if(url.search&&!['/messages','/tasks','/events','/installers','/allocation/rounds','/allocation/candidates','/allocation/assignment','/projects','/project-creation-requests'].includes(route)&&!outputRoute)throw fail(400,'unexpected_query');
    if(outputRoute&&url.search){
      for(const key of url.searchParams.keys())if(key!=='attempt_id')throw fail(400,'unexpected_query');
      const attemptParam=url.searchParams.get('attempt_id')||'';
@@ -393,6 +481,14 @@ export function createFormalGateway(config={}){
         if(!admin.accounted){admin.id=await adminScope();admin.token=adminToken;admin.accounted=true;}
         return admin.id;
       };
+      const applicant={accounted:false};
+      const asApplicant=async()=>{
+        if(applicant.accounted)return applicant;
+        if(memberEnabled){applicant.id=await memberScope();applicant.token=memberToken;}
+        else{applicant.id=await asAdmin();applicant.token=adminToken;}
+        applicant.accounted=true;
+        return applicant;
+      };
       if(req.method==='GET'&&route==='/status'){
         const members=await call('/harnesses');
         const listed=members.harnesses||[];
@@ -405,6 +501,11 @@ export function createFormalGateway(config={}){
         if(adminEnabled){
           try{adminIdentity=await adminScope();}
           catch(error){adminError=String(error?.message||error);}
+        }
+        let applicantIdentity=null,applicantError=null;
+        if(memberEnabled||adminEnabled){
+          try{applicantIdentity=memberEnabled?await memberScope():await adminScope();}
+          catch(error){applicantError=String(error?.message||error);}
         }
         // 后台的 harness 注册表是全局的：所有项目共用同一批登记窗口。真正的成员关系
         // 只能从本项目已派发的任务里推导（指定执行者 / 持有者 / 提交者 / 审查者），
@@ -422,11 +523,12 @@ export function createFormalGateway(config={}){
           if(t.owner) seen.add(t.owner);
           if(t.reviewer_harness_id) seen.add(t.reviewer_harness_id);
         }
-        json(res,200,{configured:true,connected:true,project_id:config.project,group_id:groupId,operator,
+        json(res,200,{configured:true,connected:true,project_id:config.project,group_id:groupId,operator,operator_type:'human',
           // `identity` 是网关当前**以谁的管理员身份**动作——由平台配置决定，不是常量。
           // 拿不到（凭据坏了/未配置）就是 null 加一条 `error`：前端据此不显示管理员
           // 结论，而不是拿一个过期的 id 去猜。
           admin:{configured:adminEnabled,identity:adminIdentity,error:adminError},
+          applicant:{configured:memberEnabled||adminEnabled,identity:applicantIdentity,error:applicantError},
           project_members:[...seen].sort(),
           harnesses:listed.filter(h=>h.registration_version).map(h=>({harness_id:h.harness_id,
           name:h.name||h.harness_id,status:h.status,registration_version:h.registration_version,
@@ -499,9 +601,14 @@ export function createFormalGateway(config={}){
         if([...url.searchParams.keys()].some(k=>k!=='basic'))throw fail(400,'unexpected_query');
         const result=await call('/groups/'+encodeURIComponent(groupId)+'/tasks');
         const tasks=await Promise.all(result.tasks.map(async t=>{
-          const base=safeTask(t);
-          if(basic)return {...base,verification:null};
-          return {...base,...(await call('/tasks/'+encodeURIComponent(t.task_id)+'/verification'))};
+          if(basic)return {...safeTask(t),verification:null};
+          const id=encodeURIComponent(t.task_id);
+          // 验收摘要：只有**真进过验收**的活才补一次回执读取（没进验收的不付这个请求）。
+          // 平台列表行上已经有 state/retries/receipt_id；finish_reason/rounds/gaps 只在回执里。
+          const acceptanceRaw=t.acceptance_state
+            ?await call('/tasks/'+id+'/acceptance').catch(()=>null)
+            :null;
+          return {...safeTask(t,acceptanceView(t,acceptanceRaw)),...(await call('/tasks/'+id+'/verification'))};
         }));
         json(res,200,{tasks});return true;
       }
@@ -796,6 +903,46 @@ export function createFormalGateway(config={}){
           model_id:body.model_id==null?'':String(body.model_id),
         });
         json(res,200,result);return true;
+      }
+      if(route==='/agent/project-creation-requests'&&['GET','POST'].includes(req.method)){
+        const actor=await asApplicant(),agentId=actor.id,actorToken=actor.token;
+        if(req.method==='GET'){
+          const answer=await callRaw('/project-creation-requests','GET',undefined,actorToken);
+          const rows=(answer.data.requests||[]).filter(row=>row.requested_by_type==='harness'&&row.requested_by_id===agentId);
+          json(res,answer.status,{requests:rows});return true;
+        }
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const text=(key,max)=>{const value=String(body[key]||'').trim();if(!value||value.length>max)throw fail(400,'invalid_application_field');return value;};
+        const projectId=text('project_id',120),requestedGroupId=text('group_id',120);
+        if(!ident(projectId)||!ident(requestedGroupId))throw fail(400,'invalid_application_id');
+        const answer=await callRaw('/groups/'+encodeURIComponent(groupId)+'/project-creation-requests','POST',{
+          project_id:projectId,project_name:text('project_name',120),
+          group_id:requestedGroupId,group_name:text('group_name',120),
+          purpose:text('purpose',2000),scope:text('scope',2000),expected_output:text('expected_output',2000),
+          requested_kind:'harness',requested_by:agentId,
+        },actorToken);
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='GET'&&route==='/project-creation-requests'){
+        const status=String(url.searchParams.get('status')||'').trim();
+        if(status&&!['pending','approved','rejected'].includes(status))throw fail(400,'invalid_request_status');
+        const answer=await callRaw('/project-creation-requests'+(status?'?status='+encodeURIComponent(status):''),'GET');
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='POST'&&/^\/project-creation-requests\/PCR-[a-f0-9]{32}\/(approve|reject)$/.test(route)){
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>12000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw||'{}');}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body))throw fail(400,'invalid_json');
+        const reason=String(body.reason||'').trim();
+        if(route.endsWith('/reject')&&!reason)throw fail(400,'rejection_reason_required');
+        const decision={decided_by:operator,reason};
+        for(const field of ['project_id','project_name','group_id','group_name']){
+          if(body[field]!==undefined)decision[field]=String(body[field]||'').trim();
+        }
+        const answer=await callRaw(route,'POST',decision);
+        json(res,answer.status,answer.data);return true;
       }
       if(req.method==='GET'&&route==='/projects'){
         // 平台上的项目（= 界面里的项目，现在没有云端，两者就是同一件事）。
@@ -1164,6 +1311,36 @@ export function createFormalGateway(config={}){
         if(task.group_id!==groupId)throw fail(502,'task_scope_mismatch');
         json(res,200,{...result,task:safeTask(task)});return true;
       }
+      // 候选经验、人类确认和注入审计：复用操作人凭据，并按任务所属群隔离。
+      if(req.method==='GET'&&route==='/experience-injection'){
+        json(res,200,await call('/experience-injection'));return true;
+      }
+      if(req.method==='POST'&&route==='/experience-injection'){
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='enabled')||typeof body.enabled!=='boolean')throw fail(400,'invalid_experience_switch');
+        const answer=await callRaw('/experience-injection','POST',{enabled:body.enabled,decided_by:operator});
+        json(res,answer.status,answer.data);return true;
+      }
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/experiences$/.test(route)){
+        const id=route.split('/')[2],task=await call('/tasks/'+id);
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        json(res,200,await call('/tasks/'+id+'/experiences'));return true;
+      }
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/experience-injections$/.test(route)){
+        const id=route.split('/')[2],task=await call('/tasks/'+id);
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        json(res,200,await call('/tasks/'+id+'/experience-injections'));return true;
+      }
+      if(req.method==='POST'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/experiences\/exp-[a-f0-9]{24}\/decision$/.test(route)){
+        const id=route.split('/')[2],experienceId=route.split('/')[4],task=await call('/tasks/'+id);
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
+        let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
+        if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='action')||!['confirm','ignore','revoke'].includes(body.action))throw fail(400,'invalid_experience_decision');
+        const answer=await callRaw('/tasks/'+id+'/experiences/'+experienceId+'/decision','POST',{action:body.action,decided_by:operator});
+        json(res,answer.status,answer.data);return true;
+      }
       // 任务 id 的形状**不由这条网关决定**：平台的派单允许任意 id（`plan-create --task T-1`、
       // 开工时生成的 `FD-<hex>`、演示用的 `FLOW-1101-2` 都合法）。这里以前写死成
       // `FD-[a-f0-9]{16}`，后果是别的形状一律 404 —— 界面点开一条活看到的是
@@ -1187,7 +1364,11 @@ export function createFormalGateway(config={}){
         // 人在这一版上留过的决定（目前是「确认放行」那一条留痕）。同样是**锦上添花**：
         // 读不到就空着，不能因为一条审计痕迹把整条任务详情带崩。
         const decisions=await call('/tasks/'+id+'/decisions').catch(()=>({decisions:[]}));
-        json(res,200,{task:{...safeTask(task),...(task.spec?{spec}:{})},diff,events,decisions});return true;
+        // 验收摘要（只读展示）：详情与列表用同一个 acceptanceView，字段不会两处不一致。
+        const acceptanceRaw=task.acceptance_state
+          ?await call('/tasks/'+id+'/acceptance').catch(()=>null)
+          :null;
+        json(res,200,{task:{...safeTask(task,acceptanceView(task,acceptanceRaw)),...(task.spec?{spec}:{})},diff,events,decisions});return true;
       }
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/output$/.test(route)){
         // The harness CLI's own output, as it streams. Read-only, and scoped to
@@ -1203,6 +1384,14 @@ export function createFormalGateway(config={}){
       // 这两份后端一直有（`/tasks/{id}/reviews`、`/tasks/{id}/forensics`），但界面只显示
       // "审核状态"，看不到谁在什么时候说了什么；取证更是完全没上屏。所以补这两条只读路由，
       // 让"这条活为什么被卡住"能从证据上回答，而不是靠猜。
+      if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/acceptance$/.test(route)){
+        const id=route.split('/')[2],task=await call('/tasks/'+id);
+        if(task.group_id!==groupId)throw fail(404,'task_not_in_group');
+        // **完整**验收内容：平台原样返回（最多 10 条回执），供页面「已截断，完整内容看接口」时查看。
+        // 列表/详情里的 acceptance_* 是截断过的摘要；这里是原样，不截断。
+        const acceptance=await call('/tasks/'+id+'/acceptance');
+        json(res,200,acceptance);return true;
+      }
       if(req.method==='GET'&&/^\/tasks\/[A-Za-z0-9][A-Za-z0-9._:-]{0,119}\/reviews$/.test(route)){
         const id=route.split('/')[2],task=await call('/tasks/'+id);
         if(task.group_id!==groupId)throw fail(404,'task_not_in_group');

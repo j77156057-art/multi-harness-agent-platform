@@ -72,6 +72,13 @@ class Settings:
         self.harness_timeout_seconds: int = int(
             os.environ.get("AP_HARNESS_TIMEOUT_SECONDS", "3600")
         )
+        # 静默挂死窗口：CLI 输出、CPU、output_tokens 三项同时不动到这个秒数
+        # 才判 stalled（0 关闭）。比 1800 秒的兜底超时更早收口，但比任何一次
+        # 正常的"模型在长时间生成"都宽。
+        self.harness_stall_seconds: int = int(os.environ.get("AP_STALL_SECONDS", "300"))
+        self.harness_stall_check_seconds: float = float(
+            os.environ.get("AP_STALL_CHECK_SECONDS", "15")
+        )
         self.stale_grace_misses: int = int(os.environ.get("AP_STALE_GRACE", "3"))
         self.max_attempts: int = int(os.environ.get("AP_MAX_ATTEMPTS", "3"))
         self.max_review_rounds: int = int(os.environ.get("AP_MAX_REVIEW_ROUNDS", "2"))

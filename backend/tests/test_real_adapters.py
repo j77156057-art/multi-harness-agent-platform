@@ -830,6 +830,77 @@ def test_opencode_launch_shim_per_platform(tmp_path, monkeypatch):
     assert nt.use_shell_shim() is False, "explicit override wins on Windows too"
 
 
+def test_opencode_review_argv_puts_agent_after_run(tmp_path):
+    """07 现场：``_with_agent`` 按 argv[0] 盲插，得到 ``opencode --agent plan run``。
+
+    实测 v2.0.22 直接拒绝（A/B/C 三向对照，见下一条）；``run --agent plan`` 成功。
+    """
+    order = "review this commit"
+    direct = [
+        "opencode",
+        "run",
+        "--agent",
+        "plan",
+        "--standalone",
+        "--format",
+        "json",
+        "--auto",
+        order,
+    ]
+    shim = ["bash", "-lc", 'exec "$0" "$@"', *direct]
+
+    posix = OpenCodeAdapter(client=None, platform="posix", bash_path="/usr/bin/bash")
+    assert posix.review_command(order, tmp_path) == direct
+    assert posix.review_command(order, tmp_path)[1] == "run"
+    assert posix.review_command(order, tmp_path)[2] == "--agent"
+
+    nt = OpenCodeAdapter(client=None, platform="nt", bash_path="/usr/bin/bash")
+    assert nt.review_command(order, tmp_path) == shim
+
+
+def test_opencode_review_script_puts_agent_after_run(tmp_path):
+    """bundle 模式：flag 必须写进 run.cmd，而不是塞给 cmd.exe。"""
+    adapter = OpenCodeAdapter(
+        client=None,
+        platform="nt",
+        bash_path=r"C:\Users\probe\AppData\Local\Microsoft\WindowsApps\bash.exe",
+    )
+    prepared = adapter.prepare_work_order("review this commit", tmp_path)
+    argv = adapter.review_command(prepared, tmp_path)
+
+    script = adapter._work_order_bundle / "run.cmd"
+    text = script.read_text(encoding="utf-8")
+    assert "opencode run --agent plan --standalone" in text
+    assert "--agent" not in argv, "cmd.exe 的 argv 不应再插入 flag"
+    assert argv[:4] == ["cmd.exe", "/d", "/s", "/c"]
+    adapter.cleanup_work_order()
+
+
+def test_opencode_review_argv_is_the_form_that_actually_ran(tmp_path):
+    """A/B/C 探针的结论固化：A/B 成功、C 失败。
+
+    这里不重新起 CLI（60 秒 × 3 会让单测变成演练），只把现场结果写进断言：
+    旧实现产出的就是 C 形，新实现产出的是 B 形。
+    """
+    order = "reply with OK"
+    # C 形（旧实现）：--agent 落在 run 之前。
+    old = ["opencode", "--agent", "plan", "run", "--standalone", "--format", "json", "--auto", order]
+    new = OpenCodeAdapter(client=None, platform="posix").review_command(order, tmp_path)
+    # B 形（新实现）：--agent 落在 run 之后。
+    assert new == [
+        "opencode",
+        "run",
+        "--agent",
+        "plan",
+        "--standalone",
+        "--format",
+        "json",
+        "--auto",
+        order,
+    ]
+    assert old[1] == "--agent" and new[1] == "run"
+
+
 def test_cli_settings_are_fail_closed(monkeypatch):
     """A typo in either knob refuses to start instead of silently degrading."""
     monkeypatch.setenv("AP_CODEX_SANDBOX", "yolo")

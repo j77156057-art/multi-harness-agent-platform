@@ -202,13 +202,52 @@ class OpenCodeAdapter(CliHarness):
         """
         return self._with_agent(self.command(prompt, workdir), "plan")
 
-    @staticmethod
-    def _with_agent(argv: list[str], agent: str) -> list[str]:
+    def _with_agent(self, argv: list[str], agent: str) -> list[str]:
+        """Put ``--agent`` where OpenCode accepts it: after the ``run`` command.
+
+        07 现场：``_with_agent`` 按 ``argv[0]`` 盲插，把 argv 变成
+        ``opencode --agent plan run ...``。实测（v2.0.22）CLI 直接拒绝：
+
+            Unrecognized flag: --agent in command opencode
+            Unrecognized flag: --format in command opencode
+
+        而 ``opencode run --agent plan --standalone ...`` 成功返回（A/B/C 三向
+        对照见 tests/test_real_adapters.py）。所以这里按**子命令**定位，不再按
+        argv[0]。
+        """
+        if self._work_order_bundle is not None:
+            # bundle 模式真正执行的是 run.cmd；改 argv 改不到那一行。
+            self._inject_agent_into_script(agent)
+            return argv
         if "--agent" in argv:
             index = argv.index("--agent")
             argv[index + 1] = agent
             return argv
-        return [*argv[:1], "--agent", agent, *argv[1:]]
+        if "run" in argv:
+            index = argv.index("run")
+            return [*argv[: index + 1], "--agent", agent, *argv[index + 1 :]]
+        # 没有 ``run`` 子命令（不该发生）：追加而不是悄悄丢掉，让 CLI 自己报错。
+        return [*argv, "--agent", agent]
+
+    def _inject_agent_into_script(self, agent: str) -> None:
+        """The Windows cmd transport carries argv in a generated script.
+
+        ``_with_agent`` 改的是 argv，但 bundle 模式跑的是 ``run.cmd`` 里的那一行；
+        不把 flag 写进脚本就等于没加。只替换 ``opencode run `` 一次，保留脚本里
+        已有的 model/--file 参数顺序。
+        """
+        bundle = self._work_order_bundle
+        if bundle is None:
+            return
+        script = bundle / "run.cmd"
+        try:
+            text = script.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if "--agent " in text:
+            return
+        text = text.replace("opencode run ", f"opencode run --agent {agent} ", 1)
+        script.write_text(text, encoding="utf-8", newline="")
 
     # ---------------------------------------------------------------- 平台工具
 

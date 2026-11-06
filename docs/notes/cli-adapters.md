@@ -101,7 +101,42 @@
 - **不替人做登录**。十条里有账号体系的，一律由人自己登录；平台只负责在缺凭据时
   说清楚缺什么。
 
-## 五、复现这些结论
+## 五、CodeBuddy 的启动前置条件（2026-11-05 实测）
+
+CodeBuddy 在 Windows 上找不到 Git Bash 时不会报错，只会在 stderr 打一行提示，然后
+回退到 PowerShell。它的工具集里因此**没有 `Bash`**；模型第一步偏偏调用 `Bash`，收到
+`Tool "Bash" does not exist in the current tool set` 后重试三次，接着进程活着、CPU 不涨、
+日志不再更新 —— 平台只能等 `AP_HARNESS_TIMEOUT_SECONDS`（默认 1800 秒）超时才收口。
+
+实测证据（`FD-045eb96438124aae.a1` / `FD-e16fff40c3dc4db5.a1`）：3 次模型调用共用
+370 / 348 output tokens（约 12 秒），之后 30 分钟零增长。
+
+所以这是**启动前置条件**，不是运行期运气：
+
+- **必需变量**：`CODEBUDDY_CODE_GIT_BASH_PATH` 指向一个**存在且可执行**的 bash。
+  本机可用值：`<PortableGit>\bin\bash.exe`。
+- **检查代码**：`backend/app/adapter/prerequisites.py` 的
+  `codebuddy_git_bash_failure()` 会真的跑一次 `bash -c "exit 0"`；`check_harness_prerequisites()`
+  按 harness 汇总。`backend/app/adapter/formal_worker.py` 在 `--harness-id` 解析之后、
+  连库和进 ready 池**之前**调用它。
+- **失败行为**：打印一行 JSON
+  `{"status":"worker_prerequisite_missing","reason":"codebuddy_git_bash","detail":...}`
+  并以退出码 2 结束 —— 不注册、不领取、不进池。
+- **成功行为**：`{"status":"worker_prerequisites_ok","checked":"codebuddy_git_bash","git_bash":...}`
+  写进 worker 自己的日志，真实 worker 进程可核验。
+- **注入位置**：启动脚本（`artifacts/e2e-real-20261105/scripts/start-workers.ps1`）在起
+  CodeBuddy 窗口时把该变量写进子进程环境；不依赖任何人的交互 shell。
+- **测试**：`backend/tests/test_worker_prerequisites.py`（6 例，其中一例用真实子进程验证
+  缺变量时退出码 2 且不接活）。
+
+配套的**静默挂死活性检测**（`backend/app/adapter/stall.py` + `harnesses/cli.py`）：
+每 `AP_STALL_CHECK_SECONDS`（默认 15 秒）采样一次，只有**输出字节、子进程 CPU 时间、
+`output_tokens` 三项同时不增长**并持续 `AP_STALL_SECONDS`（默认 300 秒）才判 `stalled`，
+立刻杀进程并写 `HarnessStalled` failure（带部分 stdout/stderr 与 stalled 秒数）。
+拿不到 `output_tokens` 时永不触发（宁可漏判，不误杀）。反例测试：每 0.4 秒持续产出的
+慢任务必须正常退出。
+
+## 六、复现这些结论
 
 ```powershell
 # 已装的那条，直接问它

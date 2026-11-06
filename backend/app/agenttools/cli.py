@@ -113,12 +113,16 @@ def main(argv: list[str] | None = None) -> int:
         head = first[0][:200] if first else "（空）"
         print(f"[{step.no}] {step.tool or '（没写工具）'} → {head}", flush=True)
 
+    reasons = list(getattr(channel, "finish_reasons", []) or [])
     summary = {
         "ok": result.ok,
         "steps": len(result.steps),
         "summary": result.summary,
         "error": result.error,
         "tool_calls": sum(1 for step in result.steps if step.tool),
+        # 上游给了就带上；没给就是 None（不可得），由平台照实记录。
+        "finish_reasons": reasons,
+        "finish_reason": reasons[-1] if reasons else None,
     }
     print(RESULT_MARKER + " " + json.dumps(summary, ensure_ascii=False), flush=True)
     if result.ok:

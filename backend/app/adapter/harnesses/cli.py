@@ -36,8 +36,39 @@ from typing import Any, Protocol
 
 from app.adapter import cli_output
 from app.adapter.http import AdapterError, HttpAdapter
+from app.adapter.stall import (
+    ProgressSample,
+    StallDetector,
+    child_cpu_seconds,
+    output_tokens_in_tail,
+)
 from app.config import settings
 from app.git.repo import run_git
+
+
+class HarnessStalled(RuntimeError):
+    """CLI made no progress for the whole stall window and was killed.
+
+    "No progress" is three signals at once -- output bytes, child CPU time and
+    ``output_tokens`` -- so a slow but producing run is not mistaken for a hung
+    one. The partial stdout/stderr is carried along like a timeout's.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        duration_seconds: float | None = None,
+        stalled_seconds: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+        self.duration_seconds = duration_seconds
+        self.stalled_seconds = stalled_seconds
+
 
 
 class HarnessTimeout(RuntimeError):
@@ -128,6 +159,21 @@ class CliUnavailable(RuntimeError):
     """The harness binary is not on PATH."""
 
 
+class ProviderUnavailable(RuntimeError):
+    """The pool answered that no model of this window can serve the request.
+
+    Raised **before** the CLI starts: this attempt sends tool definitions and
+    every model the window can reach is a CLI slot.  Retrying on the same
+    window would repeat the same refusal, so the caller must treat it as
+    non-retryable.
+    """
+
+    def __init__(self, message: str, *, reason_code: str = "", required_tools: tuple[str, ...] = ()) -> None:
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.required_tools = required_tools
+
+
 class CliFailed(RuntimeError):
     """The CLI exited non-zero; the attempt has been abandoned."""
 
@@ -161,6 +207,10 @@ class CliRunResult:
     stdout: str
     stderr: str
     duration_seconds: float
+    #: 执行期的**信息**（不是失败）。目前只有一条来源：运行产物被跳过，
+    #: 不判越界也不进提交（见 ``ScopedRunner``）。随 ``task.submit`` 的
+    #: payload 一起落盘，事后可与"越界"区分。
+    notes: tuple[str, ...] = ()
 
 
 class CliRunner(Protocol):
@@ -402,6 +452,10 @@ class SubprocessRunner:
                 else None
             )
             offsets = {"out": 0, "err": 0}
+            stall_window = float(settings.harness_stall_seconds)
+            detector = StallDetector(window_seconds=stall_window) if stall_window > 0 else None
+            stall_check_seconds = max(1.0, float(settings.harness_stall_check_seconds))
+            next_stall_check = started + stall_check_seconds
             while True:
                 now = time.monotonic()
                 # Copy whatever the child has written so far into the live log
@@ -409,6 +463,27 @@ class SubprocessRunner:
                 # only exist so a reader can watch the run.
                 offsets["out"] = _drain(out, out_log, offsets["out"])
                 offsets["err"] = _drain(err, err_log, offsets["err"])
+                if detector is not None and now >= next_stall_check:
+                    # 三项同时不动才判 stalled；output_tokens 取不到就不判。
+                    next_stall_check = now + stall_check_seconds
+                    sample = ProgressSample(
+                        bytes_total=offsets["out"] + offsets["err"],
+                        cpu_seconds=child_cpu_seconds(process.pid),
+                        tokens=output_tokens_in_tail(log_path),
+                    )
+                    if detector.observe(sample, now=now):
+                        stalled = detector.stalled_seconds(now=now)
+                        _kill(process)
+                        offsets["out"] = _drain(out, out_log, offsets["out"])
+                        offsets["err"] = _drain(err, err_log, offsets["err"])
+                        raise HarnessStalled(
+                            f"{argv[0]} made no progress for {stalled:.0f}s"
+                            " (no output bytes, CPU time and output_tokens growth)",
+                            stdout=_tail(out),
+                            stderr=_tail(err),
+                            duration_seconds=time.monotonic() - started,
+                            stalled_seconds=stalled,
+                        )
                 moments = [moment for moment in (deadline, next_tick) if moment is not None]
                 if moments and now >= min(moments):
                     if deadline is not None and now >= deadline:
@@ -491,6 +566,9 @@ class WorkOutcome:
     submit: dict[str, Any]
     cli: CliRunResult
     parsed: dict[str, Any]
+    acceptance: dict[str, Any] | None = None
+    #: 上游实际返回的 ``finish_reason``；拿不到就是 ``None``（不拿 token 数反推）。
+    finish_reason: str | None = None
 
 
 #: How much of the CLI's own output may go into the **event log**. The event
@@ -500,6 +578,23 @@ class WorkOutcome:
 #: transcript (``data/formal-runs/<task>.<attempt>.log``) and in the run
 #: evidence; the event keeps the beginning.
 MAX_EVENT_OUTPUT_CHARS = 4000
+
+
+def _finish_reason_of(parsed: dict[str, Any]) -> str | None:
+    """上游明确返回的结束原因，拿不到就是 ``None``。
+
+    只看适配器自己解析出来的原字段；不在这里用 token 数或截断迹象猜一个
+    "看起来像"的值 —— 猜出来的 finish_reason 比没有更坏。
+    """
+    value = parsed.get("finish_reason")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    reasons = parsed.get("finish_reasons")
+    if isinstance(reasons, list):
+        tail = [str(item).strip() for item in reasons if str(item).strip()]
+        if tail:
+            return tail[-1]
+    return None
 
 
 def _summarize_output(parsed: dict[str, Any]) -> dict[str, Any]:
@@ -581,6 +676,7 @@ class CliHarnessWorker:
         on_error_attempt: Callable[[str | None], None] | None = None,
         abandon_on_failure: bool = True,
         env: dict[str, str] | None = None,
+        acceptance_gate: Any | None = None,
     ) -> WorkOutcome:
         """claim -> [CLI runs, heartbeat on tick] -> publish -> submit.
 
@@ -670,13 +766,79 @@ class CliHarnessWorker:
         commit = self._git("rev-parse", "HEAD")
         branch = self._git("rev-parse", "--abbrev-ref", "HEAD")
         changed = self._changed_files(str(item.get("base_commit") or ""))
+        parsed = self.adapter.parse_output(cli.stdout)
+        # 上游适配器给了 ``finish_reason`` 就记下来；没给就是 None（不可得），
+        # 后续绝不拿 completion tokens 之类的东西反推替代。
+        finish_reason = _finish_reason_of(parsed)
+        # 交付边界：执行者已经写完、工作树里已经有 commit。这里先判验收，
+        # 不合格就把具体缺项拼进工单，**同一次尝试**里退回给同一个执行者一次；
+        # 仍然不合格就不进 publish/submit（终态由调用方落盘）。
+        acceptance: dict[str, Any] | None = None
+        if acceptance_gate is not None:
+            from app.acceptance.flow_gate import AcceptanceRejected
+
+            acceptance = acceptance_gate.check(
+                commit=commit, worktree=self.worktree, changed=changed
+            )
+            if acceptance["verdict"] != "pass" and acceptance_gate.retry_available():
+                retry_order = self.work_order(
+                    task_id=task_id,
+                    attempt_id=context.attempt_id,
+                    base_commit=item.get("base_commit"),
+                    goal=acceptance_gate.retry_goal(goal, acceptance),
+                )
+                prepared_retry = self.adapter.prepare_work_order(retry_order, self.worktree)
+                retry_argv = self.adapter.command(prepared_retry, self.worktree)
+                if self.adapter.prompt_via_stdin:
+                    run_kwargs["stdin_text"] = prepared_retry
+                try:
+                    cli = self.runner.run(
+                        retry_argv,
+                        cwd=self.worktree,
+                        timeout_seconds=timeout_seconds,
+                        on_tick=self._tick(task_id),
+                        tick_interval_seconds=float(self.heartbeat_seconds),
+                        **({"env": merged_env} if merged_env else {}),
+                        **run_kwargs,
+                    )
+                finally:
+                    self.adapter.cleanup_work_order()
+                if cli.returncode != 0:
+                    if abandon_on_failure:
+                        self.adapter.abandon(
+                            task_id=task_id, reason=f"harness CLI exited {cli.returncode}"
+                        )
+                    raise CliFailed(task_id, cli)
+                commit = self._git("rev-parse", "HEAD")
+                changed = self._changed_files(str(item.get("base_commit") or ""))
+                parsed = self.adapter.parse_output(cli.stdout)
+                finish_reason = _finish_reason_of(parsed)
+                acceptance = acceptance_gate.check(
+                    commit=commit, worktree=self.worktree, changed=changed
+                )
+            if acceptance["verdict"] != "pass":
+                state = (
+                    "unjudgeable"
+                    if acceptance["verdict"].startswith("unjudgeable")
+                    else "acceptance_failed"
+                )
+                record = acceptance_gate.final_record(
+                    state, attempt_state="abandoned", finish_reason=finish_reason
+                )
+                acceptance_gate.persist(record)
+                raise AcceptanceRejected(task_id, record)
+            record = acceptance_gate.final_record(
+                "retry_fixed" if len(acceptance_gate.rounds) > 1 else "passed",
+                finish_reason=finish_reason,
+            )
+            acceptance_gate.persist(record)
+            acceptance = record
         publish = self.adapter.publish_task_branch(
             task_id=task_id,
             branch=branch,
             commit=commit,
             idempotency_key=f"pub:{task_id}:{commit[:8]}",
         )
-        parsed = self.adapter.parse_output(cli.stdout)
         completion: dict[str, Any] = {
             "commit": commit,
             "task_id": task_id,
@@ -685,7 +847,16 @@ class CliHarnessWorker:
             "changed_files": changed,
             "harness": self.adapter.registration.harness_id,
             "cli": {"adapter_version": self.adapter.registration.adapter_version},
+            "finish_reason": finish_reason,
+            "finish_reason_source": "upstream" if finish_reason else "unavailable",
         }
+        notes = tuple(getattr(cli, "notes", ()) or ())
+        if notes:
+            # 事件名不新造（EventKind 封闭）；"跳过运行产物"作为信息字段
+            # 落在已有的 task.submit 事件里，不报越界、不阻断。
+            completion["runtime_artifacts_skipped"] = list(notes)
+        if acceptance is not None:
+            completion["acceptance"] = acceptance
         if parsed:
             completion["harness_output"] = _summarize_output(parsed)
         submit = self.adapter.submit_result(task_id=task_id, completion=completion)
@@ -699,6 +870,8 @@ class CliHarnessWorker:
             submit=submit,
             cli=cli,
             parsed=parsed,
+            acceptance=acceptance,
+            finish_reason=finish_reason,
         )
 
     # -------------------------------------------------------------- internals

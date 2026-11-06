@@ -64,18 +64,21 @@ def plan_attempt(
     data_dir: Path | None = None,
     pool: Any = None,
     selection: Any = None,
+    required_tools: tuple[str, ...] | list[str] = (),
 ) -> dict[str, Any]:
     """Decide where this attempt's model calls go.
 
-    ``mode`` is ``"direct"`` (the harness uses its own provider) or ``"pool"``
-    (the platform serves the attempt from the pool).  The answer always says
-    *why*, because a silent switch of provider is exactly the kind of thing
-    that has to be explainable afterwards.
+    ``mode`` is ``"direct"`` (the harness uses its own provider), ``"pool"``
+    (the platform serves the attempt from the pool) or ``"unavailable"``
+    (nothing in the pool can serve the **shape** of this request; the caller
+    must not start an upstream call at all).
 
-    ``selection`` is what the **human** chose for this window (see
-    ``app.adapter.model_choice``): when it names a model in the pool, this
-    attempt runs on that model right away -- not only after the window's own
-    provider died.  The pool stays the emergency path for everyone else.
+    ``required_tools`` names the tool definitions the client will send.  A CLI
+    slot (``protocol == "cli"``) can only return text: it must never be chosen
+    for a request that carries tools -- that is exactly the 2026-11-05 pi 502
+    (``relay_cli_cannot_use_tools``), where the window was pointed at
+    ``codebuddy/hy3`` and every work request was refused after the attempt had
+    already been created.
     """
     evidence = failure_evidence(task_id, data_dir=data_dir)
     chosen = _chosen_model_id(selection)
@@ -92,6 +95,7 @@ def plan_attempt(
             model_id=chosen,
             pool=pool,
             consented_tier=str(getattr(selection, "model_tier", "") or ""),
+            required_tools=tuple(str(item) for item in required_tools),
         )
     if not evidence:
         return {
@@ -124,11 +128,19 @@ def plan_attempt(
     model = None
     upstream = None
     protocol = ""
+    cli_only = False
     if pool is not None:
         try:
             entries = pool.models()
         except Exception:
             entries = []
+        if required_tools and entries:
+            # A CLI slot can only return text.  This attempt sends tool
+            # definitions, so the slot is not a candidate at all -- it is
+            # excluded **before** the request, not refused after it.
+            capable = [item for item in entries if str(item.get("protocol") or "") != "cli"]
+            cli_only = bool(entries) and not capable
+            entries = capable
         # The failing window's own quota is exactly what cannot be used again.
         blocked = _blocked_upstreams(harness_id)
         # Which quota to spend, in order: somebody's **free** tier first (the
@@ -158,6 +170,24 @@ def plan_attempt(
                 break
             if model:
                 break
+    if not model and cli_only:
+        # Everything the pool has is a CLI slot, and this request carries tools.
+        # Saying "the pool is empty, retry on your own provider" would hide the
+        # real reason; the operator needs `protocol_unsupported` to see that the
+        # *selection* is wrong, not the quota.
+        return {
+            "mode": "unavailable",
+            "reason_code": "protocol_unsupported",
+            "reason": (
+                "every model this window can reach is served by a CLI slot, and a"
+                " CLI slot cannot accept tool definitions; point the window at a"
+                " provider model, or run this task on a harness with no pool route"
+            ),
+            "required_tools": list(required_tools),
+            "task_id": task_id,
+            "harness_id": harness_id,
+            "attempt_no": attempt_no,
+        }
     if not model:
         # 自己的 key：平台**不自己花**。用户点头了才用；没点头就只**问**一次，
         # 这一轮照旧回窗口自己的 provider（失败照旧记在案上）。
@@ -225,6 +255,7 @@ def _plan_for_chosen_model(
     model_id: str,
     pool: Any,
     consented_tier: str = "",
+    required_tools: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Run this attempt on the model the human chose.
 
@@ -253,6 +284,48 @@ def _plan_for_chosen_model(
             "harness_id": harness_id,
         }
     upstream = str(entry.get("upstream") or "")
+    protocol = str(entry.get("protocol") or "")
+    if required_tools and protocol == "cli":
+        # The human pointed the window at a CLI slot, but this attempt sends
+        # tool definitions.  The slot is excluded; fall back to a model that
+        # can accept them, and say so -- never let it reach the relay and be
+        # refused with `relay_cli_cannot_use_tools` after an attempt exists.
+        capable = _capable_fallback(entries, model_id, consented_tier=consented_tier)
+        if capable is not None:
+            return {
+                "mode": "pool",
+                "reason": (
+                    f"protocol_unsupported: the chosen model {model_id} is a CLI slot"
+                    f" and cannot accept tool definitions; this attempt runs on "
+                    f"{capable.get('id')} instead"
+                ),
+                "reason_code": "protocol_unsupported",
+                "fallback_from": {"model": model_id, "protocol": protocol},
+                "required_tools": list(required_tools),
+                "model": str(capable.get("id") or ""),
+                "upstream": str(capable.get("upstream") or ""),
+                "upstream_protocol": str(capable.get("protocol") or ""),
+                "base_path": POOL_BASE_PATH,
+                "anthropic_path": POOL_ANTHROPIC_PATH,
+                "task_id": task_id,
+                "harness_id": harness_id,
+                "attempt_no": attempt_no,
+            }
+        return {
+            "mode": "unavailable",
+            "reason_code": "protocol_unsupported",
+            "reason": (
+                f"protocol_unsupported: the chosen model {model_id} is a CLI slot"
+                " and cannot accept tool definitions; no other pool model can"
+                " accept them either, so no upstream call was made"
+            ),
+            "selected_model": model_id,
+            "selected_protocol": protocol,
+            "required_tools": list(required_tools),
+            "task_id": task_id,
+            "harness_id": harness_id,
+            "attempt_no": attempt_no,
+        }
     current_tier = str(entry.get("tier") or "")
     if current_tier == "metered" and consented_tier != "metered":
         # The human said yes to a **free** quota; the quota is a paid one now.
@@ -304,6 +377,29 @@ def _plan_for_chosen_model(
         "harness_id": harness_id,
         "attempt_no": attempt_no,
     }
+
+
+def _capable_fallback(
+    entries: list[dict[str, Any]], model_id: str, *, consented_tier: str = ""
+) -> dict[str, Any] | None:
+    """First pool entry that can accept tool definitions, skipping the chosen one.
+
+    Same spending rules as the rest of the module: a metered quota needs the
+    human's yes, and a user's own key needs its own yes.  A CLI slot is never
+    a fallback -- it is the thing being avoided.
+    """
+    for entry in entries:
+        if str(entry.get("id") or "") == model_id:
+            continue
+        if str(entry.get("protocol") or "") == "cli":
+            continue
+        tier = str(entry.get("tier") or "")
+        if tier == "metered" and consented_tier != "metered":
+            continue
+        if tier == "user" and not _user_key_approved(str(entry.get("upstream") or "")):
+            continue
+        return entry
+    return None
 
 
 def _user_key_approved(upstream_name: str) -> bool:

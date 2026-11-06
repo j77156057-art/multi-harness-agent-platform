@@ -67,11 +67,19 @@ _POOL_MESSAGES = {
 
 def _as_api_error(exc: PoolError) -> ApiError:
     """A pool refusal, in the envelope the rest of the platform uses."""
-    return ApiError(
-        exc.code,
-        exc.status,
-        _POOL_MESSAGES.get(exc.code, "the pool could not serve this request"),
-    )
+    message = _POOL_MESSAGES.get(exc.code, "the pool could not serve this request")
+    details = dict(exc.details or {})
+    # 保留原文，再补上"哪个窗口、要求哪些工具"：042e/pi 那次事后只能看到
+    # 一句 code，不知道是哪个窗口把活带进了 CLI 档。
+    extra = []
+    if details.get("window"):
+        extra.append(f"window={details['window']}")
+    tools = details.get("tools")
+    if isinstance(tools, list) and tools:
+        extra.append("tools=" + ",".join(str(item) for item in tools))
+    if extra:
+        message = f"{message} ({'; '.join(extra)})"
+    return ApiError(exc.code, exc.status, message, details=details or None)
 
 
 def _pool_errors(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -320,7 +328,7 @@ def pool_chat_completions(
         route = service.route(str(payload.get("model") or ""))
         # 同一句话也要在**开流之前**说完：CLI 槽位服务不了带工具定义的请求，而
         # 生成器里抛错时响应头已经发出去了，调用方只会看到「连接被关闭」。
-        service.refuse_tools_for_cli(route, payload)
+        service.refuse_tools_for_cli(route, payload, window=_consumer(principal))
         return StreamingResponse(
             service.chat_completions_stream(payload, consumer=_consumer(principal)),
             media_type="text/event-stream",
@@ -367,6 +375,8 @@ def pool_plan(
     task_id: str,
     harness_id: str,
     attempt_no: int = 0,
+    needs_tools: bool = False,
+    tools: str = "",
 ) -> dict[str, Any]:
     """Where should this attempt's model calls go?
 
@@ -380,6 +390,9 @@ def pool_plan(
         attempt_no=attempt_no,
         pool=_service(),
         selection=model_choice.read_choice(database, harness_id),
+        required_tools=tuple(item.strip() for item in tools.split(",") if item.strip())
+        if tools
+        else (("tools",) if needs_tools else ()),
     )
 
 

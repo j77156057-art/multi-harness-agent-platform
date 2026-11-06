@@ -1567,11 +1567,20 @@ class AdminWorker:
         own = self.admin.dispatched_task_ids()
         if not own:
             return
+        capacity = {item["harness_id"]: item for item in self.admin.harness_capacity()}
         page = self.client.get(f"/groups/{self.group_id}/tasks", status="ready")
         load: dict[str, int] = {}
         for task in page.get("tasks") or []:
             for target in _assigned_ids(task):
                 load[target] = load.get(target, 0) + 1
+        # 服务端算的活租约更准（按 lease_until，过期租约不算占用）；把它和
+        # ready 任务叠加，再取两者较大值，避免把「手上正干着一条」的窗口当空闲。
+        for candidate in candidates:
+            item = capacity.get(candidate)
+            if item is not None:
+                load[candidate] = max(
+                    load.get(candidate, 0), item["active_leases"] + item["ready_tasks"]
+                )
         for task in page.get("tasks") or []:
             task_id = str(task.get("task_id") or "")
             targets = _assigned_ids(task)
@@ -1580,13 +1589,30 @@ class AdminWorker:
             dead = [target for target in targets if not self.admin.harness_has_credential(target)]
             if not dead:
                 continue
-            # 优先给**最闲**的窗口，别把活全堆到一个窗口上。
+            # 优先给**真正空闲**的窗口：有活租约的窗口即使还有并行槽位也不塞新活，
+            # 否则它手上那条还没跑完就已经排上了。没有空闲窗口就不创建新任务。
+            idle = [
+                candidate
+                for candidate in candidates
+                if candidate not in targets and capacity.get(candidate, {}).get("idle")
+            ]
             target = min(
-                (candidate for candidate in candidates if candidate not in targets),
+                idle,
                 key=lambda candidate: (load.get(candidate, 0), candidate),
                 default=None,
             )
             if target is None:
+                print(
+                    json.dumps(
+                        {
+                            "reassign_deferred": "no idle window",
+                            "task_id": task_id,
+                            "earliest_available_at": self.admin.earliest_available_at(),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
                 continue
             load[target] = load.get(target, 0) + 1
             try:
@@ -1741,30 +1767,57 @@ class AdminWorker:
             )
             return
         previous = str(task.get("owner") or "")
-        if target and target not in candidates:
-            print(
-                json.dumps(
-                    {"reassign_request_ignored": f"{target} cannot take work", "seq": seq},
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
-            return
+        capacity = {item["harness_id"]: item for item in self.admin.harness_capacity()}
+        if target:
+            # 指定窗口时把「为什么不行」说清楚：offline / 无凭证 / 满载 / 管理员窗口。
+            reasons = self.admin.unavailability_reasons(target)
+            if target not in candidates and not reasons:
+                reasons = ["not_assignable"]
+            if reasons:
+                print(
+                    json.dumps(
+                        {
+                            "reassign_request_refused": target,
+                            "task_id": task_id,
+                            "reasons": reasons,
+                            "earliest_available_at": self.admin.earliest_available_at(),
+                            "seq": seq,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                return
         if not target:
             load: dict[str, int] = {}
             page = self.client.get(f"/groups/{self.group_id}/tasks", status="ready")
             for ready_task in page.get("tasks") or []:
                 for assigned in _assigned_ids(ready_task):
                     load[assigned] = load.get(assigned, 0) + 1
+            for candidate in candidates:
+                item = capacity.get(candidate)
+                if item is not None:
+                    load[candidate] = max(
+                        load.get(candidate, 0), item["active_leases"] + item["ready_tasks"]
+                    )
+            idle = [
+                candidate
+                for candidate in candidates
+                if candidate != previous and capacity.get(candidate, {}).get("idle")
+            ]
             target = min(
-                (candidate for candidate in candidates if candidate != previous),
+                idle,
                 key=lambda candidate: (load.get(candidate, 0), candidate),
                 default="",
             )
         if not target:
             print(
                 json.dumps(
-                    {"reassign_request_ignored": "no other window available", "seq": seq},
+                    {
+                        "reassign_request_ignored": "no idle window available",
+                        "earliest_available_at": self.admin.earliest_available_at(),
+                        "seq": seq,
+                    },
                     ensure_ascii=False,
                 ),
                 flush=True,

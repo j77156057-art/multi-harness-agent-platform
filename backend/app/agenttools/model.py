@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -40,6 +40,9 @@ class PoolChannel:
     timeout: float = 120.0
     max_tokens: int = 3000
     retries: int = 2
+    #: 上游每次回答显式给出的 ``finish_reason``（按调用顺序）。只有上游真给了
+    #: 才追加；没给就留空，绝不从 token 数之类的东西反推。
+    finish_reasons: list[str] = field(default_factory=list)
 
     def text(self, prompt: str) -> str:
         return self.ask([{"role": "user", "content": prompt}])
@@ -83,6 +86,9 @@ class PoolChannel:
                 document = response.json()
             except ValueError as exc:
                 raise ChannelFailed(f"模型通道回来的不是 JSON：{response.text[:200]}") from exc
+            reason = _finish_reason_of(document)
+            if reason:
+                self.finish_reasons.append(reason)
             content = _content_of(document)
             if content.strip():
                 return content
@@ -96,6 +102,18 @@ class PoolChannel:
                 f"模型这次没有输出（{last}）；这次没有产出内容，等于通道不可用"
             )
         raise ChannelFailed(last or "模型通道失败")
+
+
+def _finish_reason_of(document: object) -> str | None:
+    """提取上游响应里的 ``finish_reason``；没有就是 None。"""
+    if not isinstance(document, dict):
+        return None
+    choices = document.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    value = first.get("finish_reason")
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def _content_of(document: object) -> str:

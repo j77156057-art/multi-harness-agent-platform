@@ -66,10 +66,18 @@ DISCOVERY_TTL_SECONDS = 30.0
 class PoolError(RuntimeError):
     """The relay cannot serve this request as asked."""
 
-    def __init__(self, message: str, *, status: int = 502, code: str = "relay_error") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int = 502,
+        code: str = "relay_error",
+        details: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+        self.details = details
 
 
 @dataclass(frozen=True, slots=True)
@@ -771,7 +779,9 @@ class PoolService:
 
     # ----------------------------------------------------------- CLI slots
 
-    def refuse_tools_for_cli(self, route: "Route", payload: dict[str, Any]) -> None:
+    def refuse_tools_for_cli(
+        self, route: Route, payload: dict[str, Any], *, window: str = ""
+    ) -> None:
         """带上工具定义的请求不许打到 CLI 槽位上。
 
         这一跳把另一个 CLI 当模型用，它只能回一段文字，回不了 ``tool_calls``；
@@ -785,19 +795,34 @@ class PoolService:
         调用方看到的是「连接被关闭」，而不是这句话。2026-10-30 实测：qwen 指向
         free 档时只拿到 ``UND_ERR_SOCKET: other side closed``，绕了几圈才查到是这个
         原因。所以路由层先调这里，再决定要不要开流。
+
+        ``window``/工具名进 ``details``：回复原文要被保留，同时下次一眼能看出
+        「是哪个窗口、带了哪几个工具」才撞上的，而不是只知道选错了档。
         """
         upstream = route.upstream
-        if not payload.get("tools"):
+        tools = payload.get("tools")
+        if not tools:
             return
+        tool_names = [
+            str((item.get("function") or {}).get("name") or "")
+            for item in tools
+            if isinstance(item, dict)
+        ]
         raise PoolError(
             f"{route.model} 由一个 CLI 当模型来服务（{upstream.name}），这一跳只能回文字、"
             "回不了 tool_calls；带着 "
-            f"{len(payload['tools'])} 个工具定义来用它，会让调用方以为自己不许用工具。"
+            f"{len(tools)} 个工具定义来用它，会让调用方以为自己不许用工具。"
             "请给这个窗口换一个真 provider 的模型（额度池里非 CLI 上游的那一档）。",
             status=502,
             # 给自己一个 code：调用方与人都要能一眼认出这是"选错档"，而不是
             # "池子抽风"。没有 code 时对外只有一句 "could not serve"。
             code="relay_cli_cannot_use_tools",
+            details={
+                "window": window,
+                "model": route.model,
+                "upstream": upstream.name,
+                "tools": [name for name in tool_names if name],
+            },
         )
 
     def _cli_chat(
@@ -826,7 +851,7 @@ class PoolService:
         upstream = route.upstream
         if upstream.cli is None:
             raise PoolError(f"upstream {upstream.name} has no CLI slot", status=500)
-        self.refuse_tools_for_cli(route, payload)
+        self.refuse_tools_for_cli(route, payload, window=consumer)
         started = time.monotonic()
         try:
             report = upstream.cli.run(_messages_of(payload))

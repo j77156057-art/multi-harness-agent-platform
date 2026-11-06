@@ -270,17 +270,26 @@ class HttpAdapter(HarnessAdapter):
             },
         )
 
-    def abandon(self, *, task_id: str, reason: str) -> dict[str, Any]:
+    def abandon(
+        self,
+        *,
+        task_id: str,
+        reason: str,
+        acceptance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         context = self._context(task_id)
+        body: dict[str, Any] = {
+            "task_id": task_id,
+            "attempt_id": context.attempt_id,
+            "fencing_epoch": context.fencing_epoch,
+            "reason": reason,
+        }
+        if acceptance is not None:
+            body["acceptance"] = acceptance
         result = self._post(
             "abandon",
             "/adapter/abandon",
-            {
-                "task_id": task_id,
-                "attempt_id": context.attempt_id,
-                "fencing_epoch": context.fencing_epoch,
-                "reason": reason,
-            },
+            body,
         )
         self.attempts.pop(task_id, None)
         return result

@@ -129,7 +129,13 @@ class HarnessAdapter(ABC):
     def ask_human(self, *, task_id: str, question: str) -> dict[str, Any]: ...
 
     @abstractmethod
-    def abandon(self, *, task_id: str, reason: str) -> dict[str, Any]: ...
+    def abandon(
+        self,
+        *,
+        task_id: str,
+        reason: str,
+        acceptance: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
 
     @abstractmethod
     def release(self, *, task_id: str) -> dict[str, Any]: ...

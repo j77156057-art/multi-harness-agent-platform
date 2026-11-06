@@ -5,7 +5,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import {createFormalGateway} from '../server/formal-dispatch-gateway.mjs';
 
-const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'formal-gateway-')),calls=[];
+const tmp=await fs.mkdtemp(path.join(os.tmpdir(),'formal-gateway-')),calls=[],decisionBodies=[];
 const OPERATOR_TOKEN='apt_'+'a'.repeat(64),ADMIN_TOKEN='apt_'+'b'.repeat(64);
 await fs.writeFile(path.join(tmp,'operator.key'),OPERATOR_TOKEN);
 await fs.writeFile(path.join(tmp,'admin.key'),ADMIN_TOKEN);
@@ -40,6 +40,14 @@ const upstream=http.createServer((req,res)=>{
   if(req.url==='/api/v1/review/claim'&&req.method==='POST')data={review_id:'rv-1',reviewed_commit:'a'.repeat(40),status:'claimed'};
   if(req.url==='/api/v1/review/submit'&&req.method==='POST')data={event:'approve',status:'approved',review_id:'rv-1'};
   if(req.url==='/api/v1/tasks/FD-ffffffffffffffff')data={task_id:'FD-ffffffffffffffff',group_id:'OTHER'};
+  if(req.url==='/api/v1/tasks/FD-0123456789abcdef/experiences')data={experiences:[{experience_id:'exp-0123456789abcdef01234567'}]};
+  if(req.url==='/api/v1/tasks/FD-0123456789abcdef/experience-injections')data={injections:[{experience_id:'exp-0123456789abcdef01234567',layer:'admin_dispatch'}]};
+  if(req.url==='/api/v1/experience-injection'&&req.method==='GET')data={enabled:false,updated_by:'',updated_at:''};
+  if(req.url==='/api/v1/experience-injection'&&req.method==='POST')data={enabled:true,updated_by:'operator',updated_at:'now'};
+  if(req.url==='/api/v1/tasks/FD-0123456789abcdef/experiences/exp-0123456789abcdef01234567/decision'&&req.method==='POST'){
+    let raw='';req.on('data',chunk=>{raw+=chunk;});req.on('end',()=>decisionBodies.push(JSON.parse(raw)));
+    data={confirmation:{status:'confirmed',decided_by:'operator'},injection_layer:'admin_dispatch'};
+  }
   res.setHeader('Content-Type','application/json');res.end(JSON.stringify(data));
 });
 const upstreamPort=await listen(upstream);
@@ -79,6 +87,12 @@ try{
   const adminCall=calls.find(c=>c.path==='/api/v1/review/claim');assert(adminCall&&adminCall.authorization==='Bearer '+ADMIN_TOKEN);
   const reviewSubmit=await fetch(base+'/api/formal/review/submit',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({task_id:'FD-0123456789abcdef',attempt_id:'FD-0123456789abcdef.a1',review_id:'rv-1',verdict:'approve',reviewed_commit:'a'.repeat(40),review_revision:1,findings:[]})});assert.equal(reviewSubmit.status,200);assert.equal((await reviewSubmit.json()).status,'approved');
   const foreign=await fetch(base+'/api/formal/tasks/FD-ffffffffffffffff');assert.equal(foreign.status,404);assert(!calls.some(c=>c.path.includes('FD-ffffffffffffffff/diff')));
+  // 经验读面与写面都走操作人凭据；网关覆盖操作人，不接受浏览器伪造身份。
+  const candidates=await fetch(base+'/api/formal/tasks/FD-0123456789abcdef/experiences');assert.equal(candidates.status,200);assert.equal((await candidates.json()).experiences.length,1);
+  const decision=await fetch(base+'/api/formal/tasks/FD-0123456789abcdef/experiences/exp-0123456789abcdef01234567/decision',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({action:'confirm'})});
+  assert.equal(decision.status,200);assert.equal(decisionBodies[0].decided_by,'operator');
+  const injectionSwitch=await fetch(base+'/api/formal/experience-injection',{method:'POST',headers:{Origin:base,'X-Office-Formal':'1','Content-Type':'application/json'},body:JSON.stringify({enabled:true})});assert.equal(injectionSwitch.status,200);assert.equal((await injectionSwitch.json()).enabled,true);
+  const injections=await fetch(base+'/api/formal/tasks/FD-0123456789abcdef/experience-injections');assert.equal(injections.status,200);assert.equal((await injections.json()).injections[0].layer,'admin_dispatch');
   // 窗口自己跑过的 CLI 会话：只读，透传平台。id 不认识形状的（带斜杠/点）
   // 不放行 —— 它会被拼进上游路径，拼坏了就是把路径当查询串用。
   const runs=await fetch(base+'/api/formal/harnesses/claude-code/runs');assert.equal(runs.status,200);
@@ -88,6 +102,6 @@ try{
   await close(upstream);
   const offline=await fetch(base+'/api/formal/status');assert.equal(offline.status,503);
   assert.throws(()=>createFormalGateway({upstream:'http://external.example',tokenFile:'x',project:'P',group:'G'}));
-  const result={checks:26,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
+  const result={checks:30,result:'PASS',scope:'real local HTTP gateway with isolated stub upstream; not model execution'};
   await fs.mkdir('handoff/codex-formal-dispatch-2026-10-14',{recursive:true});await fs.writeFile('handoff/codex-formal-dispatch-2026-10-14/gateway-check-final.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }finally{await close(server);if(upstream.listening)await close(upstream);await fs.rm(tmp,{recursive:true,force:true});}

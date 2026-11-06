@@ -15,6 +15,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,27 @@ def _answer_text(adapter: Any, stdout: str) -> str:
     return stdout
 
 
+def _capacity_row(row: Any) -> dict[str, Any]:
+    """One registry row plus live load, normalized (``max_parallel_tasks`` floors at 1)."""
+    active = int(row["active_leases"] or 0)
+    ready = int(row["ready_tasks"] or 0)
+    limit = max(1, int(row["max_parallel_tasks"] or 1))
+    return {
+        "harness_id": str(row["harness_id"]),
+        "active_leases": active,
+        "ready_tasks": ready,
+        "max_parallel_tasks": limit,
+        "load": active + ready,
+        "available_slots": max(0, limit - active),
+        # 「闲」= 手上没有任何活着的租约；有 ready 但还没开工的也算"有活"。
+        "idle": active == 0,
+        "at_capacity": active >= limit,
+        "earliest_available_at": (
+            str(row["earliest_lease_until"]) if row["earliest_lease_until"] else None
+        ),
+    }
+
+
 class AdminService:
     """The admin harness's own model call, plus its audit trail."""
 
@@ -286,12 +308,94 @@ class AdminService:
 
     # ------------------------------------------------------------------ refine
 
-    def running_harnesses(self) -> list[str]:
+    def running_harnesses(self) -> list[dict[str, Any]]:
+        """Registered online windows that still have a free slot right now.
+
+        返回值从「一串 id」改成**带负载的候选行**：只看 ``online`` 会把一个
+        ``max_parallel_tasks=1`` 却已经挂着租约的窗口当成可派单对象，派出去的活
+        在那儿排队（或者被 claim 的 ``parallel_limit`` 拒掉），而管理员以为它接了。
+        满载窗口在这里就被滤掉，调用方不必各自再判一次。
+        """
+        return [item for item in self.harness_capacity() if not item["at_capacity"]]
+
+    def harness_capacity(self) -> list[dict[str, Any]]:
+        """Every registered online window, with what it is already carrying.
+
+        容量按**活着的租约**算（``released_at IS NULL`` 且 ``lease_until`` 还没到），
+        不是「有没有租约行」：一条过期但还没被清扫的租约不该永久占着窗口。
+        ``ready_tasks`` 是已经指向它、但还没开工的活 —— 一个窗口手上压着三条
+        ready 时，它在第一条被领走之前就已经不闲了。
+        """
+        now = datetime.now(UTC).isoformat()
         rows = self.database.read(
-            "SELECT harness_id FROM harnesses WHERE status = 'online'"
-            " AND registration_version IS NOT NULL ORDER BY harness_id"
+            "SELECT h.harness_id, COALESCE(r.max_parallel_tasks, 1) AS max_parallel_tasks,"
+            "  (SELECT COUNT(*) FROM leases l"
+            "    WHERE l.owner = h.harness_id AND l.kind = 'development'"
+            "      AND l.released_at IS NULL AND l.lease_until > ?) AS active_leases,"
+            "  (SELECT MIN(l.lease_until) FROM leases l"
+            "    WHERE l.owner = h.harness_id AND l.kind = 'development'"
+            "      AND l.released_at IS NULL AND l.lease_until > ?) AS earliest_lease_until,"
+            "  (SELECT COUNT(*) FROM tasks t"
+            "    WHERE t.status = 'ready' AND t.assigned_harness_ids_json IS NOT NULL"
+            "      AND t.assigned_harness_ids_json LIKE '%\"' || h.harness_id || '\"%')"
+            "    AS ready_tasks"
+            "  FROM harnesses h LEFT JOIN harness_registrations r ON"
+            "    r.harness_id = h.harness_id"
+            "    AND r.registration_version = h.registration_version"
+            " WHERE h.status = 'online' AND h.registration_version IS NOT NULL"
+            " ORDER BY h.harness_id",
+            (now, now),
         )
-        return [str(row["harness_id"]) for row in rows]
+        return [_capacity_row(row) for row in rows]
+
+    def unavailability_reasons(self, harness_id: str) -> list[str]:
+        """Why this window must not be handed work; ``[]`` when it can take some.
+
+        `offline / 无凭证 / 满载` 是三种**不同**的事，人需要看到是哪一种 —— 只报
+        「不可用」会让人去重启一个其实只是忙着的窗口。``earliest_available_at``
+        给满载窗口一个可行动的时间点。
+        """
+        rows = self.database.read(
+            "SELECT status, registration_version FROM harnesses WHERE harness_id = ?",
+            (str(harness_id),),
+        )
+        if not rows or not rows[0]["registration_version"]:
+            return ["not_registered"]
+        if str(rows[0]["status"]) != "online":
+            return [f"offline ({rows[0]['status']})"]
+        reasons: list[str] = []
+        admin_ids = set(getattr(settings, "admin_subjects", frozenset())) | {self.harness_id}
+        if harness_id in admin_ids or harness_id == PLATFORM_ASSISTANT_HARNESS_ID:
+            reasons.append("administrator_window")
+        if not self.harness_has_credential(harness_id):
+            reasons.append("no_credential")
+        for item in self.harness_capacity():
+            if item["harness_id"] != harness_id:
+                continue
+            if item["at_capacity"]:
+                reasons.append(
+                    f"full ({item['active_leases']}/{item['max_parallel_tasks']},"
+                    f" earliest {item['earliest_available_at'] or 'unknown'})"
+                )
+            break
+        return reasons
+
+    def idle_harnesses(self) -> list[dict[str, Any]]:
+        """Assignable windows with **no live lease**: the ones new work may go to."""
+        return [
+            item
+            for item in self.running_harnesses()
+            if item["idle"] and item["harness_id"] in self.assignable_harnesses()
+        ]
+
+    def earliest_available_at(self) -> str | None:
+        """When the busiest window frees its first slot (None when anything is free)."""
+        stamps = [
+            str(item["earliest_available_at"])
+            for item in self.harness_capacity()
+            if item["earliest_available_at"] and item["at_capacity"]
+        ]
+        return min(stamps) if stamps else None
 
     def harness_has_credential(self, harness_id: str) -> bool:
         """Whether this window can actually authenticate to the platform.
@@ -333,7 +437,45 @@ class AdminService:
                 task_ids.add(task_id)
         return task_ids
 
-    def assignable_harnesses(self) -> list[str]:
+    def tool_capability_problem(self, harness_id: str) -> str | None:
+        """Why this window cannot accept a request that carries tool definitions.
+
+        A window whose chosen pool model is served by a **CLI slot** can only
+        get text back (``relay_cli_cannot_use_tools``); handing it coding work
+        burns an attempt and produces a 502.  This is checked when the window
+        is *selected*, not when the relay refuses the request.
+
+        Returns ``None`` when the window does not route through the pool (its
+        own provider decides) or when the chosen model is a real provider.
+        """
+        rows = self.database.read(
+            "SELECT model_mode, model_id FROM harnesses WHERE harness_id = ?",
+            (str(harness_id),),
+        )
+        if not rows:
+            return None
+        mode = str(rows[0]["model_mode"] or "")
+        model_id = str(rows[0]["model_id"] or "")
+        if mode != "pool" or not model_id:
+            return None
+        try:
+            from app.pool.service import PoolService
+
+            entries = PoolService().models()
+        except Exception:  # pragma: no cover - discovery is best effort
+            return None
+        for entry in entries:
+            if str(entry.get("id") or "") != model_id:
+                continue
+            if str(entry.get("protocol") or "") == "cli":
+                return (
+                    "protocol_unsupported: the chosen model "
+                    f"{model_id} is a CLI slot and cannot accept tool definitions"
+                )
+            return None
+        return None
+
+    def assignable_harnesses(self, *, needs_tools: bool = False) -> list[str]:
         """The members this administrator may hand work to.
 
         One rule, used by both the refinement and the re-pointing, so the two
@@ -344,9 +486,10 @@ class AdminService:
         """
         admin_ids = set(getattr(settings, "admin_subjects", frozenset())) | {self.harness_id}
         available = [
-            harness_id
-            for harness_id in self.running_harnesses()
-            if harness_id not in admin_ids and harness_id != PLATFORM_ASSISTANT_HARNESS_ID
+            str(item["harness_id"])
+            for item in self.running_harnesses()
+            if item["harness_id"] not in admin_ids
+            and item["harness_id"] != PLATFORM_ASSISTANT_HARNESS_ID
         ]
         admin_provider = self._provider(self.harness_id)
         if admin_provider is not None:
@@ -355,7 +498,18 @@ class AdminService:
                 for harness_id in available
                 if self._provider(harness_id) != admin_provider
             ]
-        return [harness_id for harness_id in available if self.harness_has_credential(harness_id)]
+        available = [harness_id for harness_id in available if self.harness_has_credential(harness_id)]
+        if needs_tools:
+            # 工作请求必带 read/edit/write 工具定义。被选到 CLI 档的窗口只能在
+            # 开流前被池层拒掉（``relay_cli_cannot_use_tools``，502），代价是
+            # 一次 attempt + 一次上游调用。此处提前把这类窗口排除在候选人里：
+            # 它根本不是"现在忙"，而是"这个形状的活它接不了"。
+            available = [
+                harness_id
+                for harness_id in available
+                if self.tool_capability_problem(harness_id) is None
+            ]
+        return available
 
     def _provider(self, harness_id: str) -> str | None:
         """The registry's provider for a harness, or None when it is unknown.
