@@ -40,6 +40,30 @@ CLI_MODEL_PREAMBLE = (
     "Do not use tools, do not read or write files, do not run commands."
 )
 
+#: Env override per slot: an installer may put its CLI somewhere PATH does not
+#: see, and a long-running worker keeps the PATH it started with.
+_BINARY_ENV = {
+    "qoderclicn": "AP_QODER_BIN",
+    "codebuddy": "AP_CODEBUDDY_BIN",
+}
+
+
+def _install_locations(wanted: str) -> list[Path]:
+    """The places the installers write to, derived -- never a machine path."""
+    home = Path.home()
+    locations: list[Path] = []
+    if wanted == "qoderclicn":
+        locations.append(home / ".qoder-cn" / "bin" / "qoderclicn" / "qoderclicn.exe")
+        for name in ("LOCALAPPDATA", "ProgramFiles"):
+            base = os.environ.get(name)
+            if base:
+                locations.append(
+                    Path(base) / "QoderWork CN" / "resources" / "bin" / "qoderclicn.exe"
+                )
+    elif wanted == "codebuddy":
+        locations.append(home / ".codebuddy" / "bin" / "codebuddy.exe")
+    return locations
+
 
 @dataclass(frozen=True, slots=True)
 class CliModelSource:
@@ -82,13 +106,22 @@ class CliModelSource:
     def resolve_binary(self) -> str:
         """The CLI to run.
 
-        PATH first; then the places the installers actually write to, because
-        a long-running worker often has an older PATH than the installer left
-        behind (the qoder CN installer writes its own directory).
+        The env override wins (``AP_QODER_BIN`` / ``AP_CODEBUDDY_BIN``), then
+        PATH, then the places the installers actually write to -- a
+        long-running worker often has an older PATH than the installer left
+        behind.  Returns an empty string when nothing resolves, so the caller
+        fails with a clear message instead of spawning a path that is not
+        there.
         """
         if self.binary and (Path(self.binary).exists() or os.path.sep in self.binary):
             return self.binary
         wanted = self.binary or "opencode"
+        env_name = _BINARY_ENV.get(wanted, f"AP_{wanted.upper()}_BIN")
+        override = os.environ.get(env_name)
+        if override:
+            if not Path(override).exists():
+                raise RuntimeError(f"{env_name} points at {override}, which does not exist")
+            return override
         found = shutil.which(wanted) or shutil.which(f"{wanted}.cmd")
         if (
             found
@@ -101,19 +134,10 @@ class CliModelSource:
                     return candidate
         if found:
             return found
-        fallbacks = {
-            "qoderclicn": [
-                Path.home() / ".qoder-cn" / "bin" / "qoderclicn" / "qoderclicn.exe",
-                Path(r"D:\study\tools\QoderWork CN\resources\bin\qoderclicn.exe"),
-            ],
-            "codebuddy": [
-                Path.home() / ".codebuddy" / "bin" / "codebuddy.exe",
-            ],
-        }
-        for candidate in fallbacks.get(wanted, []):
+        for candidate in _install_locations(wanted):
             if candidate.exists():
                 return str(candidate)
-        return wanted
+        return ""
 
     def _argv(self, prompt: str, workdir: Path) -> list[str]:
         """The command line for one model call.
@@ -128,6 +152,13 @@ class CliModelSource:
           only used when a real bash is installed.
         """
         binary = self.resolve_binary()
+        if not binary:
+            wanted = self.binary or "opencode"
+            env_name = _BINARY_ENV.get(wanted, f"AP_{wanted.upper()}_BIN")
+            raise RuntimeError(
+                f"the CLI slot {self.name} cannot find {wanted}: "
+                f"install it, put it on PATH, or set {env_name}"
+            )
         args = [part.replace("{workdir}", str(workdir)) for part in self.args]
         base = [binary, *args, "--model", self.model]
         if self.prompt_via_stdin:

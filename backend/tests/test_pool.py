@@ -16,6 +16,7 @@ whose quota can it borrow?".  These tests pin the three facts it rests on:
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -196,7 +197,10 @@ def test_a_source_pointing_at_the_pool_itself_is_skipped(tmp_path):
     assert "opencode:pool" not in upstreams
 
 
-def test_the_cli_slot_is_the_only_way_to_spend_a_cli_only_quota(tmp_path):
+def test_the_cli_slot_is_the_only_way_to_spend_a_cli_only_quota(tmp_path, monkeypatch):
+    # This machine need not have the CLI installed: the slot resolves through
+    # the env override, which is exactly the knob an operator would use.
+    monkeypatch.setenv("AP_OPENCODE_BIN", sys.executable)
     source = CliModelSource(name="opencode-cli", model="opencode/minimax-m3.1-flash-free")
     prompt = source.prompt_for(
         [
@@ -581,7 +585,8 @@ def test_without_a_sign_in_there_is_no_minimax_quota(tmp_path):
     assert "minimax" not in upstreams
 
 
-def test_the_mmx_slot_passes_the_question_as_a_flag(tmp_path):
+def test_the_mmx_slot_passes_the_question_as_a_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("AP_MMX_BIN", sys.executable)
     source = CliModelSource(
         name="mmx",
         model="MiniMax-M3.1-Flash-Preview",
