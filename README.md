@@ -137,7 +137,7 @@ README 不把“有代码”当成“已验证”。仓库中已有针对关键�
 - `backend/tests/test_agenttools_mcp.py`：MCP 协议本身，以及"别人的尝试借不走、过期尝试自动关闭、工作树指到工位目录外就拒"。
 - `backend/tests/test_agenttools_wiring.py`：把工具交给 CLI 的那一层——令牌不进 argv、写进工作树的配置算临时文件、**声明不许覆盖授权落点**（否则交付物能被藏进临时文件删掉）。
 - `backend/tests/test_runtime_driver.py`：用真实 Git 和隔离 worktree 驱动任务从 claim 到 publish/submit，而不是只手工拼数据库状态。
-- `office/npm run build`：验证前端生产构建。
+- `cd office && npm run build`：验证前端生产构建。
 - `git diff --check`：检查提交中的空白和补丁格式问题。
 
 运行后端测试：
@@ -495,7 +495,6 @@ backend/tests/        单元、并发、集成和真实 Git 流程测试
 backend/migrations/   SQLite schema migrations
 office/               Agent Office 前端和本地预览网关
 tools/                本地开发检查和合并辅助工具
-docs/adr/             架构决策记录
 ```
 
 ## 真实集成边界
@@ -518,7 +517,7 @@ docs/adr/             架构决策记录
 - 管理员 token、项目和群组配置
 - 面向生产的远程数据库、密钥托管和多副本部署
 
-这些集成不是本地零配置运行的前置条件。仓库不包含任何 token、API key、私钥或本机绝对路径。
+这些集成不是本地零配置运行的前置条件。仓库不包含任何真实 token、API key 或私钥。
 
 ## 设计要点
 
