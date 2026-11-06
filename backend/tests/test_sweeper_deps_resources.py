@@ -363,6 +363,7 @@ def test_the_offline_requester_ends_in_the_existing_stale_chain(tmp_path):
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "attempt_reconcile",
         "project_trash",
     ]
 
@@ -398,5 +399,6 @@ def test_the_runner_order_includes_the_new_sweeps():
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "attempt_reconcile",
         "project_trash",
     ]

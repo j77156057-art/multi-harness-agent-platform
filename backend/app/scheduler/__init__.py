@@ -8,6 +8,7 @@ from app.scheduler.report import SweepReport
 from app.scheduler.runner import SWEEPS, run_all_sweeps
 from app.scheduler.sweeps import (
     sweep_aging,
+    sweep_attempt_reconcile,
     sweep_blocked_sla,
     sweep_budget,
     sweep_dependencies,
@@ -30,6 +31,7 @@ __all__ = [
     "SweepReport",
     "run_all_sweeps",
     "sweep_aging",
+    "sweep_attempt_reconcile",
     "sweep_blocked_sla",
     "sweep_budget",
     "sweep_dependencies",

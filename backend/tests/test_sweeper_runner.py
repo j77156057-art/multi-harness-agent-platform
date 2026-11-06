@@ -60,6 +60,7 @@ def test_the_runner_drives_the_lease_sweep_end_to_end(tmp_path):
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "attempt_reconcile",
         "project_trash",
     ]
     assert reports[0].actions == 1
@@ -106,6 +107,7 @@ def test_the_runner_order_is_pinned():
         "worktree_recycle",
         "human_wait_timeout",
         "escalation_reminder",
+        "attempt_reconcile",
         # 删东西的排在最后：它删的是"已经没人看的东西"，不该插在状态推进中间。
         "project_trash",
     ]
@@ -118,7 +120,7 @@ def test_a_second_round_over_the_same_clock_is_a_no_op(tmp_path):
     run_all_sweeps(database, now=future)
     second = run_all_sweeps(database, now=future)
 
-    assert [report.actions for report in second] == [0] * 17
+    assert [report.actions for report in second] == [0] * 18
     events = database.read(
         "SELECT COUNT(*) AS n FROM task_events WHERE event_name = 'lease_uncertain'"
     )

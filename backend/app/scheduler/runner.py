@@ -21,6 +21,7 @@ from app.git.repo import CanonicalRepo
 from app.scheduler.report import SweepReport
 from app.scheduler.sweeps import (
     sweep_aging,
+    sweep_attempt_reconcile,
     sweep_blocked_sla,
     sweep_budget,
     sweep_dependencies,
@@ -72,6 +73,9 @@ SWEEPS: tuple[tuple[str, Sweep], ...] = (
     ("worktree_recycle", sweep_worktree_recycle),
     ("human_wait_timeout", sweep_human_wait_timeout),
     ("escalation_reminder", sweep_escalation_reminder),
+    # 只读观测：把绕过状态机、没被收口的 attempt 摆在报告里。放在删东西的
+    # 回收站清理之前，保证它看到的是本轮所有状态推进之后的结果。
+    ("attempt_reconcile", sweep_attempt_reconcile),
     # 回收站到期清理放在最后：它删的是"已经没人看的东西"，不该插在状态推进中间。
     ("project_trash", sweep_project_trash),
 )

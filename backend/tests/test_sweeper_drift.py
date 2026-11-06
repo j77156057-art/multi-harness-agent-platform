@@ -162,8 +162,8 @@ def test_drift_states_have_a_recovery_exit(tmp_path):
     assert names.index("drift") < names.index(
         "budget"
     ), "drift runs before the trailing group (budget, worktree recycle, reminders, trash)"
-    # 收尾那组的尾巴：两条提醒之后是回收站清理（删东西的永远最后）。
-    assert names[-2:] == ["escalation_reminder", "project_trash"]
+    # 收尾那组的尾巴：两条提醒 + 只读观测之后是回收站清理（删东西的永远最后）。
+    assert names[-3:] == ["escalation_reminder", "attempt_reconcile", "project_trash"]
     # R10-fix-14：drift 状态也是 owner 状态，到期先停在「等人确认」，不直接判失联。
     assert _status(database) == "awaiting_human"
     assert _event_count(database, "lease_uncertain") == 1

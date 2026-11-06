@@ -1762,3 +1762,46 @@ def sweep_project_trash(
         actions=len(purged),
         detail={"retain_days": TRASH_RETAIN_DAYS, "purged": purged},
     )
+
+
+#: attempt 在这些任务状态下仍然可以合法开着。其余状态（终态、退回重做、失联
+#: 回收、awaiting_review/approved/merging 等）下 attempt 还开着，说明有一条
+#: 路径绕过了收口点。
+_ATTEMPT_LIVE_TASK_STATES = (
+    TaskStatus.CLAIMED.value,
+    TaskStatus.IN_PROGRESS.value,
+    TaskStatus.NEEDS_HELP.value,
+    TaskStatus.BLOCKED.value,
+    TaskStatus.VERIFYING.value,
+    TaskStatus.AWAITING_HUMAN.value,
+    TaskStatus.PLAN_DRIFT.value,
+    TaskStatus.IMPL_DRIFT.value,
+)
+
+
+def sweep_attempt_reconcile(
+    database: Database, now: datetime, repo: CanonicalRepo | None = None
+) -> SweepReport:
+    """只读观测：任务已经不可能再用到 attempt，attempt 却还开着。
+
+    收口动作集中在 ``apply_transition``（谁进入终态谁关 attempt）。这个 sweep
+    不写任何一行：它只把「绕过状态机留下的漏账」摆到报告里 —— 比如有人新加
+    一条直接 UPDATE tasks 的路径、或手工改库。历史数据不回填，所以 2026-11-05
+    的 67 行和 8 条 verifying 会一直出现在这里；这是有意的：看得见比静默好。
+    """
+    placeholders = ", ".join(["?"] * len(_ATTEMPT_LIVE_TASK_STATES))
+    rows = database.read(
+        "SELECT t.status AS task_status, COUNT(*) AS n"
+        " FROM task_attempts a JOIN tasks t ON t.task_id = a.task_id"
+        " WHERE a.closed_at IS NULL"
+        "   AND a.status IN ('claimed', 'in_progress', 'verifying')"
+        f"   AND t.status NOT IN ({placeholders})"
+        " GROUP BY t.status ORDER BY t.status",
+        _ATTEMPT_LIVE_TASK_STATES,
+    )
+    by_status = {str(row["task_status"]): int(row["n"]) for row in rows}
+    return SweepReport(
+        sweep="attempt_reconcile",
+        actions=0,
+        detail={"open_attempts": sum(by_status.values()), "by_task_status": by_status},
+    )
