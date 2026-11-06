@@ -1,5 +1,6 @@
 """MVP-API-001 / CORE-CLAIM-001/002: real dispatch, identity and replay."""
 
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -394,3 +395,52 @@ def test_a_dispatch_without_a_lineage_hashes_exactly_as_before(env):
     first = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()
     replay = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()
     assert replay["task_id"] == first["task_id"] and replay["replayed"]
+
+
+def test_a_dispatched_task_carries_its_project_name_for_the_ledger(env):
+    """D-1：人派单建的任务要带项目名，台账才认得出它属于哪个项目。
+
+    以前这一格只有管理员细化那条路会写，人派单这条路不写，办公室只能拿标题
+    前缀去猜，于是人派单建的项目在台账里整片消失。归属由**群所属项目**决定，
+    不靠调用方传，也不改标题。
+    """
+    response = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1"))
+    assert response.status_code == 200, response.text
+    task_id = response.json()["task_id"]
+
+    tasks = env.client.get("/api/v1/groups/G/tasks").json()["tasks"]
+
+    assert [task["task_id"] for task in tasks] == [task_id]
+    assert tasks[0]["project_label"] == "project"
+    # 归属另占一格，标题保持人写的样子，不被加上项目前缀。
+    assert tasks[0]["title"] == "Write documentation"
+
+
+def test_a_snapshot_without_a_project_label_still_reads(env):
+    """老快照没有这一格：读的时候不能崩，也不能凭空造一个标签。
+
+    修复前派出去的任务都落在这种快照上，它们必须继续可读、继续按标题前缀
+    被办公室归堆。
+    """
+    task_id = env.client.post("/api/v1/groups/G/dispatch", json=body("request-1")).json()["task_id"]
+    with env.db.transaction() as conn:
+        row = conn.execute(
+            "SELECT s.snapshot_id, s.content_json FROM plan_snapshots s"
+            " JOIN tasks t ON t.plan_snapshot_id = s.snapshot_id WHERE t.task_id = ?",
+            (task_id,),
+        ).fetchone()
+        snapshot = json.loads(str(row["content_json"]))
+        for spec in snapshot["tasks"]:
+            spec.pop("project_label", None)
+        conn.execute(
+            "UPDATE plan_snapshots SET content_json = ? WHERE snapshot_id = ?",
+            (json.dumps(snapshot, ensure_ascii=False), row["snapshot_id"]),
+        )
+
+    response = env.client.get("/api/v1/groups/G/tasks")
+
+    assert response.status_code == 200, response.text
+    tasks = response.json()["tasks"]
+    assert [task["task_id"] for task in tasks] == [task_id]
+    assert "project_label" not in tasks[0]
+    assert tasks[0]["title"] == "Write documentation"

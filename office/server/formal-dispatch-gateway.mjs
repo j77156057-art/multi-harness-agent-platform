@@ -371,6 +371,9 @@ export function createFormalGateway(config={}){
     return memberId;
   };
   const safeTask=(t,acceptance)=>({task_id:t.task_id,title:t.title,group_id:t.group_id,status:t.status,owner:t.owner,
+    // 归属：平台任务行上已经有这一格（人派单与管理员细化都会写）。网关早先按白名单
+    // 收字段，把它漏在了外面 —— 前端只能退回去猜标题前缀，D-1 因此一直没真正修好。
+    project_label:t.project_label??null,
     assigned_harness_ids:JSON.parse(t.assigned_harness_ids_json||'[]'),attempt_id:t.current_attempt_id,
     attempt_no:t.attempt_no,max_attempts:t.max_attempts,budget_override_by:t.budget_override_by,
     escalated_at:t.escalated_at,state_changed_seq:t.state_changed_seq,

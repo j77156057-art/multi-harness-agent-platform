@@ -129,8 +129,18 @@ def dispatch(
                 raise Conflict("dispatch request id reused for different content")
             result = json.loads(prior["first_result_json"])
             return {**result, "replayed": True}
-        if not conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone():
+        group = conn.execute(
+            "SELECT p.name AS project_name FROM groups g"
+            " JOIN projects p ON p.project_id = g.project_id WHERE g.group_id = ?",
+            (group_id,),
+        ).fetchone()
+        if not group:
             raise InvalidInput("unknown dispatch group")
+        # 台账按项目名归堆：群属于哪个项目，任务就带哪个项目的名字。以前这里
+        # 什么都不写，办公室只能拿标题前缀去猜，人派单建的项目于是在台账里整片
+        # 消失（D-1）。这一格只作**归属标签**，不进幂等摘要 —— 它由 group_id
+        # 唯一决定，同一个 request_id 重放仍然算同一条派单。
+        project_name = str(group["project_name"] or "").strip()
         member = conn.execute(
             "SELECT * FROM harnesses WHERE harness_id = ?", (harness_id,)
         ).fetchone()
@@ -200,6 +210,8 @@ def dispatch(
             "budget_tokens": 0,
             "verify_profile": "formal-artifact",
         }
+        if project_name:
+            spec["project_label"] = project_name
         if acceptance_gate is not None:
             # 派单级开关进**快照**：执行器（worker）从快照读，不读部署环境；
             # 这样并行的两条活各自带自己的开关，部署默认只给没写字段的老派单用。
