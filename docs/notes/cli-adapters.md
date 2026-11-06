@@ -124,8 +124,9 @@ CodeBuddy 在 Windows 上找不到 Git Bash 时不会报错，只会在 stderr �
   并以退出码 2 结束 —— 不注册、不领取、不进池。
 - **成功行为**：`{"status":"worker_prerequisites_ok","checked":"codebuddy_git_bash","git_bash":...}`
   写进 worker 自己的日志，真实 worker 进程可核验。
-- **注入位置**：启动脚本（`artifacts/e2e-real-20261105/scripts/start-workers.ps1`）在起
-  CodeBuddy 窗口时把该变量写进子进程环境；不依赖任何人的交互 shell。
+- **注入位置**：起 CodeBuddy 窗口时把该变量写进子进程环境；不依赖任何人的交互 shell。
+  E2E 启动脚本是本机一次性产物（含本机路径），不入库；复现方式见
+  `backend/tests/test_worker_prerequisites.py` 里的真实子进程用例。
 - **测试**：`backend/tests/test_worker_prerequisites.py`（6 例，其中一例用真实子进程验证
   缺变量时退出码 2 且不接活）。
 
