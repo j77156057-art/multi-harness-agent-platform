@@ -331,3 +331,45 @@ dialog:not([open]) { display: none !important; }
   .project-card-icon { width: 40px; font-size: 22px; }
   .project-lobby-foot { width: calc(100% - 32px); }
 }
+
+/* 桌面首屏密度收口：保留交付台账结构，把空间还给项目与下一步动作。 */
+@media (min-width: 901px) {
+  .project-lobby-body { width: min(1320px, calc(100% - 48px)); grid-template-columns: minmax(0, 1fr) 288px; gap: 24px 32px; padding: 24px 0 20px; }
+  .project-lobby-copy { padding-bottom: 20px; }
+  .project-lobby-heading { align-items: center; }
+  .project-lobby-copy .eyebrow { margin-bottom: 8px; }
+  .project-lobby-copy h1 { font-size: 36px; line-height: 1.2; }
+  .project-lobby-description { margin-top: 8px; line-height: 1.55; }
+  .project-lobby-actions { padding-top: 0; }
+  .project-lobby-ledger { margin-top: 14px; }
+  .project-lobby-side { gap: 20px; }
+  .project-history, .project-platform, .project-tools { padding-top: 14px; }
+  .project-section-head { padding-bottom: 10px; }
+  .project-section-head h2 { font-size: 18px; }
+  .project-section-head p { margin-top: 4px; line-height: 1.5; }
+  .project-card { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; min-height: 72px; padding: 10px 6px; }
+  .project-card-icon { width: 36px; height: 36px; font-size: 22px; }
+  .project-card-main span { margin-top: 4px; }
+  .project-card-side { gap: 8px; }
+  .project-empty { padding: 24px 8px; }
+  .project-empty-icon { margin-bottom: 4px; font-size: 48px; }
+  .project-empty strong { font-size: 21px; }
+  .project-platform-item { min-height: 60px; padding-block: 10px; }
+  .project-tools-summary { margin: 10px 0 8px; line-height: 1.55; }
+  .project-tools-actions { margin-top: 10px; padding-top: 10px; }
+  .project-onboarding { padding: 20px 22px; }
+  .project-onboarding-label { margin-bottom: 8px; }
+  .project-onboarding h2 { margin-bottom: 8px; font-size: 23px; }
+  .project-onboarding > p { line-height: 1.6; }
+  .project-lobby-steps { gap: 14px; margin-block: 18px; }
+  .project-lobby-steps p { line-height: 1.55; }
+  .project-onboarding-status { padding-top: 14px; }
+  .project-lobby-foot { width: min(1320px, calc(100% - 48px)); padding-block: 12px; }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+  .project-lobby-body { grid-template-columns: minmax(0, 1fr) 272px; gap: 24px; }
+  .project-card { grid-template-columns: 34px minmax(0, 1fr) auto; gap: 9px; }
+  .project-card-icon { width: 32px; font-size: 20px; }
+  .project-card-side { gap: 5px; }
+  .project-card-open, .project-card-remove { padding-inline: 8px; }
+}

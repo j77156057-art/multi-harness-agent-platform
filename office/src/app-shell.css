@@ -570,3 +570,103 @@ dialog::backdrop, #openingDialog::backdrop { background: #17201bb3; backdrop-fil
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+/* 桌面单屏密度收口：暖纸/墨色不变，压缩外壳、任务事实与运维卡片留白。 */
+:root { --ao-topbar-h: 56px; }
+@media (min-width: 861px) {
+  .ao-topbar { min-height: 56px; gap: 16px; padding-inline: 20px; }
+  .ao-brand { gap: 10px; }
+  .ao-mark { flex-basis: 32px; height: 32px; }
+  .ao-brand-text { gap: 14px; }
+  .ao-brand-text strong { font-size: 17px; }
+  .ao-brand-text span::before { margin-right: 14px; }
+  .ao-btn, .ao-topbar .admin-agent-launch { min-height: 34px; }
+  .ao-user { height: 30px; flex-basis: 30px; }
+  .ao-workspace.flat-office { grid-template-columns: 208px minmax(0, 1fr) 272px; }
+  .ao-workspace .flat-body { grid-template-columns: 208px minmax(0, 1fr); }
+  .ao-workspace .flat-head { min-height: 0; padding: 16px 20px; gap: 8px 16px; }
+  .ao-workspace .flat-head-main { gap: 4px; }
+  .ao-workspace .flat-head-main h1 { font-size: 26px; }
+  .ao-workspace .flat-head-main p.flat-guide { line-height: 1.5; }
+  .ao-workspace .flat-head-main p.flat-today { margin-top: 2px; line-height: 1.45; }
+  .ao-workspace .flat-counts li { min-width: 58px; padding-inline: 10px; }
+  .ao-workspace .flat-counts li b, .ao-workspace .flat-counts li.has-value b { font-size: 24px; }
+  .ao-workspace .flat-source select { min-height: 28px; }
+  .ao-workspace .flat-convs { padding: 14px 8px; }
+  .ao-workspace .flat-convs-head { padding-bottom: 10px; }
+  .ao-workspace .flat-conv { min-height: 54px; padding: 8px 10px; gap: 3px; }
+  .ao-workspace .flat-main { padding: 16px 20px; }
+  .ao-workspace .flat-tasks { gap: 8px; }
+  .ao-workspace .flat-filters { gap: 3px; padding-bottom: 6px; }
+  .ao-workspace .flat-filters button { min-height: 30px; padding: 4px 12px; }
+  .ao-workspace .flat-filters button[aria-pressed="true"]::after { bottom: -8px; }
+  .ao-workspace .flat-tools { padding-block: 2px 4px; }
+  .ao-workspace .flat-sort select { min-height: 28px; }
+  .ao-workspace .flat-task { padding: 9px 10px; }
+  .ao-workspace .flat-task-title { line-height: 1.4; }
+  .ao-workspace .flat-task-meta, .ao-workspace .flat-task-foot, .ao-workspace .flat-task-sub { line-height: 1.45; }
+  .ao-workspace .flat-group { margin-top: 6px; }
+  .ao-workspace .flat-group-head { padding: 7px 4px; }
+  .ao-workspace .flat-group-facts { margin-left: auto; }
+  .ao-workspace .flat-pager { padding-top: 8px; }
+  .ao-workspace .flat-detail-head { gap: 10px; padding-bottom: 12px; }
+  .ao-workspace .flat-detail-head h2 { font-size: 22px; line-height: 1.35; }
+  .ao-workspace .flat-detail-actions button { min-height: 32px; }
+  .ao-workspace .flat-summary { line-height: 1.55; }
+  .ao-workspace .flat-spec { margin-top: 12px; padding-block: 10px; }
+  .ao-workspace .flat-spec h3 { margin-bottom: 8px; }
+  .ao-workspace .flat-spec p { line-height: 1.6; }
+  .ao-workspace .flat-tech { margin-top: 10px; }
+  .ao-workspace .flat-detail-foot { margin-top: 10px; }
+  .ao-workspace .flat-rail { padding: 14px 16px; }
+  .ao-workspace .flat-rail-head { margin-bottom: 12px; padding-bottom: 12px; }
+  .ao-workspace .flat-rail-lead { margin-top: 8px; }
+  .ao-workspace .flat-rail-lead strong { font-size: 36px; }
+  .ao-workspace .flat-rail-ledger { margin-top: 12px; padding-top: 8px; }
+  .ao-workspace .flat-card { margin-bottom: 12px; padding-bottom: 12px; }
+  .ao-workspace .flat-card h3 { margin-bottom: 6px; }
+  .ao-workspace .flat-card p { margin: 4px 0; line-height: 1.55; }
+  .ao-workspace .flat-card .flat-empty { padding: 0; }
+  .ao-workspace .flat-card button { min-height: 30px; }
+  .ao-workspace .flat-card-ask, .ao-workspace .flat-card-trouble, .ao-workspace .flat-card-waiting,
+  .ao-workspace .flat-card.flat-card-plan { padding: 12px; }
+  .ao-workspace .flat-waiting-list { gap: 4px; }
+  .ao-workspace .flat-waiting-list button { padding: 5px 7px; }
+  .ao-workspace .flat-card-fold { padding-bottom: 0; }
+  .ao-workspace .flat-card-fold > details > summary { padding: 8px 10px; }
+  .ao-workspace .flat-card-fold > button { margin: 0 10px 8px; }
+  .ao-workspace .flat-chat-head { min-height: 38px; padding-bottom: 10px; }
+  .ao-workspace .flat-chat-list { gap: 12px; padding-block: 12px; }
+  .ao-workspace .flat-chat-form { padding-top: 10px; }
+  .ao-workspace .flat-chat-form input, .ao-workspace .flat-chat-form button { height: 38px; min-height: 38px; }
+  .flat-loading { grid-template-rows: 128px minmax(0, 1fr); }
+  .flat-loading-head { padding: 24px 20px; }
+  .flat-loading-body { grid-template-columns: 208px minmax(0, 1fr) 272px; }
+  .flat-loading-main { padding: 20px; }
+}
+@media (min-width: 1600px) {
+  .ao-workspace.flat-office { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+  .ao-workspace .flat-body { grid-template-columns: 220px minmax(0, 1fr); }
+  .flat-loading-body { grid-template-columns: 220px minmax(0, 1fr) 280px; }
+}
+@media (min-width: 861px) and (max-width: 1320px) {
+  .ao-workspace.flat-office { grid-template-columns: 192px minmax(0, 1fr) 256px; }
+  .ao-workspace .flat-body { grid-template-columns: 192px minmax(0, 1fr); }
+  .ao-workspace .flat-main { padding-inline: 16px; }
+  .ao-workspace .flat-rail { padding-inline: 12px; }
+  .flat-loading-body { grid-template-columns: 192px minmax(0, 1fr) 256px; }
+}
+/* 1024 仍保留三列：右栏就地滚动，不再把运维摘要挤到首屏之外。 */
+@media (min-width: 861px) and (max-width: 1180px) {
+  .ao-workspace.flat-office { grid-template-columns: 176px minmax(0, 1fr) 236px; grid-template-rows: auto minmax(0, 1fr); }
+  .ao-workspace .flat-body { grid-template-columns: 176px minmax(0, 1fr); }
+  .ao-workspace .flat-head { padding: 14px 16px; }
+  .ao-workspace .flat-head-main h1 { font-size: 24px; }
+  .ao-workspace .flat-counts li { min-width: 48px; padding-inline: 8px; }
+  .ao-workspace .flat-main { padding: 12px; }
+  .ao-workspace .flat-rail { grid-column: 3; grid-row: 2; display: flex; max-height: 100%; padding: 12px 10px; border-top: 0; border-left: 1px solid var(--ao-border-strong); }
+  .ao-workspace .flat-rail-head { grid-column: auto; }
+  .ao-workspace .flat-card { margin-bottom: 10px; padding-bottom: 10px; }
+  .flat-loading-body { grid-template-columns: 176px minmax(0, 1fr) 236px; }
+  .flat-loading-rail { display: block; }
+}

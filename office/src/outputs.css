@@ -306,3 +306,35 @@
   .outputs-item > header time { margin-left: 0; }
   .outputs-count { margin-left: 0; flex-basis: 100%; }
 }
+
+/* 桌面交付档案：标题与说明双栏，尝试记录保持局部滚动与摘要折叠。 */
+@media (min-width: 601px) {
+  .outputs-body { height: 100dvh; overflow: hidden; }
+  .outputs-shell { max-width: 1280px; height: 100dvh; min-height: 0; }
+  .outputs-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .9fr); gap: 0 28px; padding: 18px 28px 14px; }
+  .outputs-kicker { margin-bottom: 6px !important; }
+  .outputs-head h1 { margin-bottom: 4px; font-size: 28px; }
+  .outputs-note { grid-column: 2; grid-row: 1 / 4; align-self: center; max-width: none; margin: 0; line-height: 1.6; }
+  .outputs-head .outputs-tools { grid-column: 1 / -1; margin-top: 12px; padding-top: 10px; }
+  .outputs-tools select, .outputs-tools button { min-height: 30px; }
+  .outputs-list { gap: 28px; padding: 0 28px 24px; }
+  .outputs-window { grid-template-columns: 140px minmax(0, 1fr); column-gap: 24px; }
+  .outputs-window > header { padding: 16px 0; }
+  .outputs-window > header b { font-size: 18px; }
+  .outputs-window > header span { margin-top: 4px; }
+  .outputs-window > .outputs-item { padding: 16px 0 20px; }
+  .outputs-item > header { margin-bottom: 10px; }
+  .outputs-item > header > b { font-size: 18px; line-height: 1.4; }
+  .outputs-attempt { margin-top: 12px; padding-left: 12px; }
+  .outputs-attempt-head { margin-bottom: 6px; }
+  .outputs-said { gap: 8px; }
+  .outputs-said-head { margin-top: 4px; }
+  .outputs-words { font-size: 14px; line-height: 1.65; }
+  .outputs-words.is-clipped { max-height: 148px; }
+  .outputs-empty { padding-block: 24px; }
+}
+@media (min-width: 601px) and (max-width: 1100px) {
+  .outputs-head { grid-template-columns: minmax(0, 1fr) minmax(260px, .85fr); gap: 0 20px; padding-inline: 22px; }
+  .outputs-list { padding-inline: 22px; }
+  .outputs-window { grid-template-columns: 128px minmax(0, 1fr); column-gap: 20px; }
+}

@@ -155,3 +155,27 @@
   .direct-error { padding-inline: 20px; }
   .direct-form { padding: 16px 20px; }
 }
+
+/* 桌面定向通信：收件信息双栏，消息与常驻发送框分享首屏。 */
+@media (min-width: 601px) {
+  .direct-shell { max-width: 960px; }
+  .direct-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr); gap: 0 28px; padding: 20px 28px 14px; }
+  .direct-kicker { margin-bottom: 6px !important; }
+  .direct-head h1 { margin-bottom: 4px; font-size: 26px; }
+  .direct-note { grid-column: 2; grid-row: 1 / 4; align-self: center; max-width: none; margin: 0; line-height: 1.6; }
+  .direct-list { gap: 16px; padding: 18px 28px 22px; }
+  .direct-msg { width: min(88%, 680px); }
+  .direct-meta { margin-bottom: 5px; }
+  .direct-msg p { padding-top: 8px; font-size: 14px; line-height: 1.65; }
+  .direct-msg.is-mine p { padding: 10px 12px; }
+  .direct-empty { padding-block: 24px; }
+  .direct-waiting { padding: 0 28px 8px; }
+  .direct-error { padding: 8px 28px; }
+  .direct-form { gap: 10px; padding: 12px 28px; }
+  .direct-form input, .direct-form button { min-height: 38px; }
+}
+@media (min-width: 601px) and (max-width: 1100px) {
+  .direct-head { grid-template-columns: minmax(0, 1fr) minmax(260px, .8fr); gap: 0 20px; padding-inline: 22px; }
+  .direct-list, .direct-form { padding-inline: 22px; }
+  .direct-waiting, .direct-error { padding-inline: 22px; }
+}

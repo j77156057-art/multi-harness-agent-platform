@@ -13,6 +13,8 @@ export default defineConfig({
     upstream: process.env.OFFICE_FORMAL_UPSTREAM,
     tokenFile: process.env.OFFICE_FORMAL_TOKEN_FILE,
     adminTokenFile: process.env.OFFICE_FORMAL_ADMIN_TOKEN_FILE,
+    memberTokenFile: process.env.OFFICE_FORMAL_MEMBER_TOKEN_FILE,
+    memberId: process.env.OFFICE_FORMAL_MEMBER_ID,
     project: process.env.OFFICE_FORMAL_PROJECT,
     group: process.env.OFFICE_FORMAL_GROUP,
   }), harnessGatewayPlugin()],

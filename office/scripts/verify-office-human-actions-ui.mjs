@@ -115,6 +115,43 @@ const responses = {
   [`/tasks/${TASK_ID}/verification`]: {},
 };
 
+const experiencePayload = {
+  project: '只读观察回归',
+  task_category: 'implementation',
+  injection_enabled: false,
+  prompt_injection: 'disabled',
+  injection_layer: 'admin_dispatch',
+  experiences: [
+    {
+      experience_id: 'EXP-1',
+      root_cause: '缺少失败路径验收',
+      action: '补充失败路径验收',
+      result: '验收未通过',
+      occurrence_count: 3,
+      source: 'backfill',
+      source_task_id: TASK_ID,
+      contract_id: TASK_ID,
+      scope: 'project',
+      confirmation: null,
+    },
+    {
+      experience_id: 'EXP-2',
+      root_cause: '交接说明缺少路径',
+      action: '在交接中写明文件路径',
+      result: '返修减少',
+      occurrence_count: 2,
+      source: 'live',
+      source_task_id: TASK_ID,
+      contract_id: TASK_ID,
+      scope: 'project',
+      confirmation: { status: 'confirmed', decided_by: 'office-operator', decided_at: '2026-11-04T08:00:00Z' },
+    },
+  ],
+};
+const injectionStatus = { enabled: false, updated_by: '', updated_at: '' };
+const experienceCalls = [];
+const failingExperiences = new Set();
+
 const browser = await chromium.launch({ headless: true });
 const calls = [];
 // 可以让某个端点失败（用来验"动作没成的时候**不要**去通知管理员"）。
@@ -128,6 +165,52 @@ try {
     const pathname = new URL(request.url()).pathname.replace('/api/formal', '');
     const raw = request.postData();
     calls.push({ path: pathname, method: request.method(), body: raw ? JSON.parse(raw) : null });
+    if (pathname === '/experience-injection' || pathname.includes('/experiences')) {
+      const body = raw ? JSON.parse(raw) : null;
+      experienceCalls.push({ path: pathname, method: request.method(), body });
+      if (failingExperiences.has(pathname)) {
+        await route.fulfill({
+          status: 409,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({ error: { code: 'experience.test_failure', message: '模拟经验操作失败' } }),
+        });
+        return;
+      }
+      let payload = {};
+      if (pathname === `/tasks/${TASK_ID}/experiences`) {
+        experiencePayload.injection_enabled = injectionStatus.enabled;
+        experiencePayload.prompt_injection = injectionStatus.enabled ? 'confirmed_only' : 'disabled';
+        payload = experiencePayload;
+      } else if (pathname === '/experience-injection' && request.method() === 'GET') {
+        payload = injectionStatus;
+      } else if (pathname === '/experience-injection' && request.method() === 'POST') {
+        Object.assign(injectionStatus, {
+          enabled: body.enabled,
+          updated_by: body.decided_by,
+          updated_at: '2026-11-04T09:00:00Z',
+        });
+        payload = injectionStatus;
+      } else {
+        const match = /^\/tasks\/[^/]+\/experiences\/([^/]+)\/decision$/.exec(pathname);
+        if (match && request.method() === 'POST') {
+          const experience = experiencePayload.experiences.find(item => item.experience_id === match[1]);
+          if (experience) {
+            experience.confirmation = {
+              status: { confirm: 'confirmed', ignore: 'ignored', revoke: 'revoked' }[body.action],
+              decided_by: body.decided_by,
+              decided_at: '2026-11-04T09:00:00Z',
+            };
+            payload = { confirmation: experience.confirmation, injection_layer: 'admin_dispatch' };
+          }
+        }
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify(payload),
+      });
+      return;
+    }
     if (failing.has(pathname)) {
       await route.fulfill({
         status: 409,
@@ -173,6 +256,66 @@ try {
   // 先看列表，再点进去）。所以这里先点一条等人回答的活。
   await page.locator('#aoWorkspace .flat-task', { hasText: '等人回答的活' }).first().click();
   await page.waitForTimeout(800);
+
+  // 候选经验：按需加载，人工确认/忽略/撤销与总开关都走真实 HTTP 契约。
+  const experiences = page.locator('.flat-experiences');
+  const loadExperiences = experiences.locator('[data-act="load-experiences"]');
+  await loadExperiences.waitFor({ state: 'visible' });
+  assert.match(await experiences.innerText(), /管理员派单/);
+  assert.match(await experiences.innerText(), /默认不注入/);
+  await loadExperiences.focus();
+  await page.keyboard.press('Enter');
+  const firstExperience = experiences.locator('[data-experience-row="EXP-1"]');
+  await firstExperience.waitFor({ state: 'visible' });
+  assert.match(await firstExperience.innerText(), /缺少失败路径验收/);
+  assert.match(await firstExperience.innerText(), /补充失败路径验收/);
+  assert.match(await firstExperience.innerText(), /3 次/);
+  assert.match(await firstExperience.innerText(), /backfill/);
+  assert.match(await firstExperience.innerText(), /未确认/);
+  assert.equal(await firstExperience.locator('[data-decision="confirm"]').count(), 1);
+  assert.equal(await firstExperience.locator('[data-decision="ignore"]').count(), 1);
+  assert.equal(
+    await experiences.locator('[data-experience-row="EXP-2"] [data-decision="revoke"]').count(),
+    1,
+    '已确认经验提供撤销',
+  );
+  assert.match(await experiences.locator('[data-experience-switch-status]').innerText(), /已关闭/);
+
+  await firstExperience.locator('[data-decision="confirm"]').click();
+  await experiences.locator('[data-experience-row="EXP-1"] [data-decision="revoke"]').waitFor({ state: 'visible' });
+  let decisionCall = experienceCalls.filter(call => call.path.endsWith('/decision')).at(-1);
+  assert.equal(decisionCall.body.action, 'confirm');
+  assert.equal(decisionCall.body.decided_by, 'office-operator');
+
+  await experiences.locator('[data-experience-row="EXP-1"] [data-decision="revoke"]').click();
+  await experiences.locator('[data-experience-row="EXP-1"] [data-decision="ignore"]').waitFor({ state: 'visible' });
+  decisionCall = experienceCalls.filter(call => call.path.endsWith('/decision')).at(-1);
+  assert.equal(decisionCall.body.action, 'revoke');
+
+  const decisionPath = `/tasks/${TASK_ID}/experiences/EXP-1/decision`;
+  failingExperiences.add(decisionPath);
+  await experiences.locator('[data-experience-row="EXP-1"] [data-decision="ignore"]').click();
+  await experiences.locator('[data-experience-action-error]').waitFor({ state: 'visible' });
+  assert.match(await experiences.locator('[data-experience-action-error]').innerText(), /模拟经验操作失败/);
+  failingExperiences.delete(decisionPath);
+  await experiences.locator('[data-experience-row="EXP-1"] [data-decision="ignore"]').click();
+  await experiences.locator('[data-experience-row="EXP-1"].is-ignored').waitFor({ state: 'visible' });
+  decisionCall = experienceCalls.filter(call => call.path.endsWith('/decision')).at(-1);
+  assert.equal(decisionCall.body.action, 'ignore');
+
+  await experiences.locator('[data-act="toggle-experience-injection"]').click();
+  await experiences.locator('[data-act="toggle-experience-injection"][aria-pressed="true"]').waitFor({ state: 'visible' });
+  let switchCall = experienceCalls.filter(call => call.path === '/experience-injection' && call.method === 'POST').at(-1);
+  assert.equal(switchCall.body.enabled, true);
+  assert.equal(switchCall.body.decided_by, 'office-operator');
+  await experiences.locator('[data-act="toggle-experience-injection"]').click();
+  await experiences.locator('[data-act="toggle-experience-injection"][aria-pressed="false"]').waitFor({ state: 'visible' });
+  switchCall = experienceCalls.filter(call => call.path === '/experience-injection' && call.method === 'POST').at(-1);
+  assert.equal(switchCall.body.enabled, false);
+
+  experiencePayload.experiences = [];
+  await experiences.locator('[data-act="refresh-experiences"]').click();
+  await experiences.locator('[data-experience-empty]').waitFor({ state: 'visible' });
 
   // 从详情换看另一条活：先回任务表（详情视图里没有任务行）。
   const backToTable = async () => {

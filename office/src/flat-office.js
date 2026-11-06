@@ -253,10 +253,40 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     selected: null,
     detail: null,
     output: null,
+    // 候选经验只在人点「加载」后读取；切任务时不把上一条的经验带过去。
+    experiences: {
+      taskId: '',
+      loaded: false,
+      loading: false,
+      data: null,
+      injection: null,
+      error: '',
+      actionError: '',
+      busy: '',
+    },
     availability: [],
     // 分配轮（§39）：后端一直有写侧，读面是后补的；界面接上之前，
     // 「有一轮在等我定人」只有 curl 看得到。读不到就是空，不编。
     allocation: { rounds: [], loaded: false },
+    // 项目创建申请：读取与动作分开记错，失败时不清空最后一次成功的列表。
+    projectRequests: {
+      rows: [],
+      loaded: false,
+      loading: false,
+      error: '',
+      actionError: '',
+      busy: '',
+    },
+    // Agent 自己的申请：与人工审批分栏，提交失败时草稿原样保留。
+    agentApplications: {
+      rows: [],
+      loaded: false,
+      loading: false,
+      for: '',
+      error: '',
+      actionError: '',
+      busy: false,
+    },
     // 当前看的是哪个会话：tasks=项目任务、group=项目群聊、assistant=平台助手、
     // window=某个窗口（id 是它的 harness_id）。
     view: restoredView.view || { kind: 'tasks', id: null },
@@ -414,7 +444,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   // 重画会把这些栏整个换掉，滚动位置也就没了：用户滚到额度池看额度，下一次
   // 刷新就"啪"地回到顶上 —— 跟刚才那个"正在填的表单被抹掉"是同一类毛病。
   const scrollState = new Map();
-  const SCROLLING_PANES = ['.flat-convs', '.flat-rail', '.flat-tasks', '.flat-detail', '.flat-chat-list'];
+  const SCROLLING_PANES = ['.flat-convs', '.flat-rail', '.flat-tasks', '.flat-detail', '.flat-chat-list', '.flat-project-request-list'];
 
   function captureScroll() {
     for (const selector of SCROLLING_PANES) {
@@ -472,13 +502,13 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   demoRuntime.configure(demoFixture.scope);
   demoRuntime.ingest(demoFixture);
 
-  const api = async (route, body_) => {
+  const requestApi = async (base, route, body_) => {
     // 每个请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
     // 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个。
     const headers = withGroup(
       body_ ? { 'Content-Type': 'application/json', 'X-Office-Formal': '1' } : {},
     );
-    const response = await fetch(`/api/formal${route}`, {
+    const response = await fetch(`${base}${route}`, {
       cache: 'no-store',
       headers,
       ...(body_ ? { method: 'POST', body: JSON.stringify(body_) } : {}),
@@ -493,6 +523,10 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     }
     return data;
   };
+
+  const api = (route, body_) => requestApi('/api/formal', route, body_);
+  // 经验确认也走办公室网关：由服务端带真实操作人凭据，浏览器不保存密钥。
+  const experienceApi = (route, body_) => requestApi('/api/formal', route, body_);
 
   /** 删掉一个东西（DELETE 也要带同源写的那个头）。 */
   const apiDelete = async (route) => {
@@ -528,6 +562,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 平台配置的管理员窗口（事实，不是猜的）。 */
   function adminIdentity() {
     return (state.status && state.status.admin && state.status.admin.identity) || null;
+  }
+
+  function applicantIdentity() {
+    return (state.status && state.status.applicant && state.status.applicant.identity) || null;
   }
 
   function adminName() {
@@ -1218,6 +1256,154 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       text.focus();
     });
   }
+
+  // 项目创建会真的新增项目与主群：批准前把四个创建参数原样回显，并明确让人确认。
+  const projectRequestDialog = document.createElement('dialog');
+  projectRequestDialog.className = 'flat-dialog is-compact flat-project-request-dialog';
+  projectRequestDialog.id = 'flatProjectRequestDecision';
+  projectRequestDialog.setAttribute('aria-label', '项目创建申请审批');
+  projectRequestDialog.innerHTML = `
+    <header class="flat-dialog-head">
+      <div><h2></h2><p class="flat-note"></p></div>
+      <button type="button" class="flat-dialog-close" data-project-request-close aria-label="关闭">×</button>
+    </header>
+    <form class="flat-dialog-list" data-project-request-form>
+      <dl class="flat-project-request-confirm">
+        <div><dt>项目 ID</dt><dd><input data-confirm-field="project_id" aria-label="项目 ID"></dd></div>
+        <div><dt>项目名称</dt><dd><input data-confirm-field="project_name" aria-label="项目名称"></dd></div>
+        <div><dt>主群 ID</dt><dd><input data-confirm-field="group_id" aria-label="主群 ID"></dd></div>
+        <div><dt>主群名称</dt><dd><input data-confirm-field="group_name" aria-label="主群名称"></dd></div>
+      </dl>
+      <label class="flat-field"><span data-project-request-reason-label></span>
+        <textarea data-project-request-reason rows="3"></textarea>
+      </label>
+      <label class="flat-check" data-project-request-confirm-wrap>
+        <span><input type="checkbox" data-project-request-confirm data-request-confirm /> 我已核对并确认创建上述项目与主群</span>
+      </label>
+      <p class="flat-project-request-action-error" data-project-request-dialog-error role="alert"></p>
+      <div class="flat-dialog-actions">
+        <button type="button" data-project-request-cancel>取消</button>
+        <button type="submit" data-project-request-submit>确认</button>
+      </div>
+    </form>`;
+  document.body.append(projectRequestDialog);
+  let activeProjectRequestDecision = null;
+
+  function syncProjectRequestDialog() {
+    const decision = activeProjectRequestDecision;
+    if (!decision) return;
+    const busy = Boolean(state.projectRequests.busy);
+    const approve = decision.mode === 'approve';
+    const checked = projectRequestDialog.querySelector('[data-project-request-confirm]').checked;
+    const reason = projectRequestDialog.querySelector('[data-project-request-reason]').value.trim();
+    const changed = ['project_id', 'project_name', 'group_id', 'group_name'].some((field) => {
+      const input = projectRequestDialog.querySelector(`[data-confirm-field="${field}"]`);
+      return String(input?.value || '').trim() !== String(decision.row[field] || '');
+    });
+    const submit = projectRequestDialog.querySelector('[data-project-request-submit]');
+    submit.disabled = busy || (approve && (!checked || (changed && !reason))) || (!approve && !reason);
+    projectRequestDialog.querySelector('[data-project-request-reason-label]').textContent = changed
+      ? '修订理由（必填）'
+      : approve ? '审批说明（选填）' : '拒绝原因（必填）';
+    submit.textContent = busy ? '正在提交…' : approve ? '确认批准并创建' : '确认拒绝';
+    projectRequestDialog.querySelector('[data-project-request-cancel]').disabled = busy;
+    projectRequestDialog.querySelector('[data-project-request-close]').disabled = busy;
+    projectRequestDialog.querySelector('[data-project-request-dialog-error]').textContent = state.projectRequests.actionError;
+    projectRequestDialog.querySelectorAll('[data-confirm-field]').forEach((input) => { input.disabled = busy; });
+  }
+
+  function openProjectRequestDecision(requestId, mode) {
+    const row = state.projectRequests.rows.find((item) => String(item.request_id || '') === requestId);
+    if (!row || String(row.status || '') !== 'pending' || state.status?.operator_type !== 'human') return;
+    activeProjectRequestDecision = { row, mode };
+    state.projectRequests.actionError = '';
+    const approve = mode === 'approve';
+    projectRequestDialog.querySelector('h2').textContent = approve ? '批准创建项目' : '拒绝项目创建申请';
+    projectRequestDialog.querySelector('.flat-dialog-head .flat-note').textContent = approve
+      ? '批准后平台会按下列参数创建项目与主群。请逐项核对。'
+      : '拒绝不会创建项目或主群；原因会留在审批记录里。';
+    for (const field of ['project_id', 'project_name', 'group_id', 'group_name']) {
+      projectRequestDialog.querySelector(`[data-confirm-field="${field}"]`).value = String(row[field] || '');
+    }
+    projectRequestDialog.querySelector('[data-project-request-reason-label]').textContent = approve
+      ? '审批说明（选填）'
+      : '拒绝原因（必填）';
+    const reason = projectRequestDialog.querySelector('[data-project-request-reason]');
+    reason.toggleAttribute('data-approve-reason', approve);
+    reason.toggleAttribute('data-reject-reason', !approve);
+    reason.value = '';
+    reason.placeholder = approve ? '例如：用途与范围明确，同意创建' : '例如：当前预算不支持另建项目';
+    projectRequestDialog.querySelector('[data-project-request-confirm-wrap]').hidden = !approve;
+    projectRequestDialog.querySelector('[data-project-request-confirm]').checked = false;
+    projectRequestDialog.querySelector('[data-project-request-submit]').dataset.act = approve
+      ? 'confirm-approve-request'
+      : 'confirm-reject-request';
+    syncProjectRequestDialog();
+    if (!projectRequestDialog.open) projectRequestDialog.showModal();
+    reason.focus();
+  }
+
+  projectRequestDialog.querySelector('[data-project-request-confirm]').addEventListener('change', () => {
+    state.projectRequests.actionError = '';
+    syncProjectRequestDialog();
+  });
+  projectRequestDialog.querySelectorAll('[data-confirm-field]').forEach((input) => {
+    input.addEventListener('input', () => syncProjectRequestDialog());
+  });
+  projectRequestDialog.querySelector('[data-project-request-reason]').addEventListener('input', () => {
+    if (!state.projectRequests.busy) {
+      state.projectRequests.actionError = '';
+      syncProjectRequestDialog();
+    }
+  });
+  projectRequestDialog.querySelector('[data-project-request-cancel]').addEventListener('click', () => projectRequestDialog.close());
+  projectRequestDialog.querySelector('[data-project-request-close]').addEventListener('click', () => projectRequestDialog.close());
+  projectRequestDialog.addEventListener('click', (event) => {
+    if (event.target === projectRequestDialog && !state.projectRequests.busy) projectRequestDialog.close();
+  });
+  projectRequestDialog.addEventListener('close', () => {
+    if (!state.projectRequests.busy) activeProjectRequestDecision = null;
+  });
+  projectRequestDialog.querySelector('[data-project-request-form]').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const decision = activeProjectRequestDecision;
+    if (!decision || state.projectRequests.busy) return;
+    const reason = projectRequestDialog.querySelector('[data-project-request-reason]').value.trim();
+    const approve = decision.mode === 'approve';
+    const confirmed = projectRequestDialog.querySelector('[data-project-request-confirm]').checked;
+    const revisions = Object.fromEntries(['project_id', 'project_name', 'group_id', 'group_name'].map((field) => [
+      field,
+      projectRequestDialog.querySelector(`[data-confirm-field="${field}"]`).value.trim(),
+    ]));
+    const changed = Object.keys(revisions).some((field) => revisions[field] !== String(decision.row[field] || ''));
+    if ((approve && (!confirmed || (changed && !reason))) || (!approve && !reason)) {
+      state.projectRequests.actionError = approve && !confirmed
+        ? '请先核对并勾选确认创建参数。'
+        : changed && approve ? '修订创建参数必须填写修订理由。' : '拒绝原因不能为空。';
+      syncProjectRequestDialog();
+      render();
+      return;
+    }
+    const requestId = String(decision.row.request_id || '');
+    state.projectRequests.busy = `${decision.mode}:${requestId}`;
+    state.projectRequests.actionError = '';
+    syncProjectRequestDialog();
+    render();
+    try {
+      await api(`/project-creation-requests/${encodeURIComponent(requestId)}/${decision.mode}`, { reason, ...revisions });
+      // 不以本地改行冒充结果：创建与审批状态都以平台重新返回的列表为准。
+      await loadProjectCreationRequests();
+      activeProjectRequestDecision = null;
+      projectRequestDialog.close();
+    } catch (error) {
+      // 动作失败不碰旧 rows；错误同时留在对话框和申请区，避免静默失败。
+      state.projectRequests.actionError = `${approve ? '批准' : '拒绝'}失败：${String(error.message || error)}`;
+    } finally {
+      state.projectRequests.busy = '';
+      syncProjectRequestDialog();
+      render();
+    }
+  });
 
   function openPanel(dialog, { title, note, body }) {
     dialog.querySelector('.flat-dialog-head h2').textContent = title;
@@ -2907,8 +3093,73 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 而是"这件事有结论了才没了"。分配轮的那几条不同：它们靠**真的裁决**消失
    * （定给人、或者写明为什么先不分配），没有"先不管"。
    */
+  function projectCreationPending() {
+    return state.projectRequests.rows.filter((row) => String(row.status || '') === 'pending');
+  }
+
+  function projectCreationRequestRow(row) {
+    const status = String(row.status || '');
+    const statusLabel = { pending: '待批准', approved: '已批准', rejected: '已拒绝' }[status] || status || '未知状态';
+    const requestId = String(row.request_id || '');
+    const requesterType = String(row.requested_by_type || '');
+    const requesterKind = { human: '人', harness: 'Harness' }[requesterType] || requesterType;
+    const canDecide = status === 'pending' && state.status?.operator_type === 'human';
+    const busy = Boolean(state.projectRequests.busy);
+    const fact = (label, value, className = '') => `<div class="${className}"><dt>${label}</dt><dd>${escape(String(value || '—'))}</dd></div>`;
+    return `<article class="flat-project-request is-${escape(status || 'unknown')}" data-request-id="${escape(requestId)}">
+      <header class="flat-project-request-head">
+        <div><span class="flat-project-request-status">${escape(statusLabel)}</span><h4>${escape(String(row.project_name || row.project_id || '未命名项目'))}</h4></div>
+        <time datetime="${escape(String(row.created_at || ''))}" title="created_at：${escape(String(row.created_at || '—'))}">${escape(timeOf(row.created_at))}</time>
+      </header>
+      <dl class="flat-project-request-facts">
+        ${fact('申请人', `${String(row.requested_by_id || '—')}${requesterKind ? ` · ${requesterKind}` : ''}`)}
+        ${fact('用途 purpose', row.purpose, 'is-wide')}
+        ${fact('范围 scope', row.scope, 'is-wide')}
+        ${fact('预期产出 expected_output', row.expected_output, 'is-wide')}
+        ${fact('审批说明 decision_reason', row.decision_reason, 'is-wide')}
+      </dl>
+      ${row.original ? `<dl class="flat-project-request-original"><dt>原申请参数</dt><dd>${escape(String(row.original.project_id || '—'))} · ${escape(String(row.original.project_name || '—'))} / ${escape(String(row.original.group_id || '—'))} · ${escape(String(row.original.group_name || '—'))}</dd><dt>最终参数</dt><dd>${escape(String(row.project_id || '—'))} · ${escape(String(row.project_name || '—'))} / ${escape(String(row.group_id || '—'))} · ${escape(String(row.group_name || '—'))}</dd></dl>` : ''}
+      ${status === 'approved' ? `<p class="flat-project-request-created"><b>创建结果</b> 已创建项目 <code>${escape(String(row.project_id || '—'))}</code> · 已创建主群 <code>${escape(String(row.group_id || '—'))}</code></p>` : ''}
+      ${canDecide ? `<div class="flat-project-request-actions">
+        <button type="button" data-act="open-approve-request" data-request="${escape(requestId)}" ${busy ? 'disabled' : ''}>批准创建</button>
+        <button type="button" data-act="open-reject-request" data-request="${escape(requestId)}" ${busy ? 'disabled' : ''}>拒绝</button>
+        ${busy ? '<span class="flat-note">正在提交审批…</span>' : ''}
+      </div>` : ''}
+    </article>`;
+  }
+
+  function projectCreationRequestsBlock() {
+    const requests = state.projectRequests;
+    const rows = requests.rows;
+    const pending = projectCreationPending().length;
+    const readState = requests.error
+      ? `<div class="flat-project-request-error" data-project-requests-error role="alert">
+          <span>读取失败：${escape(requests.error)}。${rows.length ? '以下保留上次成功读取的数据。' : '暂时无法确认有没有申请。'}</span>
+          <button type="button" data-act="retry-project-requests" ${requests.loading ? 'disabled' : ''}>${requests.loading ? '正在重试…' : '重试'}</button>
+        </div>`
+      : '';
+    const content = rows.length
+      ? `<div class="flat-project-request-list" aria-label="项目创建申请列表">${rows.map(projectCreationRequestRow).join('')}</div>`
+      : !requests.loaded
+        ? '<p class="flat-empty" data-project-requests-loading>正在读取项目创建申请…</p>'
+        : requests.error
+          ? ''
+          : `<p class="flat-empty" data-project-requests-empty>${state.source === 'demo' ? '本地样例不提供项目创建申请。' : '暂无项目创建申请。'}</p>`;
+    return `<section class="flat-spec flat-alert flat-project-requests" data-project-requests aria-busy="${requests.loading ? 'true' : 'false'}">
+      <header class="flat-project-requests-head">
+        <div><h3>项目创建申请${pending ? ` · ${pending} 条待批准` : ''}</h3><p class="flat-note">申请只登记意图；人工批准后才创建项目与主群。${requests.loading && rows.length ? ' 正在刷新…' : ''}</p></div>
+        <button type="button" data-act="refresh-project-requests" ${requests.loading ? 'disabled' : ''}>${requests.loading ? '正在读取…' : '刷新'}</button>
+      </header>
+      <div class="flat-project-request-errors" data-request-error>
+        ${requests.actionError ? `<p class="flat-project-request-error" data-project-requests-action-error role="alert">${escape(requests.actionError)}</p>` : ''}
+        ${readState}
+      </div>
+      ${content}
+    </section>`;
+  }
+
   function attentionCount() {
-    return attentionItems().length + allocationPending().length;
+    return attentionItems().length + allocationPending().length + projectCreationPending().length;
   }
 
   /** 这一页：需要你处理的事，一件一块。处理完就没了。 */
@@ -2917,7 +3168,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     pane.className = 'flat-main flat-alerts';
     const items = attentionItems();
     const pendingAllocations = allocationPending();
-    const total = items.length + pendingAllocations.length;
+    const pendingRequests = projectCreationPending().length;
+    const total = items.length + pendingAllocations.length + pendingRequests;
     const head = document.createElement('header');
     head.className = 'flat-detail-head';
     head.innerHTML = `<div>
@@ -2926,11 +3178,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           total
             ? `${total} 件事在等你。${
                 items.length ? '「模型用不了」处理完或「先不管」之后红点会消失；' : ''
-              }${pendingAllocations.length ? '分配要定下来（或者写明为什么先不分配）才会算完。' : ''}`
+              }${pendingAllocations.length ? '分配要定下来（或者写明为什么先不分配）才会算完；' : ''}${
+                pendingRequests ? '项目创建申请要由人逐项核对后批准或拒绝。' : ''
+              }`
             : '现在没有需要你处理的事。'
         }</p>
       </div>`;
     pane.append(head);
+    const requestsBlock = document.createElement('div');
+    requestsBlock.innerHTML = projectCreationRequestsBlock();
+    pane.append(requestsBlock.firstElementChild);
     for (const item of items) {
       const block = document.createElement('section');
       block.className = 'flat-spec flat-alert';
@@ -3267,6 +3524,147 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
+  // ── 验收记录（只读展示）───────────────────────────────────────────
+  //
+  // 平台会给每条活记下验收结论（retry_fixed / abandoned / …）、退回次数、终态原因
+  // 和本轮缺口。网关只放**截断后的摘要**（最多 5 轮 / 8 条 / 每条 120 字），完整内容
+  // 仍在 `/api/formal/tasks/{id}/acceptance`。这里不猜、不留白：没有状态就写「未验收」，
+  // 没有终态原因就写「平台未记录」。
+  const ACCEPT_STATE_CONCLUSION = {
+    passed: '通过',
+    retry_fixed: '退回后修回',
+    abandoned: '已放弃',
+    unjudgeable: '无法判定',
+  };
+  const ACCEPT_CHECK_LABEL = {
+    delivery_path_exists: '交付路径缺失',
+    content_min_length: '正文长度不足',
+    banned_token: '出现禁止词',
+  };
+  const ACCEPT_VERDICT_LABEL = { pass: '通过', fail: '未通过', unjudgeable_no_text: '没有可判定的正文' };
+
+  /** 验收结论那句人话；没有验收状态就明确说「未验收」（不能空着）。 */
+  function acceptanceConclusion(task) {
+    const state = String((task && task.acceptance_state) || '');
+    const retries = Number(task && task.acceptance_retries);
+    if (!state) return '未验收';
+    if (state === 'passed') return '通过';
+    if (state === 'retry_fixed') {
+      return Number.isFinite(retries) ? `退回 ${retries} 次后修回` : '退回后修回';
+    }
+    return ACCEPT_STATE_CONCLUSION[state] || state;
+  }
+
+  /** 退回次数；未验收的不写「0 次」（那是"没记"，不是"退了 0 次"）。 */
+  function acceptanceRetriesLine(task) {
+    const state = String((task && task.acceptance_state) || '');
+    if (!state) return '退回次数：未验收，不适用';
+    const retries = task && task.acceptance_retries;
+    if (retries === null || retries === undefined || retries === '') return '退回次数：平台未记录';
+    return `退回次数：${retries} 次`;
+  }
+
+  /** 终态原因；空值显式写「平台未记录」，不留白。 */
+  function acceptanceFinishLine(task) {
+    const reason = String((task && task.finish_reason) || '').trim();
+    return `终态原因：${reason || '平台未记录'}`;
+  }
+
+  /** 一条缺口一句话：哪项检查没过（带上路径/禁用词/行号）。 */
+  function acceptanceGapSentence(gap) {
+    if (!gap || typeof gap !== 'object') return String(gap || '（平台未给出细节）');
+    const label = ACCEPT_CHECK_LABEL[String(gap.check || '')] || String(gap.check || '未通过检查');
+    const extras = [
+      gap.path ? `路径 ${gap.path}` : '',
+      gap.token ? `禁用词「${gap.token}」` : '',
+      gap.line !== null && gap.line !== undefined ? `第 ${gap.line} 行` : '',
+    ].filter(Boolean).join('，');
+    const detail = String(gap.detail || '').trim();
+    if (detail) return `${label}：${detail}`;
+    return extras ? `${label}：${extras}` : `${label}（平台未给出细节）`;
+  }
+
+  /** 一轮验收：第几轮、结论、commit 前 12 位、缺口条数。 */
+  function acceptanceRoundSentence(round) {
+    const verdict = ACCEPT_VERDICT_LABEL[String((round && round.verdict) || '')]
+      || String((round && round.verdict) || '未记结论');
+    const commit = String((round && round.commit) || '');
+    const gaps = Number(round && round.gap_count);
+    const parts = [`第 ${round && round.round !== null && round.round !== undefined ? round.round : '?'} 轮`, verdict];
+    if (commit) parts.push(commit.slice(0, 12));
+    if (Number.isFinite(gaps)) parts.push(`缺口 ${gaps} 条`);
+    return parts.join(' · ');
+  }
+
+  /** 卡片上的那一行（展开可见）：结论 + 退回次数 + 终态原因。 */
+  function acceptanceCardLine(task) {
+    return `<p class="flat-note">验收</p>
+      <p class="flat-wtask-goal" data-acceptance-card>验收结论：${escape(acceptanceConclusion(task))} · ${escape(acceptanceRetriesLine(task))} · ${escape(acceptanceFinishLine(task))}</p>`;
+  }
+
+  /**
+   * 折叠起来的卡片也要能一眼看到验收结论：一个短徽标，四档。
+   * 沿用现有 `.flat-chip` 的颜色语义（绿=通过、黄=退回修回、红=放弃、灰=未验收），
+   * 不新造视觉；文字压到一行，放在状态之后、标题之前。
+   */
+  function acceptanceBadge(task) {
+    const state = String((task && task.acceptance_state) || '');
+    const retries = Number(task && task.acceptance_retries);
+    let tone = 'none';
+    let text = '未验收';
+    let hint = '没有进入自动验收';
+    if (state === 'passed') {
+      tone = 'pass';
+      text = '已通过';
+      hint = '自动验收通过';
+    } else if (state === 'retry_fixed') {
+      tone = 'retry';
+      text = Number.isFinite(retries) ? `退回 ${retries} 次后修回` : '退回后修回';
+      hint = `验收结论：${text}`;
+    } else if (state === 'abandoned') {
+      tone = 'abandoned';
+      text = '已放弃';
+      hint = `验收结论：已放弃（退回 ${Number.isFinite(retries) ? retries : 0} 次）`;
+    } else if (state === 'unjudgeable') {
+      tone = 'none';
+      text = '无法判定';
+      hint = '没有可判定的正文';
+    }
+    return `<span class="flat-chip flat-chip-accept flat-chip-accept-${tone}" data-acceptance-badge title="${escape(hint)}">${escape(text)}</span>`;
+  }
+
+  /**
+   * 详情里的「验收记录」：结论、退回次数、终态原因、轮次、缺口。
+   * 风格沿用现有 `flat-spec` / `flat-note` / `flat-list`，不另造一套视觉。
+   */
+  function acceptanceRecordBlock(task) {
+    if (!task || typeof task !== 'object') return '';
+    const state = String(task.acceptance_state || '');
+    const rounds = Array.isArray(task.acceptance_rounds) ? task.acceptance_rounds : [];
+    const gaps = Array.isArray(task.acceptance_gaps) ? task.acceptance_gaps : [];
+    const truncated = task.acceptance_truncated || {};
+    const receiptId = String(task.acceptance_receipt_id || '');
+    const gapsOmitted = Number(truncated.gaps_omitted) || 0;
+    const roundsOmitted = Number(truncated.rounds_omitted) || 0;
+    const truncatedLine = gapsOmitted || roundsOmitted
+      ? `<p class="flat-note" data-acceptance-truncated>已截断：另有 ${[
+          roundsOmitted ? `${roundsOmitted} 轮` : '',
+          gapsOmitted ? `${gapsOmitted} 条缺口` : '',
+        ].filter(Boolean).join(' / ')}未显示，完整内容看接口 <code>GET /api/formal/tasks/${escape(String(task.task_id || ''))}/acceptance</code>。</p>`
+      : '';
+    return `<section class="flat-spec" data-acceptance-record>
+      <h3>验收记录</h3>
+      <p><b data-acceptance-conclusion>验收结论：${escape(acceptanceConclusion(task))}</b></p>
+      <p class="flat-note" data-acceptance-meta>${escape(acceptanceRetriesLine(task))} · ${escape(acceptanceFinishLine(task))}</p>
+      <p class="flat-note">验收回执：<code>${escape(receiptId || '平台未记录')}</code></p>
+      ${!state ? '<p class="flat-note">这条活没有进入自动验收（派单时未开启，或还没到验收环节）。</p>' : ''}
+      ${rounds.length ? `<p class="flat-note">验收轮次（页面显示最近 ${rounds.length} 轮）</p><ul class="flat-list" data-acceptance-rounds>${rounds.map((round) => `<li>${escape(acceptanceRoundSentence(round))}</li>`).join('')}</ul>` : ''}
+      ${gaps.length ? `<p class="flat-note">缺口（${gaps.length} 条）</p><ul class="flat-list" data-acceptance-gaps>${gaps.map((gap) => `<li>${escape(acceptanceGapSentence(gap))}</li>`).join('')}</ul>` : ''}
+      ${state && !gaps.length ? '<p class="flat-empty">本轮没有缺口。</p>' : ''}
+      ${truncatedLine}
+    </section>`;
+  }
+
   /**
    * 窗口页里的一条活：收起时是「状态 + 标题 + 做到第几次 + 现在什么状态」，
    * 点开就是**这条活完整的目标原文**（不截断）+ 验收标准 + 只允许改的路径 +
@@ -3280,6 +3678,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     card.dataset.fold = foldKey;
     const summary = document.createElement('summary');
     summary.innerHTML = `<span class="flat-chip flat-chip-${escape(task.status)}">${escape(STATE_LABEL[task.status] || task.status)}</span>
+      ${acceptanceBadge(task)}
       <b>${escape(titleParts(task).main || task.title || task.task_id)}</b>
       <span class="flat-wtask-meta">${escape(attemptWord(task))} · ${escape(statusSentence(task))}</span>`;
     card.append(summary);
@@ -3304,6 +3703,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         ${specError ? `<p class="flat-domain-error" role="alert"><b>任务规格读取失败</b><span>${escape(specError)}${spec ? '；当前显示最后成功读取的内容。' : '；无法确认平台是否提供。'}</span></p>` : ''}
         <p class="flat-note">任务目标</p>
         <p class="flat-wtask-goal">${goal ? escape(goal) : specError ? '（读取失败，暂不能确认）' : '（平台未提供该任务的目标）'}</p>
+        ${acceptanceCardLine(task)}
         ${acceptance.length ? `<p class="flat-note">验收标准</p><ul class="flat-list">${acceptance.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : ''}
         ${paths.length ? `<p class="flat-note">允许修改的路径</p><ul class="flat-list">${paths.map((path) => `<li><code>${escape(path)}</code></li>`).join('')}</ul>` : ''}
         <p class="flat-note">动作记录${events.length ? `（${events.length} 步）` : ''}</p>
@@ -3712,6 +4112,112 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return card;
   }
 
+  const AGENT_APPLICATION_FIELDS = ['project_id', 'project_name', 'group_id', 'group_name', 'purpose', 'scope', 'expected_output'];
+
+  async function loadAgentApplications() {
+    const requests = state.agentApplications;
+    if (requests.loading) return false;
+    requests.loading = true;
+    try {
+      const data = await api('/agent/project-creation-requests');
+      if (!Array.isArray(data.requests)) throw new Error('平台回包缺少 requests');
+      requests.rows = data.requests;
+      requests.loaded = true;
+      requests.error = '';
+      requests.actionError = '';
+      return true;
+    } catch (error) {
+      requests.error = String(error.message || error);
+      return false;
+    } finally {
+      requests.loading = false;
+    }
+  }
+
+  function agentApplicationRow(row) {
+    const status = String(row.status || '');
+    const label = { pending: '待批准', approved: '已批准', rejected: '已拒绝' }[status] || status || '未知状态';
+    return `<article class="flat-agent-application is-${escape(status || 'unknown')}" data-agent-request-id="${escape(String(row.request_id || ''))}">
+      <header><span>${escape(label)}</span><h4>${escape(String(row.project_name || row.project_id || '未命名项目'))}</h4><time>${escape(timeOf(row.created_at))}</time></header>
+      <dl>
+        <div><dt>用途</dt><dd>${escape(String(row.purpose || '—'))}</dd></div>
+        <div><dt>范围</dt><dd>${escape(String(row.scope || '—'))}</dd></div>
+        <div><dt>预期产出</dt><dd>${escape(String(row.expected_output || '—'))}</dd></div>
+        <div><dt>当前决定与原因</dt><dd>${escape(String(row.decision_reason || '—'))}</dd></div>
+      </dl>
+      ${row.original ? `<dl class="flat-project-request-original"><dt>原申请参数</dt><dd>${escape(String(row.original.project_id || '—'))} · ${escape(String(row.original.project_name || '—'))} / ${escape(String(row.original.group_id || '—'))} · ${escape(String(row.original.group_name || '—'))}</dd><dt>最终参数</dt><dd>${escape(String(row.project_id || '—'))} · ${escape(String(row.project_name || '—'))} / ${escape(String(row.group_id || '—'))} · ${escape(String(row.group_name || '—'))}</dd></dl>` : ''}
+      ${status === 'approved' ? `<p class="flat-project-request-created"><b>创建结果</b> 项目 <code>${escape(String(row.project_id || '—'))}</code> · 主群 <code>${escape(String(row.group_id || '—'))}</code></p>` : ''}
+    </article>`;
+  }
+
+  function agentApplicationsBlock() {
+    const requests = state.agentApplications;
+    const field = (name, label, placeholder, wide = false) => `<label class="${wide ? 'is-wide' : ''}"><span>${label}</span><input data-draft="agent-${name}" data-agent-field="${name}" placeholder="${escape(placeholder)}" ${requests.busy ? 'disabled' : ''}></label>`;
+    return `<section class="flat-spec flat-agent-applications" data-agent-applications>
+      <h3>发起建项目 / 建群申请</h3>
+      <p class="flat-note">你只能提交申请，不能自行批准。提交后进入人工待批队列；失败不会清空已填内容。</p>
+      <form data-agent-application-form class="flat-agent-application-form">
+        ${field('project_id', '项目 ID', '例如 P-new-project')}
+        ${field('project_name', '项目名称', '例如：新交付项目')}
+        ${field('group_id', '主群 ID', '例如 G-new-project')}
+        ${field('group_name', '主群名称', '例如：新交付项目主群')}
+        ${field('purpose', '用途（必填）', '为什么需要这个项目', true)}
+        ${field('scope', '范围（必填）', '允许做什么、明确不做什么', true)}
+        ${field('expected_output', '预期产出（必填）', '批准后希望看到什么结果', true)}
+        <button type="submit" data-act="submit-agent-application" ${requests.busy ? 'disabled' : ''}>${requests.busy ? '正在提交…' : '提交申请'}</button>
+      </form>
+      <div data-agent-application-error>
+        ${requests.actionError ? `<p class="flat-project-request-error" role="alert">${escape(requests.actionError)}</p>` : ''}
+        ${requests.error ? `<div class="flat-project-request-error" role="alert"><span>读取失败：${escape(requests.error)}。已保留旧数据与当前输入。</span><button type="button" data-act="retry-agent-applications" ${requests.loading ? 'disabled' : ''}>重试</button></div>` : ''}
+      </div>
+      <section class="flat-agent-application-history" aria-label="我的申请状态">
+        <h3>我的申请状态</h3>
+        ${requests.rows.length
+          ? `<div class="flat-agent-application-list">${requests.rows.map(agentApplicationRow).join('')}</div>`
+          : !requests.loaded
+            ? '<p class="flat-empty">正在读取我的申请…</p>'
+            : requests.error
+              ? ''
+              : '<p class="flat-empty">你还没有提交过申请。</p>'}
+      </section>
+    </section>`;
+  }
+
+  async function submitAgentApplication() {
+    const requests = state.agentApplications;
+    if (requests.busy) return;
+    const body = {};
+    for (const name of AGENT_APPLICATION_FIELDS) {
+      const input = root.querySelector(`[data-agent-field="${name}"]`);
+      body[name] = String(input?.value || '').trim();
+    }
+    if (AGENT_APPLICATION_FIELDS.some((name) => !body[name])) {
+      requests.actionError = '项目、主群、用途、范围和预期产出都要填写，当前内容已保留。';
+      render();
+      return;
+    }
+    requests.busy = true;
+    requests.actionError = '';
+    render();
+    try {
+      await api('/agent/project-creation-requests', body);
+      const refreshed = await loadAgentApplications();
+      if (!refreshed) throw new Error(`申请已提交，但列表刷新失败：${requests.error}`);
+      for (const name of AGENT_APPLICATION_FIELDS) {
+        dropDraft(`agent-${name}`);
+        const input = root.querySelector(`[data-agent-field="${name}"]`);
+        if (input) input.value = '';
+      }
+      requests.actionError = '';
+    } catch (error) {
+      // 不回填、不清空：失败时表单里的每个字都保持用户刚才填的样子。
+      requests.actionError = String(error.message || error);
+    } finally {
+      requests.busy = false;
+      render();
+    }
+  }
+
   function windowPane(harnessId) {
     const panel = document.createElement('section');
     panel.className = 'flat-detail flat-window';
@@ -3781,6 +4287,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         </div>
       </div>
       <dl class="flat-facts">${facts.map(([k, v]) => `<dt>${escape(k)}</dt><dd>${escape(v)}</dd>`).join('')}</dl>`;
+
+    if (harnessId === applicantIdentity() && state.source === 'platform') {
+      panel.insertAdjacentHTML('beforeend', agentApplicationsBlock());
+      if (state.agentApplications.for !== harnessId && !state.agentApplications.loading) {
+        state.agentApplications.for = harnessId;
+        void loadAgentApplications().then(() => render());
+      }
+    }
 
     // 现在正在做什么：读它正在跑的那条活的实时日志（与任务详情同一个端点）。
     if (running.length) {
@@ -4440,6 +4954,160 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     </section>`;
   }
 
+  function currentHumanIdentity() {
+    return String(state.status?.operator || 'office-operator');
+  }
+
+  async function loadExperiences(taskId = state.selected?.task_id) {
+    const id = String(taskId || '');
+    const panel = state.experiences;
+    if (!id || panel.taskId !== id || panel.loading) return;
+    panel.loading = true;
+    panel.error = '';
+    panel.actionError = '';
+    render();
+    try {
+      const [candidates, injection] = await Promise.all([
+        experienceApi(`/tasks/${encodeURIComponent(id)}/experiences`),
+        experienceApi('/experience-injection'),
+      ]);
+      if (!Array.isArray(candidates?.experiences)) throw new Error('平台回包缺少 experiences');
+      if (typeof injection?.enabled !== 'boolean') throw new Error('平台回包缺少总开关状态');
+      if (panel.taskId !== id) return;
+      panel.data = candidates;
+      panel.injection = injection;
+      panel.loaded = true;
+    } catch (error) {
+      if (panel.taskId === id) panel.error = String(error.message || error);
+    } finally {
+      if (panel.taskId === id) {
+        panel.loading = false;
+        render();
+      }
+    }
+  }
+
+  async function decideExperience(button) {
+    const panel = state.experiences;
+    const taskId = String(state.selected?.task_id || '');
+    const experienceId = String(button.dataset.experience || '');
+    const action = String(button.dataset.decision || '');
+    if (!taskId || panel.taskId !== taskId || !experienceId || panel.busy) return;
+    if (!['confirm', 'ignore', 'revoke'].includes(action)) return;
+    panel.busy = `${experienceId}:${action}`;
+    panel.actionError = '';
+    render();
+    try {
+      await experienceApi(
+        `/tasks/${encodeURIComponent(taskId)}/experiences/${encodeURIComponent(experienceId)}/decision`,
+        { action, decided_by: currentHumanIdentity() },
+      );
+    } catch (error) {
+      if (panel.taskId === taskId) {
+        panel.busy = '';
+        panel.actionError = `经验操作失败：${String(error.message || error)}`;
+        render();
+      }
+      return;
+    }
+    if (panel.taskId !== taskId) return;
+    panel.busy = '';
+    await loadExperiences(taskId);
+  }
+
+  async function toggleExperienceInjection() {
+    const panel = state.experiences;
+    const taskId = String(state.selected?.task_id || '');
+    if (!taskId || panel.taskId !== taskId || !panel.injection || panel.busy) return;
+    const enabled = !panel.injection.enabled;
+    panel.busy = 'switch';
+    panel.actionError = '';
+    render();
+    try {
+      await experienceApi('/experience-injection', {
+        enabled,
+        decided_by: currentHumanIdentity(),
+      });
+    } catch (error) {
+      if (panel.taskId === taskId) {
+        panel.busy = '';
+        panel.actionError = `总开关操作失败：${String(error.message || error)}`;
+        render();
+      }
+      return;
+    }
+    if (panel.taskId !== taskId) return;
+    panel.busy = '';
+    await loadExperiences(taskId);
+  }
+
+  function experiencesBlock(task) {
+    const panel = state.experiences;
+    const taskId = String(task.task_id || '');
+    const items = panel.loaded && Array.isArray(panel.data?.experiences) ? panel.data.experiences : [];
+    const disabled = panel.loading || Boolean(panel.busy);
+    const enabled = panel.injection?.enabled === true;
+    const switchBlock = panel.loaded && panel.injection
+      ? `<div class="flat-experience-switch">
+          <p class="flat-note" data-experience-switch-status>总开关：<b>${enabled ? '已开启' : '已关闭'}</b>（默认关闭）。${enabled ? '仅已确认经验会注入。' : '当前不注入任何候选经验。'}</p>
+          <button type="button" data-act="toggle-experience-injection" aria-pressed="${enabled ? 'true' : 'false'}" ${disabled ? 'disabled' : ''}>${panel.busy === 'switch' ? '正在更新…' : enabled ? '关闭总开关' : '开启总开关'}</button>
+        </div>`
+      : '';
+    const rows = items.map((item) => {
+      const id = String(item.experience_id || '');
+      const confirmation = item.confirmation && typeof item.confirmation === 'object' ? item.confirmation : null;
+      const status = String(confirmation?.status || 'pending');
+      const statusLabel = {
+        pending: '未确认',
+        confirmed: '已确认',
+        ignored: '已忽略',
+        revoked: '已撤销',
+      }[status] || status;
+      const statusClass = ['confirmed', 'ignored', 'revoked'].includes(status) ? ` is-${status}` : '';
+      const source = [item.source || '未记录', item.source_task_id ? `任务 ${item.source_task_id}` : '']
+        .filter(Boolean)
+        .join(' · ');
+      const decisionFact = confirmation
+        ? `${confirmation.decided_by || '未记录操作人'} · ${timeOf(confirmation.decided_at)}`
+        : '尚未人工确认，默认不注入。';
+      const actionButton = (action, label) => {
+        const busy = panel.busy === `${id}:${action}`;
+        return `<button type="button" data-act="experience-decision" data-experience="${escape(id)}" data-decision="${action}" aria-label="${label}经验 ${escape(id)}" ${disabled ? 'disabled' : ''}>${busy ? '正在提交…' : label}</button>`;
+      };
+      return `<article class="flat-experience${statusClass}" data-experience-row="${escape(id)}">
+        <header><span class="flat-experience-status">${escape(statusLabel)}</span><span class="flat-mono" title="经验编号 ${escape(id)}">${escape(id)}</span></header>
+        <dl>
+          <div><dt>根因</dt><dd>${escape(item.root_cause || '—')}</dd></div>
+          <div><dt>做法</dt><dd>${escape(item.action || '—')}</dd></div>
+          <div><dt>最近结果</dt><dd>${escape(item.result || '—')}</dd></div>
+          <div><dt>出现次数</dt><dd>${escape(item.occurrence_count ?? 0)} 次</dd></div>
+          <div><dt>来源</dt><dd>${escape(source)}</dd></div>
+          <div><dt>确认状态</dt><dd>${escape(statusLabel)} · ${escape(decisionFact)}</dd></div>
+        </dl>
+        <div class="flat-experience-actions">
+          ${status === 'confirmed'
+            ? actionButton('revoke', '撤销')
+            : `${actionButton('confirm', '确认注入')}${actionButton('ignore', '忽略')}`}
+        </div>
+      </article>`;
+    }).join('');
+    return `<section class="flat-spec flat-experiences" data-experiences="${escape(taskId)}" aria-busy="${panel.loading ? 'true' : 'false'}">
+      <div class="flat-experience-head">
+        <div><h3>候选经验</h3><p class="flat-note">注入层级：管理员派单。默认不注入；只有总开关开启且单条经验已确认，才会进入派单提示。</p></div>
+        ${panel.loaded ? `<button type="button" data-act="refresh-experiences" ${disabled ? 'disabled' : ''}>${panel.loading ? '正在刷新…' : '刷新候选'}</button>` : ''}
+      </div>
+      ${!panel.loaded && !panel.loading && !panel.error
+        ? '<button type="button" class="flat-experience-load" data-act="load-experiences">加载候选经验</button>'
+        : ''}
+      ${panel.loading ? '<p class="flat-empty" role="status">正在读取候选经验和总开关…</p>' : ''}
+      ${panel.error ? `<div class="flat-experience-error" data-experience-error role="alert"><span>候选经验读取失败：${escape(panel.error)}${panel.loaded ? '；以下保留上次成功读取的数据。' : ''}</span><button type="button" data-act="retry-experiences" ${panel.loading ? 'disabled' : ''}>重试</button></div>` : ''}
+      ${panel.actionError ? `<div class="flat-experience-error" data-experience-action-error role="alert"><span>${escape(panel.actionError)}</span></div>` : ''}
+      ${switchBlock}
+      ${panel.loaded && !items.length && !panel.loading ? '<p class="flat-empty" data-experience-empty>暂无候选经验。</p>' : ''}
+      ${items.length ? `<div class="flat-experience-list">${rows}</div>` : ''}
+    </section>`;
+  }
+
   function detail() {
     const panel = document.createElement('section');
     panel.className = 'flat-detail';
@@ -4465,6 +5133,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       ? spec.acceptance.map((item) => item.description || JSON.stringify(item)).join('；')
       : spec.acceptance || '';
     const paths = Array.isArray(spec.exclusive_paths) ? spec.exclusive_paths : [];
+    // 验收字段在任务行上（列表已由网关放行）；详情里那条任务更全，同 id 时以它为准。
+    const detailTask = detailData.task && detailData.task.task_id === task.task_id ? detailData.task : null;
+    const acceptanceTask = detailTask ? { ...task, ...detailTask } : task;
 
     panel.innerHTML = `
       <button type="button" class="flat-back" data-act="back-tasks">← 返回任务表</button>
@@ -4481,7 +5152,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       </div>
       ${lineageBlock(task)}
       ${assignmentBlock(task)}
+      ${experiencesBlock(task)}
       ${approvedReviewBlock(task)}
+      ${acceptanceRecordBlock(acceptanceTask)}
       ${spec.goal ? `<section class="flat-spec"><h3>任务目标</h3><p>${escape(spec.goal)}</p></section>` : ''}
       ${handoffBlock(spec)}
       ${acceptance ? `<section class="flat-spec"><h3>验收标准</h3><p>${escape(acceptance)}</p></section>` : ''}
@@ -6017,6 +6690,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const waiting = (state.tasks || []).filter((task) =>
       ['awaiting_human', 'escalated'].includes(String(task.status)),
     );
+    const requestCounts = { pending: 0, approved: 0, rejected: 0 };
+    for (const row of state.projectRequests.rows) {
+      if (Object.hasOwn(requestCounts, String(row.status || ''))) requestCounts[String(row.status)] += 1;
+    }
+    const requestSummary = state.projectRequests.error
+      ? `读取失败 · 保留 ${state.projectRequests.rows.length} 条旧数据`
+      : !state.projectRequests.loaded
+        ? '正在读取…'
+        : state.projectRequests.rows.length
+          ? `${requestCounts.pending} 待批 · ${requestCounts.approved} 已批准 · ${requestCounts.rejected} 已拒绝`
+          : '暂无申请';
     const decisions = attentionCount() + waiting.length + helps.length + (plan ? 1 : 0) + (state.userKeyPending ? 1 : 0);
 
     wrap.innerHTML = `
@@ -6031,6 +6715,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       </header>
       ${askCard()}
       ${waitingCard()}
+      <section class="flat-card flat-project-requests-summary">
+        <h3>${cardIcon('stamp')}项目创建申请</h3>
+        <p class="flat-note">${escape(requestSummary)}</p>
+        <button type="button" data-act="open-project-requests">查看申请与审批记录</button>
+      </section>
       ${plan ? `<section class="flat-card flat-card-plan">
         <p class="flat-card-kicker">需要你决策</p>
         <h3>${cardIcon('stamp')}待批准的方案</h3>
@@ -6299,6 +6988,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     state.detail = null;
     state.output = null;
     state.failureOutput = null;
+    Object.assign(state.experiences, {
+      taskId: String(taskId || ''),
+      loaded: false,
+      loading: false,
+      data: null,
+      injection: null,
+      error: '',
+      actionError: '',
+      busy: '',
+    });
     // 这条活定给了谁：**每次看一条就现读一次**，不从全局的分配轮快照里翻 ——
     // 那个快照只读"开着的轮"（`state=open`），裁决过之后轮就 decided 了，
     // 恰恰在最想撤销的时候一条都翻不到。
@@ -6553,6 +7252,31 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       button.disabled = true;
       button.textContent = '正在重试…';
       void refresh();
+      return;
+    }
+    if (button.dataset.act === 'open-project-requests') {
+      state.view = { kind: 'alerts', id: null };
+      render();
+      root.querySelector('[data-project-requests]')?.scrollIntoView({ block: 'start' });
+      return;
+    }
+    if (['refresh-project-requests', 'retry-project-requests'].includes(button.dataset.act)) {
+      button.disabled = true;
+      button.textContent = '正在读取…';
+      void loadProjectCreationRequests().then(() => render());
+      return;
+    }
+    if (button.dataset.act === 'submit-agent-application') {
+      event.preventDefault();
+      void submitAgentApplication();
+      return;
+    }
+    if (button.dataset.act === 'retry-agent-applications') {
+      void loadAgentApplications().then(() => render());
+      return;
+    }
+    if (button.dataset.act === 'open-approve-request' || button.dataset.act === 'open-reject-request') {
+      openProjectRequestDecision(String(button.dataset.request || ''), button.dataset.act === 'open-approve-request' ? 'approve' : 'reject');
       return;
     }
     // 一次新的动作开始：把上一条"没成"的提示收起来（这次要是再失败，会写新的）。
@@ -6824,6 +7548,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'alloc-revoke') {
       void revokeAssignment(button);
+      return;
+    }
+    if (['load-experiences', 'retry-experiences', 'refresh-experiences'].includes(button.dataset.act)) {
+      void loadExperiences();
+      return;
+    }
+    if (button.dataset.act === 'experience-decision') {
+      void decideExperience(button);
+      return;
+    }
+    if (button.dataset.act === 'toggle-experience-injection') {
+      void toggleExperienceInjection();
       return;
     }
     if (button.dataset.act === 'return-for-changes') {
@@ -7099,6 +7835,26 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (recent.length) await humanize(recent, 'text');
   }
 
+  async function loadProjectCreationRequests() {
+    const requests = state.projectRequests;
+    if (requests.loading) return false;
+    requests.loading = true;
+    try {
+      const data = await api('/project-creation-requests');
+      if (!Array.isArray(data.requests)) throw new Error('平台回包缺少 requests');
+      requests.rows = data.requests;
+      requests.loaded = true;
+      requests.error = '';
+      return true;
+    } catch (error) {
+      // 只记错误，绝不用空数组覆盖旧数据；首次失败时 loaded 仍保持 false。
+      requests.error = String(error.message || error);
+      return false;
+    } finally {
+      requests.loading = false;
+    }
+  }
+
   async function refresh(options) {
     // 人点了刷新 → 顺手**重探一遍**池子（新增的免费额度、变成收费的额度都要知道）。
     // 平时 15 秒的自动刷新不探：探一次要问二十几个上游。
@@ -7118,6 +7874,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.availability = [];
         state.pool = null;
         state.plan = null;
+        Object.assign(state.projectRequests, { rows: [], loaded: true, loading: false, error: '', actionError: '', busy: '' });
+        Object.assign(state.agentApplications, { rows: [], loaded: true, loading: false, for: '', error: '', actionError: '', busy: false });
         state.error = null;
         state.errors = { events: '', availability: '', messages: '', pool: '', plan: '' };
         render();
@@ -7128,6 +7886,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       //
       // 但**事件**必须跟任务表一起到：按人归堆要知道每条活是谁接的（从领取事件
       // 看），分两批到的话第一屏会先摆成"一堆没人接"，等事件到了再重排 —— 一闪。
+      const projectRequestsRead = loadProjectCreationRequests();
       const [statusResult, tasksResult, eventsResult] = await Promise.allSettled([
         api('/status'),
         api('/tasks'),
@@ -7223,6 +7982,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           .catch(() => {
             state.allocation = { rounds: [], loaded: false };
           }),
+        projectRequestsRead,
       ]);
       // 这一轮读到的池子是**发起时**的状态：要是这期间有人定过档（探针/定档
       // 写进去的更新鲜），就别用这份旧的盖上去。
@@ -7327,11 +8087,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           .map((row) => `${row.harness_id}:${row.status}:${row.version || ''}`)
           .join('|')
       : state.installsError || '-';
+    const projectRequests = `${state.projectRequests.loaded ? 1 : 0}:${state.projectRequests.loading ? 1 : 0}:${
+      state.projectRequests.error
+    }:${state.projectRequests.actionError}:${state.projectRequests.busy}:${JSON.stringify(state.projectRequests.rows)}`;
+    const agentApplications = `${state.agentApplications.loaded ? 1 : 0}:${state.agentApplications.loading ? 1 : 0}:${
+      state.agentApplications.error
+    }:${state.agentApplications.actionError}:${state.agentApplications.busy ? 1 : 0}:${JSON.stringify(state.agentApplications.rows)}`;
     return [
       state.source,
       state.loaded ? 1 : 0,
       state.messagesLoaded ? 1 : 0,
-      state.status ? `${state.status.connected ? 1 : 0}:${state.status.group_id || ''}` : '-',
+      state.status ? `${state.status.connected ? 1 : 0}:${state.status.group_id || ''}:${state.status.operator_type || ''}` : '-',
       tasks.join('|'),
       lastEvent,
       windows.join('|'),
@@ -7341,6 +8107,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       runs,
       allocation,
       installs,
+      projectRequests,
+      agentApplications,
       state.error || '',
       Object.values(state.errors).join('|'),
       state.memberNote || '',
