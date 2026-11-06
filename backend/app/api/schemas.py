@@ -23,6 +23,40 @@ class CreateGroup(BaseModel):
     group_short: str | None = None
 
 
+class ProjectCreationApplication(BaseModel):
+    """Agent 提交的建项目/建群申请；不包含任何自行执行授权。"""
+
+    project_id: str = Field(min_length=1, max_length=120)
+    project_name: str = Field(min_length=1, max_length=120)
+    group_id: str = Field(min_length=1, max_length=120)
+    group_name: str = Field(min_length=1, max_length=120)
+    purpose: str = Field(min_length=1, max_length=2000)
+    scope: str = Field(min_length=1, max_length=2000)
+    expected_output: str = Field(min_length=1, max_length=2000)
+    requested_kind: Literal["human", "harness"]
+    requested_by: str = Field(min_length=1, max_length=120)
+
+
+class ProjectCreationDecision(BaseModel):
+    decided_by: str = Field(min_length=1, max_length=120)
+    reason: str = Field(default="", max_length=2000)
+    project_id: str | None = Field(default=None, max_length=120)
+    project_name: str | None = Field(default=None, max_length=120)
+    group_id: str | None = Field(default=None, max_length=120)
+    group_name: str | None = Field(default=None, max_length=120)
+
+    def revisions(self) -> dict[str, str]:
+        return {
+            field: value
+            for field in ("project_id", "project_name", "group_id", "group_name")
+            if (value := getattr(self, field)) is not None
+        }
+
+
+class ProjectCreationRejection(ProjectCreationDecision):
+    reason: str = Field(min_length=1, max_length=2000)
+
+
 class RenameProject(BaseModel):
     """只改名字：`project_id` 在路径上，正文里没有它 —— id 不该被改。"""
 

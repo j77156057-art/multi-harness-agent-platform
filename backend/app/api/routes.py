@@ -137,6 +137,98 @@ def create_group(
     return service.create_group(group_id=body.group_id, project_id=project_id, name=body.name)
 
 
+@management.post("/groups/{source_group_id}/project-creation-requests")
+def request_project_creation(
+    source_group_id: str,
+    body: schemas.ProjectCreationApplication,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("project:request"),
+) -> dict[str, Any]:
+    """Agent 只能申请；真正创建仍需人类批准接口。"""
+    bind_declared(
+        principal, body.requested_by, key="project:request", database=database, request=request
+    )
+    if principal is not None and body.requested_kind != principal.subject_type:
+        _refuse(
+            database=database,
+            request=request,
+            principal=principal,
+            key="project:request",
+            reason="requested_kind_mismatch",
+            status=403,
+            code="auth.permission_denied",
+        )
+    row = service.request_project_creation(
+        project_id=body.project_id.strip(),
+        project_name=body.project_name.strip(),
+        group_id=body.group_id.strip(),
+        group_name=body.group_name.strip(),
+        source_group_id=source_group_id,
+        purpose=body.purpose.strip(),
+        scope=body.scope.strip(),
+        expected_output=body.expected_output.strip(),
+        requested_by_type=principal.subject_type if principal else body.requested_kind,
+        requested_by_id=body.requested_by,
+    )
+    return {"request": row}
+
+
+@management.get("/project-creation-requests")
+def list_project_creation_requests(
+    service: SchedulerDep,
+    _principal: _guard("project:request"),
+    status: str = "",
+) -> dict[str, Any]:
+    return {"requests": service.list_project_creation_requests(status=status)}
+
+
+@management.post("/project-creation-requests/{request_id}/approve")
+def approve_project_creation(
+    request_id: str,
+    body: schemas.ProjectCreationDecision,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("project:create"),
+    _group_create: _guard("group:create"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="project:create", database=database, request=request
+    )
+    row = service.approve_project_creation(
+        request_id=request_id,
+        decided_by_type=_actor_type(principal),
+        decided_by_id=body.decided_by,
+        reason=body.reason,
+        revisions=body.revisions(),
+    )
+    return {"request": row}
+
+
+@management.post("/project-creation-requests/{request_id}/reject")
+def reject_project_creation(
+    request_id: str,
+    body: schemas.ProjectCreationRejection,
+    service: SchedulerDep,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("project:create"),
+) -> dict[str, Any]:
+    bind_declared(
+        principal, body.decided_by, key="project:create", database=database, request=request
+    )
+    row = service.reject_project_creation(
+        request_id=request_id,
+        decided_by_type=_actor_type(principal),
+        decided_by_id=body.decided_by,
+        reason=body.reason,
+        revisions=body.revisions(),
+    )
+    return {"request": row}
+
+
 @management.post("/projects/{project_id}/rename")
 def rename_project(
     project_id: str,

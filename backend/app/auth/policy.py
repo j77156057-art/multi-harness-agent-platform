@@ -89,6 +89,8 @@ POLICY: dict[str, frozenset[str]] = {
     # 吊销不删行（`revoked_at` / `revoked_reason` 留在原地），所以这一面**不改
     # 历史**，只把一条还生效的凭据变成不生效。
     "harness:credential": frozenset({HUMAN}),
+    # 建项目/建群申请只表达“请人授权”，不能执行创建；批准仍走下两行的人类权限。
+    "project:request": frozenset({HUMAN, HARNESS}),
     "project:create": frozenset({HUMAN}),
     "group:create": frozenset({HUMAN}),
     "task:resume": frozenset({HUMAN}),

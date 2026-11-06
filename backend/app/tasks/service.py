@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -255,45 +256,318 @@ class SchedulerService:
 
     # ------------------------------------------------------------- creation
 
+    @staticmethod
+    def _insert_project(
+        conn: sqlite3.Connection, *, project_id: str, name: str, now: str
+    ) -> None:
+        exists = conn.execute(
+            "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+        ).fetchone()
+        if exists is not None:
+            raise Conflict(f"project {project_id} already exists")
+        conn.execute(
+            "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
+            (project_id, name, now),
+        )
+        # R10 §21 makes integration_health the merge queue's stop-the-line signal.
+        conn.execute(
+            "INSERT OR IGNORE INTO integration_health(project_id, status,"
+            " integration_commit, updated_seq) VALUES (?, 'green', NULL, NULL)",
+            (project_id,),
+        )
+
+    @staticmethod
+    def _insert_group(
+        conn: sqlite3.Connection, *, group_id: str, project_id: str, name: str, now: str
+    ) -> None:
+        parent = conn.execute(
+            "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+        ).fetchone()
+        if parent is None:
+            raise NotFound(f"unknown project: {project_id}")
+        exists = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
+        if exists is not None:
+            raise Conflict(f"group {group_id} already exists")
+        conn.execute(
+            "INSERT INTO groups(group_id, project_id, name, created_at) VALUES (?, ?, ?, ?)",
+            (group_id, project_id, name, now),
+        )
+
     def create_project(self, *, project_id: str, name: str) -> dict[str, object]:
         now = _now()
         with self.database.transaction() as conn:
-            exists = conn.execute(
-                "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
-            ).fetchone()
-            if exists is not None:
-                raise Conflict(f"project {project_id} already exists")
-            conn.execute(
-                "INSERT INTO projects(project_id, name, created_at) VALUES (?, ?, ?)",
-                (project_id, name, now),
-            )
-            # R10 §21 makes integration_health the merge queue's stop-the-line
-            # signal. Without a row, every merge on an API-created project is
-            # refused as "no integration_health row" -- the fake harness found
-            # this on its first full run.
-            conn.execute(
-                "INSERT OR IGNORE INTO integration_health(project_id, status,"
-                " integration_commit, updated_seq) VALUES (?, 'green', NULL, NULL)",
-                (project_id,),
-            )
+            self._insert_project(conn, project_id=project_id, name=name, now=now)
         return {"project_id": project_id, "name": name, "created_at": now}
 
     def create_group(self, *, group_id: str, project_id: str, name: str) -> dict[str, object]:
         now = _now()
         with self.database.transaction() as conn:
-            parent = conn.execute(
-                "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+            self._insert_group(conn, group_id=group_id, project_id=project_id, name=name, now=now)
+        return {"group_id": group_id, "project_id": project_id, "name": name}
+
+    def request_project_creation(
+        self,
+        *,
+        project_id: str,
+        project_name: str,
+        group_id: str,
+        group_name: str,
+        source_group_id: str,
+        purpose: str,
+        scope: str,
+        expected_output: str,
+        requested_by_type: str,
+        requested_by_id: str,
+    ) -> dict[str, object]:
+        """只登记授权申请，不创建项目或群。"""
+        request_id = f"PCR-{uuid.uuid4().hex}"
+        now = _now()
+        with self.database.transaction() as conn:
+            source = conn.execute(
+                "SELECT 1 FROM groups WHERE group_id = ?", (source_group_id,)
             ).fetchone()
-            if parent is None:
-                raise NotFound(f"unknown project: {project_id}")
-            exists = conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone()
-            if exists is not None:
+            if source is None:
+                raise NotFound(f"unknown source group: {source_group_id}")
+            pending = conn.execute(
+                "SELECT 1 FROM project_creation_requests WHERE status = 'pending'"
+                " AND (project_id = ? OR group_id = ?)",
+                (project_id, group_id),
+            ).fetchone()
+            if pending is not None:
+                raise Conflict("an equivalent project creation request is already pending")
+            if conn.execute(
+                "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone():
+                raise Conflict(f"project {project_id} already exists")
+            if conn.execute(
+                "SELECT 1 FROM groups WHERE group_id = ?", (group_id,)
+            ).fetchone():
                 raise Conflict(f"group {group_id} already exists")
             conn.execute(
-                "INSERT INTO groups(group_id, project_id, name, created_at) VALUES (?, ?, ?, ?)",
-                (group_id, project_id, name, now),
+                "INSERT INTO project_creation_requests("
+                "request_id, project_id, project_name, group_id, group_name, source_group_id,"
+                " purpose, scope, expected_output, requested_by_type, requested_by_id,"
+                " status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (
+                    request_id,
+                    project_id,
+                    project_name,
+                    group_id,
+                    group_name,
+                    source_group_id,
+                    purpose,
+                    scope,
+                    expected_output,
+                    requested_by_type,
+                    requested_by_id,
+                    now,
+                ),
             )
-        return {"group_id": group_id, "project_id": project_id, "name": name}
+        return self.get_project_creation_request(request_id)
+
+    def _request_with_revision(self, row: sqlite3.Row | dict[str, object]) -> dict[str, object]:
+        result = dict(row)
+        revisions = self.database.read(
+            "SELECT * FROM project_creation_request_revisions WHERE request_id = ?",
+            (result["request_id"],),
+        )
+        result["original"] = None
+        result["revision"] = None
+        if revisions:
+            revision = revisions[0]
+            result["original"] = {
+                "project_id": revision["original_project_id"],
+                "project_name": revision["original_project_name"],
+                "group_id": revision["original_group_id"],
+                "group_name": revision["original_group_name"],
+            }
+            result["revision"] = {
+                "project_id": revision["final_project_id"],
+                "project_name": revision["final_project_name"],
+                "group_id": revision["final_group_id"],
+                "group_name": revision["final_group_name"],
+                "reason": revision["reason"],
+                "revised_by_type": revision["revised_by_type"],
+                "revised_by_id": revision["revised_by_id"],
+                "created_at": revision["created_at"],
+            }
+        return result
+
+    def get_project_creation_request(self, request_id: str) -> dict[str, object]:
+        rows = self.database.read(
+            "SELECT * FROM project_creation_requests WHERE request_id = ?", (request_id,)
+        )
+        if not rows:
+            raise NotFound(f"unknown project creation request: {request_id}")
+        return self._request_with_revision(rows[0])
+
+    def list_project_creation_requests(self, *, status: str = "") -> list[dict[str, object]]:
+        if status:
+            rows = self.database.read(
+                "SELECT * FROM project_creation_requests WHERE status = ?"
+                " ORDER BY created_at DESC, request_id DESC",
+                (status,),
+            )
+        else:
+            rows = self.database.read(
+                "SELECT * FROM project_creation_requests"
+                " ORDER BY created_at DESC, request_id DESC"
+            )
+        return [self._request_with_revision(row) for row in rows]
+
+    def _apply_request_revision(
+        self,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        revisions: dict[str, str] | None,
+        decided_by_type: str,
+        decided_by_id: str,
+        reason: str,
+        now: str,
+    ) -> None:
+        """只在 pending 内修订；原值与最终值同事务留档。"""
+        changes = revisions or {}
+        final = {
+            field: str(changes[field] if field in changes else row[field]).strip()
+            for field in ("project_id", "project_name", "group_id", "group_name")
+        }
+        if any(not value or len(value) > 120 for value in final.values()):
+            raise InvalidInput("project and group ids/names must be 1..120 characters")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", final["project_id"]):
+            raise InvalidInput("invalid project id")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", final["group_id"]):
+            raise InvalidInput("invalid group id")
+        changed = any(final[field] != str(row[field]) for field in final)
+        if not changed:
+            return
+        if not reason.strip():
+            raise InvalidInput("a revision reason is required")
+        conn.execute(
+            "INSERT INTO project_creation_request_revisions("
+            "revision_id, request_id, original_project_id, original_project_name,"
+            " original_group_id, original_group_name, final_project_id, final_project_name,"
+            " final_group_id, final_group_name, reason, revised_by_type, revised_by_id, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                f"REV-{uuid.uuid4().hex}",
+                row["request_id"],
+                row["project_id"],
+                row["project_name"],
+                row["group_id"],
+                row["group_name"],
+                final["project_id"],
+                final["project_name"],
+                final["group_id"],
+                final["group_name"],
+                reason.strip(),
+                decided_by_type,
+                decided_by_id,
+                now,
+            ),
+        )
+        conn.execute(
+            "UPDATE project_creation_requests SET project_id = ?, project_name = ?,"
+            " group_id = ?, group_name = ? WHERE request_id = ? AND status = 'pending'",
+            (
+                final["project_id"],
+                final["project_name"],
+                final["group_id"],
+                final["group_name"],
+                row["request_id"],
+            ),
+        )
+
+    def approve_project_creation(
+        self,
+        *,
+        request_id: str,
+        decided_by_type: str,
+        decided_by_id: str,
+        reason: str = "",
+        revisions: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        """人工批准后，在同一事务里创建项目、主群并留下审批事实。"""
+        now = _now()
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_creation_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"unknown project creation request: {request_id}")
+            if row["status"] != "pending":
+                raise Conflict(f"project creation request is {row['status']}")
+            self._apply_request_revision(
+                conn,
+                row,
+                revisions=revisions,
+                decided_by_type=decided_by_type,
+                decided_by_id=decided_by_id,
+                reason=reason,
+                now=now,
+            )
+            row = conn.execute(
+                "SELECT * FROM project_creation_requests WHERE request_id = ?", (request_id,)
+            ).fetchone()
+            self._insert_project(
+                conn,
+                project_id=str(row["project_id"]),
+                name=str(row["project_name"]),
+                now=now,
+            )
+            self._insert_group(
+                conn,
+                group_id=str(row["group_id"]),
+                project_id=str(row["project_id"]),
+                name=str(row["group_name"]),
+                now=now,
+            )
+            conn.execute(
+                "UPDATE project_creation_requests SET status = 'approved',"
+                " decided_by_type = ?, decided_by_id = ?, decided_at = ?, decision_reason = ?"
+                " WHERE request_id = ?",
+                (decided_by_type, decided_by_id, now, reason.strip(), request_id),
+            )
+        return self.get_project_creation_request(request_id)
+
+    def reject_project_creation(
+        self,
+        *,
+        request_id: str,
+        decided_by_type: str,
+        decided_by_id: str,
+        reason: str,
+        revisions: dict[str, str] | None = None,
+    ) -> dict[str, object]:
+        cleaned = reason.strip()
+        if not cleaned:
+            raise InvalidInput("a rejection reason is required")
+        now = _now()
+        with self.database.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM project_creation_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise NotFound(f"unknown project creation request: {request_id}")
+            if row["status"] != "pending":
+                raise Conflict(f"project creation request is {row['status']}")
+            self._apply_request_revision(
+                conn,
+                row,
+                revisions=revisions,
+                decided_by_type=decided_by_type,
+                decided_by_id=decided_by_id,
+                reason=cleaned,
+                now=now,
+            )
+            conn.execute(
+                "UPDATE project_creation_requests SET status = 'rejected',"
+                " decided_by_type = ?, decided_by_id = ?, decided_at = ?, decision_reason = ?"
+                " WHERE request_id = ?",
+                (decided_by_type, decided_by_id, now, cleaned, request_id),
+            )
+        return self.get_project_creation_request(request_id)
 
     def create_plan(
         self, *, plan_id: str, group_id: str, snapshot: dict[str, object]
