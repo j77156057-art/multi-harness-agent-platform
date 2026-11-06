@@ -24,6 +24,7 @@ import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { mountRelayWorkspace } from './relay-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { openingCandidateWindows } from './opening-candidates.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
 import { withGroup } from './office-scope.js';
@@ -57,6 +58,23 @@ const administratorIds = roster
 const memberCandidates = actionable
   .filter((item) => !isAdministratorHarness(item, ADMIN_IDENTITY) && !isPlatformAssistantHarness(item))
   .map((item) => ({ harness_id: item.harness_id, name: item.name || item.harness_id }));
+
+// 开工向导的候选名单**不能**用上面这份模块级快照：页面打开之后才注册的窗口
+// （qoder）在快照里根本不存在，向导里就只剩「ADMIN 身份 + 已有项目成员」——
+// 人看到的现象是"新注册的窗口没进名单"（P2-7）。所以向导每次打开前现读一次
+// 注册表，规则集中在 opening-candidates.js 里。
+let liveHarnesses = status?.harnesses || [];
+
+async function refreshRosterForWizard() {
+  const next = await formal('/api/formal/status', { cache: 'no-store' })
+    .then((response) => (response.ok ? response.json() : null))
+    .catch(() => null);
+  if (!next) return false;
+  if (Array.isArray(next.harnesses)) liveHarnesses = next.harnesses;
+  return true;
+}
+
+const wizardWindows = () => openingCandidateWindows(liveHarnesses);
 
 // ---------------------------------------------------------------- 外壳
 
@@ -242,6 +260,22 @@ openingHost = mountOpeningHost({
   },
 });
 
+// 向导候选：现读注册表 → 按规则重算实例表 → 再开。三个入口（顶栏、空项目里的
+// 「去写第一件事」、新建项目后自动打开）都必须走这里，否则又退回模块级快照。
+function applyWizardCandidates() {
+  const windows = wizardWindows();
+  openingHost?.setProjectAdminCandidates?.(
+    windows.map((item) => item.harness_id),
+    Object.fromEntries(windows.map((item) => [item.harness_id, item.name])),
+  );
+}
+
+async function openWizard() {
+  await refreshRosterForWizard();
+  applyWizardCandidates();
+  openingHost.open();
+}
+
 // ---------------------------------------------------------------- 项目大厅
 
 const projectWorkspace = mountProjectWorkspace({
@@ -270,19 +304,10 @@ const projectWorkspace = mountProjectWorkspace({
     // 页面所处的阶段（大厅 / 进场）：样式与冒烟脚本都看这个标记。
     document.body.dataset.projectPhase = project.phase || 'scene';
     adminAgent.setAdminHarness?.(ADMIN_IDENTITY);
-    // 开工向导的**实例表**：先管理员（向导把第一个实例当管理员），再是这个项目的
-    // 成员，最后是平台在册的窗口 —— 少了最后一段，成员那一栏会空着没法选人。
-    const projectAdmins = (project.members || []).filter((id) => administratorIds.includes(id));
-    openingHost.setProjectAdminCandidates?.([
-      ...new Set(
-        [
-          ...projectAdmins,
-          ADMIN_IDENTITY,
-          ...(project.members || []),
-          ...memberCandidates.map((h) => h.harness_id),
-        ].filter(Boolean),
-      ),
-    ]);
+    // 开工向导的**实例表**：按平台注册表现算（规则见 opening-candidates.js）。
+    // 这里刻意不再拼 project.members —— 成员名单不是"平台上现在有哪些窗口"，
+    // 拼进来正好会掩盖"新注册的窗口没进候选"这个缺陷（P2-7）。
+    applyWizardCandidates();
     if (relayProject) {
       // 换项目时先把上一份转接视图收掉：它自己挂着 15 秒轮询，留着会一直读信箱。
       relayView?.destroy?.();
@@ -292,7 +317,7 @@ const projectWorkspace = mountProjectWorkspace({
         root: $('#aoWorkspace'),
         project: () => activeProject,
         // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
-        onStart: () => openingHost.open(),
+        onStart: () => void openWizard(),
         // 顶栏的状态（在线/离线）跟着每轮刷新变。
         onStatus: paintConnection,
         // 中途加入一个新的窗口：写进项目成员，办公室那边已经通知管理员了。
@@ -307,14 +332,14 @@ const projectWorkspace = mountProjectWorkspace({
     } else {
       void office.refresh();
     }
-    if (openAfterCreate && !relayProject) openingHost.open();
+    if (openAfterCreate && !relayProject) void openWizard();
   },
 });
 
 // 旧的"手机开机向导"入口：欢迎块里那两句（开工 / 先看看场景）属于小样，
 // 现在由顶栏的「开工配置」进入对话框。
 openingHost.hideWelcome();
-$('#aoStartBtn').addEventListener('click', () => openingHost.open());
+$('#aoStartBtn').addEventListener('click', () => void openWizard());
 // 顶栏的「终端」：装 CLI 与登录都要用它（登录是交互式的，按钮面板替代不了，
 // 所以给的是一台真本机 shell，见 docs/notes/terminal-design.md）。
 // `sent` 记住这次页面停留里打过的命令：关掉再开，人还看得到自己点过什么。

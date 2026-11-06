@@ -326,11 +326,13 @@ export function mountOpeningHost({ root, catalog, reducedMotion, onReady, onPrev
     },
     // 每个项目的管理员**候选**：只列外部 Harness 窗口。平台 Agent 不在里面 ——
     // 它注册的是模型身份，不是可以替项目做规划的外部 harness。
-    setProjectAdminCandidates(ids) {
+    // `names` 是现读注册表带来的显示名：模块级 harnesses 是页面加载时的快照，
+    // 新注册的窗口不在里面，只传 id 会让它显示成一串裸 id（P2-7）。
+    setProjectAdminCandidates(ids, names = {}) {
       const list = Array.isArray(ids) ? [...ids] : [];
       activeCatalog = {...activeCatalog, instances: list.map(id => {
         const h = harnesses.find(item => item.harness_id === id);
-        return {instance_id: id, display_name: h?.name || id, brand: id, available: true};
+        return {instance_id: id, display_name: names[id] || h?.name || id, brand: id, available: true};
       })}; 
       phone.setCatalog(activeCatalog);
       pruneAdministratorWorkers();
