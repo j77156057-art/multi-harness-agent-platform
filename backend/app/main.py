@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -70,43 +71,35 @@ async def spec_status() -> dict[str, Any]:
     }
 
 
-def _check_spec_or_exit() -> None:
-    """启动时校验规范（R10 §29.3）。失败则拒绝启动，避免带着不自洽的规范 coding。"""
-    if not settings.check_spec_on_startup:
+def _check_git_or_warn() -> None:
+    """启动时检查 git 是否可用。
+
+    领取任务要读 canonical 仓库的 integration HEAD，每次 attempt 也都要跑 git。
+    没有 git 时平台仍能通过 /health，但每一次领取都会以 claim.git_missing 失败。
+    在启动日志里先说清楚，胜过等服务跑起来、派活时才炸。
+    """
+    if shutil.which("git") is not None:
+        # flush: 后端常以 `.\start.bat` 起在重定向的窗口/日志里，stdout 是块缓冲，
+        # 不 flush 的话这行要等进程退出才出现，等于没有启动检查。
+        print("[ok] git found on PATH", flush=True)
         return
-    try:
-        from docstate.docstate import run  # type: ignore[import-not-found]
-    except ImportError:
-        print("[warn] docstate 检查器不可用，跳过启动校验", file=sys.stderr)
-        return
-    if not settings.spec_path.exists():
-        print(f"[warn] 规范文件不存在，跳过启动校验: {settings.spec_path}", file=sys.stderr)
-        return
-
-    result = run(str(settings.spec_path))
-    if result.failed:
-        print(
-            f"[error] 规范一致性检查失败 {len(result.failed)}/{len(result.checks)} 项：",
-            file=sys.stderr,
-        )
-        for c in result.failed:
-            print(f"  - {c['msg']}", file=sys.stderr)
-        print("拒绝启动。修复规范或设置 AP_CHECK_SPEC=0 临时跳过。", file=sys.stderr)
-        raise SystemExit(1)
-
-    print(f"[ok] 规范一致性检查通过 {len(result.checks)} 项")
-
-
-@app.on_event("startup")
-async def on_startup() -> None:
-    settings.ensure_dirs()
-    _check_spec_or_exit()
+    print("=" * 72, file=sys.stderr)
+    print("[error] 找不到 git：领取任务会直接失败（claim.git_missing）。", file=sys.stderr)
+    print("  1) 安装 Git for Windows：https://git-scm.com/download/win", file=sys.stderr)
+    print("  2) 装完重开终端，确认 `git --version` 能输出版本号，再重启后端。", file=sys.stderr)
+    print("  3) 已装但不在 PATH：把 Git 的 cmd 目录加进 PATH，", file=sys.stderr)
+    print(r"     例如 C:\Program Files\Git\cmd，然后重启后端。", file=sys.stderr)
+    print("=" * 72, file=sys.stderr)
 
 
 def main() -> None:
     import uvicorn
 
     settings.ensure_dirs()
+    # 起在 uvicorn.run 之前：`create_app()` 自带 lifespan，`@app.on_event("startup")`
+    # 在那种情况下不会执行（Starlette 只用传入的 lifespan），把检查放在这里才能
+    # 保证 `python -m app.main` 一定打印出来。
+    _check_git_or_warn()
     uvicorn.run(
         "app.main:app",
         host=settings.host,

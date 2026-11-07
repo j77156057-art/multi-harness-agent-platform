@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+from app.agenttools import mcp_routes as agenttools_routes
 from app.api import routes
 from app.api.errors import ApiError, envelope, install_error_handlers
+from app.boot import check_spec_on_startup
 from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo
-from app.agenttools import mcp_routes as agenttools_routes
 from app.pool import routes as pool_routes
 from app.relay import routes as relay_routes
 from app.spec import R10_ALLOWLIST_COUNTS, R10_TRANSITION_EDGE_COUNT
@@ -69,6 +70,9 @@ def create_app(database: Database | None = None, repo: CanonicalRepo | None = No
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         settings.ensure_dirs()
+        # 规范校验必须在真实启动路径上：`@app.on_event("startup")` 在传入
+        # 自定义 lifespan 时不会执行，这里才是唯一会被 Starlette 调用的地方。
+        check_spec_on_startup()
         app.state.database.initialize()
         yield
 

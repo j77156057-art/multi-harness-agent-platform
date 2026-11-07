@@ -48,6 +48,9 @@ class Settings:
         )
         # 是否在启动时跑 docstate 检查（R10 §29.3 阶段 0 通过条件）
         self.check_spec_on_startup: bool = _env_bool("AP_CHECK_SPEC", True)
+        # 检查不一致时是否拒绝启动。默认关：这个守卫长期没有真正执行过，
+        # 一上来就硬退出可能让本来能用的启动起不来。需要门禁时设 AP_SPEC_STRICT=1。
+        self.spec_strict_on_startup: bool = _env_bool("AP_SPEC_STRICT", False)
 
         # --- 安全（MVP 简化，见清单 MVP-05）---
         # R10 §13 完整方案是三账户隔离；MVP 阶段降级为单账户
@@ -312,6 +315,7 @@ class Settings:
             "data_dir": str(self.data_dir),
             "spec_path": str(self.spec_path),
             "check_spec_on_startup": self.check_spec_on_startup,
+            "spec_strict_on_startup": self.spec_strict_on_startup,
             "insecure_single_account": self.insecure_single_account,
             "auth_mode": self.auth_mode,
             # 主体 id 不是凭据；打印出来才能从启动日志判断管理员接线是否生效。
