@@ -153,8 +153,19 @@ python -m pytest
 cd office
 npm ci
 npm run build
+npx playwright install chromium     # 每条 verify-*.mjs 都要开真实浏览器，只装一次
 npm run verify
 ```
+
+`npm run verify` 顺序跑 `office/scripts/verify-*.mjs`，连的是真实本地环境而不是假数据。有几条需要先准备夹具，缺了会打印「缺什么、怎么准备」后跳过（退出码 2），不会变成一个看不懂的 assert：
+
+- **Chromium**：上面那条 `npx playwright install chromium`。
+- **本机 Ollama 有 `qwen3:4b`**：`verify-harness-connections.mjs` 会问 `http://127.0.0.1:11434`。没有就先 `ollama pull qwen3:4b`，并确认 `ollama serve` 在跑。
+- **分组里至少两个项目、各有一条任务**：`verify-office-project-scope.mjs` 要把两个项目的任务摆在一起才验得出隔离。
+- **界面里有待你处理的事**：`verify-office-alerts.mjs` 默认要求真实待办；不想等可以 `OFFICE_ALERTS_STUB=1` 注入一条管理员模型失败。
+- **一个已经开工的项目**：新建项目后界面会自动弹「开工向导」，挡住后面的点击。脚本会先把它关掉；关不掉就说明这个项目还没开工，会提示先在界面完成一次开工。
+
+`verify.mjs` 只把「失败」算成非零退出，跳过会单独列出来，所以不会静默变绿。
 
 ## 五分钟本地演示
 
@@ -169,12 +180,14 @@ npm run verify
 
 ### Windows
 
-在仓库根目录打开 PowerShell：
+在仓库根目录打开 PowerShell（或 cmd）：
 
 ```powershell
-.\setup.ps1
+.\setup.bat
 .\start.bat
 ```
+
+**为什么是 `.\setup.bat` 而不是 `.\setup.ps1`**：Windows 默认执行策略是 `Restricted`，直接跑 `.ps1` 会在第一行之前就被拒绝（`... cannot be loaded because running scripts is disabled on this system`）。`setup.bat` 用 `powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1` 跑同一条安装路径，`Bypass` 只作用于这一次进程，不改机器的执行策略；`start.bat` 也是这么写的。想直接用 `.ps1` 就得自己改策略（例如 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`），README 不要求这一步。
 
 另开一个 PowerShell 窗口启动 Agent Office：
 
@@ -251,11 +264,11 @@ npm run verify
 
 | 步骤 | 结果 |
 |---|---|
-| `.\setup.ps1` | 建 `.venv`、装后端依赖、`npm ci` 装前端依赖，输出 `Setup complete.` |
-| `.\start-demo.ps1` | 后端 `auth_mode=enforce`、两个令牌、项目与分组、界面全部就绪；`/api/formal/status` 返回 `configured:true, connected:true` |
+| `.\setup.bat` | 建 `.venv`、装后端依赖、`npm ci` 装前端依赖，输出 `Setup complete.` |
+| `.\start-demo.ps1` | 后端 `auth_mode=enforce`、两个令牌、项目与分组、`canonical.git`、界面全部就绪；`/api/formal/status` 返回 `configured:true, connected:true` |
 | 数据放在哪 | 全部在这个克隆里：`data\state.db`（首次启动自动建）、`wt\`（工作树根）、`data\*.key`（令牌，不进仓库） |
 
-没有预先存在的令牌、数据库或仓库：`data\`、`wt\` 由后端自己创建，`canonical.git` 由正式模式的脚本创建。产品代码里没有写死的本机路径。
+没有预先存在的令牌、数据库或仓库：`data\`、`wt\` 由后端自己创建，`canonical.git` 由 `start-demo.ps1`（以及正式模式/worker 启动时）创建。产品代码里没有写死的本机路径。
 
 
 ### Windows 正式 Harness 模式
@@ -265,7 +278,7 @@ npm run verify
 在仓库根目录执行：
 
 ```powershell
-.\setup.ps1
+.\setup.bat
 .\start-formal.ps1
 ```
 
@@ -334,6 +347,8 @@ OpenAPI:       http://127.0.0.1:8848/docs
 规范状态:      http://127.0.0.1:8848/spec/status
 ```
 
+`/spec/status` 是手动查询；后端启动时也会在 lifespan 里跑同一套 docstate 检查。默认只告警（打印不一致的条目与修法），服务照常启动；设 `AP_SPEC_STRICT=1` 后，不一致会拒绝启动（退出码非零）。`AP_CHECK_SPEC=0` 可整体跳过启动检查。
+
 ### Linux / macOS
 
 ```bash
@@ -359,7 +374,7 @@ chmod +x setup.sh start-backend.sh
 - 后端运行依赖：`backend/requirements.txt`
 - 后端测试与开发依赖：`backend/requirements-dev.txt`
 - 前端锁定依赖：`office/package-lock.json`
-- Windows 安装入口：`setup.ps1`
+- Windows 安装入口：`setup.bat`（内部以 Bypass 调 `setup.ps1`，避开默认执行策略）
 - Linux/macOS 安装入口：`setup.sh`
 - 运行期目录：仓库内 `.venv`、`data/` 和 `office/node_modules/`，均不提交
 
