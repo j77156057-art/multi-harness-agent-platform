@@ -105,6 +105,29 @@ export async function requireTasks(base, scriptName) {
 }
 
 /**
+ * 新建项目后界面会自动弹「开工向导」（`#openingDialog`）。
+ *
+ * 这些脚本验的是向导背后那一屏，向导没关掉会挡住所有点击 —— 表现成
+ * "element intercepts pointer events" 之类跟被测代码毫无关系的失败。
+ * 这里按人的正常操作把它关掉（×）；关不掉说明这个项目还没开工，
+ * 说清怎么准备再跳过。
+ */
+export async function dismissOpeningWizard(page, scriptName) {
+  const dialog = page.locator('#openingDialog');
+  if (!(await dialog.count())) return;
+  if (!(await dialog.evaluate((node) => node.open).catch(() => false))) return;
+  await page.locator('#openingCloseBtn').click().catch(() => {});
+  await page.waitForTimeout(300);
+  const stillOpen = await dialog.evaluate((node) => node.open).catch(() => false);
+  if (stillOpen) {
+    skip(
+      scriptName,
+      '新建项目后「开工向导」开着且关不掉，后面的点击都会被它挡住。先在界面里完成一次开工（选管理员和成员并提交），或把 OFFICE_URL 指向一个已开工的项目，再跑这条校验',
+    );
+  }
+}
+
+/**
  * 大厅那一列「平台上已有的项目」要的是**能归堆的任务**。
  *
  * 那一列是按任务标题的前缀（`项目名 · 任务名`）归出来的 —— 平台上有一百条活，

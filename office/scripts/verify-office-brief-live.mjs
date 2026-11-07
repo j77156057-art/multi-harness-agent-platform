@@ -6,7 +6,7 @@
 //   2. 没人接的条数也跟着变；
 //   3. 刷新不打断阅读：滚动位置不被拉回顶部。
 import { chromium } from 'playwright';
-import { requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
+import { dismissOpeningWizard, requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = await requireOffice('verify-office-brief-live.mjs', process.env.OFFICE_URL);
@@ -56,6 +56,7 @@ try {
   await page.locator('[data-project-name]').fill('活任务书');
   await page.locator('[data-confirm-create]').click();
   await waitForTasksOrSkip(page, 'verify-office-brief-live.mjs');
+  await dismissOpeningWizard(page, 'verify-office-brief-live.mjs');
   await page.waitForTimeout(1200);
 
   await page.locator('[data-act="open-brief"]').click();

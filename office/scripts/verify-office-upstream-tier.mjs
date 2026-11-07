@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-upstream-tier.mjs');
 await requireProjectGroups(base, 'verify-office-upstream-tier.mjs');
@@ -155,7 +155,14 @@ try {
       await page.waitForSelector('.project-platform-open', {timeout: 30000});
     }
   }
-  assert.ok(entered, `没有哪个项目里有这个窗口（${harness}）`);
+  if (!entered) {
+    skip(
+      'verify-office-upstream-tier.mjs',
+      `没有哪个项目里能看到窗口「${harness}」，分组「${groupName}」也无从谈起。` +
+        '这条要一个有该窗口的真实项目：用 start-fresh.ps1 起的界面，' +
+        '或用 OFFICE_UTIER_HARNESS=<窗口 id> / OFFICE_UTIER_GROUP=<分组名> 指到已有的项目与分组',
+    );
+  }
   await page.locator(rowSelector).click();
   await page.waitForSelector('.flat-model', {timeout: 30000});
 

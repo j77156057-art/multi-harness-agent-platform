@@ -8,7 +8,7 @@
 //   1. 打开一个名字与群里某个项目一致的项目 → 任务表里只有那个项目的任务；
 //   2. 打开一个与谁都不匹配的项目 → 0 条任务（不泄漏别处的历史）。
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, skip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = await requireOffice('verify-office-project-scope.mjs', process.env.OFFICE_URL);
@@ -22,7 +22,15 @@ try {
 
   const platform = await (await fetch(`${BASE}/api/formal/tasks`)).json();
   const groupTasks = platform.tasks || [];
-  assert.ok(groupTasks.length > 1, 'the group has several projects to mix up');
+  // 这条校验要的是「同一个 group 里并列多个项目」。只有一条任务、或者标题里
+  // 全是同一个项目时，隔离根本无从谈起 —— 说清楚缺什么，而不是让 `[0][0]`
+  // 抛一个 TypeError。
+  if (groupTasks.length < 2) {
+    skip(
+      'verify-office-project-scope.mjs',
+      `这个分组里只有 ${groupTasks.length} 条任务，项目隔离至少要两个项目各有一条任务才验得出来。先在这个分组里给第二个项目派一条任务，再跑这条校验`,
+    );
+  }
 
   // 一个真实存在的项目名：取群任务标题里出现最多的那个前缀。
   const prefixes = new Map();
@@ -32,6 +40,12 @@ try {
     if (cut < 0) continue;
     const prefix = title.slice(0, cut);
     prefixes.set(prefix, (prefixes.get(prefix) || 0) + 1);
+  }
+  if (prefixes.size < 2) {
+    skip(
+      'verify-office-project-scope.mjs',
+      `任务标题里只归出 ${prefixes.size} 个项目（要至少两个）。任务标题需要以「项目名 · 」开头，先给第二个项目派一条任务，再跑这条校验`,
+    );
   }
   const known = [...prefixes.entries()].sort((a, b) => b[1] - a[1])[0][0];
   const knownTaskIds = groupTasks

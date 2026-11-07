@@ -5,7 +5,7 @@
 // 什么。宿主把组件自己的输入框搬到表单最前（见 opening-host.js 的
 // promoteGoalField）—— 这条检查钉住两件事：位置，以及搬动没有把它弄坏。
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-opening-goal.mjs', process.env.OFFICE_UI_URL);
 const GOAL = '为本期活动写一页说明';
@@ -103,6 +103,16 @@ try {
     return { admin: pick('管理员窗口'), member: pick('成员窗口') };
   });
   await page.waitForTimeout(800);
+
+  // 组件要求「管理员 + 至少一个成员」都选上，「查看配置摘要」才可点；
+  // 只登记了一个管理员时摘要永远打不开，验不了目标有没有进摘要。
+  if (!picked.admin || !picked.member) {
+    skip(
+      'verify-opening-goal.mjs',
+      `开工配置里选不到「管理员 + 至少一个成员」窗口（picked=${JSON.stringify(picked)}），摘要会被校验拦下。` +
+        '先用 start-fresh.ps1 起界面，或注册至少一个成员窗口，再跑这条校验',
+    );
+  }
 
   // 搬动没有把它弄坏：目标照旧进摘要
   await page.locator('#openingPhoneSlot button', { hasText: '查看配置摘要' }).first().click();

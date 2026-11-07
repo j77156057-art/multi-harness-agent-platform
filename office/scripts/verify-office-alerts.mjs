@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-alerts.mjs');
 const shotDir = process.env.OFFICE_ALERTS_SHOTS || path.join(process.env.TEMP || '.', 'office-alerts');
@@ -130,23 +130,27 @@ try {
   await page.locator('#aoWorkspace .flat-conv', {hasText: '需要你处理'}).first().click();
   const pane = await waitFor(paneState, () => true, '打开这一页');
   assert.equal(pane.floating, 0, '不该再有固定定位的浮层');
-  const firstShot = await shot('1-alerts-page');
+  await shot('1-alerts-page');
 
-  if (!pane.blocks.length) {
+  // 左栏这一行才是权威。它说「没有待你处理的事」时，`.flat-alerts` 可能还留在
+  // DOM 里（上一次渲染的残影），拿 blocks 判断会把「本来就没有待办」误判成
+  // 「有待办却没红点」—— 那是夹具不在，不是 UI 坏了。
+  if (rowLive.text.includes('没有待你处理的事')) {
     assert.equal(rowLive.dot, false, '没有待办时不该有红点');
-    console.log(JSON.stringify({
-      row: rowLive.text,
-      dot: rowLive.dot,
-      blocks: 0,
-      note: '这个项目现在没有待你处理的事；只验了页面与红点不亮。',
-      shots: [firstShot],
-      errors,
-    }, null, 2));
     assert.deepEqual(errors, [], `页面不该报错：${errors.join(' | ')}`);
-    process.exit(0);
+    // 没有待办就验不了红点与「先不管」。这不是失败，但也不能静悄悄当通过 ——
+    // 说清怎么造一条待办，再跳过。
+    skip(
+      'verify-office-alerts.mjs',
+      '这个项目现在没有待你处理的事，红点与「先不管」无从验证。加 OFFICE_ALERTS_STUB=1 跑（只往 /messages 注入一条管理员模型失败，平台数据不动），或等平台真的产生一条待办',
+    );
   }
 
   assert.equal(rowLive.dot, true, `有待办时红点要亮，实际：${rowLive.text}`);
+  assert.ok(
+    pane.blocks.length > 0,
+    `左栏说有事，但页面上没有列出任何一块（左栏：${rowLive.text}）`,
+  );
   for (const block of pane.blocks) {
     assert.ok(block.hasSelect, `每一块都要能选模型：${block.title}`);
     assert.ok(block.actions.includes('apply-trouble-model'), '每一块都要有「就用这个模型」');

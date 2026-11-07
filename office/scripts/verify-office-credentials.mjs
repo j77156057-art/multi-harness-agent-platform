@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-credentials.mjs');
 await requireProjectGroups(base, 'verify-office-credentials.mjs');
@@ -87,7 +87,14 @@ try {
       await page.waitForSelector('.project-platform-open', {timeout: 30000});
     }
   }
-  assert.ok(entered, `没有哪个项目里有这个窗口（${harness}）`);
+  if (!entered) {
+    skip(
+      'verify-office-credentials.mjs',
+      `没有哪个项目里能看到窗口「${harness}」。这条要一个有该窗口的真实项目：` +
+        '用 start-fresh.ps1 起的界面（它会把本机 CLI 登记成窗口），' +
+        '或用 OFFICE_CRED_HARNESS=<窗口 id> 指到界面里已有的窗口',
+    );
+  }
   await page.locator(rowSelector).click();
 
   // 1. 有多条，且只有一条在用，并且写着指纹

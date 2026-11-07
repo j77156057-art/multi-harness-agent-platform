@@ -1,5 +1,5 @@
 import {chromium} from 'playwright';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, skip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const base = await requireOffice('verify-harness-connections.mjs', process.env.OFFICE_PREVIEW_BASE);
@@ -13,8 +13,16 @@ const ollama = await (await fetch(`${base}/api/harnesses/test`, {
   method: 'POST', headers: {'Origin': base, 'X-Office-Harness': '1', 'Content-Type': 'application/json'},
   body: JSON.stringify({harness_id: 'opencode', transport: 'local_ollama', base_url: 'http://127.0.0.1:11434'}),
 })).json();
+const models = Array.isArray(ollama.models) ? ollama.models : [];
+if (ollama.status !== 'connected' || !models.includes('qwen3:4b')) {
+  skip(
+    'verify-harness-connections.mjs',
+    `本机 Ollama 没有可用的 qwen3:4b（返回 status=${ollama.status || 'unknown'}，模型=${models.join(',') || '无'}）。` +
+      '先运行 `ollama pull qwen3:4b`，并确认 `ollama serve` 在 127.0.0.1:11434 上跑着，再跑这条校验',
+  );
+}
 assert.equal(ollama.status, 'connected');
-assert(ollama.models.includes('qwen3:4b'));
+assert(models.includes('qwen3:4b'));
 
 const browser = await chromium.launch({headless: true});
 try {

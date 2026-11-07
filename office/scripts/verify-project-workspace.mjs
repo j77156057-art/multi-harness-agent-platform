@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-import { requireOffice } from './lib/office-url.mjs';
+import { requireOffice, skip } from './lib/office-url.mjs';
 
 // 大厅与项目卡：**建一个项目、进得去、回得来、刷新还在**。
 //
@@ -49,7 +49,12 @@ try {
     .evaluateAll(nodes => nodes.map(node => node.value));
   // 不写死条数：这台机器注册了几个窗口是**环境**，不是界面契约（本地实测 14 个，写 9 就红）。
   // 真正要守的是"列出来的都是成员、不是管理员"，以及命名的那两个必须在。
-  assert.ok(memberValues.length > 0, '成员列表不该是空的');
+  if (!memberValues.length) {
+    skip(
+      'verify-project-workspace.mjs',
+      '界面上一个非管理员窗口都没有，「成员列表」无从检查。先注册至少一个成员窗口（start-fresh.ps1 会把本机 CLI 登记成窗口），再跑这条校验',
+    );
+  }
   for (const administrator of ['codex-window-admin', 'qoder-window-admin', 'office-admin']) {
     assert.equal(memberValues.includes(administrator), false, `管理员 ${administrator} 不该出现在成员里`);
   }

@@ -10,7 +10,7 @@
 //
 // 只读脚本：API 全部拦截，不往正式平台写任何东西。
 import { chromium } from 'playwright';
-import { requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
+import { dismissOpeningWizard, requireOffice, waitForTasksOrSkip } from './lib/office-url.mjs';
 import assert from 'node:assert/strict';
 
 const BASE = await requireOffice('verify-office-brief-members.mjs', process.env.OFFICE_URL);
@@ -94,6 +94,7 @@ try {
   await page.locator('[data-project-name]').fill('回归');
   await page.locator('[data-confirm-create]').click();
   await waitForTasksOrSkip(page, 'verify-office-brief-members.mjs');
+  await dismissOpeningWizard(page, 'verify-office-brief-members.mjs');
   await page.waitForTimeout(1500);
 
   // 1. 管理员对话：能开，也能用 × 关掉

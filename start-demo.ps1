@@ -135,6 +135,23 @@ if (-not $health) {
 }
 Write-Host "[demo] backend ok (auth_mode=$($health.config.auth_mode))"
 
+# 1b. canonical repository ---------------------------------------------------
+# Every claim freezes the canonical integration HEAD into its attempt, so the
+# bare repository has to exist before anything can be claimed. start-fresh
+# starts workers, which create it lazily; the demo path starts no worker, so
+# without this step the first claim fails with claim.repo_unavailable. Same
+# call the workers make, and idempotent.
+Write-Host '[demo] preparing canonical repository (canonical.git)'
+Push-Location $backend
+try {
+    $canonicalOut = & $python -c 'from app.git.repo import CanonicalRepo; CanonicalRepo.from_settings().ensure()' 2>&1
+} finally {
+    Pop-Location
+}
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not prepare the canonical repository. Output: $canonicalOut. Run .\setup.bat, then this script again."
+}
+
 # 2. tokens ------------------------------------------------------------------
 $operatorKey = Join-Path $data 'office-operator.key'
 $adminKey = Join-Path $data "$Admin.key"
