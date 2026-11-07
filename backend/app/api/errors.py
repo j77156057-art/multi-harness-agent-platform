@@ -26,7 +26,7 @@ from app.claim.guarded_write import (
     StatusNotAllowed,
     TaskNotFound,
 )
-from app.claim.service import IdempotencyConflict
+from app.claim.service import ClaimPrerequisiteError, IdempotencyConflict
 from app.claim.transitions import ConcurrentStateChange, IllegalTransition
 from app.git.publish import PublishRejected
 from app.lease.service import LeaseExpired, LeaseNotFound, LeaseTokenMismatch
@@ -106,6 +106,10 @@ def _from_exception(exc: Exception) -> ApiError:
         )
     if isinstance(exc, IdempotencyConflict):
         return ApiError(exc.code.value, 409, str(exc))
+    if isinstance(exc, ClaimPrerequisiteError):
+        # Missing canonical repo / git / failed git run: an environment problem
+        # with its own code, not a generic 500. Messages name the next step.
+        return ApiError(exc.code, exc.http_status, str(exc), retryable=False)
     if isinstance(exc, StaleFencingEpoch):
         return ApiError("fencing.epoch_stale", 409, str(exc), task_id=None)
     if isinstance(exc, AttemptMismatch):

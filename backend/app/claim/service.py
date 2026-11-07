@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ from app.claim.transitions import ConcurrentStateChange, apply_transition
 from app.config import settings
 from app.db.connection import Database
 from app.events.store import EventStore
-from app.git.repo import CanonicalRepo
+from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import worktree_capacity
 from app.lease.service import (
     LeaseGrant,
@@ -96,6 +97,38 @@ class IdempotencyConflict(RuntimeError):
     """Same key, different payload. Rejects the whole request (R10 §11)."""
 
     code = RejectCode.IDEMPOTENCY_CONFLICT
+
+
+class ClaimPrerequisiteError(RuntimeError):
+    """A claim stopped because a local prerequisite is not usable.
+
+    These are environment problems, not bad requests: no canonical repository,
+    no ``git`` on ``PATH``, or a git command that ran and failed. They carry a
+    wire code and status so ``app/api/errors.py`` can answer with something the
+    caller can act on instead of collapsing into ``internal.error``.
+    """
+
+    code = "claim.repo_unavailable"
+    http_status = 503
+
+
+class ClaimRepoUnavailable(ClaimPrerequisiteError):
+    """The canonical bare repository is not on disk yet."""
+
+    code = "claim.repo_unavailable"
+
+
+class ClaimGitMissing(ClaimPrerequisiteError):
+    """No ``git`` executable could be found on ``PATH``."""
+
+    code = "claim.git_missing"
+
+
+class ClaimGitFailed(ClaimPrerequisiteError):
+    """git ran but could not report a usable integration HEAD."""
+
+    code = "claim.git_failed"
+    http_status = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -1417,10 +1450,7 @@ class ClaimService:
         if self.repo is not None:
             # integration_health is a health projection, not Git HEAD. It can
             # be NULL before the first merge or lag a scheduler ref update.
-            head = self.repo.ref_commit(self.repo.integration_ref)
-            if head is None:
-                raise RuntimeError("canonical integration HEAD unavailable; claim refused")
-            return head
+            return self._repo_integration_head(self.repo)
         row = conn.execute(
             "SELECT ih.integration_commit"
             "  FROM tasks t"
@@ -1432,6 +1462,66 @@ class ClaimService:
         if row is None:
             return None
         return row["integration_commit"]
+
+    @staticmethod
+    def _repo_integration_head(repo: CanonicalRepo) -> str:
+        """Read the canonical integration HEAD, or name what is missing.
+
+        ``run_git`` passes ``repo.path`` to ``subprocess`` as its ``cwd``. When
+        that directory is gone, the OS raises ``NotADirectoryError`` (Windows)
+        or ``FileNotFoundError`` (POSIX) before git ever starts -- an exception
+        that says nothing about claims. Check the environment first and turn
+        each failure into a ``ClaimPrerequisiteError`` the API can translate.
+        """
+        if not repo.is_initialized():
+            raise ClaimRepoUnavailable(
+                f"canonical repository is missing at {repo.path}; claim cannot start. "
+                r"Run .\start-demo.ps1 (demo) or start a worker, which creates it via "
+                "CanonicalRepo.ensure(), then retry."
+            )
+        if shutil.which("git") is None:
+            raise ClaimGitMissing(
+                "git is not on PATH, so the canonical integration HEAD cannot be read. "
+                "Install Git for Windows from https://git-scm.com/download/win, reopen "
+                "the terminal, confirm `git --version` prints a version, then restart "
+                "the backend."
+            )
+        try:
+            proc = run_git(
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                repo.integration_ref,
+                cwd=repo.path,
+                check=False,
+            )
+        except (FileNotFoundError, NotADirectoryError) as exc:
+            # The directory vanished between the check above and this call.
+            raise ClaimRepoUnavailable(
+                f"canonical repository disappeared from {repo.path}; claim cannot start. "
+                r"Run .\start-demo.ps1 or start a worker to recreate it, then retry."
+            ) from exc
+        except OSError as exc:
+            raise ClaimGitFailed(
+                f"git could not run against {repo.path}: {exc}. Check that the path is "
+                "readable and retry."
+            ) from exc
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip() or "no output"
+            raise ClaimGitFailed(
+                f"git rev-parse failed (exit {proc.returncode}) in {repo.path}: {stderr}. "
+                f'Reproduce with `git -C "{repo.path}" rev-parse --verify '
+                f"{repo.integration_ref}`, then seed it by running a worker or "
+                r".\start-demo.ps1."
+            )
+        head = proc.stdout.strip()
+        if not head:
+            raise ClaimGitFailed(
+                f"canonical integration HEAD is empty in {repo.path}. Run a worker or "
+                r".\start-demo.ps1 so CanonicalRepo.ensure() seeds the integration "
+                "branch, then retry."
+            )
+        return head
 
     def _last_seq(self, conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT COALESCE(MAX(seq), 0) AS seq FROM task_events").fetchone()
