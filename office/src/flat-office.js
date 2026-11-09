@@ -2160,7 +2160,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   /** 助手发来的定向消息（它回的是私聊，所以只有这一条线程）。 */
   function assistantAnswers() {
     return (state.messages || []).filter(
-      (message) => String(message.sender_id || message.author_id || '') === ASSISTANT_ID,
+      (message) => String(message.sender_id || '') === ASSISTANT_ID,
     );
   }
 

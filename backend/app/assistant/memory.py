@@ -40,7 +40,7 @@ def _is_direct(message: dict[str, Any]) -> bool:
 
 
 def _sender(message: dict[str, Any]) -> str:
-    return str(message.get("sender_id") or message.get("author_id") or "")
+    return str(message.get("sender_id") or "")
 
 
 def _in_thread(message: dict[str, Any], asker_id: str) -> bool:
