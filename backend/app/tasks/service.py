@@ -965,7 +965,6 @@ class SchedulerService:
             task_id=task_id,
             current=TaskStatus.DRAFT,
             event=event,
-            extra_sets={"waiting_since": _now() if unmet else None},
             state_seq=record.seq,
         )
         return event

@@ -19,6 +19,7 @@ from app.scheduler import (
     sweep_stuck,
 )
 from app.spec import TaskStatus
+from app.tasks.service import SchedulerService
 from tests.api_support import make_client
 from tests.claim_support import make_database, seed_project, seed_task
 
@@ -42,6 +43,10 @@ def _counter(database, task_id: str = "T-1"):
 
 
 def _watched_rig(tmp_path, *, status: TaskStatus, waited_minutes: int | None = None):
+    assert status is not TaskStatus.READY, (
+        "ready 的等待起点必须由批准动作写入；用 _approved_ready 造现场，"
+        "否则测的是夹具自己写的 waiting_since，不是生产写点"
+    )
     database = make_database(tmp_path)
     seed_project(database)
     seed_task(database, task_id="T-1")
@@ -56,16 +61,57 @@ def _watched_rig(tmp_path, *, status: TaskStatus, waited_minutes: int | None = N
     return database
 
 
+def _approved_ready(tmp_path, *, assigned: list[str] | None = None):
+    """走真实的批准动作把任务送进 ready，返回 (库, 生产写入的 waiting_since)。
+
+    不手工写 waiting_since：这条路径正是 2026-11-09 之前漏写的地方。
+    后续 sweep 的时钟都相对这个起点推，而不是用固定的 NOW。
+    """
+    database = make_database(tmp_path)
+    seed_project(database)
+    moment = datetime.now(UTC).isoformat()
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO plans(plan_id, group_id, status, plan_hash, created_at)"
+            " VALUES ('PL-1', 'G-1', 'draft', 'hash-1', ?)",
+            (moment,),
+        )
+        conn.execute(
+            "INSERT INTO plan_snapshots(snapshot_id, plan_id, snapshot_hash,"
+            " content_json, created_at) VALUES ('S-1', 'PL-1', 'hash-1', ?, ?)",
+            (json.dumps({"plan_version": "v1", "tasks": [{"id": "T-1"}]}), moment),
+        )
+        conn.execute(
+            "INSERT INTO tasks(task_id, group_id, plan_snapshot_id, status, attempt_no,"
+            " max_attempts, created_at, updated_at)"
+            " VALUES ('T-1', 'G-1', 'S-1', 'draft', 0, 3, ?, ?)",
+            (moment, moment),
+        )
+
+    SchedulerService(database).approve_plan(plan_id="PL-1", decided_by="ops")
+
+    row = database.read("SELECT status, waiting_since FROM tasks WHERE task_id = 'T-1'")[0]
+    assert str(row["status"]) == TaskStatus.READY.value, row
+    assert row["waiting_since"] is not None, "批准进 ready 必须起等待时钟"
+    if assigned is not None:
+        with database.transaction() as conn:
+            conn.execute(
+                "UPDATE tasks SET assigned_harness_ids_json = ? WHERE task_id = 'T-1'",
+                (json.dumps(assigned),),
+            )
+    return database, datetime.fromisoformat(str(row["waiting_since"]))
+
+
 # ------------------------------------------------------------------- aging
 
 
 def test_aging_escalates_ready_past_the_configured_multiple(tmp_path):
-    fresh = _watched_rig(tmp_path / "fresh", status=TaskStatus.READY, waited_minutes=30)
-    assert sweep_aging(fresh, NOW).actions == 0
+    fresh, fresh_since = _approved_ready(tmp_path / "fresh")
+    assert sweep_aging(fresh, fresh_since + timedelta(minutes=30)).actions == 0
     assert _status(fresh) == "ready"
 
-    stale = _watched_rig(tmp_path / "stale", status=TaskStatus.READY, waited_minutes=200)
-    report = sweep_aging(stale, NOW)
+    stale, stale_since = _approved_ready(tmp_path / "stale")
+    report = sweep_aging(stale, stale_since + timedelta(minutes=200))
     assert report.detail["escalated"] == ["T-1"]
     assert _status(stale) == "escalated"
     assert _event_count(stale, "aging_timeout") == 1
@@ -201,16 +247,13 @@ def test_the_heartbeat_route_stores_the_progress_hash(tmp_path):
 
 
 def _ready_waiting(tmp_path, *, waited_minutes: int = 20, assigned: list[str] | None = None):
-    database = _watched_rig(
-        tmp_path, status=TaskStatus.READY, waited_minutes=waited_minutes
-    )
-    if assigned is not None:
-        with database.transaction() as conn:
-            conn.execute(
-                "UPDATE tasks SET assigned_harness_ids_json = ? WHERE task_id = 'T-1'",
-                (json.dumps(assigned),),
-            )
-    return database
+    """ready 现场由批准动作造出，再把观察时钟往后推 waited_minutes。
+
+    ``waited_minutes`` 只推进 sweep 的 now，不参与写 waiting_since —— 起点
+    一定是生产代码写进去的那个值。
+    """
+    database, since = _approved_ready(tmp_path, assigned=assigned)
+    return database, since + timedelta(minutes=waited_minutes)
 
 
 def _online_window(database, harness_id: str = "H-1") -> None:
@@ -246,9 +289,9 @@ def _decisions(database, task_id: str = "T-1") -> list[dict[str, object]]:
 
 
 def test_a_ready_task_with_no_claimable_window_is_reported(tmp_path):
-    database = _ready_waiting(tmp_path)
+    database, at = _ready_waiting(tmp_path)
 
-    report = sweep_ready_unclaimed(database, NOW)
+    report = sweep_ready_unclaimed(database, at)
 
     assert report.sweep == "ready_unclaimed"
     assert report.actions == 1
@@ -262,17 +305,17 @@ def test_a_ready_task_with_no_claimable_window_is_reported(tmp_path):
 
 
 def test_a_ready_task_inside_the_threshold_is_left_alone(tmp_path):
-    database = _ready_waiting(tmp_path, waited_minutes=5)
+    database, at = _ready_waiting(tmp_path, waited_minutes=5)
 
-    assert sweep_ready_unclaimed(database, NOW).actions == 0
+    assert sweep_ready_unclaimed(database, at).actions == 0
     assert _decisions(database) == []
 
 
 def test_an_idle_window_that_never_claims_is_also_reported(tmp_path):
-    database = _ready_waiting(tmp_path)
+    database, at = _ready_waiting(tmp_path)
     _online_window(database)
 
-    report = sweep_ready_unclaimed(database, NOW)
+    report = sweep_ready_unclaimed(database, at)
 
     assert report.detail["notified"] == ["T-1"]
     assert "一直没人动" in _decisions(database)[0]["question"]
@@ -283,10 +326,10 @@ def test_an_idle_window_that_never_claims_is_also_reported(tmp_path):
 
 
 def test_the_reminder_is_not_repeated_inside_the_interval(tmp_path):
-    database = _ready_waiting(tmp_path)
+    database, at = _ready_waiting(tmp_path)
 
-    first = sweep_ready_unclaimed(database, NOW)
-    second = sweep_ready_unclaimed(database, NOW + timedelta(minutes=1))
+    first = sweep_ready_unclaimed(database, at)
+    second = sweep_ready_unclaimed(database, at + timedelta(minutes=1))
 
     assert first.actions == 1
     assert second.actions == 0
@@ -298,9 +341,9 @@ def test_the_reminder_is_not_repeated_inside_the_interval(tmp_path):
 
 
 def test_the_reminder_repeats_once_the_interval_has_passed(tmp_path):
-    database = _ready_waiting(tmp_path)
-    sweep_ready_unclaimed(database, NOW)
-    later = NOW + timedelta(minutes=settings.ready_unclaimed_reminder_minutes + 1)
+    database, at = _ready_waiting(tmp_path)
+    sweep_ready_unclaimed(database, at)
+    later = at + timedelta(minutes=settings.ready_unclaimed_reminder_minutes + 1)
 
     report = sweep_ready_unclaimed(database, later)
 

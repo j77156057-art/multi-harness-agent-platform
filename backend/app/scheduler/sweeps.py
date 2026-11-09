@@ -153,7 +153,6 @@ def sweep_dependencies(
                 expected=TaskStatus.READY_WAITING_DEPS,
                 event=EventKind.DEPENDENCIES_SATISFIED,
                 payload={"upstreams": [str(item["upstream_id"]) for item in upstream]},
-                extra_sets={"waiting_since": None},
             ):
                 satisfied.append(task_id)
             continue
@@ -211,7 +210,6 @@ def sweep_dependencies(
                 expected=TaskStatus.BLOCKED,
                 event=EventKind.ALL_CHILDREN_MERGED,
                 payload={"children": [str(item["child_id"]) for item in children]},
-                extra_sets={"waiting_since": None},
             )
         ):
             unblocked.append(task_id)

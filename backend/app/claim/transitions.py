@@ -12,6 +12,7 @@ raises :class:`IllegalTransition` instead of quietly writing a new status.
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime
 
 from app.spec import EventKind, TaskStatus
 from app.state.machine import TransitionTable, default_transition_table
@@ -109,11 +110,32 @@ def apply_transition(
         ).fetchone()
         attempt_id = row[0] if row is not None else None
 
+    extra = dict(extra_sets or {})
+
+    # 等待时钟的唯一起表点。
+    #
+    # 进入 ready / ready_waiting_deps 的路径不止批准一条：派单、依赖满足、
+    # 拆分回收、release、人类 reopen 都从这里过。以前由各调用方自己写
+    # waiting_since，结果批准直接进 ready 的那条写成了 NULL（2026-11-09 库里
+    # 31 条 ready 全是 NULL），aging 与 ready_unclaimed 因此**永远看不到**
+    # 这些任务。
+    # 口径：只要本次迁移**进入** ready，就起表。调用方传 None（人类 reopen /
+    # release 的“清空”语义）在这里视为“没给”——ready 本身就是等待，NULL 只会
+    # 把任务从两条 sweep 里藏掉；显式给了时间戳（例如租约恢复按原时刻起表）
+    # 才用调用方的。
+    if (
+        nxt is not current
+        and nxt in (TaskStatus.READY, TaskStatus.READY_WAITING_DEPS)
+        and extra.get("waiting_since") is None
+    ):
+        extra["waiting_since"] = datetime.now(UTC).isoformat()
+
     assignments = ["status = ?"]
     params: list[object] = [nxt.value]
-    for column, value in (extra_sets or {}).items():
+    for column, value in extra.items():
         assignments.append(f"{column} = ?")
         params.append(value)
+
     if state_seq is not None and nxt is not current:
         assignments.append("state_changed_seq = ?")
         params.append(state_seq)

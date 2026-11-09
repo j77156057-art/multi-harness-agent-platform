@@ -154,7 +154,7 @@ def test_all_children_merged_wakes_the_parent(tmp_path):
     assert report.detail["unblocked"] == ["T-1"]
     assert _status(database, "T-1") == "ready"
     after = database.read("SELECT waiting_since FROM tasks WHERE task_id = 'T-1'")[0]
-    assert after["waiting_since"] is None, "R10: the wake clears the wait clock"
+    assert after["waiting_since"] is not None, "a ready task always carries a wait clock"
     assert _event_names(database, "T-1").count("all_children_merged") == 1
     assert sweep_dependencies(database, NOW).actions == 0, "idempotent second round"
 

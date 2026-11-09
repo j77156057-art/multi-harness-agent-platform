@@ -241,6 +241,9 @@ def test_reopen_returns_a_parked_or_drifted_task_to_ready(tmp_path, status):
     row = _task(database)
     assert row["status"] == "ready"
     assert row["owner"] is None and row["current_attempt_id"] is None
+    # 回到 ready 就是重新开始等：等待时钟必须起表，否则 aging / ready_unclaimed
+    # 看不见这条任务。reopen 的 extra_sets 传的是 None，起表由状态机兜住。
+    assert row["waiting_since"] is not None
     assert _event_names(database) == ["human.reopen"]
 
 
@@ -274,6 +277,8 @@ def test_release_returns_an_escalated_task_to_ready(tmp_path):
     row = _task(database)
     assert row["status"] == "ready"
     assert row["escalated_at"] is None, "the escalation anchor goes with the state"
+    # 放回队列同样是一条新的等待，等待时钟随状态机起表。
+    assert row["waiting_since"] is not None
     assert _event_names(database) == ["human.release"]
 
 
@@ -359,9 +364,6 @@ def test_a_human_release_hands_the_allocation_authorization_back(tmp_path):
             " VALUES ('al-1', 'r-1', 'T-1', 'harness-1', 'accepted', ?, ?, 1)",
             (NOW.isoformat(), NOW.isoformat()),
         )
-        claim_id = conn.execute(
-            "SELECT claim_id FROM task_claims WHERE task_id = 'T-1'"
-        ).fetchone()
 
     _service(database).release(task_id="T-1", decided_by="ops", reason="infra hiccup")
 

@@ -65,7 +65,9 @@ def test_dependencies_satisfied_moves_the_task_to_ready(tmp_path):
     assert _status(database, "T-1") == "ready"
     assert _event_count(database, "T-1", "dependencies_satisfied") == 1
     waiting = database.read("SELECT waiting_since FROM tasks WHERE task_id = 'T-1'")[0]
-    assert waiting["waiting_since"] is None
+    # 依赖满足是一条新的等待：从这里起表，aging / ready_unclaimed 才看得见它。
+    # 旧断言写的是 ``is None``，那正是这两条 sweep 对 ready 永远不可达的原因。
+    assert waiting["waiting_since"] is not None
 
 
 def _output_dep_rig(tmp_path):
