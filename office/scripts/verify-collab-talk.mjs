@@ -5,9 +5,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireTasks } from './lib/office-url.mjs';
+import { requireOffice, requireTasks, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-collab-talk.mjs');
+// 等回话的上限。CI 里没有能回话的窗口/模型，按默认四分钟等三轮会空转十二分钟；
+// 用 20 秒确认「没人回」之后明确跳过，而不是把一段静默当成通过。
+const REPLY_TIMEOUT_MS = Number(process.env.TALK_REPLY_TIMEOUT_MS || 240000);
 const outFile = process.env.OFFICE_TALK_OUT || path.join(process.env.TEMP || '.', 'collab-talk.json');
 const assistantQuestion =
   process.env.TALK_ASSISTANT_QUESTION ||
@@ -62,7 +65,7 @@ try {
     entry.sent = true;
     const started = Date.now();
     // 助手的回话要过一次模型：轮询等，别写死 sleep。
-    while (Date.now() - started < 240000) {
+    while (Date.now() - started < REPLY_TIMEOUT_MS) {
       await sleep(3000);
       const replies = await page.evaluate(() =>
         [...document.querySelectorAll('.flat-assistant-turn.is-assistant')].map((n) =>
@@ -77,6 +80,14 @@ try {
     }
     entry.waitedSeconds = Math.round((Date.now() - started) / 1000);
     result.results.assistant = entry;
+    if (!entry.reply) {
+      fs.writeFileSync(outFile, JSON.stringify(result, null, 2));
+      skip(
+        'verify-collab-talk.mjs',
+        `${entry.waitedSeconds}s 内平台助手没有回话 —— 这条要一个真的会调模型的助手窗口（CI 没有真实模型）；` +
+          '「能发出这一句」已经验过，回话内容没验',
+      );
+    }
   }
 
   // ---------------------------------------------------------- 与管理员对话（定向私聊）
@@ -89,7 +100,7 @@ try {
     await page.click('#flatAdminChatForm button[type="submit"]');
     entry.sent = true;
     const started = Date.now();
-    while (Date.now() - started < 240000) {
+    while (Date.now() - started < REPLY_TIMEOUT_MS) {
       await sleep(3000);
       const replies = await page.evaluate(() =>
         [...document.querySelectorAll('#flatAdminChatList .flat-thread-msg:not(.is-mine)')].map((n) => ({
@@ -108,6 +119,14 @@ try {
     entry.waitedSeconds = Math.round((Date.now() - started) / 1000);
     await page.evaluate(() => document.querySelector('#flatAdminChat')?.close());
     result.results.adminChat = entry;
+    if (!entry.reply) {
+      fs.writeFileSync(outFile, JSON.stringify(result, null, 2));
+      skip(
+        'verify-collab-talk.mjs',
+        `${entry.waitedSeconds}s 内管理员窗口没有回话 —— 这条要另一个成员窗口真的收下并回复（CI 只有一个窗口）；` +
+          '「能发出这一句」已经验过，回话内容没验',
+      );
+    }
   }
 
   // ---------------------------------------------------------- 私聊窗口页
@@ -122,7 +141,7 @@ try {
       await direct.click('#directForm button[type="submit"]');
       entry.sent = true;
       const started = Date.now();
-      while (Date.now() - started < 240000) {
+      while (Date.now() - started < REPLY_TIMEOUT_MS) {
         await sleep(3000);
         const replies = await direct.evaluate(() =>
           [...document.querySelectorAll('.direct-msg:not(.is-mine)')].map((n) => ({
@@ -143,8 +162,18 @@ try {
       await direct.close();
     }
     result.results.directPage = entry;
+    if (!entry.reply) {
+      fs.writeFileSync(outFile, JSON.stringify(result, null, 2));
+      skip(
+        'verify-collab-talk.mjs',
+        `${entry.waitedSeconds}s 内私聊窗口没有回话 —— 这条要对话另一方真的在线并回复（CI 只有一个窗口）；` +
+          '「能发出这一句」已经验过，回话内容没验',
+      );
+    }
   }
 } catch (error) {
+  // 跳过要在 finally 落盘之后交给 uncaughtException（退出码 2），不能被这里吞成 0。
+  if (error && error.name === 'Skipped') throw error;
   result.fatal = String(error.message || error);
 } finally {
   fs.writeFileSync(outFile, JSON.stringify(result, null, 2));

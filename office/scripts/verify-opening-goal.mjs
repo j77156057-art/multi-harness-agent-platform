@@ -89,18 +89,25 @@ try {
   // 组件的校验要求：选一个管理员窗口 + 至少一个成员窗口。先选上，
   // 否则「查看配置摘要」会被机械门拦下，摘要里自然看不到目标。
   const picked = await page.evaluate(() => {
-    const groups = [...document.querySelectorAll('#openingPhoneSlot .oop-group')];
-    const pick = (keyword) => {
-      const group = groups.find((g) => {
-        const label = g.querySelector('label.oop-label');
-        return label && (label.textContent || '').includes(keyword);
-      });
-      const chip = group ? group.querySelector('.oop-chip:not(.on)') : null;
+    // 按**这一组管什么**找，不按文案找：宿主的 `opening-host.js` 会把两栏标题都
+    // 改写成「管理员窗口（必选…）」「成员窗口（…）」，组件自己的文案里根本没有
+    // 那四个字 —— 拿文案匹配永远匹配不上，于是永远跳过。
+    const pick = (selector) => {
+      // 每次重新查：点管理员会让组件重画，先前抓到的节点已经脱离文档。
+      const group = [...document.querySelectorAll('#openingPhoneSlot .oop-group')].find((g) =>
+        g.querySelector(selector),
+      );
+      if (!group) return false;
+      // 已经选上的照算：成员默认就是全选（「已选 N 个」），不需要再点一次。
+      if (group.querySelector('.oop-chip.on')) return true;
+      const chip = group.querySelector('.oop-chip:not(.on):not(.dis)');
       if (!chip) return false;
       chip.click();
       return true;
     };
-    return { admin: pick('管理员窗口'), member: pick('成员窗口') };
+    const admin = pick('.oop-admins');
+    const member = pick('.oop-workers');
+    return { admin, member };
   });
   await page.waitForTimeout(800);
 

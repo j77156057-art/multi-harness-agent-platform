@@ -74,7 +74,14 @@ def configured_model(harness_id: str, *, home: Path | None = None) -> dict[str, 
     relative, key = source
     if not relative:
         return {"model": None, "source": "not-readable"}
-    path = (home if home is not None else Path.home()) / relative
+    # ``AP_MODEL_HOME`` lets CI point the lookup at a throwaway profile instead
+    # of the runner's real ``~``; unset means the real home, as before.
+    configured_home = (
+        home
+        if home is not None
+        else Path(os.environ.get("AP_MODEL_HOME") or Path.home())
+    )
+    path = configured_home / relative
     if path.suffix == ".toml":
         model = _read_toml_model(path)
         return {"model": model, "source": str(path)}

@@ -35,6 +35,9 @@ page.on('pageerror', (error) => errors.push(String(error)));
 // 「先不管」，**只**把 /messages 的应答加一条管理员报的模型失败 —— 平台数据不动，
 // 其它接口照旧是真的。OFFICE_ALERTS_STUB=1 才这么做。
 const STUB = process.env.OFFICE_ALERTS_STUB === '1';
+// 时间戳必须是**一次运行内固定**的：界面按「谁 + 原因 + 时间」认这一件事，
+// 每次拉消息都换一个 now()，就会把「先不管」过的同一件事当成新的一件事再摆出来。
+const STUB_AT = new Date().toISOString();
 if (STUB) {
   await page.route('**/api/formal/messages*', async (route) => {
     const response = await route.fetch();
@@ -50,7 +53,7 @@ if (STUB) {
       sender_type: 'harness',
       sender_id: process.env.OFFICE_ALERTS_STUB_SENDER || 'codex-window-admin',
       body: '这一条没有答上来。\n原因：ConnectionRefused: failed to connect to upstream',
-      created_at: new Date().toISOString(),
+      created_at: STUB_AT,
       refs: [],
     });
     await route.fulfill({
@@ -87,6 +90,7 @@ const paneState = () =>
     return {
       summary: (pane.querySelector('.flat-summary') || {}).textContent || '',
       blocks: [...pane.querySelectorAll('.flat-alert')].map((block) => ({
+        harnessId: block.dataset.harness || '',
         title: (block.querySelector('h3') || {}).textContent || '',
         hasSelect: Boolean(block.querySelector('[data-trouble-select]')),
         actions: [...block.querySelectorAll('button[data-act]')].map((b) => b.dataset.act),
@@ -130,7 +134,7 @@ try {
   await page.locator('#aoWorkspace .flat-conv', {hasText: '需要你处理'}).first().click();
   const pane = await waitFor(paneState, () => true, '打开这一页');
   assert.equal(pane.floating, 0, '不该再有固定定位的浮层');
-  await shot('1-alerts-page');
+  const firstShot = await shot('1-alerts-page');
 
   // 左栏这一行才是权威。它说「没有待你处理的事」时，`.flat-alerts` 可能还留在
   // DOM 里（上一次渲染的残影），拿 blocks 判断会把「本来就没有待办」误判成
@@ -147,18 +151,22 @@ try {
   }
 
   assert.equal(rowLive.dot, true, `有待办时红点要亮，实际：${rowLive.text}`);
+  // 这一页里还有「项目创建申请」那一块（同样带 `.flat-alert`），它不在"模型用不了"
+  // 这件事的范畴里：只数带窗口 id 的块，否则会去点它身上并不存在的「先不管」。
+  const troubleBlocks = (state) => (state ? state.blocks.filter((block) => block.harnessId) : []);
+  const listed = troubleBlocks(pane);
   assert.ok(
-    pane.blocks.length > 0,
+    listed.length > 0,
     `左栏说有事，但页面上没有列出任何一块（左栏：${rowLive.text}）`,
   );
-  for (const block of pane.blocks) {
+  for (const block of listed) {
     assert.ok(block.hasSelect, `每一块都要能选模型：${block.title}`);
     assert.ok(block.actions.includes('apply-trouble-model'), '每一块都要有「就用这个模型」');
     assert.ok(block.actions.includes('dismiss-trouble'), '每一块都要有「先不管」');
   }
 
   // 3. 先不管 → 那一块消失；全部不管掉 → 红点灭
-  let remaining = pane.blocks.length;
+  let remaining = listed.length;
   const cleared = [];
   if (process.env.OFFICE_ALERTS_APPLY === '1') {
     // 「处理掉」那条路：真给这个窗口换成一个额度池里的模型。它会**改动平台**
@@ -170,19 +178,19 @@ try {
     await page.waitForTimeout(2500);
     const rowAfterApply = await rowState();
     cleared.push(`处理掉之后：${rowAfterApply ? rowAfterApply.text : '(读不到)'}`);
-    remaining = (await paneState()).blocks.length;
+    remaining = troubleBlocks(await paneState()).length;
   }
   while (remaining > 0) {
-    const before = await paneState();
-    const target = before.blocks[0];
+    const before = troubleBlocks(await paneState());
+    const target = before[0];
     await page.locator('.flat-alert [data-act="dismiss-trouble"]').first().click();
     await page.waitForTimeout(700);
-    const after = await paneState();
-    if (after.blocks.length === before.blocks.length) {
+    const after = troubleBlocks(await paneState());
+    if (after.length === before.length) {
       throw new Error(`点了「先不管」那件事还在：${target.title}`);
     }
     cleared.push(target.title);
-    remaining = after.blocks.length;
+    remaining = after.length;
   }
   const rowAfter = await waitFor(rowState, (state) => state.dot === false, '红点消失');
   assert.ok(

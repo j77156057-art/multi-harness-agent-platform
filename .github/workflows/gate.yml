@@ -10,6 +10,7 @@ on:
 jobs:
   gate:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -53,4 +54,16 @@ jobs:
         run: |
           npm ci
           npm run build
-          npm run verify
+
+      # 需要真起界面才能跑的脚本用 playwright 驱动 chromium；以前它们还没走到
+      # launch() 就在 requireOffice 退出了，所以没装浏览器也看不出问题。
+      - name: Install Playwright chromium
+        working-directory: office
+        run: npx playwright install --with-deps chromium
+
+      # 真起后端 + 办公室，先 seed 项目/分组/方案/任务/成员窗口/模型 stub，
+      # 再跑全部冒烟脚本。只有确实依赖「多成员窗口并发」的脚本允许继续跳过，
+      # 跳过数仍会打印并写进 step summary。
+      - name: Office smoke scripts against a real stack
+        working-directory: office
+        run: node scripts/ci-stack.mjs

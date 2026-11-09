@@ -209,7 +209,9 @@ try {
       if (!pane) return null;
       return {
         summary: (pane.querySelector('.flat-summary') || {}).textContent || '',
-        blocks: [...pane.querySelectorAll('.flat-alert')].map((block) => ({
+        // 这一页里还有「项目创建申请」那一块，它同样带 `.flat-alert`（便于统一留白），
+        // 但不是"模型用不了"的一件。只数带窗口 id 的那些。
+        blocks: [...pane.querySelectorAll('.flat-alert[data-harness]')].map((block) => ({
           harness: block.dataset.harness || '',
           title: (block.querySelector('h3') || {}).textContent || '',
           text: block.innerText.replace(/\s+/g, ' ').trim(),

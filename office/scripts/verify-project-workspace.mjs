@@ -96,6 +96,13 @@ try {
   // 项目历史按源站持久化，不是只在内存里。
   await page.reload();
   await page.waitForSelector('#aoLobby:not([hidden])');
+  // 大厅里有两类卡：本机记账的项目（同步画出来）与仓库里的转接项目（等
+  // `/relay/overview` 回来才画）。刚 reload 完立刻数，会把"还没回来"当成"丢了"。
+  await page.waitForFunction(
+    (expected) => document.querySelectorAll('[data-history] .project-card').length === expected,
+    before + 1,
+    { timeout: 15000 },
+  );
   assert.equal(await cards.count(), before + 1);
   assert.match(await created.textContent(), new RegExp(projectName));
 

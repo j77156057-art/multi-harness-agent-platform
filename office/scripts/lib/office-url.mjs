@@ -57,7 +57,14 @@ export async function requireOffice(scriptName, explicit) {
  * 0xC0000409 —— 于是"跳过 2"被伪装成"崩溃"。抛一个哨兵让本轮模块求值中止，
  * 退出码交给下面的 uncaughtException 处理，事件循环自然收尾。
  */
-class Skipped extends Error {}
+class Skipped extends Error {
+  constructor(reason) {
+    super(reason);
+    // 有脚本在 try/catch/finally 里跳过（要在收尾时先把报告落盘）。catch 里靠
+    // 名字认出它并原样抛出去，否则会被当成"普通错误"吞掉、退出码回到 0。
+    this.name = 'Skipped';
+  }
+}
 
 process.on("uncaughtException", (error) => {
   if (error instanceof Skipped) {

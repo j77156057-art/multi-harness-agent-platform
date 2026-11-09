@@ -11,8 +11,8 @@ const previewUrl = process.env.OFFICE_PREVIEW_URL || 'http://127.0.0.1:5197/';
 if (!(await officeReachable(previewUrl))) {
   skip(
     'verify-anchors.mjs',
-    `${previewUrl} 上没有预览页在跑（它要的是办公室场景预览，不是 4174 的界面）。` +
-      '先起那一版：OFFICE_PREVIEW_URL 指过去，或用它自带的启动方式',
+    `${previewUrl} 上没有预览页在跑。这份脚本验的是 Godot 场景预览（docs/prototypes/office-anim ` +
+      '导出后的静态页），本树没有这个产物，也不是 4174 上的办公室界面；界面/组件由其它 verify-* 覆盖',
   );
 }
 
@@ -26,6 +26,15 @@ try {
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('response', response => { if (response.status() >= 400) badResponses.push(response.url()); });
   await page.goto(previewUrl);
+  // 5197 上站着的可能根本不是场景预览（比如 vite preview 出来的办公室前端）：
+  // 那样等到超时只会得到一个 `null.classList` 的 TypeError。先说清"这里不是"，再跳过。
+  if (!(await page.locator('#office').count())) {
+    skip(
+      'verify-anchors.mjs',
+      `${previewUrl} 上不是办公室场景预览（页面里没有 #office）。这份脚本验的是 Godot 场景 ` +
+        '（docs/prototypes/office-anim 导出的静态页），本树没有这个产物；界面/组件由其它 verify-* 覆盖',
+    );
+  }
   await page.waitForFunction(() => document.querySelector('#office').classList.contains('godot-active'), {}, {timeout: 45000});
   const frame = page.frames().find(frame => frame.url().includes('/godot/'));
   await frame.waitForFunction(() => window.officeState?.actors?.length === 6);

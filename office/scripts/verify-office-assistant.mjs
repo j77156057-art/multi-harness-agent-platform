@@ -15,8 +15,16 @@ try {
   await page.waitForSelector('#aoLobbyBtn', { timeout: 20000 });
   await page.waitForTimeout(1500);
 
-  // 进一个项目（有活的那种，速览才有东西可算）
-  await page.locator('button', { hasText: '打开这个项目' }).first().click();
+  // 进一个项目（有活的那种，速览才有东西可算）。
+  // 不能只认「打开这个项目」那一个按钮：它挂在"还没有项目"的空白态里，而仓库里
+  // 带一个转接项目（relay/project.json）时空白态整体是收起的 —— 那按钮就算被
+  // 点亮也点不到。优先走大厅里**平台项目**那一列（有活），没有再退回另外两条路。
+  const platformOpen = page.locator('.project-platform-open').first();
+  const recover = page.locator('button', { hasText: '打开这个项目' }).first();
+  const repoOpen = page.locator('.project-card-repo .project-card-open').first();
+  if (await platformOpen.isVisible().catch(() => false)) await platformOpen.click();
+  else if (await recover.isVisible().catch(() => false)) await recover.click();
+  else await repoOpen.click();
   // 等第一轮 refresh 回来：窗口名单、任务表、助手轨迹都是异步拉的
   // （探本机 CLI 配置慢），不等就会把"还没拉到"当成"没有"。
   await page.waitForFunction(
