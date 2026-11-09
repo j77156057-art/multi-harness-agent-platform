@@ -65,9 +65,18 @@ Claim 使用请求级和任务项级两层记录。同一个请求重放会返�
 
 ### 5. 用事件流保留可重建的事实
 
-SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序号单调递增、事件记录追加写入，并支持从事件重放状态。任务状态、执行者、审核者、commit 和错误原因因此可以回溯。
+SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序号单调递增、事件记录追加写入，库内提供事件重放原语（`EventStore.replay`）。任务状态、执行者、审核者、commit 和错误原因因此可以回溯。
 
-这让系统不仅能回答“现在是什么状态”，还能回答“为什么变成这个状态”。
+投影本身也可以从事件重建：`app.tools.rebuild` 把最新 checkpoint（`schema_migration_applied`，payload 标注 `projection.checkpoint.v1`）读入 reducer，再叠加其后的生命周期事件，写出一个完整的新库。运行：
+
+```bash
+python -m app.tools.rebuild --source data/state.db --snapshot \
+    --to /tmp/rebuilt.db --verify
+```
+
+`--verify` 对 15 张任务聚合表（projects/groups/plans/plan_snapshots/tasks/attempts/claims/leases/receipts/verify_jobs/reviews/decisions/acceptance/workspaces）和 `task_events` 逐表逐列 diff。用 `--report` 查看无法由事件重建的表及具体缺口：token 哈希、消息正文、外部文件状态、纯运行时投影等。
+
+这让系统不仅能回答“现在是什么状态”，还能回答“为什么变成这个状态”，并在投影损坏时用一条命令从事件日志恢复。
 
 ## 具体展示了哪些工程能力
 
@@ -79,7 +88,7 @@ SQLite 保存当前投影，`task_events` 保存关键状态变化。事件序�
 | 结果验证 | verify profile、命令白名单、verification receipt | 未验证的提交不能直接进入 review 或 merge |
 | 人工审核 | review lease、commit 一致性、权限矩阵 | 审核身份和被审核 commit 都必须可确认 |
 | 受控合并 | canonical repo、隔离 worktree、merge worker | 合并边界和证据可以复现 |
-| 事件追踪 | append-only event store、全局 seq、replay | 当前投影损坏时可以从事件重建 |
+| 事件追踪 | append-only event store、全局 seq、checkpoint + reducer、`app.tools.rebuild` | 轨迹可回溯；任务聚合 15 张表可重建并逐列 diff，无法重建的表逐项列出具体缺口 |
 | 多 Harness 适配 | 注册表、统一 adapter protocol、CLI 输出解析 | 将不同 CLI 的差异限制在适配器边界 |
 | 运行期巡检 | runtime driver、sweeper、liveness/budget 检查 | 持续推进状态并发现卡住的执行 |
 | 可观察界面 | Agent Office + 本地预览网关 | 查看任务、成员、事件、输出和额度，不暴露内部凭据 |
@@ -539,7 +548,7 @@ tools/                本地开发检查和合并辅助工具
 - 并发领取通过事务、条件更新和幂等记录共同约束，而非依赖客户端互斥。
 - 租约描述执行者的存活期限，fencing epoch 阻止过期执行者继续写入，两者解决不同问题。
 - 验证、人工审核和合并分阶段执行，后续阶段依赖前序阶段的结果与证据。
-- 事件流记录状态变化，当前投影服务查询；两者在同一事务中提交，以支持追踪和重放。
+- 事件流记录状态变化，当前投影服务查询；两者在同一事务中提交，checkpoint + reducer 可把任务聚合投影重建到新库并逐表 diff。
 - Harness 差异由注册信息和适配器协议承接，平台服务使用统一的任务协作接口。
 - SQLite 便于本地运行和测试；多副本部署等生产需求需要重新评估存储与协调组件。
 
