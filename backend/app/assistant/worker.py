@@ -152,7 +152,7 @@ class AssistantWorker:
     # -------------------------------------------------------------- answer
 
     def answer(self, message: dict[str, Any], *, seq: int) -> _TurnReceipt:
-        sender = str(message.get("sender_id") or message.get("author_id") or "")
+        sender = str(message.get("sender_id") or "")
         body = str(message.get("body") or "").strip()
         loop = AssistantLoop(
             self.model,
@@ -218,7 +218,7 @@ class AssistantWorker:
             page = self.client.get(f"/groups/{self.group_id}/messages", since_seq=0, limit=500)
         except Exception:  # noqa: BLE001 - 记忆是加分项，不是前提
             return []
-        turns = thread_turns(page.get("messages") or [], before_seq=seq)
+        turns = thread_turns(page.get("messages") or [], before_seq=seq, asker_id=asker_id)
         return memory_context(turns, assistant_id=self.harness_id, asker_id=asker_id)
 
     def _deliver(self, recipient: str, body: str) -> None:
@@ -328,7 +328,9 @@ def build_worker(args: argparse.Namespace, client: PlatformClient) -> AssistantW
         client=client,
         group_id=args.group,
         harness_id=args.assistant_id,
-        model=PoolModelChannel(client, fallback=fallback, pin=_pinned_model(client, args.assistant_id)),
+        model=PoolModelChannel(
+            client, fallback=fallback, pin=_pinned_model(client, args.assistant_id)
+        ),
         state=AssistantState.load(state_path),
         state_path=state_path,
         budget=Budget(max_calls=args.max_calls, max_seconds=args.max_seconds),
@@ -344,9 +346,7 @@ def main() -> None:
     worker = build_worker(args, client)
     # 在场：报「我还在」的心跳走自己的线程 —— 助手答一句要过模型，那一刻主循环
     # 腾不出手，不能因此被界面说成「没在跑」。
-    presence.start_heartbeat(
-        lambda body: client.post("/adapter/presence", body), role="assistant"
-    )
+    presence.start_heartbeat(lambda body: client.post("/adapter/presence", body), role="assistant")
     try:
         while True:
             try:

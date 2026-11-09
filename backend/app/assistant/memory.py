@@ -43,18 +43,39 @@ def _sender(message: dict[str, Any]) -> str:
     return str(message.get("sender_id") or message.get("author_id") or "")
 
 
+def _in_thread(message: dict[str, Any], asker_id: str) -> bool:
+    """这条定向消息是否属于「助手 ↔ asker」那一条私聊。
+
+    同一个群里可以有多条互不相干的私聊：A 问助手、B 也问助手。只按 ``direct``
+    收，两条线程会混成一条。收窄的判据是参与者：asker 发的，或者投递给了 asker。
+    ``recipients`` 由消息读接口从 message_deliveries 投影而来；缺投递信息时按
+    「没投给 asker」处理 —— 宁可少记一句，也不把别人的私事带进这条线程。
+    """
+    if not asker_id:
+        return False
+    if _sender(message) == asker_id:
+        return True
+    recipients = message.get("recipients")
+    return isinstance(recipients, list) and asker_id in {str(item) for item in recipients}
+
+
 def thread_turns(
     messages: list[dict[str, Any]] | None,
     *,
+    asker_id: str,
     before_seq: int | None = None,
     limit: int = MAX_TURNS,
 ) -> list[dict[str, Any]]:
-    """同一条私聊线程里的消息，按时间排好，最多 ``limit`` 条。
+    """助手与 ``asker_id`` 之间那一条私聊线程，按时间排好，最多 ``limit`` 条。
 
     ``before_seq`` 用来切掉「本轮」：本轮的问题由调用方自己放进 context 的
     第一行，历史只取它之前的。
     """
-    rows = [message for message in (messages or []) if _is_direct(message)]
+    rows = [
+        message
+        for message in (messages or [])
+        if _is_direct(message) and _in_thread(message, asker_id)
+    ]
     rows.sort(key=_seq)
     if before_seq is not None:
         rows = [message for message in rows if _seq(message) < before_seq]
@@ -67,7 +88,7 @@ def memory_context(
     turns: list[dict[str, Any]],
     *,
     assistant_id: str,
-    asker_id: str = "",
+    asker_id: str,
     limit: int = MAX_TURNS,
 ) -> list[str]:
     """把历史变成引擎的引用行。
@@ -79,6 +100,16 @@ def memory_context(
     （用户问「现在」，它答「上次」）。写明身份，它才知道哪一行能用来理解「刚才那个
     数字」指什么，哪一行是**上一轮的读数**、不能当本轮结论。
     """
+    if not str(asker_id or "").strip():
+        # 空 asker 不能静默退化成「没有记忆」：那读起来像助手只是没记住，
+        # 实际是调用方拿不到提问者。说清楚缺的是哪一环，别让人去翻别处。
+        raise ValueError(
+            "memory_context: asker_id is empty — the caller could not tell who asked,"
+            " so there is no private thread to recall. The production caller is"
+            " AssistantWorker.answer (app/assistant/worker.py), which takes asker_id"
+            " from the triggering message's sender_id; empty means that message row"
+            " carries no usable sender."
+        )
     lines: list[str] = []
     for message in turns[-limit:] if limit else []:
         body = str(message.get("body") or "").strip()

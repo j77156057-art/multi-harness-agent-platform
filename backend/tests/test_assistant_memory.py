@@ -13,30 +13,35 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.assistant.memory import memory_context, thread_turns
 from app.assistant.runs import read_runs
 
 ASSISTANT = "office-assistant"
 
 
-def _message(seq, sender, body, *, direct=True):
-    return {
+def _message(seq, sender, body, *, direct=True, recipients=None):
+    message = {
         "created_seq": seq,
         "sender_id": sender,
         "body": body,
         "refs": ["direct"] if direct else [],
     }
+    if recipients is not None:
+        message["recipients"] = recipients
+    return message
 
 
 def test_the_memory_is_the_same_private_thread_in_order():
     messages = [
         _message(10, "office-operator", "第一条"),
-        _message(11, ASSISTANT, "第一条的回答"),
+        _message(11, ASSISTANT, "第一条的回答", recipients=["office-operator"]),
         _message(12, "office-operator", "群里的公开消息", direct=False),
         _message(13, "office-operator", "第二条"),
     ]
 
-    turns = thread_turns(messages, before_seq=99)
+    turns = thread_turns(messages, asker_id="office-operator", before_seq=99)
 
     assert [turn["created_seq"] for turn in turns] == [10, 11, 13]
     assert "群里的公开消息" not in " ".join(turn["body"] for turn in turns)
@@ -45,11 +50,11 @@ def test_the_memory_is_the_same_private_thread_in_order():
 def test_the_memory_leaves_the_current_question_out():
     messages = [
         _message(10, "office-operator", "第一问"),
-        _message(11, ASSISTANT, "第一答"),
+        _message(11, ASSISTANT, "第一答", recipients=["office-operator"]),
         _message(12, "office-operator", "这是本轮"),
     ]
 
-    turns = thread_turns(messages, before_seq=12)
+    turns = thread_turns(messages, asker_id="office-operator", before_seq=12)
 
     assert [turn["created_seq"] for turn in turns] == [10, 11]
     assert all(turn["created_seq"] < 12 for turn in turns)
@@ -58,11 +63,13 @@ def test_the_memory_leaves_the_current_question_out():
 def test_the_memory_lines_say_who_said_what():
     messages = [
         _message(10, "office-operator", "第一问"),
-        _message(11, ASSISTANT, "第一答"),
+        _message(11, ASSISTANT, "第一答", recipients=["office-operator"]),
     ]
 
     lines = memory_context(
-        thread_turns(messages), assistant_id=ASSISTANT, asker_id="office-operator"
+        thread_turns(messages, asker_id="office-operator"),
+        assistant_id=ASSISTANT,
+        asker_id="office-operator",
     )
 
     assert len(lines) == 2
@@ -72,20 +79,47 @@ def test_the_memory_lines_say_who_said_what():
 
 
 def test_a_third_party_line_is_not_guessed_to_be_the_user():
-    messages = [_message(10, "somebody-else", "第三方说的")]
+    # 助手转发给 asker 的第三方原话：参与者是 asker，仍属这条线程，但身份不是用户。
+    messages = [_message(10, "somebody-else", "第三方说的", recipients=["office-operator"])]
 
     lines = memory_context(
-        thread_turns(messages), assistant_id=ASSISTANT, asker_id="office-operator"
+        thread_turns(messages, asker_id="office-operator"),
+        assistant_id=ASSISTANT,
+        asker_id="office-operator",
     )
 
     assert "另一方" in lines[0]
 
 
+def test_another_askers_private_thread_never_leaks_in():
+    """同一个群里两条互不相干的私聊：A 问 A 的，B 问 B 的。
+
+    只按 ``direct`` 收会把两串内容拼成一条记忆，A 再提问时就会看到只有 B
+    参与的那几轮 —— 这是泄漏，不是记性好。
+    """
+    messages = [
+        _message(10, "asker-a", "A 的第一问"),
+        _message(11, ASSISTANT, "答 A 的第一问", recipients=["asker-a"]),
+        _message(12, "asker-b", "B 的第一问"),
+        _message(13, ASSISTANT, "答 B 的第一问", recipients=["asker-b"]),
+        _message(14, "asker-a", "A 的第二问"),
+        _message(15, ASSISTANT, "答 A 的第二问", recipients=["asker-a"]),
+    ]
+
+    a_turns = thread_turns(messages, asker_id="asker-a", before_seq=99)
+    b_turns = thread_turns(messages, asker_id="asker-b", before_seq=99)
+
+    assert [turn["created_seq"] for turn in a_turns] == [10, 11, 14, 15]
+    assert [turn["created_seq"] for turn in b_turns] == [12, 13]
+    joined = " ".join(turn["body"] for turn in a_turns)
+    assert "B 的第一问" not in joined and "答 B 的第一问" not in joined
+
+
 def test_the_memory_is_bounded():
     messages = [_message(index, "office-operator", f"第 {index} 轮") for index in range(50)]
 
-    turns = thread_turns(messages, limit=3)
-    lines = memory_context(turns, assistant_id=ASSISTANT, limit=3)
+    turns = thread_turns(messages, asker_id="office-operator", limit=3)
+    lines = memory_context(turns, assistant_id=ASSISTANT, asker_id="office-operator", limit=3)
 
     assert len(turns) == 3
     assert len(lines) == 3
@@ -94,10 +128,23 @@ def test_the_memory_is_bounded():
 def test_a_long_turn_is_clipped():
     messages = [_message(10, "office-operator", "长" * 2000)]
 
-    lines = memory_context(thread_turns(messages), assistant_id=ASSISTANT)
+    lines = memory_context(
+        thread_turns(messages, asker_id="office-operator"),
+        assistant_id=ASSISTANT,
+        asker_id="office-operator",
+    )
 
     assert len(lines[0]) < 1000
     assert lines[0].endswith("…")
+
+
+def test_an_empty_asker_is_refused_instead_of_silently_recalling_nothing():
+    """空 asker 不能静默退化成「没有记忆」：那读起来像助手只是没记住。"""
+    with pytest.raises(ValueError, match="asker_id is empty"):
+        memory_context([], assistant_id=ASSISTANT, asker_id="")
+
+    with pytest.raises(ValueError, match="asker_id is empty"):
+        memory_context([], assistant_id=ASSISTANT, asker_id="   ")
 
 
 def _write_trace(directory, name, rows):

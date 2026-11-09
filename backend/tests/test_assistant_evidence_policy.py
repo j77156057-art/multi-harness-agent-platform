@@ -16,13 +16,16 @@ from app.assistant.memory import memory_context, thread_turns
 from app.assistant.prompts import SYSTEM_PROMPT
 
 
-def _message(seq, sender, body):
-    return {
+def _message(seq, sender, body, *, recipients=None):
+    message = {
         "created_seq": seq,
         "sender_id": sender,
         "body": body,
         "refs": ["direct"],
     }
+    if recipients is not None:
+        message["recipients"] = recipients
+    return message
 
 
 def test_the_prompt_says_the_facts_are_to_be_retaken_this_turn():
@@ -42,8 +45,11 @@ def test_the_memory_line_names_who_spoke():
     turns = thread_turns(
         [
             _message(10, "office-operator", "上一轮问的"),
-            _message(11, "office-assistant", "上一轮答的"),
-        ]
+            _message(
+                11, "office-assistant", "上一轮答的", recipients=["office-operator"]
+            ),
+        ],
+        asker_id="office-operator",
     )
 
     lines = memory_context(turns, assistant_id="office-assistant", asker_id="office-operator")
