@@ -76,8 +76,12 @@ def _now() -> str:
 #: abandoned。attempt 的状态是投影，owner 阶段结束时平台必须自己收口，
 #: 不能等 harness 回来汇报（它已经不回来了）。``task_attempts.status`` 是自由
 #: 文本（001_initial.sql 没有枚举），所以这几个值不需要迁移。
+#:
+#: ``reconciled`` 专供 ``sweep_attempt_reconcile``：任务早就进入终态/停泊态，
+#: attempt 却还开着，这是绕过状态机留下的漏账。它既不是正常完成（merged），
+#: 也不是 owner 自己放弃（abandoned），单独一个值才查得出来。
 CLOSED_ATTEMPT_STATUSES = frozenset(
-    {"abandoned", "escalated", "failed", "released", "merged", "cancelled"}
+    {"abandoned", "escalated", "failed", "released", "merged", "cancelled", "reconciled"}
 )
 
 #: 收口**只**认这两个「还没结束」的状态。``claimed`` 是必须收的那一类：
@@ -100,6 +104,7 @@ def close_attempt(
     reason: str,
     now: datetime | None = None,
     head_commit: str | None = None,
+    include_verifying: bool = False,
 ) -> bool:
     """Close an attempt that has not ended yet; idempotent by design.
 
@@ -111,18 +116,26 @@ def close_attempt(
     row left at ``claimed``). ``closed_at`` / ``close_reason`` keep the "when"
     and "why" on the row itself -- ``task_events`` has a fixed allowlist, so
     this closes the row without inventing an unregistered event name.
+
+    ``include_verifying`` is for the reconcile sweep only. A task that has
+    already left ``verifying`` for a terminal/parked state can never use that
+    attempt again, so leaving it open helps nobody; the ordinary callers keep
+    the narrower guard because they cannot know the verify verdict.
     """
     if not attempt_id:
         return False
     if status not in CLOSED_ATTEMPT_STATUSES:
         raise ValueError(f"unknown closed attempt status: {status}")
     moment = now or datetime.now(UTC)
-    placeholders = ", ".join(["?"] * len(OPEN_ATTEMPT_STATUSES))
+    open_statuses = (
+        TRANSITION_ATTEMPT_STATUSES if include_verifying else OPEN_ATTEMPT_STATUSES
+    )
+    placeholders = ", ".join(["?"] * len(open_statuses))
     cursor = conn.execute(
         "UPDATE task_attempts SET status = ?, head_commit = COALESCE(?, head_commit),"
         " closed_at = ?, close_reason = ?"
         f" WHERE attempt_id = ? AND status IN ({placeholders})",
-        (status, head_commit, iso(moment), reason, attempt_id, *OPEN_ATTEMPT_STATUSES),
+        (status, head_commit, iso(moment), reason, attempt_id, *open_statuses),
     )
     if cursor.rowcount != 1:
         return False

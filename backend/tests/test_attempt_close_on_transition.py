@@ -211,8 +211,8 @@ def test_the_service_release_path_closes_an_in_progress_attempt(open_attempt):
     assert row["close_reason"] == "relay_cli_cannot_use_tools"
 
 
-def test_the_reconcile_sweep_makes_a_bypassed_close_visible(tmp_path):
-    """只读 sweep：awaiting_review 还开着 attempt 会被点名，正常在途的不算。"""
+def test_the_reconcile_sweep_closes_a_bypassed_close(tmp_path):
+    """任务已终态/停泊而 attempt 还开着：sweep 真收口，但留可区分的原因。"""
     database = make_database(tmp_path)
     seed_project(database)
     seed_task(database, task_id="T-1", status="awaiting_review")
@@ -233,12 +233,25 @@ def test_the_reconcile_sweep_makes_a_bypassed_close_visible(tmp_path):
     report = sweep_attempt_reconcile(database, now=datetime.now(UTC))
 
     assert report.sweep == "attempt_reconcile"
-    assert report.actions == 0, "只读观测，不写库"
+    assert report.actions == 1, "漏账被真正关闭"
     assert report.detail == {
-        "open_attempts": 1,
+        "open_attempts_before": 1,
+        "closed": 1,
         "by_task_status": {"awaiting_review": 1},
     }
-    rows = database.read(
-        "SELECT closed_at FROM task_attempts WHERE attempt_id = 'T-1.a1'"
-    )
-    assert rows[0]["closed_at"] is None, "sweep 不得替漏账补写"
+    closed = database.read(
+        "SELECT status, closed_at, close_reason FROM task_attempts"
+        " WHERE attempt_id = 'T-1.a1'"
+    )[0]
+    assert closed["status"] == "reconciled", "不冒充 merged / abandoned"
+    assert closed["closed_at"] is not None
+    assert closed["close_reason"] == "reconcile: task awaiting_review"
+    live = database.read(
+        "SELECT status, closed_at FROM task_attempts WHERE attempt_id = 'T-2.a1'"
+    )[0]
+    assert live["status"] == "in_progress" and live["closed_at"] is None
+
+    # 幂等：第二轮没有可关的行，actions 归零。
+    again = sweep_attempt_reconcile(database, now=datetime.now(UTC))
+    assert again.actions == 0
+    assert again.detail["open_attempts_before"] == 0

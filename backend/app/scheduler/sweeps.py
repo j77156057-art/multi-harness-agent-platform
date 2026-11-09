@@ -42,6 +42,7 @@ from app.merge.outputs import dependency_output_satisfied
 from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
+from app.tasks.service import close_attempt
 from app.verify.worker import STATUS_ABORTED, STATUS_QUEUED, STATUS_RUNNING
 
 _AGING_STATES = (TaskStatus.READY.value, TaskStatus.QUEUED.value)
@@ -1782,26 +1783,56 @@ _ATTEMPT_LIVE_TASK_STATES = (
 def sweep_attempt_reconcile(
     database: Database, now: datetime, repo: CanonicalRepo | None = None
 ) -> SweepReport:
-    """只读观测：任务已经不可能再用到 attempt，attempt 却还开着。
+    """收口观测：任务已经不可能再用到 attempt，attempt 却还开着。
 
-    收口动作集中在 ``apply_transition``（谁进入终态谁关 attempt）。这个 sweep
-    不写任何一行：它只把「绕过状态机留下的漏账」摆到报告里 —— 比如有人新加
-    一条直接 UPDATE tasks 的路径、或手工改库。历史数据不回填，所以 2026-11-05
-    的 67 行和 8 条 verifying 会一直出现在这里；这是有意的：看得见比静默好。
+    收口动作集中在 ``apply_transition``（谁进入终态谁关 attempt）。正常路径
+    之外仍可能有漏账 —— 有人新加了一条直接 UPDATE tasks 的路径、手工改库、
+    或旧版本留下的历史行。这个 sweep 把它们真正关掉：
+
+    * 状态写 ``reconciled``，不写 ``merged``/``abandoned``：前者会冒充正常
+      完成，后者会冒充 owner 自己放弃，两者都让事后审计读错；
+    * ``close_reason`` 写明任务当时的状态（``reconcile: task cancelled``），
+      每条行的结束原因可区分；
+    * 幂等：``close_attempt`` 的条件 UPDATE 只匹配还开着的行，第二轮 actions
+      归零。
+
+    报告里保留本轮看到的分布与关闭数，便于回答「关掉了多少、原来堆在哪些
+    状态」。
     """
     placeholders = ", ".join(["?"] * len(_ATTEMPT_LIVE_TASK_STATES))
     rows = database.read(
-        "SELECT t.status AS task_status, COUNT(*) AS n"
+        "SELECT a.attempt_id AS attempt_id, t.status AS task_status"
         " FROM task_attempts a JOIN tasks t ON t.task_id = a.task_id"
         " WHERE a.closed_at IS NULL"
         "   AND a.status IN ('claimed', 'in_progress', 'verifying')"
         f"   AND t.status NOT IN ({placeholders})"
-        " GROUP BY t.status ORDER BY t.status",
+        " ORDER BY a.attempt_id",
         _ATTEMPT_LIVE_TASK_STATES,
     )
-    by_status = {str(row["task_status"]): int(row["n"]) for row in rows}
+    by_status: dict[str, int] = {}
+    for row in rows:
+        key = str(row["task_status"])
+        by_status[key] = by_status.get(key, 0) + 1
+
+    closed = 0
+    with database.transaction() as conn:
+        for row in rows:
+            task_status = str(row["task_status"])
+            if close_attempt(
+                conn,
+                attempt_id=str(row["attempt_id"]),
+                status="reconciled",
+                reason=f"reconcile: task {task_status}",
+                now=now,
+                include_verifying=True,
+            ):
+                closed += 1
     return SweepReport(
         sweep="attempt_reconcile",
-        actions=0,
-        detail={"open_attempts": sum(by_status.values()), "by_task_status": by_status},
+        actions=closed,
+        detail={
+            "open_attempts_before": len(rows),
+            "closed": closed,
+            "by_task_status": by_status,
+        },
     )
