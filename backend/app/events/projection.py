@@ -17,9 +17,11 @@ payload grows a ``kind``/``table``/``row`` trio that the reducer understands.
 Rebuildable vs. not
 -------------------
 ``REBUILDABLE`` lists the tables a checkpoint carries in full, so a rebuilt
-database is byte-for-byte identical for them.  ``GAPS`` lists what cannot be
-rebuilt and the concrete missing fact -- see the module docstring of
-``app/tools/rebuild.py`` for the operator-facing wording.
+database is byte-for-byte identical for them.  ``GAPS`` lists the tables no
+checkpoint carries and the concrete missing fact; ``PARTIAL_GAPS`` lists the
+tables whose rows come back column-for-column but whose external fact (a
+directory, a branch) is not observed by the event stream.  See the module
+docstring of ``app/tools/rebuild.py`` for the operator-facing wording.
 """
 
 from __future__ import annotations
@@ -72,7 +74,6 @@ GAPS: dict[str, str] = {
         "消息正文与定向 refs 从不写事件流（003 迁移明确不让消息进 task_events），缺正文"
     ),
     "artifacts": ("承载外部文件（uri/hash/size）；事件流没有文件系统观测，无法还原文件是否存在"),
-    "workspaces": ("行元数据（branch/path）可随任务快照恢复，但路径上的真实目录/分支不在事件流里"),
     "capability_probes": "纯运行时探测结果，无创建/变更事件",
     "harness_registrations": "注册表变更没有事件种类，只有 created_seq 字段",
     "harness_presence": "在线状态是运行时心跳投影，无事件",
@@ -91,6 +92,17 @@ GAPS: dict[str, str] = {
     "applications": "application.submitted 只有 harness_id/revision/task_ids，申请材料缺失",
     "application_tasks": "关联表没有事件",
     "application_materials": "材料正文缺失",
+}
+
+#: Tables whose rows are in ``REBUILDABLE`` (the diff can report them equal) but
+#: whose reason for existing is an external fact the event stream never sees.
+#: They used to sit in ``GAPS`` and read as "this table cannot be rebuilt",
+#: directly contradicting the diff result a few lines below.
+PARTIAL_GAPS: dict[str, str] = {
+    "workspaces": (
+        "行可逐列重建（branch/path 随 checkpoint 回来），重建不了的是行指向的外部目录与分支："
+        "事件流没有文件系统观测，无法还原，也无法校验"
+    ),
 }
 
 #: task_events is copied verbatim, so it is included in the diff even though it
@@ -423,20 +435,28 @@ def diff(
 
 
 def gap_report(source: Path | str) -> dict[str, dict[str, Any]]:
-    """Return row counts plus the concrete missing fact for every gap table."""
+    """Return row counts plus the concrete missing fact for every gap table.
+
+    ``partial`` separates "the row comes back but the external fact does not"
+    (``PARTIAL_GAPS``) from "there is nothing in the event stream to replay".
+    """
     conn = _open_readonly(Path(source))
     try:
         existing = {
             str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         report: dict[str, dict[str, Any]] = {}
-        for table, reason in GAPS.items():
+        for table, reason in {**GAPS, **PARTIAL_GAPS}.items():
             rows = (
                 int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
                 if table in existing
                 else 0
             )
-            report[table] = {"rows": rows, "gap": reason}
+            report[table] = {
+                "rows": rows,
+                "gap": reason,
+                "partial": table in PARTIAL_GAPS,
+            }
         return report
     finally:
         conn.close()

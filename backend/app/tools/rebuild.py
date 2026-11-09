@@ -49,7 +49,14 @@ def _print_report(source: Path, as_json: bool) -> int:
         return 0
     print("不能由事件重建的表（具体缺口）：")
     for table, item in report.items():
+        if item["partial"]:
+            continue
         print(f"  {table:28s} rows={item['rows']:<5d} {item['gap']}")
+    partial = {table: item for table, item in report.items() if item["partial"]}
+    if partial:
+        print("\n部分可重建的表（行可逐列重建，行指向的外部事实不在事件流里）：")
+        for table, item in partial.items():
+            print(f"  {table:28s} rows={item['rows']:<5d} {item['gap']}")
     print("\n可由 checkpoint 重建的表：")
     for table in REBUILDABLE:
         print(f"  {table}")

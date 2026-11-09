@@ -13,7 +13,15 @@ import sqlite3
 
 from app.claim.transitions import apply_transition
 from app.events import EventStore
-from app.events.projection import GAPS, REBUILDABLE, append_checkpoints, diff, gap_report, rebuild
+from app.events.projection import (
+    GAPS,
+    PARTIAL_GAPS,
+    REBUILDABLE,
+    append_checkpoints,
+    diff,
+    gap_report,
+    rebuild,
+)
 from app.spec import EventKind, TaskStatus
 from tests.claim_support import make_database, seed_project, seed_task
 
@@ -88,9 +96,14 @@ def test_gap_report_names_the_missing_fact(tmp_path):
     database = _seed(tmp_path)
     report = gap_report(database.path)
 
-    assert set(report) == set(GAPS)
+    assert set(report) == set(GAPS) | set(PARTIAL_GAPS)
     assert "task_messages" in report
     assert "正文" in report["task_messages"]["gap"]
     assert "auth_tokens" in report
     assert "哈希" in report["auth_tokens"]["gap"]
+    # workspaces 的行能逐列重建，缺的是行指向的外部目录/分支。它不能和
+    # 「整表不可重建」混在同一类里，否则报告和 diff 结果自相矛盾。
+    assert report["workspaces"]["partial"] is True
+    assert "外部目录" in report["workspaces"]["gap"]
+    assert "workspaces" in REBUILDABLE
     assert "tasks" in REBUILDABLE
