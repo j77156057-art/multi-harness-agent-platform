@@ -19,7 +19,7 @@ import '../contributions/office-opening-phone/office-opening-phone.css';
 import '../contributions/office-opening-phone/office-opening-phone.js';
 import './opening-host.css';
 import { mountOpeningHost, OPENING_GOAL_MAX, openingProjectName } from './opening-host.js';
-import { mountFlatOffice } from './flat-office.js';
+import './flat-office.css';
 import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { mountRelayWorkspace } from './relay-workspace.js';
@@ -27,12 +27,7 @@ import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-ro
 import { openingCandidateWindows } from './opening-candidates.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
-import { withGroup } from './office-scope.js';
-
-// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
-// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
-const formal = (url, options = {}) =>
-  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
+import { formal } from './formal-api.js';
 const $ = (selector) => document.querySelector(selector);
 
 // ---------------------------------------------------------------- 平台状态
@@ -155,6 +150,7 @@ paintConnection({ connected: Boolean(status?.connected) });
 let activeProject = null;
 let openingHost = null;
 let office = null;
+let officePending = null;
 // 转接项目用的那一页（与办公室互斥：项目选了走哪条路，只有一个视图在跑）。
 let relayView = null;
 
@@ -312,24 +308,33 @@ const projectWorkspace = mountProjectWorkspace({
       // 换项目时先把上一份转接视图收掉：它自己挂着 15 秒轮询，留着会一直读信箱。
       relayView?.destroy?.();
       relayView = mountRelayWorkspace({ root: $('#aoRelay'), project: () => activeProject });
-    } else if (!office) {
-      office = mountFlatOffice({
-        root: $('#aoWorkspace'),
-        project: () => activeProject,
-        // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
-        onStart: () => void openWizard(),
-        // 顶栏的状态（在线/离线）跟着每轮刷新变。
-        onStatus: paintConnection,
-        // 中途加入一个新的窗口：写进项目成员，办公室那边已经通知管理员了。
-        onAddMember: (harnessId) => {
-          if (!activeProject) return;
-          const members = Array.from(new Set([...(activeProject.members || []), harnessId]));
-          projectWorkspace.updateProject(activeProject.id, { members });
-          activeProject = { ...activeProject, members };
-          openingHost?.setProjectMembers(members);
-        },
-      });
-    } else {
+    } else if (!office && !officePending) {
+      // 办公室主体只在进项目时挂载：懒加载，首屏包不带这 8000 行。
+      officePending = import('./flat-office.js')
+        .then(({ mountFlatOffice }) => {
+          officePending = null;
+          office = mountFlatOffice({
+            root: $('#aoWorkspace'),
+            project: () => activeProject,
+            // 空项目里那个「去写第一件事」的按钮：把人直接送到开工向导。
+            onStart: () => void openWizard(),
+            // 顶栏的状态（在线/离线）跟着每轮刷新变。
+            onStatus: paintConnection,
+            // 中途加入一个新的窗口：写进项目成员，办公室那边已经通知管理员了。
+            onAddMember: (harnessId) => {
+              if (!activeProject) return;
+              const members = Array.from(new Set([...(activeProject.members || []), harnessId]));
+              projectWorkspace.updateProject(activeProject.id, { members });
+              activeProject = { ...activeProject, members };
+              openingHost?.setProjectMembers(members);
+            },
+          });
+        })
+        .catch((error) => {
+          officePending = null;
+          console.error('[office] 办公室视图加载失败，再进一次项目可重试', error);
+        });
+    } else if (office) {
       void office.refresh();
     }
     if (openAfterCreate && !relayProject) void openWizard();

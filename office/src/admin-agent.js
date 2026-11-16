@@ -13,12 +13,8 @@ import './admin-agent.css';
 import { createRoutedMessage } from './routed-message.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { readableText } from './cli-transcript.js';
-import { withGroup } from './office-scope.js';
-
-// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
-// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
-const formal = (url, options = {}) =>
-  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
+import { formalJson } from './formal-api.js';
+import { escapeHtml } from './html-escape.js';
 const POLL_MS = 20000; // 面板刷新周期：只影响显示新鲜度，不参与停滞判定
 // 进度窗口按 PROACTIVE-HELP-REQUIREMENT.md §3 的产品默认值：每 5 分钟核对一次，
 // 连续两个窗口无实质进展提醒说明卡点，连续四个窗口且无有效回应交管理员。
@@ -81,7 +77,7 @@ const reasonText = reason => {
   return reason.detail ? `${label}：${reason.detail}` : label;
 };
 // 面板里拼进 innerHTML 的 harness 名称来自注册表（可被外部写入），必须转义。
-const escapeAttr = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));const personaFor = id => PERSONAS[baseOf(id)] || PERSONAS[id] || '按自己的节奏推进。';
+const personaFor = id => PERSONAS[baseOf(id)] || PERSONAS[id] || '按自己的节奏推进。';
 
 function loadStore({ fresh = false } = {}) {
   if (fresh) return { samples: {}, events: [], backlog: {}, reminders: {} };
@@ -189,12 +185,12 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
   // 面板每 20 秒整体重渲染；草稿必须留在渲染之外，否则用户填一半就被清空。
   const backlogDraft = { text: '', target: '' };
 
-  const api = async (route, body_) => {
-    const response = await formal('/api/formal' + route, { cache: 'no-store', ...(body_ ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' }, body: JSON.stringify(body_) } : {}) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '请求失败');
-    return data;
-  };
+  const api = (route, body_) =>
+    formalJson('/api/formal' + route, body_ ? {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
+      body: JSON.stringify(body_),
+    } : {});
 
   // ---- 巡检：确定性规则，先记录再参与调度 ----
   // 巡检本身不调模型：只是把回执上的状态跃迁追加进本地记录，并在超过窗口时标出停滞。
@@ -445,7 +441,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const tbody = document.createElement('tbody');
       for (const r of busyRows) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${escapeAttr(r.name)}</td><td>${r.queued}</td><td>${r.active}</td><td>${r.running}</td><td>${r.queued + r.active + r.running}</td>`;
+        tr.innerHTML = `<td>${escapeHtml(r.name)}</td><td>${r.queued}</td><td>${r.active}</td><td>${r.running}</td><td>${r.queued + r.active + r.running}</td>`;
         tbody.append(tr);
       }
       loadTable.append(tbody); patrol.append(loadTable);
@@ -485,7 +481,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
         const state = item.usable ? '可用' : '不可用';
         const reason = (item.reasons || []).map(reasonText).join('；') || '—';
         const model = item.model ? (item.model_alias ? `${item.model}（别名 ${item.model_alias}）` : item.model) : '未知';
-        tr.innerHTML = `<td>${escapeAttr(item.name)}</td><td>${state}</td><td>${escapeAttr(model)}</td><td>${escapeAttr(reason)}</td>`;
+        tr.innerHTML = `<td>${escapeHtml(item.name)}</td><td>${state}</td><td>${escapeHtml(model)}</td><td>${escapeHtml(reason)}</td>`;
         tbody.append(tr);
       }
       table.append(tbody); who.append(table);
@@ -521,8 +517,8 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
           const count = models.filter(item => item.upstream === source.name).length;
           const tier = source.tier || (models.find(item => item.upstream === source.name) || {}).tier || 'metered';
           const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${escapeAttr(source.name)}</td><td>${escapeAttr(TIER_LABEL[tier] || tier)}</td>`
-            + `<td>${escapeAttr(source.protocol)}</td><td>${count}</td><td>${escapeAttr(source.note || '—')}</td>`;
+          tr.innerHTML = `<td>${escapeHtml(source.name)}</td><td>${escapeHtml(TIER_LABEL[tier] || tier)}</td>`
+            + `<td>${escapeHtml(source.protocol)}</td><td>${count}</td><td>${escapeHtml(source.note || '—')}</td>`;
           tbody.append(tr);
         }
         table.append(tbody); poolSection.append(table);
@@ -698,7 +694,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
       const rbody = document.createElement('tbody');
       measured.forEach((r, index) => {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td>${index + 1}</td><td>${escapeAttr(r.name)}</td><td>${r.submissions}</td><td>${r.reworks}</td><td>${r.abandons}</td>
+        tr.innerHTML = `<td>${index + 1}</td><td>${escapeHtml(r.name)}</td><td>${r.submissions}</td><td>${r.reworks}</td><td>${r.abandons}</td>
           <td>${r.score === null ? '未知' : Math.round(r.score * 100) + '%'}</td><td>${r.median === null ? '未知' : r.median + 's'}</td>`;
         rbody.append(tr);
       });
@@ -823,7 +819,7 @@ export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap
     input.value = backlogDraft.text;
     input.addEventListener('input', () => { backlogDraft.text = input.value; });
     const targetSelect = document.createElement('select'); targetSelect.className = 'agent-input';
-    targetSelect.innerHTML = '<option value="">收件人（默认管理员窗口）</option>' + ranking.map(r => `<option value="${escapeAttr(r.id)}">${escapeAttr(r.name)}</option>`).join('');
+    targetSelect.innerHTML = '<option value="">收件人（默认管理员窗口）</option>' + ranking.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
     targetSelect.value = backlogDraft.target;
     targetSelect.addEventListener('change', () => { backlogDraft.target = targetSelect.value; });
     form.append(input, targetSelect,

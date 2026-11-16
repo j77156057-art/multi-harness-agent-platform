@@ -3,12 +3,8 @@ import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } fro
 // 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
 import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
 import { probedAtLine, readInstallCache, writeInstallCache } from './install-cache.js';
-import { withGroup } from './office-scope.js';
-
-// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
-// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
-const formal = (url, options = {}) =>
-  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
+import { formal } from './formal-api.js';
+import { escapeHtml } from './html-escape.js';
 const clone = value => structuredClone(value);
 
 // 项目历史必须跨刷新保留。此前它只活在这个模块的数组里：刷新、换标签页或
@@ -779,7 +775,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.dataset.active = project.id === activeId ? '1' : '0';
       const status = project.phase === 'scene' ? '已开工' : '待开工';
       const action = project.phase === 'scene' ? '进入办公室' : '去配置';
-      card.innerHTML = `<div class="project-card-icon">${project.index}</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status ${project.phase}">${status}</span><div class="project-card-actions"><button type="button" class="project-card-open">${action}</button>${
+      card.innerHTML = `<div class="project-card-icon">${escapeHtml(project.index)}</div><div class="project-card-main"><strong></strong><span></span></div><div class="project-card-side"><span class="project-card-status ${escapeHtml(project.phase)}">${status}</span><div class="project-card-actions"><button type="button" class="project-card-open">${action}</button>${
         project.platformProjectId
           ? '<button type="button" class="project-card-rename" title="只改给人看的名字；任务、群、事件都不受影响">改名</button>'
           : ''

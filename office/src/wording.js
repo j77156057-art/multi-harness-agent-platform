@@ -23,27 +23,14 @@ export function wordingVersion() {
   return cache.size;
 }
 
-import { withGroup } from './office-scope.js';
+import { formalJson } from './formal-api.js';
 
-// 所有 /api/formal 请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
-// 没有平台群的老项目不加这个头，网关照旧用它启动时绑的那个（见 office-scope.js）。
-const formal = (url, options = {}) =>
-  fetch(url, { ...options, headers: withGroup(options.headers || {}) });
-
-const post = async (route, body) => {
-  const response = await formal(`/api/formal${route}`, {
+const post = (route, body) =>
+  formalJson(`/api/formal${route}`, {
     method: 'POST',
-    cache: 'no-store',
     headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
     body: JSON.stringify(body),
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = data.error;
-    throw new Error((error && error.message) || error || `请求失败（${response.status}）`);
-  }
-  return data;
-};
 
 /**
  * 一批机器文本 → 人话表（原文 → 人话）。

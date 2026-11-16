@@ -16,22 +16,13 @@
  *   · 长清单默认收起，标题上写明几条（展开才看得见的清单等于没写）。
  */
 import './relay-workspace.css';
+import { escapeHtml } from './html-escape.js';
 
 const OVERVIEW = '/api/formal/relay/overview';
 const ROSTER = '/api/formal/relay/roster';
 const LETTERS = '/api/formal/relay/letters';
 /** 与后端 `MAX_HOPS` 同一个口径（后端是权威，这里只用来标"快到上限了"）。 */
 const MAX_HOPS = 6;
-
-function escape(text) {
-  return String(text == null ? '' : text).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[char]));
-}
 
 function when(iso) {
   if (!iso) return '时间未记';
@@ -116,14 +107,14 @@ export function mountRelayWorkspace({ root, project }) {
     const group = (title, list) =>
       list.length
         ? `<div class="relay-pick-group">
-            <p class="relay-pick-title">${escape(title)} <span class="relay-count">${list.length} 个</span></p>
+            <p class="relay-pick-title">${escapeHtml(title)} <span class="relay-count">${list.length} 个</span></p>
             ${list
               .map(
                 (item) => `<label class="relay-pick">
-                  <input type="checkbox" data-recipient="${escape(item.id)}"${
+                  <input type="checkbox" data-recipient="${escapeHtml(item.id)}"${
                     state.draft.recipients.has(item.id) ? ' checked' : ''
                   }>
-                  <span>${escape(item.id)}</span>
+                  <span>${escapeHtml(item.id)}</span>
                 </label>`,
               )
               .join('')}
@@ -139,10 +130,10 @@ export function mountRelayWorkspace({ root, project }) {
       .map((thread) => {
         const stamp = threadStatus(thread);
         const who = thread.unreadable ? '参与者不明' : (thread.participants || []).join(' ↔ ');
-        const value = escape(thread.thread_id);
+        const value = escapeHtml(thread.thread_id);
         return `<option value="${value}"${state.draft.replyTo === thread.thread_id ? ' selected' : ''}>${
-          thread.unreadable ? '账本读不出来' : escape(who)
-        } · ${escape(stamp.label)} · ${value}</option>`;
+          thread.unreadable ? '账本读不出来' : escapeHtml(who)
+        } · ${escapeHtml(stamp.label)} · ${value}</option>`;
       })
       .join('');
     return `<label class="relay-field">
@@ -158,10 +149,10 @@ export function mountRelayWorkspace({ root, project }) {
     const note = state.feedback;
     if (!note) return '';
     const known = (note.known || []).length
-      ? `<p class="relay-hint">可以写：${note.known.map((name) => escape(name)).join('、')}</p>`
+      ? `<p class="relay-hint">可以写：${note.known.map((name) => escapeHtml(name)).join('、')}</p>`
       : '';
     return `<div class="relay-feedback relay-feedback-${note.tone}">
-        <p>${escape(note.text)}</p>${known}
+        <p>${escapeHtml(note.text)}</p>${known}
       </div>`;
   }
 
@@ -177,26 +168,26 @@ export function mountRelayWorkspace({ root, project }) {
     wrap.innerHTML = `
       <header class="relay-head">
         <p class="relay-eyebrow">转接</p>
-        <h1>${escape(projectName())}</h1>
+        <h1>${escapeHtml(projectName())}</h1>
         <p class="relay-lead">本项目走转接：平台只当邮局。成员把要说的话写成 md 信放进信箱，平台按「给&lt;收件人&gt;：」分块投递，不建任务、不开工作树、不判内容。</p>
-        <p class="relay-state relay-state-${status.tone}">${escape(status.text)}</p>
+        <p class="relay-state relay-state-${status.tone}">${escapeHtml(status.text)}</p>
         <div class="relay-actions">
           <button type="button" data-relay-refresh>刷新</button>
         </div>
       </header>
 
-      ${state.error ? `<p class="relay-error">读不到信箱：${escape(state.error)}</p>` : ''}
+      ${state.error ? `<p class="relay-error">读不到信箱：${escapeHtml(state.error)}</p>` : ''}
 
       <section class="relay-card relay-compose">
         <h2>写一封信</h2>
-        <p class="relay-note">这封信的作者是<b>你</b>${author ? `（${escape(author)}）` : ''}，第一行「来自 ${author ? escape(author) : '你'}」由平台写死。界面上没有、也不提供「以某个窗口的身份发」—— 要某个窗口说话，让它自己写。</p>
+        <p class="relay-note">这封信的作者是<b>你</b>${author ? `（${escapeHtml(author)}）` : ''}，第一行「来自 ${author ? escapeHtml(author) : '你'}」由平台写死。界面上没有、也不提供「以某个窗口的身份发」—— 要某个窗口说话，让它自己写。</p>
         <fieldset class="relay-picks"${state.sending ? ' disabled' : ''}>
           <legend>发给谁 <span class="relay-count">已选 ${state.draft.recipients.size} 个</span></legend>
           ${recipientsBlock()}
         </fieldset>
         <label class="relay-field">
           <span>说什么</span>
-          <textarea data-body rows="6" placeholder="写清要对方做什么、或者告诉他什么。空行会保留。">${escape(state.draft.body)}</textarea>
+          <textarea data-body rows="6" placeholder="写清要对方做什么、或者告诉他什么。空行会保留。">${escapeHtml(state.draft.body)}</textarea>
         </label>
         ${threadOptions()}
         <div class="relay-actions relay-send-row">
@@ -223,11 +214,11 @@ export function mountRelayWorkspace({ root, project }) {
                   ? '参与者不明'
                   : (thread.participants || []).join(' ↔ ') || '还没有参与者记录';
                 return `<li class="relay-thread relay-thread-${stamp.tone}">
-                  <b>${escape(who)}</b>
-                  <span class="relay-badge">${escape(stamp.label)}</span>
-                  <span class="relay-when">${escape(when(thread.updated_at))}</span>
-                  <code class="relay-id">${escape(thread.thread_id)}</code>
-                  ${thread.unreadable ? `<span class="relay-hint">${escape(thread.unreadable)}：这份账本可能被手改坏了，回信会先被退回并提示找平台方看。</span>` : ''}
+                  <b>${escapeHtml(who)}</b>
+                  <span class="relay-badge">${escapeHtml(stamp.label)}</span>
+                  <span class="relay-when">${escapeHtml(when(thread.updated_at))}</span>
+                  <code class="relay-id">${escapeHtml(thread.thread_id)}</code>
+                  ${thread.unreadable ? `<span class="relay-hint">${escapeHtml(thread.unreadable)}：这份账本可能被手改坏了，回信会先被退回并提示找平台方看。</span>` : ''}
                 </li>`;
               }).join('')}</ul>`
             : '<p class="relay-empty">还没有转过任何一封信。</p>'}
@@ -239,8 +230,8 @@ export function mountRelayWorkspace({ root, project }) {
           <summary><h2>退回 <span class="relay-count">${returned.length} 封</span></h2></summary>
           ${returned.length
             ? `<ul class="relay-list">${returned.map((item) => `<li class="relay-returned">
-                <b>${escape(item.letter)}</b>
-                <span class="relay-reason">${escape(item.reason)}</span>
+                <b>${escapeHtml(item.letter)}</b>
+                <span class="relay-reason">${escapeHtml(item.reason)}</span>
               </li>`).join('')}</ul>`
             : '<p class="relay-empty">没有退回的信。</p>'}
         </details>

@@ -4,31 +4,18 @@
 // \u8fd9\u6837\u7684\u6d88\u606f\u53ea\u6709\u53d1\u9001\u65b9\u4e0e\u6536\u4ef6\u65b9\u770b\u5f97\u5230\uff0c\u5176\u4ed6\u6210\u5458\u8bfb\u4e0d\u5230\u3002
 // \u8fd9\u4e2a\u9875\u9762\u5c55\u793a\u7684\u5c31\u662f\u8fd9\u7c7b\u6d88\u606f\uff1b\u53d1\u51fa\u53bb\u4e5f\u5e26 direct\uff0c\u6240\u4ee5\u5b83\u4e0d\u4f1a\u6cc4\u5230\u7fa4\u91cc\u3002
 import './direct-chat.css';
-import { withGroup } from './office-scope.js';
+import { escapeHtml } from './html-escape.js';
+import { formalJson } from './formal-api.js';
 
 const DIRECT_REF = 'direct';
 const $ = (selector) => document.querySelector(selector);
-const escape = (value) =>
-  String(value ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
-const api = async (route, body_) => {
-  const headers = withGroup(
-    body_ ? { 'Content-Type': 'application/json', 'X-Office-Formal': '1' } : {},
-  );
-  const response = await fetch(`/api/formal${route}`, {
-    cache: 'no-store',
-    headers,
-    ...(body_
-      ? {
-          method: 'POST',
-          body: JSON.stringify(body_),
-        }
-      : {}),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
-  return data;
-};
+const api = (route, body_) =>
+  formalJson(`/api/formal${route}`, body_ ? {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Office-Formal': '1' },
+    body: JSON.stringify(body_),
+  } : {});
 
 const state = { status: null, messages: [], error: null, sending: false };
 
@@ -85,8 +72,8 @@ function render() {
     <div class="direct-shell">
       <header class="direct-head">
         <p class="direct-kicker">DIRECT CORRESPONDENCE / 定向通信</p>
-        <h1>${name ? `与 ${escape(name)} 的私聊` : '私聊'}</h1>
-        <p class="direct-recipient">${id ? `收件人：<b>${escape(id)}</b>` : '平台还没有配置管理员窗口。'}</p>
+        <h1>${name ? `与 ${escapeHtml(name)} 的私聊` : '私聊'}</h1>
+        <p class="direct-recipient">${id ? `收件人：<b>${escapeHtml(id)}</b>` : '平台还没有配置管理员窗口。'}</p>
         <p class="direct-note">这是<b>定向消息</b>：仅您与管理员可见，其他成员无法读取（平台按收件人过滤）。管理员的回复同样以定向消息发送。</p>
       </header>
       <div class="direct-list" id="directList">
@@ -98,8 +85,8 @@ function render() {
                   const who = mine ? '你' : message.sender_id || '平台';
                   const at = String(message.created_at || '').replace('T', ' ').slice(5, 16);
                   return `<article class="direct-msg ${mine ? 'is-mine' : 'is-admin'}">
-                    <header class="direct-meta"><b>${escape(who)}</b><time>${escape(at)}</time></header>
-                    <p>${escape(message.body || '')}</p>
+                    <header class="direct-meta"><b>${escapeHtml(who)}</b><time>${escapeHtml(at)}</time></header>
+                    <p>${escapeHtml(message.body || '')}</p>
                   </article>`;
                 })
                 .join('')
@@ -107,7 +94,7 @@ function render() {
         }
       </div>
       ${waitingForReply ? '<p class="direct-waiting">消息已送达，正在等待管理员回复。管理员可能正在处理其他任务，回复需经过一次模型调用，存在一定延迟。</p>' : ''}
-      ${state.error ? `<p class="direct-error" role="alert"><span>${escape(state.error)}</span><button type="button" id="directRetry">重试</button></p>` : ''}
+      ${state.error ? `<p class="direct-error" role="alert"><span>${escapeHtml(state.error)}</span><button type="button" id="directRetry">重试</button></p>` : ''}
       <form class="direct-form" id="directForm">
         <input type="text" id="directInput" placeholder="向管理员发送消息（仅双方可见）" aria-label="私聊消息" />
         <button type="submit" ${id && !state.sending ? '' : 'disabled'}>${state.sending ? '发送中…' : '发送'}</button>

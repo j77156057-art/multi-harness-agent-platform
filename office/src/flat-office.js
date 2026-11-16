@@ -17,7 +17,6 @@
  * 规矩不变：这是**观察面**。除了标注为"人"的动作，这里不替任何人改状态。
  */
 
-import './flat-office.css';
 import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
@@ -499,11 +498,18 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     const known = (state.availability || []).some((item) => item && item.harness_id === id);
     if (!known) state.view = { kind: 'tasks', id: null };
   }
-  // 本地样例（不连平台）：给没有平台的人看界面用。
-  const demoRuntime = createOfficeReadRuntime();
-  const demoFixture = createOfficeReadFixture();
-  demoRuntime.configure(demoFixture.scope);
-  demoRuntime.ingest(demoFixture);
+  // 本地样例（不连平台）：给没有平台的人看界面用。连着平台时不构造，
+  // 省掉启动时的一次 fixture 生成与 ingest。
+  let demoRuntime = null;
+  const ensureDemoRuntime = () => {
+    if (!demoRuntime) {
+      const demoFixture = createOfficeReadFixture();
+      demoRuntime = createOfficeReadRuntime();
+      demoRuntime.configure(demoFixture.scope);
+      demoRuntime.ingest(demoFixture);
+    }
+    return demoRuntime;
+  };
 
   const requestApi = async (base, route, body_) => {
     // 每个请求都带上"我问的是哪个群"：项目现在真的在平台上，切项目就是换群。
@@ -7916,7 +7922,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const scope = projectScope() || (projectOf && projectOf());
       state.scope = scope;
       if (state.source === 'demo') {
-        const snapshot = demoRuntime.snapshot();
+        const snapshot = ensureDemoRuntime().snapshot();
         state.tasks = snapshot.tasks || [];
         state.messages = snapshot.messages || [];
         state.status = { connected: false, group_id: '（本地样例）' };
