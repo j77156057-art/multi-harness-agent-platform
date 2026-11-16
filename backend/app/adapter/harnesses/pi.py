@@ -87,12 +87,12 @@ class PiAdapter(CliHarness):
             return list(self._installed_models)
         names: list[str] = []
         try:
-            import httpx
+            from app import net
 
             root = self.base_url.rstrip("/")
             if root.endswith("/v1"):
                 root = root[: -len("/v1")]
-            response = httpx.get(f"{root}/api/tags", timeout=5.0)
+            response = net.get(f"{root}/api/tags", timeout=5.0)
             if response.status_code < 400:
                 payload = response.json()
                 for entry in payload.get("models") or []:

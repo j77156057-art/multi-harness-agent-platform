@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from app import net
+
 
 class ChannelFailed(RuntimeError):
     """The model channel could not answer; another channel might."""
@@ -62,7 +64,7 @@ class PoolChannel:
         last = ""
         for attempt in range(self.retries + 1):
             try:
-                response = httpx.post(url, json=payload, headers=headers, timeout=self.timeout)
+                response = net.post(url, json=payload, headers=headers, timeout=self.timeout)
             except httpx.HTTPError as exc:
                 last = f"connection refused / transport error: {type(exc).__name__}: {exc}"
                 if attempt < self.retries:

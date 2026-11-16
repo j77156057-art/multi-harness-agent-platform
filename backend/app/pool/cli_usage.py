@@ -65,7 +65,11 @@ def opencode_message_usage(message_ids: list[str]) -> dict[str, int] | None:
             if not isinstance(tokens, dict):
                 continue
             found += 1
-            prompt += int(tokens.get("input") or tokens.get("input_tokens") or 0)
+            # 与额度池那本账同口径：input 一律含缓存读（opencode 的 input
+            # 本身不含 cache.read，见 app.usage.cli_reported._opencode_step）。
+            cache = tokens.get("cache")
+            read = int(cache.get("read") or 0) if isinstance(cache, dict) else 0
+            prompt += int(tokens.get("input") or tokens.get("input_tokens") or 0) + read
             completion += int(tokens.get("output") or tokens.get("output_tokens") or 0)
         if not found:
             continue

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -148,10 +148,6 @@ class VerifyPolicy:
 DEFAULT_POLICY_PATH = PROJECT_ROOT / "verify-profiles.json"
 
 
-def load_default_policy() -> VerifyPolicy:
-    return VerifyPolicy.from_file(DEFAULT_POLICY_PATH)
-
-
 #: 命令里那些「仓库内文件」常见的后缀。只认这些，是为了不把
 #: `pytest -q`、`npm run build` 这类没有路径的命令误判成缺失入口。
 _SCRIPT_SUFFIXES = (
@@ -197,15 +193,6 @@ def profile_entry_paths(profile: VerifyProfile) -> list[str]:
         if normalized not in entries:
             entries.append(normalized)
     return entries
-
-
-def missing_profile_entries(
-    policy: VerifyPolicy, name: str | None, exists: Callable[[str], bool]
-) -> list[str]:
-    """Which of ``name``'s entry files are absent according to ``exists``."""
-    if name is None or name not in policy.profiles:
-        return []
-    return [path for path in profile_entry_paths(policy.profiles[name]) if not exists(path)]
 
 
 @dataclass(frozen=True, slots=True)

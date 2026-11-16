@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -151,10 +150,3 @@ def merge(destination: dict[str, Any], fragment: dict[str, Any]) -> dict[str, An
         else:
             out[key] = value
     return out
-
-
-def remove_file(path: Path | None) -> None:
-    if path is None:
-        return
-    with contextlib.suppress(OSError):
-        os.unlink(path)

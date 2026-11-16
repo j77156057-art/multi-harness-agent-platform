@@ -37,11 +37,6 @@ def resolve_next(current: TaskStatus, event: EventKind) -> TaskStatus:
     return nxt
 
 
-def is_self_loop(current: TaskStatus, event: EventKind) -> bool:
-    """True when the edge keeps the task in the same status (R10 §10 self loop)."""
-    return resolve_next(current, event) is current
-
-
 #: 任务落到这些状态，当前 attempt 就不可能再被继续使用：交付、取消、放弃、
 #: 升级、退回重做、失联回收、放回队列。这是**唯一**的收口清单 —— 各条路径
 #: 不再各自调 close_attempt，否则总会漏掉一条（2026-11-05 的 escalation /

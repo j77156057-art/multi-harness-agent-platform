@@ -15,3 +15,19 @@ def http_client(**kwargs: Any) -> httpx.Client:
     except httpx.InvalidURL:
         kwargs.pop("trust_env", None)
         return httpx.Client(trust_env=False, **kwargs)
+
+
+def get(url: str, *, headers: dict | None = None, timeout: float | None = None) -> httpx.Response:
+    with http_client(timeout=timeout) as client:
+        return client.get(url, headers=headers)
+
+
+def post(
+    url: str,
+    *,
+    json: Any = None,
+    headers: dict | None = None,
+    timeout: float | None = None,
+) -> httpx.Response:
+    with http_client(timeout=timeout) as client:
+        return client.post(url, json=json, headers=headers)

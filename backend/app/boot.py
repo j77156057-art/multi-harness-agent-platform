@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 
 from app.config import settings
@@ -23,6 +24,12 @@ def check_spec_on_startup() -> None:
 
     返回即表示允许继续启动；严格模式下不一致会抛 ``SystemExit(1)``。
     """
+    # 启动日志带中文；非 UTF-8 locale（如 CI Windows 的 cp1252 管道）下
+    # stdout 默认 strict 会直接 UnicodeEncodeError 拖垮 lifespan。
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
     if not settings.check_spec_on_startup:
         print(
             "[warn] 规范启动校验已关闭（AP_CHECK_SPEC=0），跳过",

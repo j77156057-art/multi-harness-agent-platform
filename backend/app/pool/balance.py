@@ -24,6 +24,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app import net
+
 
 def _host(base_url: str) -> str:
     try:
@@ -45,7 +47,7 @@ def _read_deepseek(base_url: str, key: str, timeout: float) -> dict[str, Any]:
     It answers with the balances per currency; the pool keeps them as they
     come and adds them up only when they share a currency.
     """
-    response = httpx.get(
+    response = net.get(
         _origin(base_url) + "/user/balance",
         headers={"Authorization": f"Bearer {key}"},
         timeout=timeout,
@@ -87,7 +89,7 @@ def _read_usage_endpoint(base_url: str, key: str, timeout: float) -> dict[str, A
     the **account's**, not the platform's: the platform is one of its
     callers, and saying otherwise would be a lie about someone else's bill.
     """
-    response = httpx.get(
+    response = net.get(
         _origin(base_url) + "/v1/usage",
         headers={"Authorization": f"Bearer {key}"},
         timeout=timeout,

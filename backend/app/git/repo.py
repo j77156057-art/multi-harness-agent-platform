@@ -73,6 +73,12 @@ def run_git(
     env["GIT_CONFIG_COUNT"] = str(config_count + 1)
     env[f"GIT_CONFIG_KEY_{config_count}"] = "core.quotepath"
     env[f"GIT_CONFIG_VALUE_{config_count}"] = "false"
+    if os.name == "nt":
+        # 临时 init/clone 出来的仓库不继承任何 per-repo 配置；深根下对象路径
+        # 会超 MAX_PATH，统一在环境层开扩展长度路径。
+        env[f"GIT_CONFIG_KEY_{config_count + 1}"] = "core.longpaths"
+        env[f"GIT_CONFIG_VALUE_{config_count + 1}"] = "true"
+        env["GIT_CONFIG_COUNT"] = str(config_count + 2)
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(
@@ -187,6 +193,9 @@ class CanonicalRepo:
         work = Path(tempfile.mkdtemp(prefix=".s-", dir=self.path.parent))
         try:
             run_git("init", "--initial-branch", INTEGRATION_BRANCH, str(work))
+            # fetch 会派生 upload-pack 子进程读这个临时库的对象；环境层配置
+            # 到不了那条路，per-repo 配置才是 worktree 已验证的生效方式。
+            run_git("config", "core.longpaths", "true", cwd=work)
             readme = work / "README.md"
             readme.write_text(
                 "# canonical integration seed\n\n"

@@ -62,6 +62,8 @@ def _run_startup(tmp_path: Path, spec: Path, *, strict: bool) -> subprocess.Comp
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=180,
     )
 

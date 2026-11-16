@@ -108,8 +108,9 @@ def test_a_platform_the_vendor_does_not_ship_says_so(shimmed):
 
 
 def test_probing_another_platform_claims_nothing(shimmed):
-    """Asking about Linux from Windows is guidance, not a local measurement."""
-    rows = installers.probe(target_os="linux")
+    """Asking about the *other* OS is guidance, not a local measurement."""
+    foreign = "linux" if sys.platform == "win32" else "windows"
+    rows = installers.probe(target_os=foreign)
 
     assert all(row["status"] == "unknown" for row in rows)
     assert all(row["path"] is None for row in rows)

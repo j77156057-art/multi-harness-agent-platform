@@ -69,19 +69,6 @@ def agent_branch(*, group_short: str, harness: str, task_id: str, attempt_id: st
     ).name
 
 
-def help_branch(*, group_short: str, harness: str, task_id: str, ordinal: int) -> str:
-    """Format a collaborator help branch (R10 §14 ``help-<n>``)."""
-    if ordinal < 1:
-        raise BranchNameError(f"help ordinal must be >= 1, got {ordinal}")
-    return AgentBranch(
-        group_short=_check_segment("group_short", group_short),
-        harness=_check_segment("harness", harness),
-        task_id=_check_segment("task_id", task_id),
-        attempt_id="",
-        help_ordinal=ordinal,
-    ).name
-
-
 def parse_branch(name: str) -> AgentBranch:
     """Parse an agent branch name, raising :class:`BranchNameError` otherwise."""
     parts = name.split("/")

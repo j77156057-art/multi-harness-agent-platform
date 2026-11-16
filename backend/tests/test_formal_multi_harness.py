@@ -161,6 +161,20 @@ def test_windowsapps_opencode_moves_multiline_order_to_attachment(tmp_path):
     assert bundle is not None
     assert (bundle / "work-order.txt").read_text(encoding="utf-8") == work_order
     assert "line one" not in " ".join(command)
+    adapter.cleanup_work_order()
+    assert not bundle.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="executes a real cmd.exe shim")
+def test_windowsapps_opencode_shim_actually_runs(tmp_path):
+    adapter = OpenCodeAdapter(
+        SimpleNamespace(),
+        platform="nt",
+        bash_path=r"C:\Users\operator\AppData\Local\Microsoft\WindowsApps\bash.exe",
+    )
+    work_order = 'line one\nJSON {"path":"a&b"} %PATH%\nline three'
+    prepared = adapter.prepare_work_order(work_order, tmp_path)
+    command = adapter.command(prepared, tmp_path)
 
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -170,7 +184,6 @@ def test_windowsapps_opencode_moves_multiline_order_to_attachment(tmp_path):
     completed = subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True)
     assert completed.returncode == 0, completed.stderr
     adapter.cleanup_work_order()
-    assert not bundle.exists()
 
 
 def test_canonical_repo_initialization_is_safe_for_parallel_workers(tmp_path):

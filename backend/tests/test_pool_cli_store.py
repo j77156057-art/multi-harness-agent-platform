@@ -51,7 +51,8 @@ def test_the_usage_is_read_from_the_clis_own_store(tmp_path, monkeypatch):
 
     usage = opencode_message_usage(["msg_1"])
 
-    assert usage == {"prompt_tokens": 5600, "completion_tokens": 2}
+    # 口径含缓存读：5600 + cache.read 7，与 cli_reported / 额度池账一致。
+    assert usage == {"prompt_tokens": 5607, "completion_tokens": 2}
 
 
 def test_a_message_that_is_not_there_means_no_usage_not_zero(tmp_path, monkeypatch):

@@ -6,10 +6,12 @@ directories, capacity as a queue reason, and archive-before-recycle.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app.git.branch import parse_branch
-from app.git.worktree import WorktreeCapacityExceeded, WorktreeError, WorktreeManager
+from app.git.worktree import WorktreeCapacityExceeded, WorktreeError, WorktreeManager, _force_rmtree
 from tests.git_support import commit_in, make_fixture, provision, seed_and_claim
 
 
@@ -345,3 +347,18 @@ def test_archive_keeps_the_worktree_when_a_secret_is_the_only_dirty_file(tmp_pat
         / item.attempt_id
         / f"checkpoint-{_attempt_suffix(item.attempt_id)}.untracked.tar"
     ).exists()
+
+
+def test_force_rmtree_removes_a_readonly_tree(tmp_path):
+    """git 把对象文件与对象目录设成只读；POSIX 上目录失去读/执行位就进不去，
+    回收会静默留残骸。只读树必须在两个平台都被清干净。"""
+    tree = tmp_path / "ro"
+    (tree / "objects" / "ab").mkdir(parents=True)
+    leaf = tree / "objects" / "ab" / "cd"
+    leaf.write_text("x", encoding="utf-8")
+    os.chmod(leaf, 0o444)
+    os.chmod(tree / "objects" / "ab", 0o555)
+    os.chmod(tree / "objects", 0o555)
+    os.chmod(tree, 0o555)
+    _force_rmtree(tree)
+    assert not tree.exists()

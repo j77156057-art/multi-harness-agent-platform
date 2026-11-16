@@ -27,6 +27,8 @@ from typing import Any
 
 import httpx
 
+from app import net
+
 
 def read_catalogue(
     *,
@@ -44,7 +46,7 @@ def read_catalogue(
         return {"known": False, "reason": "没有凭据，读不了模型目录"}
     url = base_url.rstrip("/") + "/" + path.lstrip("/")
     try:
-        response = httpx.get(
+        response = net.get(
             url,
             headers={"Authorization": f"Bearer {credential}", "Accept": "application/json"},
             timeout=timeout,

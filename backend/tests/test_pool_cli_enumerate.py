@@ -317,14 +317,30 @@ def test_a_non_cli_upstream_can_be_retiered_and_withdrawn(tmp_path):
     sources.declare_upstream_tier("opencode:1", "free", config_path=config)
     assert sources.declared_upstream_tiers(config) == [{"name": "opencode:1", "tier": "free"}]
 
-    upstreams = sources.discover_upstreams(include_cli=False, config_path=config)
+    # 发现非 CLI 上游要读宿主 home 下各家 CLI 的配置；注入 tmp home 并 seed
+    # 一份 opencode 配置，测试才不取决于跑它的机器装没装 opencode。
+    home = tmp_path / "home"
+    opencode_cfg = home / ".config" / "opencode" / "opencode.json"
+    opencode_cfg.parent.mkdir(parents=True)
+    opencode_cfg.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "1": {"options": {"baseURL": "http://127.0.0.1:8402"}, "models": {"m": {}}}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    upstreams = sources.discover_upstreams(home, include_cli=False, config_path=config)
     hit = [u for u in upstreams if u.name == "opencode:1"]
     assert hit and hit[0].tier == "free", "人的说法要盖过代码默认"
 
     assert sources.withdraw_upstream_tier("opencode:1", config_path=config) is True
     back = [
         u
-        for u in sources.discover_upstreams(include_cli=False, config_path=config)
+        for u in sources.discover_upstreams(home, include_cli=False, config_path=config)
         if u.name == "opencode:1"
     ]
     assert back and back[0].tier == "metered", "撤掉就回到代码默认"

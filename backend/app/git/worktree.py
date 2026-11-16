@@ -18,7 +18,6 @@ import os
 import re
 import shutil
 import sqlite3
-import stat
 import tarfile
 import uuid
 from dataclasses import dataclass
@@ -28,7 +27,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.db.connection import Database
-from app.git.branch import agent_branch, parse_branch
+from app.git.branch import agent_branch
 from app.git.repo import CanonicalRepo, run_git
 
 
@@ -94,16 +93,24 @@ def short_id(attempt_id: str, *, length: int = 4) -> str:
 
 
 def _force_rmtree(path: Path) -> None:
-    """Remove a git directory on Windows.
+    """Remove a git directory on Windows and POSIX.
 
-    Git writes object files read-only, and ``shutil.rmtree`` silently skips
-    those on Windows -- with ``ignore_errors=True`` the recycle looked like it
-    had worked while the directory stayed behind. Clear the attribute first.
+    Git writes object files and object directories read-only. On Windows
+    ``shutil.rmtree`` silently skips read-only files; on POSIX a directory
+    without read/traverse permission cannot be entered at all. Clearing only
+    the write bit (``S_IWRITE``) strips traverse on POSIX and leaves the tree
+    behind under ``ignore_errors=True``. Give files read+write and directories
+    full owner permission instead -- enough to unlink on both platforms.
     """
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o700)
     for root, dirs, files in os.walk(path, topdown=False):
-        for name in files + dirs:
+        for name in files:
             with contextlib.suppress(OSError):
-                os.chmod(os.path.join(root, name), stat.S_IWRITE)
+                os.chmod(os.path.join(root, name), 0o600)
+        for name in dirs:
+            with contextlib.suppress(OSError):
+                os.chmod(os.path.join(root, name), 0o700)
     shutil.rmtree(path, ignore_errors=True)
 
 
@@ -956,8 +963,3 @@ class WorktreeManager:
         return (
             run_git("rev-list", "--max-parents=0", "HEAD", cwd=path).stdout.strip().splitlines()[-1]
         )
-
-
-def branch_of_workspace(row: sqlite3.Row) -> str:
-    """Re-parse a stored branch, proving it still satisfies R10 §14."""
-    return parse_branch(str(row["branch"])).name

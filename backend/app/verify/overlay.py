@@ -11,16 +11,13 @@ into a new one.
 
 from __future__ import annotations
 
-import contextlib
-import os
-import shutil
-import stat
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
 from app.config import settings
 from app.git.repo import CanonicalRepo, run_git
+from app.git.worktree import _force_rmtree
 
 
 class OverlayError(RuntimeError):
@@ -33,15 +30,6 @@ class Overlay:
     path: Path
     gitdir: Path
     commit: str
-
-
-def _force_rmtree(path: Path) -> None:
-    """See app.git.worktree: git marks objects read-only on Windows."""
-    for root, dirs, files in os.walk(path, topdown=False):
-        for name in files + dirs:
-            with contextlib.suppress(OSError):
-                os.chmod(os.path.join(root, name), stat.S_IWRITE)
-    shutil.rmtree(path, ignore_errors=True)
 
 
 class OverlayManager:
@@ -61,6 +49,7 @@ class OverlayManager:
             raise OverlayError(f"overlay path for job {job_id} already exists")
 
         run_git("init", "--separate-git-dir", str(gitdir), str(path))
+        run_git("config", "core.longpaths", "true", cwd=path)
         alternates = gitdir / "objects" / "info" / "alternates"
         alternates.parent.mkdir(parents=True, exist_ok=True)
         # `newline="\n"` 是必须的：Windows 上默认会把行尾翻成 CRLF，而 git 读这个文件

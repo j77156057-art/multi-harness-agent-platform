@@ -35,6 +35,7 @@ last text-like event as the final message, falling back to the raw tail.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import shutil
 import subprocess
@@ -95,7 +96,7 @@ class OpenCodeAdapter(CliHarness):
         return (
             self.platform == "nt"
             and self.bash_path is not None
-            and Path(self.bash_path).name.lower() == "bash.exe"
+            and ntpath.basename(self.bash_path).lower() == "bash.exe"
             and "windowsapps" in str(self.bash_path).lower()
         )
 
@@ -182,13 +183,18 @@ class OpenCodeAdapter(CliHarness):
             # ``/bin/bash: : No such file or directory``.  Use cmd.exe for
             # that launcher while retaining the bash recipe for real POSIX/Git
             # Bash installations and the existing adapter contract tests.
-            if self.platform == "nt" and self.bash_path:
-                bash_path = Path(self.bash_path)
-                if bash_path.name.lower() == "bash.exe" and "windowsapps" in str(bash_path).lower():
-                    # Arbitrary work orders are prepared as an attached file
-                    # by ``prepare_work_order``.  Keep this fallback for
-                    # callers that invoke ``command`` directly.
-                    return ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
+            # ntpath 而非 Path：注入的 Windows 路径在 POSIX 宿主上也要按
+            # Windows 语义取 basename，否则平台注入测试在 Linux 上失真。
+            if (
+                self.platform == "nt"
+                and self.bash_path
+                and ntpath.basename(self.bash_path).lower() == "bash.exe"
+                and "windowsapps" in str(self.bash_path).lower()
+            ):
+                # Arbitrary work orders are prepared as an attached file
+                # by ``prepare_work_order``.  Keep this fallback for
+                # callers that invoke ``command`` directly.
+                return ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline(argv)]
             # $0 = opencode, $@ = the remaining argv: the exe's parent becomes
             # this shell instead of the Python worker (see the module docstring).
             return ["bash", "-lc", 'exec "$0" "$@"', *argv]
