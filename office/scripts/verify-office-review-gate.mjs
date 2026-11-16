@@ -41,8 +41,25 @@ for (const file of files) {
   // 写请求里的 /tasks/ 路径：办公室不该改任务状态。
   const writes = [...text.matchAll(/method:\s*['"](POST|PUT|PATCH)['"]/g)];
   for (const match of writes) {
-    const around = text.slice(Math.max(0, match.index - 400), match.index + 400);
-    if (/\/tasks\/|base-harnesses|harnesses/.test(around) && /status/.test(around)) {
+    // 只取**本次 fetch 调用**（括号配平切片）：±N 字符窗口会借到相邻调用的
+    // URL 与 status（LF 行尾下窗口覆盖更多行，曾把 harness 探测 POST 与隔壁
+    // harnesses/status 的 GET 拼成假违规）。
+    const callStart = text.lastIndexOf('fetch(', match.index);
+    if (callStart < 0) continue;
+    let depth = 1;
+    let end = callStart + 6;
+    for (let i = callStart + 6; i < text.length; i++) {
+      if (text[i] === '(') depth++;
+      else if (text[i] === ')') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const call = text.slice(callStart, end + 1);
+    if (/\/tasks\//.test(call) && /status/.test(call)) {
       problems.push(`${rel} 有一个带任务状态的写请求 —— 状态只能由平台改`);
     }
   }
