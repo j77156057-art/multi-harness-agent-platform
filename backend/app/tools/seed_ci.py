@@ -162,6 +162,33 @@ def _write_model_config(model: str) -> str:
     return str(path)
 
 
+def _seed_opencode_config() -> None:
+    """An opencode provider config so the pool discovers an opencode upstream.
+
+    Upstream discovery reads ``Path.home()/.config/opencode/opencode.json``;
+    ci-stack isolates HOME, so without this the opencode group never appears
+    and the tier/review-gate smokes wait for a group that cannot exist.
+    """
+    import os
+
+    home = Path(os.environ.get("AP_MODEL_HOME") or Path.home())
+    path = home / ".config" / "opencode" / "opencode.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write(
+        path,
+        json.dumps(
+            {
+                "provider": {
+                    "1": {
+                        "options": {"baseURL": "http://127.0.0.1:8402/v1"},
+                        "models": {"minimax-m3.1-flash-free": {}},
+                    }
+                }
+            }
+        ),
+    )
+
+
 def _seed_opencode_store() -> None:
     """Empty but readable opencode store, so the built-in CLI slot is offered.
 
@@ -199,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     base = args.base.rstrip("/")
     data_dir = Path(args.data_dir)
     _seed_opencode_store()
+    _seed_opencode_config()
 
     operator_token = _issue_token("human", "operator", "ci operator")
     _write(data_dir / "office-operator.key", operator_token)

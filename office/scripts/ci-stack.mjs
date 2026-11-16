@@ -68,6 +68,16 @@ const env = {
   ...process.env,
   PATH: binDir + delimiter + (process.env.PATH || ''),
   XDG_DATA_HOME: xdgDir,
+  // 发现上游读 Path.home() 下的各家 CLI 配置；不隔离 HOME，开发机真配置会
+  // 掩盖 CI 的缺口（upstream-tier/review-gate 要的 opencode 组就来自这里）。
+  HOME: modelHome,
+  USERPROFILE: modelHome,
+  // HOME 隔离后 playwright 默认缓存路径会落空；钉回安装时的真实缓存。
+  PLAYWRIGHT_BROWSERS_PATH:
+    process.env.PLAYWRIGHT_BROWSERS_PATH ||
+    (process.platform === 'win32'
+      ? join(process.env.LOCALAPPDATA || join(modelHome, 'AppData', 'Local'), 'ms-playwright')
+      : join(process.env.HOME || '~', '.cache', 'ms-playwright')),
   AP_PORT: backendPort,
   AP_AUTH_MODE: 'enforce',
   AP_ADMIN_SUBJECTS: 'codex-window-admin',
