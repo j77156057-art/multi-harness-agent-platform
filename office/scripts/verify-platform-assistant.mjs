@@ -21,8 +21,15 @@ await page.locator('[data-project-name]').fill('平台助手校验');
 await page.locator('[data-confirm-create]').click();
 // 开工配置现在是顶栏的按钮（旧的手机入口已撤）。
 await page.waitForSelector('#aoStartBtn', { state: 'visible', timeout: 20000 });
-await page.locator('#aoStartBtn').click();
-await page.waitForSelector('#openingDialog', { state: 'visible', timeout: 20000 });
+// 创建项目后向导可能已自动打开（openAfterCreate）：已开就不必再点按钮；
+// 点击与自动打开竞态时按钮会被 dialog 拦截，落进 catch 等向导出现即可。
+const openingDialog = page.locator('#openingDialog');
+if (!(await openingDialog.isVisible().catch(() => false))) {
+  await page.locator('#aoStartBtn').click({ timeout: 5000 }).catch(() =>
+    openingDialog.waitFor({ state: 'visible', timeout: 20000 }),
+  );
+}
+await openingDialog.waitFor({ state: 'visible', timeout: 20000 });
 await page.locator('#openingCloseBtn').click();
 
 // 巡检与上报面板 = 列事实、报异常。它**不是**工作区域里那一行「平台助手」

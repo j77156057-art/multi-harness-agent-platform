@@ -43,7 +43,15 @@ for (const file of files) {
     };
     pump(child.stdout, process.stdout);
     pump(child.stderr, process.stderr);
-    child.on('exit', (value) => resolve({code: value ?? 1, output}));
+    // 单个脚本挂死不能把整个 job 拖到超时：5 分钟熔断，记失败并点名。
+    const fuse = setTimeout(() => {
+      console.error(`${file}: 超过 5 分钟无退出，熔断记失败`);
+      child.kill('SIGKILL');
+    }, 300000);
+    child.on('exit', (value) => {
+      clearTimeout(fuse);
+      resolve({code: value ?? 1, output});
+    });
   });
   if (outcome.code === 2) {
     // 跳过必须自己说出缺什么：`<脚本>: 跳过 —— <原因>`（见 lib/office-url.mjs）。
