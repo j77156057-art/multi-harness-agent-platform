@@ -162,6 +162,31 @@ def _write_model_config(model: str) -> str:
     return str(path)
 
 
+def _seed_opencode_store() -> None:
+    """Empty but readable opencode store, so the built-in CLI slot is offered.
+
+    The pool refuses slots whose store it cannot read; CI runners have no
+    opencode installation at all. Schema mirrors the CLI's own table.
+    """
+    import os
+    import sqlite3
+
+    home = os.environ.get("XDG_DATA_HOME")
+    if not home:
+        return
+    path = Path(home) / "opencode" / "opencode.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS session_message(id TEXT PRIMARY KEY, session_id TEXT,"
+            " type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT)"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="app.tools.seed_ci")
     parser.add_argument("--base", default="http://127.0.0.1:8848")
@@ -173,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     base = args.base.rstrip("/")
     data_dir = Path(args.data_dir)
+    _seed_opencode_store()
 
     operator_token = _issue_token("human", "operator", "ci operator")
     _write(data_dir / "office-operator.key", operator_token)

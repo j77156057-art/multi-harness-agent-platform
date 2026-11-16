@@ -10,10 +10,10 @@
 //   5. node scripts/verify.mjs
 // 失败或中断都会杀掉两个子进程并删掉临时目录。
 import { spawn } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -33,8 +33,41 @@ const tokens = join(dataDir, 'tokens');
 mkdirSync(modelHome, { recursive: true });
 mkdirSync(tokens, { recursive: true });
 
+// CLI stub：内置额度槽（opencode/codebuddy/qoder）要求「二进制可执行 + store 可读」，
+// CI runner 两样都没有，额度池相关的冒烟会等一份永远不来的模型清单。补 stub 并置于
+// PATH 头部以 shadow 开发机真 CLI，让本地与 CI 走同一条发现路径。store 由 seed_ci 播种。
+const binDir = join(dataDir, 'bin');
+const xdgDir = join(dataDir, 'xdg');
+mkdirSync(binDir, { recursive: true });
+mkdirSync(xdgDir, { recursive: true });
+const cliStubs = {
+  opencode: {
+    sh: '#!/bin/sh\nif [ "$1" = "models" ]; then printf \'opencode/minimax-m3.1-flash-free\\nopencode/beam-free\\nopencode/gpt-free\\nopencode/paid-pro\\n\'; fi\nexit 0\n',
+    cmd: '@echo off\r\nif "%~1"=="models" (\r\n  echo opencode/minimax-m3.1-flash-free\r\n  echo opencode/beam-free\r\n  echo opencode/gpt-free\r\n  echo opencode/paid-pro\r\n)\r\nexit /b 0\r\n',
+  },
+  codebuddy: {
+    sh: '#!/bin/sh\necho "Currently supported: (hy3, minimax-m3.1-flash)"\nexit 0\n',
+    cmd: '@echo off\r\necho Currently supported: (hy3, minimax-m3.1-flash)\r\nexit /b 0\r\n',
+  },
+  qoderclicn: {
+    sh: '#!/bin/sh\nif [ "$1" = "--list-models" ]; then printf \'Qwen3.8-Flash\\nDeepSeek-Flash\\n\'; fi\nexit 0\n',
+    cmd: '@echo off\r\nif "%~1"=="--list-models" (\r\n  echo Qwen3.8-Flash\r\n  echo DeepSeek-Flash\r\n)\r\nexit /b 0\r\n',
+  },
+};
+for (const [name, stub] of Object.entries(cliStubs)) {
+  if (process.platform === 'win32') {
+    writeFileSync(join(binDir, `${name}.cmd`), stub.cmd);
+  } else {
+    const file = join(binDir, name);
+    writeFileSync(file, stub.sh);
+    chmodSync(file, 0o755);
+  }
+}
+
 const env = {
   ...process.env,
+  PATH: binDir + delimiter + (process.env.PATH || ''),
+  XDG_DATA_HOME: xdgDir,
   AP_PORT: backendPort,
   AP_AUTH_MODE: 'enforce',
   AP_ADMIN_SUBJECTS: 'codex-window-admin',
