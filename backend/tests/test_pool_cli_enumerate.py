@@ -105,7 +105,15 @@ def test_one_failed_spawn_is_retried_right_away(tmp_path, monkeypatch):
     这台机器上同时跑着 opencode 窗口，`opencode models` 偶发失败一次就把 41 个
     模型从选择器里抹掉（界面只剩已定档的那几个）。所以空答案要先问第二次。
     """
-    monkeypatch.setattr(sources, "time", type("Clock", (), {"monotonic": staticmethod(lambda: 0.0), "sleep": staticmethod(lambda _seconds: None)}))
+    monkeypatch.setattr(
+        sources,
+        "time",
+        type(
+            "Clock",
+            (),
+            {"monotonic": staticmethod(lambda: 0.0), "sleep": staticmethod(lambda _seconds: None)},
+        ),
+    )
     calls = {"count": 0}
 
     def fails_once(binary: str, args: list[str]) -> list[str]:
@@ -314,7 +322,11 @@ def test_a_non_cli_upstream_can_be_retiered_and_withdrawn(tmp_path):
     assert hit and hit[0].tier == "free", "人的说法要盖过代码默认"
 
     assert sources.withdraw_upstream_tier("opencode:1", config_path=config) is True
-    back = [u for u in sources.discover_upstreams(include_cli=False, config_path=config) if u.name == "opencode:1"]
+    back = [
+        u
+        for u in sources.discover_upstreams(include_cli=False, config_path=config)
+        if u.name == "opencode:1"
+    ]
     assert back and back[0].tier == "metered", "撤掉就回到代码默认"
     assert sources.withdraw_upstream_tier("opencode:1", config_path=config) is False
 
@@ -337,7 +349,9 @@ def test_the_users_own_key_tier_is_never_overridden(tmp_path):
     config = tmp_path / "config.json"
     sources.declare_upstream_tier("my-key", "metered", config_path=config)
     user = [
-        sources.Upstream(name="my-key", protocol="openai_chat", base_url="https://x/v1", tier="user")
+        sources.Upstream(
+            name="my-key", protocol="openai_chat", base_url="https://x/v1", tier="user"
+        )
     ]
     assert sources._apply_upstream_tiers(user, config)[0].tier == "user"
 
@@ -352,14 +366,20 @@ def test_a_declaration_can_be_taken_back(tmp_path):
 
     config = tmp_path / "config.json"
     declare_cli_model(
-        "opencode-cli", "opencode/beam-free", "metered", config_path=config, roster=["opencode/beam-free"]
+        "opencode-cli",
+        "opencode/beam-free",
+        "metered",
+        config_path=config,
+        roster=["opencode/beam-free"],
     )
     assert withdraw_cli_model("opencode-cli", "beam-free", config_path=config) is True
     assert json.loads(config.read_text(encoding="utf-8"))["cli_slots"] == []
     # 再撤一次什么都没得撤
     assert withdraw_cli_model("opencode-cli", "beam-free", config_path=config) is False
     # 内置档位不在声明文件里 —— 撤不到它
-    assert withdraw_cli_model("opencode-cli", "minimax-m3.1-flash-free", config_path=config) is False
+    assert (
+        withdraw_cli_model("opencode-cli", "minimax-m3.1-flash-free", config_path=config) is False
+    )
 
 
 def test_withdraw_does_not_touch_other_declarations(tmp_path):
@@ -367,8 +387,12 @@ def test_withdraw_does_not_touch_other_declarations(tmp_path):
 
     config = tmp_path / "config.json"
     roster = ["opencode/beam-free", "opencode/big-pickle"]
-    declare_cli_model("opencode-cli", "opencode/beam-free", "free", config_path=config, roster=roster)
-    declare_cli_model("opencode-cli", "opencode/big-pickle", "free", config_path=config, roster=roster)
+    declare_cli_model(
+        "opencode-cli", "opencode/beam-free", "free", config_path=config, roster=roster
+    )
+    declare_cli_model(
+        "opencode-cli", "opencode/big-pickle", "free", config_path=config, roster=roster
+    )
 
     assert withdraw_cli_model("opencode-cli", "opencode/beam-free", config_path=config) is True
     left = json.loads(config.read_text(encoding="utf-8"))["cli_slots"]

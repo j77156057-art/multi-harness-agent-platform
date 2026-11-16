@@ -72,7 +72,8 @@ def classify_production() -> dict[str, Any]:
 
 def previous_slot_mapping() -> dict[str, Any]:
     previous = {
-        row["case_id"]: row for row in read_json(PREVIOUS_OUT / "results.json", [])
+        row["case_id"]: row
+        for row in read_json(PREVIOUS_OUT / "results.json", [])
         if row["condition"] == "B"
     }
     mapping = {}
@@ -122,16 +123,23 @@ def freeze() -> None:
         "base_script_sha256": base.sha(Path(base.__file__).read_text(encoding="utf-8")),
     }
     write_json(FROZEN, protocol)
-    print(json.dumps({
-        "frozen": str(FROZEN),
-        "actionable": classification["actionable"],
-        "unactionable": classification["unactionable"],
-        "distribution": classification["distribution"],
-        "hard_fits": len(classification["hard_fits"]),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "frozen": str(FROZEN),
+                "actionable": classification["actionable"],
+                "unactionable": classification["unactionable"],
+                "distribution": classification["distribution"],
+                "hard_fits": len(classification["hard_fits"]),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
-def _score(case: dict[str, Any], result: dict[str, Any] | None, source_task_id: str) -> dict[str, Any]:
+def _score(
+    case: dict[str, Any], result: dict[str, Any] | None, source_task_id: str
+) -> dict[str, Any]:
     if case["case_id"] == "AB-01":
         if not result or not result.get("tasks"):
             return {"hit": False, "defect_present": True, "reason": "no valid task result"}
@@ -154,7 +162,8 @@ def run(case_ids: list[str] | None = None) -> None:
     if not FROZEN.exists():
         raise RuntimeError("freeze slot protocol first")
     previous = {
-        row["case_id"]: row for row in read_json(PREVIOUS_OUT / "results.json", [])
+        row["case_id"]: row
+        for row in read_json(PREVIOUS_OUT / "results.json", [])
         if row["condition"] == "B"
     }
     outcomes: list[dict[str, Any]] = []
@@ -183,15 +192,20 @@ def run(case_ids: list[str] | None = None) -> None:
         ]
         for case in selected_cases:
             unrelated = base.CASES[(base.CASES.index(case) + 1) % len(base.CASES)]
-            context = base._post(api, "/api/v1/groups/G-1/dispatch", {
-                "request_id": f"slot-context-{case['case_id']}",
-                "title": f"{case['case_id']} · 缺陷场景",
-                "goal": case["requirement"],
-                "harness_id": base.MEMBER,
-                "decided_by": base.ADMIN,
-                "exclusive_paths": [case["path"]],
-                "acceptance": "交付物存在且可检查",
-            }, admin_token)
+            context = base._post(
+                api,
+                "/api/v1/groups/G-1/dispatch",
+                {
+                    "request_id": f"slot-context-{case['case_id']}",
+                    "title": f"{case['case_id']} · 缺陷场景",
+                    "goal": case["requirement"],
+                    "harness_id": base.MEMBER,
+                    "decided_by": base.ADMIN,
+                    "exclusive_paths": [case["path"]],
+                    "acceptance": "交付物存在且可检查",
+                },
+                admin_token,
+            )
             context_id = context["task_id"]
             source_task_id = previous[case["case_id"]]["context_task_id"]
             store = ExperienceStore(Path(temporary) / "admin" / "experience.json")
@@ -250,12 +264,18 @@ def run(case_ids: list[str] | None = None) -> None:
                     "source_task_id": source_task_id,
                     "relevant_experience_id": relevant["experience_id"],
                     "injected_experience_id": (
-                        relevant["experience_id"] if condition == "B"
-                        else unrelated_record["experience_id"] if condition == "C"
+                        relevant["experience_id"]
+                        if condition == "B"
+                        else unrelated_record["experience_id"]
+                        if condition == "C"
                         else None
                     ),
                     "slot": slot_for_experience(
-                        relevant if condition == "B" else unrelated_record if condition == "C" else relevant
+                        relevant
+                        if condition == "B"
+                        else unrelated_record
+                        if condition == "C"
+                        else relevant
                     ),
                 }
                 started = time.monotonic()
@@ -269,14 +289,19 @@ def run(case_ids: list[str] | None = None) -> None:
                     )
                     outcome["result"] = result
                     if result.get("tasks"):
-                        draft = base._post(api, "/api/v1/adapter/admin/plan_draft", {
-                            "group_id": base.GROUP,
-                            "title": f"{case['case_id']}-{condition}-slot",
-                            "goal": case["requirement"],
-                            "tasks": result["tasks"],
-                            "reviewer_harness_ids": [base.MEMBER],
-                            "opened_by": base.ADMIN,
-                        }, admin_token)
+                        draft = base._post(
+                            api,
+                            "/api/v1/adapter/admin/plan_draft",
+                            {
+                                "group_id": base.GROUP,
+                                "title": f"{case['case_id']}-{condition}-slot",
+                                "goal": case["requirement"],
+                                "tasks": result["tasks"],
+                                "reviewer_harness_ids": [base.MEMBER],
+                                "opened_by": base.ADMIN,
+                            },
+                            admin_token,
+                        )
                         outcome["plan_id"] = draft["plan_id"]
                     outcome["machine"] = _score(case, result, source_task_id)
                 except Exception as exc:
@@ -287,9 +312,16 @@ def run(case_ids: list[str] | None = None) -> None:
                 outcome["receipt"] = {
                     key: call.get(key)
                     for key in (
-                        "requested_model", "actual_model", "parameters", "usage",
-                        "provider_cost", "ledger_cost", "duration_seconds", "finish_reason",
-                        "http_status", "error",
+                        "requested_model",
+                        "actual_model",
+                        "parameters",
+                        "usage",
+                        "provider_cost",
+                        "ledger_cost",
+                        "duration_seconds",
+                        "finish_reason",
+                        "http_status",
+                        "error",
                     )
                 }
                 outcomes.append(outcome)
@@ -303,16 +335,30 @@ def run(case_ids: list[str] | None = None) -> None:
                 if spent > base.COST_LIMIT:
                     raise RuntimeError(f"cost limit reached: {spent}")
                 if condition == "B":
-                    base._post(api, f"{decision_base}/{relevant['experience_id']}/decision", {"action": "revoke", "decided_by": "human-1"}, human_token)
+                    base._post(
+                        api,
+                        f"{decision_base}/{relevant['experience_id']}/decision",
+                        {"action": "revoke", "decided_by": "human-1"},
+                        human_token,
+                    )
                 elif condition == "C":
-                    base._post(api, f"{decision_base}/{unrelated_record['experience_id']}/decision", {"action": "revoke", "decided_by": "human-1"}, human_token)
-    write_json(OUT / "environment.json", {
-        "temporary_directory_removed": not Path(temporary).exists(),
-        "production_experience_sha256_before": production_before,
-        "production_experience_sha256_after": base.sha(production.read_text(encoding="utf-8")),
-        "production_unchanged": production_before == base.sha(production.read_text(encoding="utf-8")),
-        "completed_outcomes": len(outcomes),
-    })
+                    base._post(
+                        api,
+                        f"{decision_base}/{unrelated_record['experience_id']}/decision",
+                        {"action": "revoke", "decided_by": "human-1"},
+                        human_token,
+                    )
+    write_json(
+        OUT / "environment.json",
+        {
+            "temporary_directory_removed": not Path(temporary).exists(),
+            "production_experience_sha256_before": production_before,
+            "production_experience_sha256_after": base.sha(production.read_text(encoding="utf-8")),
+            "production_unchanged": production_before
+            == base.sha(production.read_text(encoding="utf-8")),
+            "completed_outcomes": len(outcomes),
+        },
+    )
 
 
 def summarize() -> None:
@@ -323,27 +369,42 @@ def summarize() -> None:
     comparison = []
     for case in base.CASES:
         case_id = case["case_id"]
-        previous_b = next(row for row in previous_rows if row["case_id"] == case_id and row["condition"] == "B")
-        current_b = next(row for row in current_rows if row["case_id"] == case_id and row["condition"] == "B")
-        comparison.append({
-            "case_id": case_id,
-            "previous_hit": previous_b["machine"]["hit"],
-            "current_hit": current_b["machine"]["hit"],
-            "change": (
-                "flipped_to_hit" if not previous_b["machine"]["hit"] and current_b["machine"]["hit"]
-                else "regressed" if previous_b["machine"]["hit"] and not current_b["machine"]["hit"]
-                else "unchanged"
-            ),
-        })
+        previous_b = next(
+            row for row in previous_rows if row["case_id"] == case_id and row["condition"] == "B"
+        )
+        current_b = next(
+            row for row in current_rows if row["case_id"] == case_id and row["condition"] == "B"
+        )
+        comparison.append(
+            {
+                "case_id": case_id,
+                "previous_hit": previous_b["machine"]["hit"],
+                "current_hit": current_b["machine"]["hit"],
+                "change": (
+                    "flipped_to_hit"
+                    if not previous_b["machine"]["hit"] and current_b["machine"]["hit"]
+                    else "regressed"
+                    if previous_b["machine"]["hit"] and not current_b["machine"]["hit"]
+                    else "unchanged"
+                ),
+            }
+        )
     summary["previous_comparison"] = {
         "previous_B_hits": sum(bool(row["previous_hit"]) for row in comparison),
         "current_B_hits": sum(bool(row["current_hit"]) for row in comparison),
-        "delta": sum(bool(row["current_hit"]) for row in comparison) - sum(bool(row["previous_hit"]) for row in comparison),
+        "delta": sum(bool(row["current_hit"]) for row in comparison)
+        - sum(bool(row["previous_hit"]) for row in comparison),
         "rows": comparison,
     }
     summary["slot_classification"] = read_json(FROZEN, {}).get("production_classification")
     write_json(SUMMARY, summary)
-    print(json.dumps({"summary": str(SUMMARY), "previous_comparison": summary["previous_comparison"]}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"summary": str(SUMMARY), "previous_comparison": summary["previous_comparison"]},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def main() -> None:

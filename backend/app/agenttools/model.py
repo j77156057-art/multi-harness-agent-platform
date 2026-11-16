@@ -74,13 +74,14 @@ class PoolChannel:
                 last = f"HTTP {response.status_code}: {body}"
                 # 4xx that is not a rate limit is this request's problem: retry
                 # would send the same thing again.
-                retryable = response.status_code in {408, 409, 425, 429} or response.status_code >= 500
+                retryable = (
+                    response.status_code in {408, 409, 425, 429} or response.status_code >= 500
+                )
                 if attempt < self.retries and retryable:
                     time.sleep(2.0 * (attempt + 1))
                     continue
                 raise ChannelFailed(
-                    f"模型通道拒绝了这次请求（{last}）；"
-                    "换一份额度或换一个模型还能继续"
+                    f"模型通道拒绝了这次请求（{last}）；" "换一份额度或换一个模型还能继续"
                 )
             try:
                 document = response.json()
@@ -98,9 +99,7 @@ class PoolChannel:
             if attempt < self.retries:
                 time.sleep(1.5 * (attempt + 1))
                 continue
-            raise ChannelFailed(
-                f"模型这次没有输出（{last}）；这次没有产出内容，等于通道不可用"
-            )
+            raise ChannelFailed(f"模型这次没有输出（{last}）；这次没有产出内容，等于通道不可用")
         raise ChannelFailed(last or "模型通道失败")
 
 
@@ -147,7 +146,11 @@ def from_bundle(document: object) -> PoolChannel:
     base = str(document.get("base_url") or "").strip()
     token = str(document.get("token") or "").strip()
     model = str(document.get("model") or "").strip()
-    missing = [name for name, value in (("base_url", base), ("token", token), ("model", model)) if not value]
+    missing = [
+        name
+        for name, value in (("base_url", base), ("token", token), ("model", model))
+        if not value
+    ]
     if missing:
         raise ChannelFailed(
             "这次尝试没有可用的模型通道（缺 "

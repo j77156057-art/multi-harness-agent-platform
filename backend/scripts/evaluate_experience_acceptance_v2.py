@@ -10,6 +10,7 @@ RET-03 派单给的是旧禁词清单，当前要求是新三个禁词不出现�
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -87,14 +88,29 @@ CASES: list[dict[str, Any]] = [
         "seeds": {"README.md": README_SEED},
         "checks": [
             _m("delivery_path_exists", "交付路径真实存在", {"path": "ops/review-round-2.md"}),
-            _m("content_min_length", "交付正文非空且达到最低长度", {"path": "ops/review-round-2.md", "min_chars": 40}),
+            _m(
+                "content_min_length",
+                "交付正文非空且达到最低长度",
+                {"path": "ops/review-round-2.md", "min_chars": 40},
+            ),
             _m(
                 "table_header_exact",
                 "意见映射表表头恰好为要求的五列且顺序一致",
-                {"path": "ops/review-round-2.md", "columns": ["意见编号", "审查意见", "本轮处置", "状态", "证据链接"]},
+                {
+                    "path": "ops/review-round-2.md",
+                    "columns": ["意见编号", "审查意见", "本轮处置", "状态", "证据链接"],
+                },
             ),
-            _m("table_has_rows", "映射表至少有一条数据行", {"path": "ops/review-round-2.md", "min_rows": 1}),
-            _m("old_values_absent", "交付正文不得出现旧值", {"path": "ops/review-round-2.md", "tokens": []}),
+            _m(
+                "table_has_rows",
+                "映射表至少有一条数据行",
+                {"path": "ops/review-round-2.md", "min_rows": 1},
+            ),
+            _m(
+                "old_values_absent",
+                "交付正文不得出现旧值",
+                {"path": "ops/review-round-2.md", "tokens": []},
+            ),
             _m("diff_only_allowed", "git diff 只动允许路径", {"paths": ["ops/review-round-2.md"]}),
             _m("worktree_clean", "提交后工作区干净", {"porcelain": ""}),
         ],
@@ -125,9 +141,21 @@ CASES: list[dict[str, Any]] = [
         "seeds": {"README.md": README_SEED},
         "checks": [
             _m("delivery_path_exists", "交付路径真实存在", {"path": "ops/first-round.md"}),
-            _m("content_min_length", "交付正文非空且达到最低长度", {"path": "ops/first-round.md", "min_chars": 40}),
-            _m("pending_items_exactly_two", "当前口径要求待补项真实条目恰好两条", {"path": "ops/first-round.md", "count": 2}),
-            _m("old_values_absent", "交付正文不得出现旧路径或旧数量", {"path": "ops/first-round.md", "tokens": []}),
+            _m(
+                "content_min_length",
+                "交付正文非空且达到最低长度",
+                {"path": "ops/first-round.md", "min_chars": 40},
+            ),
+            _m(
+                "pending_items_exactly_two",
+                "当前口径要求待补项真实条目恰好两条",
+                {"path": "ops/first-round.md", "count": 2},
+            ),
+            _m(
+                "old_values_absent",
+                "交付正文不得出现旧路径或旧数量",
+                {"path": "ops/first-round.md", "tokens": []},
+            ),
             _m("diff_only_allowed", "git diff 只动允许路径", {"paths": ["ops/first-round.md"]}),
             _m("worktree_clean", "提交后工作区干净", {"porcelain": ""}),
         ],
@@ -151,15 +179,31 @@ CASES: list[dict[str, Any]] = [
         "seeds": {"README.md": README_SEED},
         "checks": [
             _m("delivery_path_exists", "交付路径真实存在", {"path": "ops/acceptance-wording.md"}),
-            _m("content_min_length", "交付正文非空且达到最低长度", {"path": "ops/acceptance-wording.md", "min_chars": 40}),
+            _m(
+                "content_min_length",
+                "交付正文非空且达到最低长度",
+                {"path": "ops/acceptance-wording.md", "min_chars": 40},
+            ),
             _m(
                 "banned_new_absent",
                 "交付正文不得出现当前三个禁词",
                 {"path": "ops/acceptance-wording.md", "tokens": ["草稿", "待定", "稍后补充"]},
             ),
-            _m("old_values_absent", "交付正文不得带入旧禁词清单", {"path": "ops/acceptance-wording.md", "tokens": []}),
-            _m("topic_token_present", "正文确实在写验收说明", {"path": "ops/acceptance-wording.md", "tokens": ["验收"]}),
-            _m("diff_only_allowed", "git diff 只动允许路径", {"paths": ["ops/acceptance-wording.md"]}),
+            _m(
+                "old_values_absent",
+                "交付正文不得带入旧禁词清单",
+                {"path": "ops/acceptance-wording.md", "tokens": []},
+            ),
+            _m(
+                "topic_token_present",
+                "正文确实在写验收说明",
+                {"path": "ops/acceptance-wording.md", "tokens": ["验收"]},
+            ),
+            _m(
+                "diff_only_allowed",
+                "git diff 只动允许路径",
+                {"paths": ["ops/acceptance-wording.md"]},
+            ),
             _m("worktree_clean", "提交后工作区干净", {"porcelain": ""}),
         ],
     },
@@ -209,7 +253,9 @@ def case_spec(case: dict[str, Any]) -> dict[str, Any]:
         expected = dict(check["expected"])
         if check["id"] == "old_values_absent":
             expected["tokens"] = list(case["old_values"])
-        checks.append({"id": check["id"], "kind": check["kind"], "text": check["text"], "expected": expected})
+        checks.append(
+            {"id": check["id"], "kind": check["kind"], "text": check["text"], "expected": expected}
+        )
     return {
         "case_id": case["case_id"],
         "defect": case["defect"],
@@ -219,7 +265,9 @@ def case_spec(case: dict[str, Any]) -> dict[str, Any]:
         "dispatch": case["dispatch"],
         "path": case["path"],
         "old_values": list(case["old_values"]),
-        "seed_files": [{"path": path, "sha256": sha(content)} for path, content in case["seeds"].items()],
+        "seed_files": [
+            {"path": path, "sha256": sha(content)} for path, content in case["seeds"].items()
+        ],
         "checks": checks,
     }
 
@@ -235,7 +283,9 @@ def spec_sha() -> str:
 
 def executor_prompt(case: dict[str, Any]) -> str:
     dispatch = json.dumps(case["dispatch"], ensure_ascii=False, indent=2)
-    seeds = "\n\n".join(f"--- 文件 {path} ---\n{content}" for path, content in case["seeds"].items())
+    seeds = "\n\n".join(
+        f"--- 文件 {path} ---\n{content}" for path, content in case["seeds"].items()
+    )
     return (
         "你是本仓库的执行者。请按下面的派单完成交付，在仓库中真实创建或修改文件。\n\n"
         f"派单（JSON）：\n{dispatch}\n\n"
@@ -273,7 +323,9 @@ def retry_prompt(case: dict[str, Any], gaps: list[str], files: dict[str, str]) -
 
 def ledger(token: str) -> dict[str, Any]:
     try:
-        response = httpx.get(POOL_STATUS, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+        response = httpx.get(
+            POOL_STATUS, headers={"Authorization": f"Bearer {token}"}, timeout=30.0
+        )
         response.raise_for_status()
         upstreams = (response.json().get("usage") or {}).get("upstreams") or {}
         return dict(upstreams.get("minimax") or {})
@@ -351,12 +403,13 @@ def call_pool(
                 "actual_model": document.get("model"),
                 "usage": usage,
                 "finish_reason": (document.get("choices") or [{}])[0].get("finish_reason"),
-                "provider_cost": cost if isinstance(cost, (int, float)) else None,
+                "provider_cost": cost if isinstance(cost, int | float) else None,
                 "ledger_before": before,
                 "ledger_after": after,
                 "ledger_cost": (
                     after.get("credits") - before.get("credits")
-                    if isinstance(after.get("credits"), (int, float)) and isinstance(before.get("credits"), (int, float))
+                    if isinstance(after.get("credits"), int | float)
+                    and isinstance(before.get("credits"), int | float)
                     else None
                 ),
                 "content": content,
@@ -420,10 +473,8 @@ def force_rmtree(path: Path) -> bool:
             pass
 
     for item in path.rglob("*"):
-        try:
+        with contextlib.suppress(Exception):
             os.chmod(item, stat.S_IWRITE)
-        except Exception:
-            pass
     shutil.rmtree(path, onerror=onerror)
     return not path.exists()
 
@@ -516,7 +567,9 @@ def store_repo_artifacts(case_id: str, attempt: int, repo: Path, base_sha: str) 
     head = git(repo, "rev-parse", "HEAD", check=False).stdout.strip()
     patch = git(repo, "diff", base_sha, head).stdout if head and head != base_sha else ""
     (target / "diff.patch").write_text(patch, encoding="utf-8")
-    stat_text = git(repo, "diff", "--stat", base_sha, head).stdout if head and head != base_sha else ""
+    stat_text = (
+        git(repo, "diff", "--stat", base_sha, head).stdout if head and head != base_sha else ""
+    )
     (target / "diff-stat.txt").write_text(stat_text, encoding="utf-8")
     (target / "status.txt").write_text(git(repo, "status", "--porcelain").stdout, encoding="utf-8")
 
@@ -599,7 +652,9 @@ def run_checks(
     results: list[dict[str, Any]] = []
     table_cache: dict[str, list[dict[str, Any]]] = {}
 
-    def add(check: dict[str, Any], passed: bool, observed: Any, evidence: str, gap: str | None = None):
+    def add(
+        check: dict[str, Any], passed: bool, observed: Any, evidence: str, gap: str | None = None
+    ):
         results.append(
             {
                 "check_id": check["id"],
@@ -621,7 +676,9 @@ def run_checks(
 
         if check_id == "delivery_path_exists":
             passed = text is not None and bool(text.strip())
-            add(check, passed, f"{path} {'存在' if passed else '不存在'}", f"{len(text or '')} 字符")
+            add(
+                check, passed, f"{path} {'存在' if passed else '不存在'}", f"{len(text or '')} 字符"
+            )
             continue
 
         if check_id == "content_min_length":
@@ -636,35 +693,71 @@ def run_checks(
             table_cache[path] = tables
             header = tables[0]["header"] if tables else []
             passed = header == expected["columns"]
-            add(check, passed, header, f"{path} 的表头单元格", None if passed else f"{path} 的表头为 {header}，要求依次为 {expected['columns']}")
+            add(
+                check,
+                passed,
+                header,
+                f"{path} 的表头单元格",
+                None if passed else f"{path} 的表头为 {header}，要求依次为 {expected['columns']}",
+            )
             continue
 
         if check_id == "table_has_rows":
             tables = table_cache.get(path) or markdown_tables(text or "")
             rows = tables[0]["rows"] if tables else []
             passed = len(rows) >= int(expected["min_rows"])
-            add(check, passed, f"{len(rows)} 条数据行", f"{path} 映射表", None if passed else f"{path} 的映射表没有数据行")
+            add(
+                check,
+                passed,
+                f"{len(rows)} 条数据行",
+                f"{path} 映射表",
+                None if passed else f"{path} 的映射表没有数据行",
+            )
             continue
 
         if check_id == "banned_new_absent":
             found = hits(text or "", expected["tokens"])
-            add(check, not found, found, f"{path} 实际 grep 新禁词", None if not found else "交付正文命中新禁词：" + "、".join(found))
+            add(
+                check,
+                not found,
+                found,
+                f"{path} 实际 grep 新禁词",
+                None if not found else "交付正文命中新禁词：" + "、".join(found),
+            )
             continue
 
         if check_id == "old_values_absent":
             found = hits(text or "", expected["tokens"])
-            add(check, not found, found, f"{path} 实际 grep 旧值", None if not found else "交付正文命中旧值：" + "、".join(found))
+            add(
+                check,
+                not found,
+                found,
+                f"{path} 实际 grep 旧值",
+                None if not found else "交付正文命中旧值：" + "、".join(found),
+            )
             continue
 
         if check_id == "pending_items_exactly_two":
             count, items, how = pending_items(text or "")
             passed = count == int(expected["count"])
-            add(check, passed, {"count": count, "items": items, "how": how}, f"{path} 待补项小节", None if passed else f"{path} 的待补项为 {count} 条，要求 {expected['count']} 条")
+            add(
+                check,
+                passed,
+                {"count": count, "items": items, "how": how},
+                f"{path} 待补项小节",
+                None if passed else f"{path} 的待补项为 {count} 条，要求 {expected['count']} 条",
+            )
             continue
 
         if check_id == "topic_token_present":
             missing = [token for token in expected["tokens"] if not token_hit(text or "", token)]
-            add(check, not missing, missing, f"{path} 实际 grep", None if not missing else "正文缺少关键词：" + "、".join(missing))
+            add(
+                check,
+                not missing,
+                missing,
+                f"{path} 实际 grep",
+                None if not missing else "正文缺少关键词：" + "、".join(missing),
+            )
             continue
 
         if check_id == "diff_only_allowed":
@@ -672,13 +765,25 @@ def run_checks(
             changed = sorted({row["path"] for row in changes})
             allowed = sorted(expected["paths"])
             passed = changed == allowed
-            add(check, passed, changes, f"git diff --name-status {base_sha[:8]}..{head_sha[:8]}", None if passed else f"git diff 变更路径为 {changed}，要求仅 {allowed}")
+            add(
+                check,
+                passed,
+                changes,
+                f"git diff --name-status {base_sha[:8]}..{head_sha[:8]}",
+                None if passed else f"git diff 变更路径为 {changed}，要求仅 {allowed}",
+            )
             continue
 
         if check_id == "worktree_clean":
             porcelain = git(repo, "status", "--porcelain").stdout
             passed = porcelain.strip() == ""
-            add(check, passed, porcelain.strip(), "git status --porcelain", None if passed else f"提交后工作区仍有改动：{porcelain.strip()[:200]}")
+            add(
+                check,
+                passed,
+                porcelain.strip(),
+                "git status --porcelain",
+                None if passed else f"提交后工作区仍有改动：{porcelain.strip()[:200]}",
+            )
             continue
 
         raise RuntimeError(f"unknown check {check_id}")
@@ -720,7 +825,9 @@ def _raw_fields(payload: dict[str, Any] | None) -> str:
     return " ".join(str(payload.get(key) or "") for key in ("conflict", "question", "notes"))
 
 
-def conflict_flag(case: dict[str, Any], payload: dict[str, Any] | None, files: dict[str, str]) -> bool:
+def conflict_flag(
+    case: dict[str, Any], payload: dict[str, Any] | None, files: dict[str, str]
+) -> bool:
     kind = case["conflict_kind"]
     if not kind:
         return False
@@ -763,7 +870,9 @@ def classify(
             return "copied_wrong"
         return "missed"
     if case["defect"] == "count_conflict":
-        observed = next(check for check in checks if check["check_id"] == "pending_items_exactly_two")["observed"]
+        observed = next(
+            check for check in checks if check["check_id"] == "pending_items_exactly_two"
+        )["observed"]
         count = observed.get("count") if isinstance(observed, dict) else 0
         if count == 2:
             return "transferred"
@@ -796,7 +905,11 @@ def execute_attempt(
     outcome: dict[str, Any] = {}
     try:
         repo, base_sha = init_repo(case, root)
-        prompt = executor_prompt(case) if feedback is None else retry_prompt(case, feedback[0], feedback[1])
+        prompt = (
+            executor_prompt(case)
+            if feedback is None
+            else retry_prompt(case, feedback[0], feedback[1])
+        )
         call = call_pool(prompt, case["case_id"], attempt, token)
         written: list[str] = []
         rejected: list[str] = []
@@ -825,7 +938,9 @@ def execute_attempt(
             "base_sha": base_sha,
             "head_sha": head_sha,
             "diff": diff_paths(repo, base_sha, head_sha),
-            "diff_stat": git(repo, "diff", "--stat", base_sha, head_sha).stdout.strip() if head_sha != base_sha else "",
+            "diff_stat": git(repo, "diff", "--stat", base_sha, head_sha).stdout.strip()
+            if head_sha != base_sha
+            else "",
             "files": files,
             "checks": checks,
             "failed_checks": [check["check_id"] for check in failed],
@@ -882,9 +997,7 @@ def freeze() -> None:
         "preflight_prompt_sha256": sha('Return only {"ready":true}.'),
         "reference_hashes": {
             "production_experience": file_sha(SOURCE),
-            "history": {
-                name: tree_sha(HISTORY / name) for name in HISTORY_VERSIONS
-            },
+            "history": {name: tree_sha(HISTORY / name) for name in HISTORY_VERSIONS},
             "previous_acceptance_v1": tree_sha(PREVIOUS),
         },
     }
@@ -913,7 +1026,9 @@ def verify_frozen() -> dict[str, Any]:
     ]
     current = file_sha(Path(__file__).resolve())
     if current not in allowed:
-        raise RuntimeError("判分脚本在冻结后被修改，且没有 post_freeze_changes 记录；必须按 bug 流程重新全量跑")
+        raise RuntimeError(
+            "判分脚本在冻结后被修改，且没有 post_freeze_changes 记录；必须按 bug 流程重新全量跑"
+        )
     if spec_sha() != protocol["initial_freeze"]["check_spec_sha256"]:
         raise RuntimeError("每任务期望值在冻结后被修改；必须按 bug 流程重新全量跑")
     return protocol
@@ -961,7 +1076,7 @@ def refreeze(note: str, evidence: str) -> None:
 
 
 def run() -> None:
-    protocol = verify_frozen()
+    verify_frozen()
     token = (ROOT / "data" / "platform-member-1.key").read_text(encoding="utf-8").strip()
     production_before = file_sha(SOURCE)
     history_before = {name: tree_sha(HISTORY / name) for name in HISTORY_VERSIONS}
@@ -997,7 +1112,9 @@ def run() -> None:
             row["new_problems"] = new_problems(first, second)
             row["fixed_checks"] = sorted(set(first["failed_checks"]) - set(second["failed_checks"]))
             row["final_classification"] = second["classification"]
-            row["correct_behavior"] = second["mechanical_pass"] or second["classification"] == "flagged_conflict"
+            row["correct_behavior"] = (
+                second["mechanical_pass"] or second["classification"] == "flagged_conflict"
+            )
             row["final_pass"] = second["mechanical_pass"]
         results.append(row)
         write_json(RESULTS, results)
@@ -1036,10 +1153,10 @@ def run() -> None:
 
 def _provider_cost(record: dict[str, Any]) -> float:
     value = record.get("provider_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     value = record.get("ledger_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     return 0.0
 
@@ -1091,7 +1208,8 @@ def finalize() -> None:
         "fixed_after_retry": sum(row["retry_used"] and row["final_pass"] for row in table),
         "flagged_conflict": sum(row["final_classification"] == "flagged_conflict" for row in table),
         "still_failing": sum(
-            (not row["final_pass"]) and row["final_classification"] != "flagged_conflict" for row in table
+            (not row["final_pass"]) and row["final_classification"] != "flagged_conflict"
+            for row in table
         ),
         "new_problems": sum(bool(row["new_problems"]) for row in table),
     }
@@ -1105,11 +1223,21 @@ def finalize() -> None:
         "table": table,
         "cost": {
             "provider_returned_cost_sum": round(sum(_provider_cost(item) for item in receipts), 6),
-            "provider_cost_missing_calls": sum(item.get("provider_cost") is None for item in receipts),
-            "ledger_cost_sum": round(sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6),
-            "prompt_tokens": sum(int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts),
-            "completion_tokens": sum(int((item.get("usage") or {}).get("completion_tokens") or 0) for item in receipts),
-            "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts),
+            "provider_cost_missing_calls": sum(
+                item.get("provider_cost") is None for item in receipts
+            ),
+            "ledger_cost_sum": round(
+                sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6
+            ),
+            "prompt_tokens": sum(
+                int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts
+            ),
+            "completion_tokens": sum(
+                int((item.get("usage") or {}).get("completion_tokens") or 0) for item in receipts
+            ),
+            "total_tokens": sum(
+                int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts
+            ),
             "finish_reasons": dict(Counter(str(item.get("finish_reason")) for item in receipts)),
             "calls": len(receipts),
         },
@@ -1123,7 +1251,9 @@ def finalize() -> None:
     }
     write_json(SUMMARY, summary)
     write_json(OUT / "rows.json", table)
-    print(json.dumps({key: summary[key] for key in ("counts", "cost")}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps({key: summary[key] for key in ("counts", "cost")}, ensure_ascii=False, indent=2)
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -1155,7 +1285,9 @@ GOOD = {
 }
 
 BAD = {
-    "RET-01": {"review-round-2.md": "# 第二轮复盘\n\n## 意见映射表\n\n| 意见编号 | 审查意见 | 本轮处置 | 状态 | 证据链接 |\n| --- | --- | --- | --- | --- |\n| F1 | 列名 | 已改 | 已补 | x |\n"},
+    "RET-01": {
+        "review-round-2.md": "# 第二轮复盘\n\n## 意见映射表\n\n| 意见编号 | 审查意见 | 本轮处置 | 状态 | 证据链接 |\n| --- | --- | --- | --- | --- |\n| F1 | 列名 | 已改 | 已补 | x |\n"
+    },
     "RET-02": {
         "ops/first-round.md": "# 第一轮交付说明\n\n## 待补项\n\n1. 补齐验收记录。\n2. 补充负责人。\n3. 补充完成时间。\n"
     },
@@ -1171,7 +1303,11 @@ def selftest() -> None:
         root = Path(tempfile.mkdtemp(prefix=f"acceptance-v2-selftest-{case['case_id']}-"))
         try:
             repo, base_sha = init_repo(case, root)
-            for path, content in GOOD[case["case_id"]].items() if isinstance(GOOD[case["case_id"]], dict) else [(case["path"], GOOD[case["case_id"]])]:
+            for path, content in (
+                GOOD[case["case_id"]].items()
+                if isinstance(GOOD[case["case_id"]], dict)
+                else [(case["path"], GOOD[case["case_id"]])]
+            ):
                 target = repo / path
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(content, encoding="utf-8", newline="\n")
@@ -1196,8 +1332,12 @@ def selftest() -> None:
             git(bad_repo, "commit", "-m", "selftest bad")
             bad_head = git(bad_repo, "rev-parse", "HEAD").stdout.strip()
             bad_checks = run_checks(case, bad_repo, bad_base, bad_head, snapshot(bad_repo), [])
-            if case["expected_first_check"] not in [check["check_id"] for check in bad_checks if not check["pass"]]:
-                failures.append(f"{case['case_id']} 不合格样例没有命中预期检查 {case['expected_first_check']}")
+            if case["expected_first_check"] not in [
+                check["check_id"] for check in bad_checks if not check["pass"]
+            ]:
+                failures.append(
+                    f"{case['case_id']} 不合格样例没有命中预期检查 {case['expected_first_check']}"
+                )
         finally:
             force_rmtree(bad_root)
 

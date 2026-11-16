@@ -15,9 +15,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.acceptance.flow_gate import TOKENS, frozen_identity, judge_text  # noqa: E402
+import evaluate_experience_acceptance_v5 as v5  # noqa: E402
 
-import evaluate_experience_acceptance_v5 as V5  # noqa: E402
+from app.acceptance.flow_gate import TOKENS, frozen_identity, judge_text  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[2] / "artifacts" / "experience-acceptance-flow" / "v1"
 
@@ -33,11 +33,11 @@ def _hit_key(hit: dict) -> tuple:
 
 
 def main() -> int:
-    rows = V5.all_texts()
+    rows = v5.all_texts()
     results = []
     for row in rows:
-        old_verdict, old_hits = V5.new_verdict(row)
-        tokens = V5.BANNED_TOKENS[f"{row['source']}/{row['case_id']}"]
+        old_verdict, old_hits = v5.new_verdict(row)
+        tokens = v5.BANNED_TOKENS[f"{row['source']}/{row['case_id']}"]
         new_verdict, new_hits = judge_text(
             row["text"],
             tokens=tokens,

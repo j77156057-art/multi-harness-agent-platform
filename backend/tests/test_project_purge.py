@@ -10,15 +10,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.auth.tokens import TokenService
 from app.config import settings
 from app.events.store import EventStore
 from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
-from app.spec import EventKind
 from app.scheduler.runner import SWEEPS, run_all_sweeps
 from app.scheduler.sweeps import sweep_project_trash
+from app.spec import EventKind
 from tests.api_support import make_client
 
 OPERATOR = "office-operator"
@@ -81,7 +81,7 @@ def test_a_project_past_the_retention_window_is_purged_with_its_tasks(tmp_path, 
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-old", "proj-old-g1", "T-OLD")
     # 进回收站 8 天前（超过 7 天）。
-    old = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-old'", (old,))
 
@@ -103,7 +103,7 @@ def test_a_project_past_the_retention_window_is_purged_with_its_tasks(tmp_path, 
 def test_a_project_still_inside_the_window_is_untouched(tmp_path, monkeypatch):
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-new", "proj-new-g1", "T-NEW")
-    recent = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    recent = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-new'", (recent,))
 
@@ -116,7 +116,7 @@ def test_purging_one_project_leaves_the_other_alone(tmp_path, monkeypatch):
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-a", "proj-a-g1", "T-A")
     _seed(client, database, token, "proj-b", "proj-b-g1", "T-B")
-    old = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETAIN_DAYS + 3)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 3)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-a'", (old,))
 
@@ -142,11 +142,11 @@ def test_a_project_that_is_not_in_the_trash_is_never_purged(tmp_path, monkeypatc
 def test_the_sweep_reports_what_it_deleted(tmp_path, monkeypatch):
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-sweep", "proj-sweep-g1", "T-SWEEP")
-    old = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETAIN_DAYS + 2)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 2)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-sweep'", (old,))
 
-    report = sweep_project_trash(database, now=datetime.now(timezone.utc))
+    report = sweep_project_trash(database, now=datetime.now(UTC))
 
     assert report.sweep == "project_trash"
     assert report.actions == 1
@@ -232,7 +232,7 @@ def test_a_project_with_applications_and_allocations_purges_without_fk_violation
     """
     client, database, token = _env(tmp_path, monkeypatch)
     _seed_allocation(client, database, token, "proj-alloc", "proj-alloc-g1", "T-ALLOC")
-    old = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-alloc'", (old,))
 
@@ -262,11 +262,11 @@ def test_a_project_with_applications_and_allocations_purges_without_fk_violation
 def test_running_the_whole_family_does_not_resurrect_or_crash(tmp_path, monkeypatch):
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-full", "proj-full-g1", "T-FULL")
-    old = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETAIN_DAYS + 5)).isoformat()
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 5)).isoformat()
     with database.transaction() as conn:
         conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-full'", (old,))
 
-    reports = run_all_sweeps(database, now=datetime.now(timezone.utc))
+    reports = run_all_sweeps(database, now=datetime.now(UTC))
     names = [item.sweep for item in reports]
     assert "project_trash" in names
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-full'")

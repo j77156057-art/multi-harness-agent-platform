@@ -490,7 +490,10 @@ class RuntimeDriver:
                 # 发起，仍要过同一个闸门。这里把它记成跳过而不是悄悄跳过：每一轮都要
                 # 看得见"有几条等着人确认"，否则活会静静地躺在 approved 里没人知道。
                 merge_skipped.append(
-                    Skipped(task_id, "approved, waiting for a person or the administrator to confirm the merge")
+                    Skipped(
+                        task_id,
+                        "approved, waiting for a person or the administrator to confirm the merge",
+                    )
                 )
                 continue
             merge_candidates.append(

@@ -9,8 +9,6 @@
 
 from __future__ import annotations
 
-import re
-
 from app.spec import (
     HUMAN_WAIT_STATES,
     OWNER_STATES,

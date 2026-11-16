@@ -63,7 +63,10 @@ def load_review_rules(path: Path | str | None = None) -> tuple[tuple[str, ...], 
     except FileNotFoundError:
         return DEFAULT_CRITERIA, None
     except (OSError, ValueError) as exc:
-        return DEFAULT_CRITERIA, f"{target.name} is unreadable ({type(exc).__name__}); using built-in rules"
+        return (
+            DEFAULT_CRITERIA,
+            f"{target.name} is unreadable ({type(exc).__name__}); using built-in rules",
+        )
     if not isinstance(payload, dict):
         return DEFAULT_CRITERIA, f"{target.name} is not a JSON object; using built-in rules"
     raw = payload.get("criteria")

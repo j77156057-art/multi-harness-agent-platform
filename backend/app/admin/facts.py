@@ -54,10 +54,10 @@ _STATUS_LABEL = {
     "stale": "执行中断",
     "cancelled": "已取消",
 }
-_STATUS_WORDS = (
-    "方案草案|验收返修|交付验证|等待人工|验收通过|执行中断|待领取|待验收|执行中|合并中|已合并|已取消|执行"
+_STATUS_WORDS = "方案草案|验收返修|交付验证|等待人工|验收通过|执行中断|待领取|待验收|执行中|合并中|已合并|已取消|执行"
+_CURRENT_RE = re.compile(
+    rf"(?:当前|目前|现在)(?:正在处于|正在|处于|状态为|状态是|是|为|：|:)?\s*[「『]?(?:{_STATUS_WORDS})[」』]?"
 )
-_CURRENT_RE = re.compile(rf"(?:当前|目前|现在)(?:正在处于|正在|处于|状态为|状态是|是|为|：|:)?\s*[「『]?(?:{_STATUS_WORDS})[」』]?")
 _NEXT_RE = re.compile(r"下一步(?:是|为|：|:)?\s*([^。！？\n]+)")
 _COUNT_RE = re.compile(r"((?:本群|本项目|当前项目)?共(?:有|计)?\s*)(\d+)(\s*条任务)")
 _PATH_RE = re.compile(r"(允许修改(?:的)?(?:路径|文件)(?:为|是|：|:)?\s*)([^。！？\n]+)")
@@ -91,7 +91,9 @@ def _executor(task: dict[str, Any]) -> str:
     return str(task.get("owner") or task.get("executor") or "").strip()
 
 
-def _relevant_tasks(answer: str, question: str, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _relevant_tasks(
+    answer: str, question: str, tasks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     mentioned = [
         task
         for task in tasks
@@ -186,9 +188,13 @@ def _check_next(answer: str, task: dict[str, Any], issues: list[FactIssue]) -> s
     def replace(match: re.Match[str]) -> str:
         clause = match.group(1).strip()
         # 条件句、建议和未来计划不是对当前下一责任人的断言，不机械改写。
-        if any(marker in clause for marker in ("建议", "可以", "如果", "或者", "待管理员", "待用户")):
+        if any(
+            marker in clause for marker in ("建议", "可以", "如果", "或者", "待管理员", "待用户")
+        ):
             return match.group(0)
-        expected_markers = next((words for marker, words in _NEXT_MARKERS if marker in expected), ())
+        expected_markers = next(
+            (words for marker, words in _NEXT_MARKERS if marker in expected), ()
+        )
         if expected_markers and any(word in clause for word in expected_markers):
             return match.group(0)
         if not expected_markers and expected in clause:
@@ -239,9 +245,12 @@ def validate_answer_facts(
     result = _check_counts(answer, tasks, issues)
     relevant = _relevant_tasks(answer, question, tasks)
     if len(relevant) > 1:
-        needs_check = any(
-            _FALSE_EXECUTOR_CLAIMS and claim in result for claim in _FALSE_EXECUTOR_CLAIMS
-        ) or _CURRENT_RE.search(result) or _NEXT_RE.search(result) or _PATH_RE.search(result)
+        needs_check = (
+            any(_FALSE_EXECUTOR_CLAIMS and claim in result for claim in _FALSE_EXECUTOR_CLAIMS)
+            or _CURRENT_RE.search(result)
+            or _NEXT_RE.search(result)
+            or _PATH_RE.search(result)
+        )
         if needs_check:
             _record(
                 issues,

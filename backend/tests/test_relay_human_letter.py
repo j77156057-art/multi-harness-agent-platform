@@ -59,9 +59,7 @@ def test_compose_writes_the_thread_line_only_when_replying():
     assert "回复 thr-1a2b3c4d" in letter_text.compose(
         author=OPERATOR, recipients=[WINDOW], body="接着谈", reply_to="thr-1a2b3c4d"
     )
-    assert "回复" not in letter_text.compose(
-        author=OPERATOR, recipients=[WINDOW], body="新的事"
-    )
+    assert "回复" not in letter_text.compose(author=OPERATOR, recipients=[WINDOW], body="新的事")
 
 
 def test_the_body_keeps_its_own_paragraphs():

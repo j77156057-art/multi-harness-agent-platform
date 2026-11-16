@@ -21,8 +21,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.db.connection import Database
 
@@ -31,9 +32,9 @@ TRASH_RETAIN_DAYS = 7
 
 
 def _cutoff(now: datetime | None) -> str:
-    moment = now or datetime.now(timezone.utc)
+    moment = now or datetime.now(UTC)
     if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
+        moment = moment.replace(tzinfo=UTC)
     return (moment - timedelta(days=TRASH_RETAIN_DAYS)).isoformat()
 
 

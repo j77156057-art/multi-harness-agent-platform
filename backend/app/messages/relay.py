@@ -109,7 +109,9 @@ def parse(body: str, *, known: set[str], admins: set[str], sender: str) -> Relay
 
     if unknown:
         # 一个认不出就整条退回：投一半的消息，读的人会以为那就是全部。
-        return RelayPlan(problem="message.relay_unknown_recipient", unknown=tuple(sorted(set(unknown))))
+        return RelayPlan(
+            problem="message.relay_unknown_recipient", unknown=tuple(sorted(set(unknown)))
+        )
     if not blocks:
         return RelayPlan(problem="message.relay_empty")
     return RelayPlan(blocks=tuple(blocks))

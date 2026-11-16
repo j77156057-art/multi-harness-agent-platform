@@ -27,6 +27,7 @@ window whose CLI mechanism is unknown simply gets no binding.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
@@ -130,10 +131,9 @@ def write_json(path: Path, document: dict[str, Any]) -> Path:
     """Write a config file only this user can read, and return it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
+    # pragma: no cover - Windows ignores POSIX modes
+    with contextlib.suppress(OSError):
         path.chmod(0o600)
-    except OSError:  # pragma: no cover - Windows ignores POSIX modes
-        pass
     return path
 
 
@@ -156,7 +156,5 @@ def merge(destination: dict[str, Any], fragment: dict[str, Any]) -> dict[str, An
 def remove_file(path: Path | None) -> None:
     if path is None:
         return
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(path)
-    except OSError:
-        pass

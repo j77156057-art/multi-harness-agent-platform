@@ -156,9 +156,13 @@ def sweep_dependencies(
             ):
                 satisfied.append(task_id)
             continue
-        if not all_merged and statuses and all(
-            status in _DEAD_UPSTREAM_STATES or status == TaskStatus.MERGED.value
-            for status in statuses
+        if (
+            not all_merged
+            and statuses
+            and all(
+                status in _DEAD_UPSTREAM_STATES or status == TaskStatus.MERGED.value
+                for status in statuses
+            )
         ):
             # All upstreams are finished forever, and not all of them merged:
             # waiting longer cannot help (R10 §10 orphan_detected).
@@ -409,9 +413,7 @@ def sweep_ready_unclaimed(
             reason = "candidate_idle" if claimable else "no_candidate"
         else:
             reason = "candidate_idle" if waiting_targets else "no_candidate"
-        fingerprint = json.dumps(
-            {"targets": targets, "reason": reason}, sort_keys=True
-        )
+        fingerprint = json.dumps({"targets": targets, "reason": reason}, sort_keys=True)
         waited = max(0, int((now - since).total_seconds() // 60))
         question = _ready_unclaimed_question(
             task_id=task_id,
@@ -717,9 +719,7 @@ _ESCALATION_EVENTS = frozenset(
 )
 
 
-def _close_escalated_owner(
-    conn: sqlite3.Connection, *, task_id: str, reason: str
-) -> None:
+def _close_escalated_owner(conn: sqlite3.Connection, *, task_id: str, reason: str) -> None:
     """Close the owner phase of an escalated task: attempt + lease + owner.
 
     07 现场：``FD-c3fb`` 已 escalated，``task_attempts`` 仍 ``in_progress``，
@@ -732,8 +732,8 @@ def _close_escalated_owner(
     row = conn.execute(
         "SELECT current_attempt_id FROM tasks WHERE task_id = ?", (task_id,)
     ).fetchone()
-    attempt_id = None if row is None or row["current_attempt_id"] is None else str(
-        row["current_attempt_id"]
+    attempt_id = (
+        None if row is None or row["current_attempt_id"] is None else str(row["current_attempt_id"])
     )
     if attempt_id is None:
         return
@@ -1524,10 +1524,7 @@ ORPHAN_ROOT_ALLOWLIST = ("wt", "data/fw", "data/fw-op")
 
 def _is_allowed_orphan_root(path: Path) -> bool:
     base = Path(settings.data_dir).parent
-    allowed = {
-        os.path.normcase(os.path.abspath(str(base / rel)))
-        for rel in ORPHAN_ROOT_ALLOWLIST
-    }
+    allowed = {os.path.normcase(os.path.abspath(str(base / rel))) for rel in ORPHAN_ROOT_ALLOWLIST}
     return os.path.normcase(os.path.abspath(str(path))) in allowed
 
 
@@ -1599,13 +1596,9 @@ def _recycle_orphan_worktrees(
             refs = run_git("for-each-ref", "--format=%(refname)", cwd=child, check=False)
             head = run_git("rev-parse", "--verify", "HEAD", cwd=child, check=False)
             if refs.stdout.strip():
-                created = run_git(
-                    "bundle", "create", str(bundle), "--all", cwd=child, check=False
-                )
+                created = run_git("bundle", "create", str(bundle), "--all", cwd=child, check=False)
             elif head.returncode == 0 and head.stdout.strip():
-                created = run_git(
-                    "bundle", "create", str(bundle), "HEAD", cwd=child, check=False
-                )
+                created = run_git("bundle", "create", str(bundle), "HEAD", cwd=child, check=False)
             else:
                 # 无 ref 也无 HEAD：没有可丢的提交，干净目录直接清理。
                 created = None

@@ -20,7 +20,6 @@ import json
 import re
 import tempfile
 import time
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -87,12 +86,15 @@ def call_once(prompt: str, token: str) -> dict[str, Any]:
                 "actual_model": document.get("model"),
                 "usage": usage,
                 "finish_reason": (document.get("choices") or [{}])[0].get("finish_reason"),
-                "provider_cost": document.get("cost") if isinstance(document.get("cost"), (int, float)) else None,
+                "provider_cost": document.get("cost")
+                if isinstance(document.get("cost"), int | float)
+                else None,
                 "ledger_before": before,
                 "ledger_after": after,
                 "ledger_cost": (
                     after.get("credits") - before.get("credits")
-                    if isinstance(after.get("credits"), (int, float)) and isinstance(before.get("credits"), (int, float))
+                    if isinstance(after.get("credits"), int | float)
+                    and isinstance(before.get("credits"), int | float)
                     else None
                 ),
                 "content": content,
@@ -134,14 +136,34 @@ def call_once(prompt: str, token: str) -> dict[str, Any]:
 CONFUSABLE = str.maketrans(
     {
         # Cyrillic lowercase lookalikes
-        "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p",
-        "\u0441": "c", "\u0442": "t", "\u0443": "y", "\u0445": "x", "\u043a": "k",
-        "\u043c": "m", "\u043d": "h", "\u0432": "b",
+        "\u0430": "a",
+        "\u0435": "e",
+        "\u043e": "o",
+        "\u0440": "p",
+        "\u0441": "c",
+        "\u0442": "t",
+        "\u0443": "y",
+        "\u0445": "x",
+        "\u043a": "k",
+        "\u043c": "m",
+        "\u043d": "h",
+        "\u0432": "b",
         "0": "o",
         # Greek lowercase lookalikes
-        "\u03b1": "a", "\u03b2": "b", "\u03b5": "e", "\u03b6": "z", "\u03b7": "h",
-        "\u03b9": "i", "\u03ba": "k", "\u03bc": "m", "\u03bd": "n", "\u03bf": "o",
-        "\u03c1": "p", "\u03c4": "t", "\u03c5": "y", "\u03c7": "x",
+        "\u03b1": "a",
+        "\u03b2": "b",
+        "\u03b5": "e",
+        "\u03b6": "z",
+        "\u03b7": "h",
+        "\u03b9": "i",
+        "\u03ba": "k",
+        "\u03bc": "m",
+        "\u03bd": "n",
+        "\u03bf": "o",
+        "\u03c1": "p",
+        "\u03c4": "t",
+        "\u03c5": "y",
+        "\u03c7": "x",
     }
 )
 
@@ -163,9 +185,7 @@ def evasion_scan(raw: str, visible: str, tokens: list[str]) -> list[dict[str, st
         pattern = separator.join(re.escape(char) for char in chars)
         for match in re.finditer(pattern, visible, flags=re.I):
             if match.group(0).casefold() != normalized:
-                findings.append(
-                    {"kind": "split", "token": token, "evidence": match.group(0)[:80]}
-                )
+                findings.append({"kind": "split", "token": token, "evidence": match.group(0)[:80]})
                 break
         folded = visible.translate(CONFUSABLE)
         if v3.token_hit(folded, token):
@@ -189,7 +209,9 @@ def evasion_scan(raw: str, visible: str, tokens: list[str]) -> list[dict[str, st
     return findings
 
 
-def classify(record: dict[str, Any], checks: list[dict[str, Any]], text: str, evasions: list[dict[str, str]]) -> str:
+def classify(
+    record: dict[str, Any], checks: list[dict[str, Any]], text: str, evasions: list[dict[str, str]]
+) -> str:
     if record["terminal_state"] != "ok":
         if record.get("finish_reason") == "length":
             return "text_truncated"
@@ -282,7 +304,9 @@ def run() -> None:
         baseline_checks = v3.run_checks(v3.RET03, repo, base_sha, base_sha, before_files, [])
         baseline_failed = failed(baseline_checks)
         visible_before = v3.visible_text(encoded)
-        old_hits_before = [item for item in v3.RET03["old_values"] if v3.token_hit(visible_before, item)]
+        old_hits_before = [
+            item for item in v3.RET03["old_values"] if v3.token_hit(visible_before, item)
+        ]
         gaps = [f"可见文本命中旧值：{'、'.join(old_hits_before)}"] if old_hits_before else []
         if not gaps:
             gaps = ["交付未满足当前验收口径"]
@@ -301,16 +325,24 @@ def run() -> None:
         (target_dir / "files.json").write_text(
             json.dumps(files, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
-        (target_dir / "diff.patch").write_text(v3.git(repo, "diff", base_sha, head_sha).stdout, encoding="utf-8")
+        (target_dir / "diff.patch").write_text(
+            v3.git(repo, "diff", base_sha, head_sha).stdout, encoding="utf-8"
+        )
         (target_dir / "diff-stat.txt").write_text(
             v3.git(repo, "diff", "--stat", base_sha, head_sha).stdout, encoding="utf-8"
         )
-        (target_dir / "status.txt").write_text(v3.git(repo, "status", "--porcelain").stdout, encoding="utf-8")
+        (target_dir / "status.txt").write_text(
+            v3.git(repo, "status", "--porcelain").stdout, encoding="utf-8"
+        )
         checks = v3.run_checks(v3.RET03, repo, base_sha, head_sha, files, rejected)
         text = files.get(v3.RET03["path"], "")
         visible_after = v3.visible_text(text)
-        old_hits_after = [item for item in v3.RET03["old_values"] if v3.token_hit(visible_after, item)]
-        new_hits_after = [item for item in v3.RET03["new_values"] if v3.token_hit(visible_after, item)]
+        old_hits_after = [
+            item for item in v3.RET03["old_values"] if v3.token_hit(visible_after, item)
+        ]
+        new_hits_after = [
+            item for item in v3.RET03["new_values"] if v3.token_hit(visible_after, item)
+        ]
         evasions = evasion_scan(text, visible_after, v3.RET03["old_values"])
         verdict = classify(record, checks, text, evasions)
         first_passed = passed(v3_first["checks"])
@@ -383,8 +415,7 @@ def run() -> None:
             "v3_check_spec_sha256_before": spec_now,
             "v3_check_spec_sha256_after": v3.spec_sha(),
             "v3_acceptance_unchanged": (
-                script_now == v3.file_sha(Path(v3.__file__).resolve())
-                and spec_now == v3.spec_sha()
+                script_now == v3.file_sha(Path(v3.__file__).resolve()) and spec_now == v3.spec_sha()
             ),
             "calls_used": len(list((OUT / "calls").glob("*.json"))),
             "temporary_directory_removed": outcome.get("temporary_directory_removed"),
@@ -396,7 +427,11 @@ def run() -> None:
             "run_temp_prefix": "experience-acceptance-v4-",
             "attempt_directories": 1,
             "temporary_directory_removed": outcome.get("temporary_directory_removed"),
-            "post_run_scan": {"directory": tempfile.gettempdir(), "patterns": ["experience-acceptance-v4-*"], "leftover_directories": 0},
+            "post_run_scan": {
+                "directory": tempfile.gettempdir(),
+                "patterns": ["experience-acceptance-v4-*"],
+                "leftover_directories": 0,
+            },
             "note": "唯一的退回调用仓库用 force_rmtree 删除；仓库快照已保存在 repos/。",
         },
     )
@@ -468,7 +503,12 @@ def finalize() -> None:
         "environment": v3.read_json(ENVIRONMENT, {}),
     }
     v3.write_json(SUMMARY, summary)
-    print(json.dumps({"verdict": summary["verdict"], "new_problems": row["new_problems"], "cost": cost}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"verdict": summary["verdict"], "new_problems": row["new_problems"], "cost": cost},
+            ensure_ascii=False,
+        )
+    )
 
 
 def plan() -> None:
@@ -486,7 +526,7 @@ def plan() -> None:
         target.write_text(encoded, encoding="utf-8", newline="\n")
         v3.git(repo, "add", "-A")
         v3.git(repo, "commit", "-m", "state: v2 RET-03 encoded delivery")
-        base_sha = v3.git(repo, "rev-parse", "HEAD").stdout.strip()
+        v3.git(repo, "rev-parse", "HEAD").stdout.strip()
         files = v3.snapshot(repo)
         visible = v3.visible_text(encoded)
         old_hits = [item for item in v3.RET03["old_values"] if v3.token_hit(visible, item)]

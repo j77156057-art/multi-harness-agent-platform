@@ -454,6 +454,7 @@ def test_a_revert_that_cannot_restore_green_escalates(tmp_path):
     assert status_of(chain) == "escalated"
     assert health_of(chain) == "escalated"
 
+
 def test_a_second_registration_for_the_same_attempt_updates_instead_of_tripping_the_key(tmp_path):
     """同一次尝试合并第二次时，产出登记必须**覆盖**而不是撞唯一键。
 

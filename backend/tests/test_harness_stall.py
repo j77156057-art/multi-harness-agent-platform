@@ -46,9 +46,7 @@ def test_unknown_output_tokens_never_triggers():
 
 
 SILENT = (
-    "import json, time\n"
-    "print(json.dumps({'output_tokens': 5}), flush=True)\n"
-    "time.sleep(60)\n"
+    "import json, time\n" "print(json.dumps({'output_tokens': 5}), flush=True)\n" "time.sleep(60)\n"
 )
 BUSY = (
     "import json, time\n"

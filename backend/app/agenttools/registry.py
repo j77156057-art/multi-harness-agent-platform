@@ -31,11 +31,12 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from app.agenttools.floor import Floor, FloorRefused, command_refusal
+from app.agenttools.floor import Floor, command_refusal
 
 #: Bounded observations: a prompt that grows without limit is how a 26k-token
 #: work order became a 645k-token one in this project's own history.
@@ -234,7 +235,9 @@ def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
             where = f"`{prefix}` 下" if prefix else "工作树里"
             return f"{where}没有可读的文件（凭据类文件不计）。"
         shown = names[:MAX_LIST]
-        more = "" if len(names) <= MAX_LIST else f"\n...（共 {len(names)} 个，只列前 {MAX_LIST} 个）"
+        more = (
+            "" if len(names) <= MAX_LIST else f"\n...（共 {len(names)} 个，只列前 {MAX_LIST} 个）"
+        )
         return "\n".join(shown) + more
 
     def read_file(args: dict[str, Any]) -> str:
@@ -245,9 +248,7 @@ def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
         if path.is_dir():
             return f"`{raw}` 是目录。用 list_files 看目录内容。"
         if not path.is_file():
-            return (
-                f"`{raw}` 不存在。先用 list_files 看真实有哪些文件，别猜路径。"
-            )
+            return f"`{raw}` 不存在。先用 list_files 看真实有哪些文件，别猜路径。"
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
@@ -304,9 +305,7 @@ def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
             raw = raw or head
             content = rest
         if not str(raw or "").strip():
-            raise ToolRefused(
-                "缺少 `path`。文本写法：第一行写路径，后面全是文件内容。"
-            )
+            raise ToolRefused("缺少 `path`。文本写法：第一行写路径，后面全是文件内容。")
         path = floor.resolve(str(raw), write=True)
         text = "" if content is None else str(content)
         if path.exists() and path.read_text(encoding="utf-8", errors="replace") == text:
@@ -384,10 +383,7 @@ def build_registry(floor: Floor, *, read_only: bool = False) -> dict[str, Tool]:
         sub = _require(args, "sub")
         allowed = {"status", "log", "diff", "show", "ls-files", "rev-parse", "branch"}
         if sub not in allowed:
-            return (
-                f"`git {sub}` 不是这里能跑的只读子命令。可用："
-                + "、".join(sorted(allowed))
-            )
+            return f"`git {sub}` 不是这里能跑的只读子命令。可用：" + "、".join(sorted(allowed))
         rest = _text(args, "args", "_text")
         parts = [sub, *[piece for piece in rest.split() if piece != sub]]
         try:
@@ -516,12 +512,12 @@ _END_MARK = re.compile(r"^>{3,}\s*NEW\s*$", re.MULTILINE)
 def _text_block(body: str) -> dict[str, str]:
     """The one-shot edit form, for a model that will not write nested JSON:
 
-        path: docs/a.md
-        <<<<<<< OLD
-        old text
-        =======
-        new text
-        >>>>>>> NEW
+    path: docs/a.md
+    <<<<<<< OLD
+    old text
+    =======
+    new text
+    >>>>>>> NEW
     """
     path = ""
     first, _, rest = body.partition("\n")

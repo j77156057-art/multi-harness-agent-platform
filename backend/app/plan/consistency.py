@@ -158,13 +158,10 @@ def _has_action(before: str, after: str = "") -> bool:
             return False
     if any(marker in before for marker in _ACTION_ZH):
         return True
-    if _LOCATIVE_BEFORE in before and any(
-        marker in after[:10] for marker in _LOCATIVE_AFTER
-    ):
+    if _LOCATIVE_BEFORE in before and any(marker in after[:10] for marker in _LOCATIVE_AFTER):
         return True
     return any(
-        re.search(rf"(?<![a-z]){re.escape(marker)}(?![a-z])", lowered)
-        for marker in _ACTION_EN
+        re.search(rf"(?<![a-z]){re.escape(marker)}(?![a-z])", lowered) for marker in _ACTION_EN
     )
 
 
@@ -199,7 +196,9 @@ def _in_contract(path: str, patterns: Sequence[str]) -> bool:
     # goal 里写的是裸文件名（``via conftest.py``），契约写的是完整落点
     # （``tests/conftest.py``）：同名即视为覆盖，避免把同一件事报两遍。
     if "/" not in path:
-        return any(str(pattern).replace("\\", "/").rsplit("/", 1)[-1] == path for pattern in patterns)
+        return any(
+            str(pattern).replace("\\", "/").rsplit("/", 1)[-1] == path for pattern in patterns
+        )
     # goal 里写的是目录（``在 tests/ 里``），契约覆盖了它下面的文件即可。
     return any(str(pattern).replace("\\", "/").startswith(path + "/") for pattern in patterns)
 
@@ -246,9 +245,7 @@ def goal_scope_violations(
         for path in extract_mentioned_paths(goal):
             if _in_contract(path, patterns):
                 continue
-            violations.append(
-                ScopeViolation(task_id=task_id, path=path, exclusive_paths=patterns)
-            )
+            violations.append(ScopeViolation(task_id=task_id, path=path, exclusive_paths=patterns))
     return violations
 
 

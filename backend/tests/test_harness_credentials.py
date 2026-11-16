@@ -73,9 +73,7 @@ def env(tmp_path, monkeypatch):
 
 
 def credentials(env) -> dict[str, object]:
-    response = env.client.get(
-        f"/api/v1/harnesses/{HARNESS}/credentials", headers=bearer(env.human)
-    )
+    response = env.client.get(f"/api/v1/harnesses/{HARNESS}/credentials", headers=bearer(env.human))
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -128,7 +126,7 @@ def test_the_in_use_row_is_found_by_hash_not_by_file_name(tmp_path, monkeypatch)
     service = TokenService(database)
     human = service.issue(subject_type="human", subject_id=OPERATOR)
     current = service.issue(subject_type="harness", subject_id="pi", label="这一轮签发")
-    stale = service.issue(subject_type="harness", subject_id="pi", label="上一轮签发")
+    service.issue(subject_type="harness", subject_id="pi", label="上一轮签发")
     (data_dir / "game-pi.key").write_text(f"{current}\n", encoding="utf-8")
     (data_dir / "notes.txt").write_text("不该被当成凭据\n", encoding="utf-8")
 

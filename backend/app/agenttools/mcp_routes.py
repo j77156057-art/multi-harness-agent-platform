@@ -47,9 +47,7 @@ def _attempt(database: Database, *, task_id: str, attempt_id: str) -> mcp.Attemp
     worktree = str(row["path"] or "").strip()
     if not worktree:
         raise ApiError("agenttools.no_workspace", 409, "这次尝试还没有工作树，工具暂时用不了")
-    current = database.read(
-        "SELECT current_attempt_id FROM tasks WHERE task_id = ?", (task_id,)
-    )
+    current = database.read("SELECT current_attempt_id FROM tasks WHERE task_id = ?", (task_id,))
     if not current or str(current[0]["current_attempt_id"] or "") != attempt_id:
         # A finished or superseded attempt must not keep editing the tree: the
         # platform may already have submitted, verified or recycled it.

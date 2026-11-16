@@ -38,9 +38,10 @@ from app.adapter import presence
 from app.adapter.harnesses.cli import ProviderRoute
 from app.admin.experience import ExperienceStore, ExperienceStoreError
 from app.admin.service import AdminHarnessError, AdminService, task_category_for_spec
-from app.relay.supervisor import ensure_relay_worker, relay_enabled
 from app.config import settings
 from app.db.connection import Database
+from app.net import http_client
+from app.relay.supervisor import ensure_relay_worker, relay_enabled
 from app.tasks.service import (
     ADD_MEMBER_JSON_REF,
     ADD_MEMBER_REF,
@@ -179,7 +180,7 @@ class PlatformClient:
     def __init__(self, base_url: str, token: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
-        self.client = httpx.Client(
+        self.client = http_client(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {token}"},
             timeout=60,
@@ -385,13 +386,13 @@ class AdminWorker:
             return
         attempts = int(retry.get("attempts") or 0) + 1
         payload = {
-            key: value
-            for key, value in retry.items()
-            if key not in ("retry_after", "last_error")
+            key: value for key, value in retry.items() if key not in ("retry_after", "last_error")
         }
         payload["attempts"] = attempts
         print(
-            json.dumps({"goal_retry": payload.get("goal_id"), "attempt": attempts}, ensure_ascii=False),
+            json.dumps(
+                {"goal_retry": payload.get("goal_id"), "attempt": attempts}, ensure_ascii=False
+            ),
             flush=True,
         )
         self.state.goal_retry = {
@@ -748,9 +749,7 @@ class AdminWorker:
         self.state.last_goal = dict(payload)
         # 这个项目的成员名单 = 这一轮传阅的读者名单。
         self._requested_members = [
-            str(item).strip()
-            for item in (payload.get("members") or [])
-            if str(item).strip()
+            str(item).strip() for item in (payload.get("members") or []) if str(item).strip()
         ]
         if self.dry_run:
             print(
@@ -878,9 +877,7 @@ class AdminWorker:
             return
         # 成员名单随状态恢复：worker 重启之后，这一轮仍然要给**全部**成员看。
         self._requested_members = [
-            str(item).strip()
-            for item in (pending.get("members") or [])
-            if str(item).strip()
+            str(item).strip() for item in (pending.get("members") or []) if str(item).strip()
         ] or self._requested_members
         if self.dry_run:
             print(
@@ -920,14 +917,15 @@ class AdminWorker:
                 try:
                     body = exc.response.json()
                     raw = body.get("error", body)
-                    detail = (
-                        raw.get("message", "") if isinstance(raw, dict) else str(raw)
-                    ) or ""
+                    detail = (raw.get("message", "") if isinstance(raw, dict) else str(raw)) or ""
                 except (ValueError, AttributeError):
                     detail = ""
             self._post_admin_message(
                 "管理员拟的方案被平台拒了，这一轮开不起来："
-                + (detail or f"（HTTP {getattr(exc, 'response', None) and exc.response.status_code}）")
+                + (
+                    detail
+                    or f"（HTTP {getattr(exc, 'response', None) and exc.response.status_code}）"
+                )
                 + " 请群主把目标里的落点/验收写清楚（或者说明该改哪一条），我再拟一版。"
             )
             return
@@ -1180,7 +1178,9 @@ class AdminWorker:
         except ValueError:
             return str(rows[0]["snapshot_id"]), []
         tasks = raw.get("tasks")
-        items = [item for item in tasks if isinstance(item, dict)] if isinstance(tasks, list) else []
+        items = (
+            [item for item in tasks if isinstance(item, dict)] if isinstance(tasks, list) else []
+        )
         return str(rows[0]["snapshot_id"]), items
 
     def _approved_plan_without_round(self) -> tuple[str, str, list[dict[str, Any]]] | None:
@@ -1356,8 +1356,9 @@ class AdminWorker:
                     "round_id": str(current.get("round_id") or ""),
                     "harness_id": self.admin_harness_id,
                     "reason": (
-                        "所有任务都有人申请" if not missing else
-                        f"等待超过 {int(self.ALLOCATION_ROUND_GRACE_SECONDS)} 秒，"
+                        "所有任务都有人申请"
+                        if not missing
+                        else f"等待超过 {int(self.ALLOCATION_ROUND_GRACE_SECONDS)} 秒，"
                         f"仍无人申请的任务：{'、'.join(missing)}"
                     ),
                 },
@@ -1416,9 +1417,12 @@ class AdminWorker:
                 self.state.pending_allocation = {**pending, "decided": sorted(decided)}
                 self.state.save(self.state_path)
                 continue
-            candidates = self.client.get(
-                "/allocation/candidates", round_id=round_id, task_id=task_id
-            ).get("candidates") or []
+            candidates = (
+                self.client.get("/allocation/candidates", round_id=round_id, task_id=task_id).get(
+                    "candidates"
+                )
+                or []
+            )
             usable = [
                 item
                 for item in candidates
@@ -1905,7 +1909,8 @@ class AdminWorker:
                 # A message-driven request brings its own sequence number.
                 "request_id": f"admin-reassign-{task_id}-{count}" + (f"-{token}" if token else ""),
                 "title": spec.get("title") or task.get("title") or task_id,
-                "goal": goal_override.strip() or self._goal_with_handoff(
+                "goal": goal_override.strip()
+                or self._goal_with_handoff(
                     spec.get("goal") or task.get("title") or task_id, task_id
                 ),
                 "harness_id": target,
@@ -1957,9 +1962,7 @@ class AdminWorker:
         except (OSError, ValueError):
             return None
 
-    def _report_same_provider_wall(
-        self, task_id: str, exc: httpx.HTTPStatusError
-    ) -> None:
+    def _report_same_provider_wall(self, task_id: str, exc: httpx.HTTPStatusError) -> None:
         """Say it out loud when only a human can unblock this review.
 
         A same-provider refusal is not a transient error: cooling down and
@@ -2067,9 +2070,8 @@ class AdminWorker:
     ) -> None:
         """验收/合并落账后才写经验；经验存储故障不反噬主交付流程。"""
         project = str(spec.get("project_label") or _title_project(task) or self.group_id)
-        executor = (
-            str(task.get("owner") or task.get("executor") or "")
-            or next(iter(_assigned_ids(task)), "unassigned")
+        executor = str(task.get("owner") or task.get("executor") or "") or next(
+            iter(_assigned_ids(task)), "unassigned"
         )
         summary = json.dumps(
             {
@@ -2453,9 +2455,7 @@ def main() -> None:
     )
     # 在场：报「我还在」的心跳走自己的线程 —— 管理员一次审阅/细化要过模型，
     # 那一刻主循环腾不出手，不能因此被界面说成「没在跑」。
-    presence.start_heartbeat(
-        lambda body: client.post("/adapter/presence", body), role="admin"
-    )
+    presence.start_heartbeat(lambda body: client.post("/adapter/presence", body), role="admin")
     try:
         next_relay_check = 0.0
         last_relay_note = ""
@@ -2474,7 +2474,9 @@ def main() -> None:
                     )
                     note = str(relay_state.get("note") or "")
                     # 只在"启动了"或"说法变了"时说一句，别每 60 秒刷一行同样的失败。
-                    if relay_state.get("started") or (not relay_state.get("running") and note != last_relay_note):
+                    if relay_state.get("started") or (
+                        not relay_state.get("running") and note != last_relay_note
+                    ):
                         last_relay_note = note
                         print(json.dumps({"relay": relay_state}, ensure_ascii=False), flush=True)
                 except Exception as exc:  # noqa: BLE001 - 转接的问题不该拖垮管理员

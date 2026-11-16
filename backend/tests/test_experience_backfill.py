@@ -20,13 +20,15 @@ def _source_database(tmp_path):
         seed_task(database, task_id=task_id, status=status, acceptance=[{"check": "human"}])
         spec = {
             "plan_version": "v1",
-            "tasks": [{
-                "id": task_id,
-                "title": "DEMO · 同一规格",
-                "goal": "补说明",
-                "exclusive_paths": ["docs/start.md"],
-                "acceptance": "包含失败路径验收",
-            }],
+            "tasks": [
+                {
+                    "id": task_id,
+                    "title": "DEMO · 同一规格",
+                    "goal": "补说明",
+                    "exclusive_paths": ["docs/start.md"],
+                    "acceptance": "包含失败路径验收",
+                }
+            ],
         }
         with database.transaction() as conn:
             conn.execute(
@@ -95,7 +97,9 @@ def test_backfill_dry_run_apply_and_second_run_are_identical(tmp_path):
     merged = next(record for record in records if record["kind"] == "merged")
     assert merged["recorded_at"] == "2026-01-02T00:00:00+00:00"
     missing = next(
-        snapshot for record in records for snapshot in [record["source_snapshot"]]
+        snapshot
+        for record in records
+        for snapshot in [record["source_snapshot"]]
         if snapshot["task"]["task_id"] == "T-2"
     )
     assert missing["task"]["outcome_at"] is None

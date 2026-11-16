@@ -152,11 +152,13 @@ def test_the_items_carry_only_what_is_needed_to_recognise_a_row():
 
 
 def test_every_item_says_the_current_step_and_next_actor():
-    client = Client([
-        _task(1, status="awaiting_review"),
-        _task(2, owner="qoder-member-1", status="changes_requested"),
-        _task(3, status="merged"),
-    ])
+    client = Client(
+        [
+            _task(1, status="awaiting_review"),
+            _task(2, owner="qoder-member-1", status="changes_requested"),
+            _task(3, status="merged"),
+        ]
+    )
 
     registry = build_registry(client, group_id=GROUP, author_id="office-assistant")
     result = registry["group.tasks"].call({})

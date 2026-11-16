@@ -282,9 +282,7 @@ def create_plan(
     }
 
 
-def _plan_assignment_blocks(
-    database: Any, plan_id: str
-) -> list[dict[str, Any]]:
+def _plan_assignment_blocks(database: Any, plan_id: str) -> list[dict[str, Any]]:
     """哪些目标窗口现在接不了活，以及为什么。
 
     方案在 submit 阶段只是「存下来」；真正派活发生在 approve。如果目标窗口
@@ -514,9 +512,7 @@ def approve_plan(
         decided_by=body.decided_by,
         decided_by_type=_actor_type(principal),
         scope_override=(
-            [item.as_dict() for item in violations]
-            if body.allow_out_of_contract_paths
-            else None
+            [item.as_dict() for item in violations] if body.allow_out_of_contract_paths else None
         ),
     )
     response: dict[str, Any] = {
@@ -1064,7 +1060,7 @@ def availability(
                     "code": "worker_not_running",
                     "detail": (
                         f"窗口进程不在运行（{int(age)} 秒前还在）"
-                        if isinstance(age, (int, float))
+                        if isinstance(age, int | float)
                         else "窗口进程不在运行"
                     ),
                 }
@@ -2753,8 +2749,11 @@ def _experience_context(task: dict[str, Any], spec: dict[str, Any]) -> tuple[str
     title = str(spec.get("title") or task.get("title") or task.get("task_id") or "")
     title_project = title.split(" · ", 1)[0] if " · " in title else ""
     project = str(
-        spec.get("project_label") or task.get("project_label") or title_project
-        or task.get("group_id") or "unspecified"
+        spec.get("project_label")
+        or task.get("project_label")
+        or title_project
+        or task.get("group_id")
+        or "unspecified"
     )
     summary = json.dumps(
         {
@@ -2784,9 +2783,7 @@ def task_experiences(
     task = service.get_task(task_id)
     spec = task.get("spec") if isinstance(task.get("spec"), dict) else {}
     project, category, _ = _experience_context(task, spec)
-    records = ExperienceStore(
-        Path(settings.data_dir) / "admin" / "experience.json"
-    ).recall(
+    records = ExperienceStore(Path(settings.data_dir) / "admin" / "experience.json").recall(
         project=project,
         task_category=category,
         include_cross_project=include_cross_project,
@@ -2920,7 +2917,6 @@ def task_reviews(task_id: str, service: SchedulerDep, database: DatabaseDep):
             else "这条任务还没有审阅记录（未记上）。审阅是平台记录：没有记录不等于审阅通过。"
         ),
     }
-
 
 
 @read.get("/tasks/{task_id}/verification")
@@ -3565,11 +3561,7 @@ def harness_credentials(
         # 这个窗口的凭据在本机可能落在不止一个文件里（历史遗留的命名，比如 pi 的
         # `game-pi.key`），所以给的是一张表，不是猜一个文件名。
         "key_files": sorted(name for fingerprint, name in on_disk.items() if fingerprint in own),
-        "note": (
-            ""
-            if credentials
-            else "这个窗口还没有平台凭据；给它开窗口时会当场签发一份。"
-        ),
+        "note": ("" if credentials else "这个窗口还没有平台凭据；给它开窗口时会当场签发一份。"),
     }
 
 
@@ -3722,7 +3714,9 @@ def _event_page(
     return {"events": rows, "next_seq": last, "has_more": has_more}
 
 
-def _bind_message_author(request: Request, database: DatabaseDep, body: schemas.PostMessage) -> None:
+def _bind_message_author(
+    request: Request, database: DatabaseDep, body: schemas.PostMessage
+) -> None:
     """发消息的人必须就是令牌主体 —— 与 §17 其他写路由同一个口径。
 
     以前这条路由既没有鉴权、`author_id` 也直接取自请求体：任何持有有效令牌的人都能

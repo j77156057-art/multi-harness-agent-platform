@@ -209,9 +209,7 @@ def test_the_allocation_round_may_be_opened_on_the_rebound_snapshot(database):
 
     # 硬门禁：没有已完成的传阅轮就开不了分配轮。
     with pytest.raises(Exception, match="no completed circulation round"):
-        service.open_allocation_round(
-            group_id=GROUP, plan_snapshot_id="snap-1", opened_by=ADMIN
-        )
+        service.open_allocation_round(group_id=GROUP, plan_snapshot_id="snap-1", opened_by=ADMIN)
 
     round_info = service.open_allocation_round(
         group_id=GROUP, plan_snapshot_id="snap-2", opened_by=ADMIN
@@ -270,9 +268,7 @@ def test_a_member_applies_for_the_task_the_plan_named(database):
             return {"application_id": "app-1"}
 
     client = _Client()
-    assert submit_allocation_applications(
-        client, harness_id=MEMBER, group=GROUP
-    ) is True
+    assert submit_allocation_applications(client, harness_id=MEMBER, group=GROUP) is True
     assert len(client.posts) == 1
     path, body = client.posts[0]
     assert path == "/api/v1/allocation/application"
@@ -715,7 +711,9 @@ def test_the_administrator_decides_for_a_window_that_applied(tmp_path, database)
     assert len(decisions) == 1
     assert decisions[0]["task_id"] == "T-1"
     assert decisions[0]["decided_by"] == ADMIN
-    allocations = database.read("SELECT * FROM allocations WHERE round_id = ?", (round_info["round_id"],))
+    allocations = database.read(
+        "SELECT * FROM allocations WHERE round_id = ?", (round_info["round_id"],)
+    )
     assert len(allocations) == 1
     assert allocations[0]["harness_id"] == MEMBER
     assert allocations[0]["state"] == "invited", "裁决只到 invited：接受是本人的事"

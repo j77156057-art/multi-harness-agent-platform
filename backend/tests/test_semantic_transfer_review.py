@@ -22,12 +22,19 @@ def test_negated_old_values_are_not_pollution_but_literal_says_they_are():
         "生成 ops/review-checklist.md",
         "只保留 F1、F2；不含 F3/F4；不沿用 round-1 清单",
     )
-    judged = judge(old_values=["F3", "F4", "round-1"], required_groups=[["F1"], ["F2"]], result=result)
+    judged = judge(
+        old_values=["F3", "F4", "round-1"], required_groups=[["F1"], ["F2"]], result=result
+    )
     assert judged["semantic"] == "transferred"
     assert judged["evidence"] == []
     assert {row["value"] for row in judged["excluded_values"]} == {"F3", "F4", "round-1"}
     # 旧的字面判会把这三条都算成污染。
-    assert literal_judge(old_values=["F3", "F4", "round-1"], required_groups=[["F1"], ["F2"]], result=result) == "copied_wrong"
+    assert (
+        literal_judge(
+            old_values=["F3", "F4", "round-1"], required_groups=[["F1"], ["F2"]], result=result
+        )
+        == "copied_wrong"
+    )
 
 
 def test_old_item_required_as_delivered_content_is_pollution():

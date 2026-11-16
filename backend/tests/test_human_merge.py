@@ -21,7 +21,7 @@ from app.auth.tokens import TokenService
 from app.config import settings
 from app.runtime.driver import RuntimePolicy
 from app.verify.profile import VerifyPolicy
-from tests.merge_support import REVIEWER, approve, build_chain, register_harness, status_of
+from tests.merge_support import approve, build_chain, register_harness, status_of
 
 LOOPBACK = "http://127.0.0.1"
 OPERATOR = "operator"
@@ -75,8 +75,9 @@ def _post_merge(client: TestClient, token: str, payload: dict, *, tries: int = 4
     ref，隔一下就好，mergeguard 对同一现象也是整轮重试）。只对后者重试，前者立刻
     失败 —— 否则权限或结构改坏了，测试会靠重试"蒙混过关"。
     """
-    response = client.post("/api/v1/human/merge", json=payload,
-                           headers={"Authorization": f"Bearer {token}"})
+    response = client.post(
+        "/api/v1/human/merge", json=payload, headers={"Authorization": f"Bearer {token}"}
+    )
     for _ in range(max(0, tries - 1)):
         body = response.text or ""
         if response.status_code != 409 or "merge.refused" not in body:
@@ -84,8 +85,9 @@ def _post_merge(client: TestClient, token: str, payload: dict, *, tries: int = 4
         if "could not write the merge ref" not in body:
             return response
         time.sleep(2.0)
-        response = client.post("/api/v1/human/merge", json=payload,
-                               headers={"Authorization": f"Bearer {token}"})
+        response = client.post(
+            "/api/v1/human/merge", json=payload, headers={"Authorization": f"Bearer {token}"}
+        )
     return response
 
 

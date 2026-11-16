@@ -38,9 +38,7 @@ def _qoder_binary() -> str:
     return str(candidate) if candidate.exists() else "qoderclicn"
 
 
-def qoder_command(
-    work_order: str, worktree: Path, extra: list[str] | None = None
-) -> list[str]:
+def qoder_command(work_order: str, worktree: Path, extra: list[str] | None = None) -> list[str]:
     """The one unattended argv contract for the Qoder CN CLI.
 
     Module-level so a second caller (the admin harness's refine call) reuses the

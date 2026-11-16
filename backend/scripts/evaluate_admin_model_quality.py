@@ -23,9 +23,8 @@ from typing import Any
 import httpx
 
 from app.adapter.harnesses.cli import SubprocessRunner
-from app.admin.service import AdminHarnessError, AdminService, extract_json_object
+from app.admin.service import AdminService, extract_json_object
 from app.auth.tokens import TokenService
-from app.config import settings
 from tests.merge_support import build_chain, register_harness
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,17 +40,27 @@ DATASET_VERSION = "admin-quality-v1.0.1"
 FALSE_EXECUTOR = ("尚无执行者", "没有执行者", "未有执行者", "无执行者", "无人执行")
 CHANNELS = {
     "qoder-auto": {
-        "harness_id": "qoder", "provider": "qoder", "model": "Auto", "transport": "cli",
+        "harness_id": "qoder",
+        "provider": "qoder",
+        "model": "Auto",
+        "transport": "cli",
     },
     "codebuddy-hy3": {
-        "harness_id": "codebuddy", "provider": "tencent", "model": "hy3", "transport": "cli",
+        "harness_id": "codebuddy",
+        "provider": "tencent",
+        "model": "hy3",
+        "transport": "cli",
     },
     "opencode-deepseek": {
-        "harness_id": "opencode", "provider": "sst",
-        "model": "opencode-cli/deepseek-v4.1-flash-free", "transport": "pool",
+        "harness_id": "opencode",
+        "provider": "sst",
+        "model": "opencode-cli/deepseek-v4.1-flash-free",
+        "transport": "pool",
     },
     "ollama-qwen36": {
-        "harness_id": "pi", "provider": "ollama", "model": "qwen3.6:35b-a3b",
+        "harness_id": "pi",
+        "provider": "ollama",
+        "model": "qwen3.6:35b-a3b",
         "transport": "ollama",
     },
 }
@@ -60,11 +69,14 @@ REQUIREMENT = (
     "并交给已登记成员。验收必须是可以实际检查的条目，不能只写“完成目标”。"
 )
 REVIEW_TASK = {
-    "task_id": "REAL-FAILURE-001", "attempt_id": "REAL-FAILURE-001.a1",
-    "title": "补启动说明", "status": "awaiting_review",
+    "task_id": "REAL-FAILURE-001",
+    "attempt_id": "REAL-FAILURE-001.a1",
+    "title": "补启动说明",
+    "status": "awaiting_review",
 }
 REVIEW_SPEC = {
-    "id": "REAL-FAILURE-001", "title": "补启动说明",
+    "id": "REAL-FAILURE-001",
+    "title": "补启动说明",
     "goal": "在 docs/startup.md 补启动说明，并保留既有入口，不得修改其他文件",
     "exclusive_paths": ["docs/startup.md"],
     "acceptance": "docs/startup.md 含启动步骤；既有入口保留；不得修改其他文件",
@@ -107,7 +119,11 @@ def cli_version(command: str) -> str:
                 break
     try:
         run = subprocess.run(
-            [executable, "--version"], capture_output=True, text=True, timeout=20, check=False,
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
         )
         return (run.stdout or run.stderr).strip().splitlines()[0][:300]
     except Exception as exc:  # 版本缺失必须留在协议里，不能猜。
@@ -144,15 +160,23 @@ class EvalService(AdminService):
         spec = CHANNELS[self.channel]
         stage = self.scenario
         if self.scenario == "spec":
-            stage = "spec_adjustment" if any(
-                call["stage"] == "spec_initial" for call in self.calls
-            ) else "spec_initial"
+            stage = (
+                "spec_adjustment"
+                if any(call["stage"] == "spec_initial" for call in self.calls)
+                else "spec_initial"
+            )
         attempt = 1 + sum(call["stage"] == stage for call in self.calls)
-        self.calls.append({
-            "stage": stage, "attempt": attempt, "started_at": now(),
-            "requested_model": spec["model"], "prompt_sha256": sha(prompt),
-            "duration_seconds": round(time.monotonic() - started, 3), **fields,
-        })
+        self.calls.append(
+            {
+                "stage": stage,
+                "attempt": attempt,
+                "started_at": now(),
+                "requested_model": spec["model"],
+                "prompt_sha256": sha(prompt),
+                "duration_seconds": round(time.monotonic() - started, 3),
+                **fields,
+            }
+        )
 
     def _invoke_model(self, prompt: str, route=None, log_key=""):
         if CHANNELS[self.channel]["transport"] == "cli":
@@ -161,16 +185,27 @@ class EvalService(AdminService):
                 payload, model = super()._invoke_model(prompt, route=route, log_key=log_key)
             except Exception as exc:
                 self._record(
-                    prompt, started, raw_output=self.runner.last_stdout,
-                    stderr=self.runner.last_stderr, parsed_payload=None,
-                    actual_model="", usage={}, error=f"{type(exc).__name__}: {exc}",
+                    prompt,
+                    started,
+                    raw_output=self.runner.last_stdout,
+                    stderr=self.runner.last_stderr,
+                    parsed_payload=None,
+                    actual_model="",
+                    usage={},
+                    error=f"{type(exc).__name__}: {exc}",
                 )
                 raise
             actual, usage = cli_facts(self.runner.last_stdout)
             self._record(
-                prompt, started, raw_output=self.runner.last_stdout,
-                stderr=self.runner.last_stderr, parsed_payload=payload,
-                actual_model=actual, usage=usage, model_receipt=model, error=None,
+                prompt,
+                started,
+                raw_output=self.runner.last_stdout,
+                stderr=self.runner.last_stderr,
+                parsed_payload=payload,
+                actual_model=actual,
+                usage=usage,
+                model_receipt=model,
+                error=None,
             )
             return payload, model
 
@@ -182,18 +217,33 @@ class EvalService(AdminService):
             payload = extract_json_object(raw)
         except Exception as exc:
             self._record(
-                prompt, started, raw_output="", stderr="", parsed_payload=None,
-                actual_model="", usage={}, cold_start=cold,
+                prompt,
+                started,
+                raw_output="",
+                stderr="",
+                parsed_payload=None,
+                actual_model="",
+                usage={},
+                cold_start=cold,
                 error=f"{type(exc).__name__}: {exc}",
             )
             raise
         model = {
-            "adapter": CHANNELS[self.channel]["transport"], "channel": self.channel,
+            "adapter": CHANNELS[self.channel]["transport"],
+            "channel": self.channel,
             "duration_seconds": round(time.monotonic() - started, 1),
         }
         self._record(
-            prompt, started, raw_output=raw, stderr="", parsed_payload=payload,
-            actual_model=actual, usage=usage, cold_start=cold, model_receipt=model, error=None,
+            prompt,
+            started,
+            raw_output=raw,
+            stderr="",
+            parsed_payload=payload,
+            actual_model=actual,
+            usage=usage,
+            cold_start=cold,
+            model_receipt=model,
+            error=None,
         )
         return payload, model
 
@@ -207,7 +257,8 @@ class EvalService(AdminService):
                 json={
                     "model": CHANNELS[self.channel]["model"],
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4096, "stream": False,
+                    "max_tokens": 4096,
+                    "stream": False,
                 },
                 timeout=180.0,
             )
@@ -215,14 +266,18 @@ class EvalService(AdminService):
             data = response.json()
             return (
                 str(data["choices"][0]["message"]["content"] or ""),
-                str(data.get("model") or ""), dict(data.get("usage") or {}),
+                str(data.get("model") or ""),
+                dict(data.get("usage") or {}),
             )
         response = httpx.post(
             "http://127.0.0.1:11434/api/chat",
             json={
-                "model": CHANNELS[self.channel]["model"], "think": False,
-                "messages": [{"role": "user", "content": prompt}], "stream": False,
-                "options": {"num_predict": 4096}, "keep_alive": "10m",
+                "model": CHANNELS[self.channel]["model"],
+                "think": False,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "options": {"num_predict": 4096},
+                "keep_alive": "10m",
             },
             timeout=240.0,
         )
@@ -267,19 +322,31 @@ def make_service(channel: str, chain, scratch: Path) -> EvalService:
         subject_type="harness", subject_id=MEMBER, label="evaluation member"
     )
     return EvalService(
-        chain.database, harness_id=spec["harness_id"], channel=channel,
-        runner=RecordingRunner(), scratch_dir=scratch, timeout_seconds=240,
+        chain.database,
+        harness_id=spec["harness_id"],
+        channel=channel,
+        runner=RecordingRunner(),
+        scratch_dir=scratch,
+        timeout_seconds=240,
     )
 
 
 def scenario_prompts(service: AdminService) -> dict[str, str]:
     return {
         "spec": service._prompt(
-            REQUIREMENT, group_id=GROUP, max_tasks=1, members=[MEMBER], answers=[], experience="",
+            REQUIREMENT,
+            group_id=GROUP,
+            max_tasks=1,
+            members=[MEMBER],
+            answers=[],
+            experience="",
         ),
         "review": service._review_prompt(
-            task=REVIEW_TASK, spec=REVIEW_SPEC, diff=REVIEW_DIFF,
-            verification={"status": "passed"}, project_name="质量评估",
+            task=REVIEW_TASK,
+            spec=REVIEW_SPEC,
+            diff=REVIEW_DIFF,
+            verification={"status": "passed"},
+            project_name="质量评估",
         ),
         "answer": service._answer_prompt(QUESTION, group_id=GROUP, asker="office-operator"),
     }
@@ -294,18 +361,26 @@ def basic_structure(scenario: str, payload: Any) -> bool:
         return (
             payload.get("verdict") in {"approve", "request_changes"}
             and isinstance(payload.get("findings"), list)
-            and all(isinstance(item, dict) and str(item.get("message") or "").strip()
-                    for item in payload["findings"])
+            and all(
+                isinstance(item, dict) and str(item.get("message") or "").strip()
+                for item in payload["findings"]
+            )
         )
     if isinstance(payload.get("questions"), list):
         return all(isinstance(item, str) for item in payload["questions"])
     tasks = payload.get("tasks")
-    return isinstance(tasks, list) and bool(tasks) and all(
-        isinstance(task, dict)
-        and all(isinstance(task.get(key), str) and task[key].strip()
-                for key in ("title", "goal", "acceptance", "harness_id"))
-        and isinstance(task.get("exclusive_paths"), list)
-        for task in tasks
+    return (
+        isinstance(tasks, list)
+        and bool(tasks)
+        and all(
+            isinstance(task, dict)
+            and all(
+                isinstance(task.get(key), str) and task[key].strip()
+                for key in ("title", "goal", "acceptance", "harness_id")
+            )
+            and isinstance(task.get("exclusive_paths"), list)
+            for task in tasks
+        )
     )
 
 
@@ -314,11 +389,28 @@ def acceptance_ok(text: str) -> bool:
     return (
         "docs/startup.md" in text
         and all(word in text for word in ("安装", "启动", "异常"))
-        and any(word in normalized for word in (
-            "标题", "包含", "存在", "不少于", "命令", "步骤", "section", "heading",
-            "contains", "exists", "at least", "command", "step", "verify", "reviewer",
-            "git diff", "non-empty",
-        ))
+        and any(
+            word in normalized
+            for word in (
+                "标题",
+                "包含",
+                "存在",
+                "不少于",
+                "命令",
+                "步骤",
+                "section",
+                "heading",
+                "contains",
+                "exists",
+                "at least",
+                "command",
+                "step",
+                "verify",
+                "reviewer",
+                "git diff",
+                "non-empty",
+            )
+        )
         and len(text) >= 45
     )
 
@@ -368,7 +460,8 @@ def score_payload(scenario: str, payload: Any) -> dict[str, Any]:
 def score_guarded(scenario: str, result: Any, error: str) -> dict[str, Any]:
     if result is None:
         return {
-            "structured_valid": False, "correct": False,
+            "structured_valid": False,
+            "correct": False,
             "errors": [error or "no_guarded_result"],
         }
     if scenario == "spec":
@@ -384,10 +477,12 @@ def score_guarded(scenario: str, result: Any, error: str) -> dict[str, Any]:
 
 
 def infrastructure_error(exc: Exception) -> bool:
-    if isinstance(exc, (httpx.HTTPError, TimeoutError, ConnectionError)):
+    if isinstance(exc, httpx.HTTPError | TimeoutError | ConnectionError):
         return True
     text = str(exc).lower()
-    return any(word in text for word in ("timed out", "timeout", "unavailable", "exited", "network"))
+    return any(
+        word in text for word in ("timed out", "timeout", "unavailable", "exited", "network")
+    )
 
 
 def execute_scenario(service: EvalService, scenario: str) -> tuple[Any, str, bool]:
@@ -395,15 +490,33 @@ def execute_scenario(service: EvalService, scenario: str) -> tuple[Any, str, boo
     for attempt in range(2):
         try:
             if scenario == "spec":
-                return service.refine(
-                    requirement=REQUIREMENT, group_id=GROUP, max_tasks=1, members=[MEMBER],
-                ), "", False
+                return (
+                    service.refine(
+                        requirement=REQUIREMENT,
+                        group_id=GROUP,
+                        max_tasks=1,
+                        members=[MEMBER],
+                    ),
+                    "",
+                    False,
+                )
             if scenario == "review":
-                return service.review(
-                    task=REVIEW_TASK, spec=REVIEW_SPEC, diff=REVIEW_DIFF,
-                    verification={"status": "passed"}, project_name="质量评估",
-                ), "", False
-            return service.answer(question=QUESTION, group_id=GROUP, asker="office-operator"), "", False
+                return (
+                    service.review(
+                        task=REVIEW_TASK,
+                        spec=REVIEW_SPEC,
+                        diff=REVIEW_DIFF,
+                        verification={"status": "passed"},
+                        project_name="质量评估",
+                    ),
+                    "",
+                    False,
+                )
+            return (
+                service.answer(question=QUESTION, group_id=GROUP, asker="office-operator"),
+                "",
+                False,
+            )
         except Exception as exc:
             if attempt == 0 and infrastructure_error(exc):
                 continue
@@ -424,7 +537,9 @@ def freeze() -> None:
     write_json(PROMPTS, prompts)
     prompt_hashes = {name: sha(text) for name, text in prompts.items()}
     manifest = {
-        "dataset_version": DATASET_VERSION, "frozen_at": now(), "repeats": REPEATS,
+        "dataset_version": DATASET_VERSION,
+        "frozen_at": now(),
+        "repeats": REPEATS,
         "channels": CHANNELS,
         "versions": {
             "qoderclicn": cli_version("qoderclicn"),
@@ -432,8 +547,12 @@ def freeze() -> None:
             "opencode": cli_version("opencode"),
             "ollama": cli_version("ollama"),
             "python": sys.version.split()[0],
-            "admin_service_sha256": sha((ROOT / "backend/app/admin/service.py").read_text(encoding="utf-8")),
-            "facts_guard_sha256": sha((ROOT / "backend/app/admin/facts.py").read_text(encoding="utf-8")),
+            "admin_service_sha256": sha(
+                (ROOT / "backend/app/admin/service.py").read_text(encoding="utf-8")
+            ),
+            "facts_guard_sha256": sha(
+                (ROOT / "backend/app/admin/facts.py").read_text(encoding="utf-8")
+            ),
         },
         "initial_prompt_sha256": prompt_hashes,
         "prompts_sha256": sha(PROMPTS.read_text(encoding="utf-8")),
@@ -448,14 +567,26 @@ def freeze() -> None:
         },
         "metrics": "36个场景为分母；基础设施失败不进入已完成质量指标，但不从完成率分母删除。",
         "inputs": {
-            "requirement": REQUIREMENT, "review_task": REVIEW_TASK,
-            "review_spec": REVIEW_SPEC, "review_diff": REVIEW_DIFF, "question": QUESTION,
+            "requirement": REQUIREMENT,
+            "review_task": REVIEW_TASK,
+            "review_spec": REVIEW_SPEC,
+            "review_diff": REVIEW_DIFF,
+            "question": QUESTION,
         },
     }
     manifest["protocol_sha256"] = sha(canonical(manifest))
     write_json(MANIFEST, manifest)
-    print(json.dumps({"frozen": str(MANIFEST), "protocol_sha256": manifest["protocol_sha256"],
-                      "prompt_hashes": prompt_hashes}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "frozen": str(MANIFEST),
+                "protocol_sha256": manifest["protocol_sha256"],
+                "prompt_hashes": prompt_hashes,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def verify_frozen() -> dict[str, Any]:
@@ -463,16 +594,21 @@ def verify_frozen() -> dict[str, Any]:
     claimed = manifest.pop("protocol_sha256")
     assert sha(canonical(manifest)) == claimed, "frozen protocol hash mismatch"
     manifest["protocol_sha256"] = claimed
-    assert sha(PROMPTS.read_text(encoding="utf-8")) == manifest["prompts_sha256"], "prompt hash mismatch"
+    assert (
+        sha(PROMPTS.read_text(encoding="utf-8")) == manifest["prompts_sha256"]
+    ), "prompt hash mismatch"
     return manifest
 
 
 def run() -> None:
     manifest = verify_frozen()
     RUNS.mkdir(parents=True, exist_ok=True)
-    expected = {(channel, scenario, repeat)
-                for channel in CHANNELS for scenario in ("spec", "review", "answer")
-                for repeat in range(1, REPEATS + 1)}
+    expected = {
+        (channel, scenario, repeat)
+        for channel in CHANNELS
+        for scenario in ("spec", "review", "answer")
+        for repeat in range(1, REPEATS + 1)
+    }
     # 同一冻结账本只读提供事实；各模型调用不修改任务状态。共享它可避免重复搭建
     # Git 验证链的 Windows 文件锁，已完成的同协议记录直接跳过，不重复花费额度。
     chain = build_chain(RUNS / "shared-chain")
@@ -480,8 +616,11 @@ def run() -> None:
         service = make_service(channel, chain, RUNS / "scratch" / channel)
         if channel == "ollama-qwen36":
             # 只影响本地运行时驻留，不改配置；第一次正式调用单独标为冷启动。
-            httpx.post("http://127.0.0.1:11434/api/generate",
-                       json={"model": CHANNELS[channel]["model"], "keep_alive": 0}, timeout=30)
+            httpx.post(
+                "http://127.0.0.1:11434/api/generate",
+                json={"model": CHANNELS[channel]["model"], "keep_alive": 0},
+                timeout=30,
+            )
         for repeat in range(1, REPEATS + 1):
             for scenario in ("spec", "review", "answer"):
                 path = RUNS / f"{channel}--{scenario}--{repeat}.json"
@@ -495,24 +634,48 @@ def run() -> None:
                 initial = next((call for call in calls if call["error"] is None), None)
                 raw_score = (
                     score_payload(scenario, initial["parsed_payload"])
-                    if initial else {"structured_valid": False, "correct": False,
-                                     "errors": ["no_successful_model_call"]}
+                    if initial
+                    else {
+                        "structured_valid": False,
+                        "correct": False,
+                        "errors": ["no_successful_model_call"],
+                    }
                 )
                 record = {
                     "dataset_version": DATASET_VERSION,
                     "protocol_sha256": manifest["protocol_sha256"],
-                    "channel": channel, "scenario": scenario, "repeat": repeat,
+                    "channel": channel,
+                    "scenario": scenario,
+                    "repeat": repeat,
                     "requested_model": CHANNELS[channel]["model"],
-                    "actual_models": sorted({call["actual_model"] for call in calls
-                                             if call["actual_model"]}),
+                    "actual_models": sorted(
+                        {call["actual_model"] for call in calls if call["actual_model"]}
+                    ),
                     "status": "infrastructure_failed" if infra_failed else "completed",
-                    "error": error, "raw": raw_score, "guarded": score_guarded(scenario, result, error),
-                    "call_count": len(calls), "calls": calls,
+                    "error": error,
+                    "raw": raw_score,
+                    "guarded": score_guarded(scenario, result, error),
+                    "call_count": len(calls),
+                    "calls": calls,
                 }
                 write_json(RUNS / f"{channel}--{scenario}--{repeat}.json", record)
-                print(json.dumps({key: record[key] for key in (
-                    "channel", "scenario", "repeat", "status", "call_count", "error"
-                )}, ensure_ascii=False), flush=True)
+                print(
+                    json.dumps(
+                        {
+                            key: record[key]
+                            for key in (
+                                "channel",
+                                "scenario",
+                                "repeat",
+                                "status",
+                                "call_count",
+                                "error",
+                            )
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
     assert {path.stem for path in RUNS.glob("*.json")} == {
         f"{channel}--{scenario}--{repeat}" for channel, scenario, repeat in expected
     }
@@ -531,9 +694,15 @@ def effective_usage(call: dict[str, Any]) -> dict[str, Any]:
     if call["usage"]:
         return call["usage"]
     # CLI 已返回结果但平台解析/校验失败时，额度仍已发生；从原始回执补记账。
-    if call["raw_output"] and CHANNELS[next(
-        name for name, spec in CHANNELS.items() if spec["model"] == call["requested_model"]
-    )]["transport"] == "cli":
+    if (
+        call["raw_output"]
+        and CHANNELS[
+            next(
+                name for name, spec in CHANNELS.items() if spec["model"] == call["requested_model"]
+            )
+        ]["transport"]
+        == "cli"
+    ):
         return cli_facts(call["raw_output"])[1]
     return call["usage"]
 
@@ -553,9 +722,11 @@ def summarize() -> None:
                 row["guarded"]["errors"].append("guard_status_not_ok")
         write_json(RUNS / f"{row['channel']}--{row['scenario']}--{row['repeat']}.json", row)
     output: dict[str, Any] = {
-        "dataset_version": DATASET_VERSION, "protocol_sha256": manifest["protocol_sha256"],
+        "dataset_version": DATASET_VERSION,
+        "protocol_sha256": manifest["protocol_sha256"],
         "evaluator_sha256": sha(Path(__file__).read_text(encoding="utf-8")),
-        "scenario_count": len(records), "channels": {},
+        "scenario_count": len(records),
+        "channels": {},
     }
     for channel in CHANNELS:
         subset = [row for row in records if row["channel"] == channel]
@@ -564,10 +735,13 @@ def summarize() -> None:
         durations = [call["duration_seconds"] for call in calls]
         call_usage = [effective_usage(call) for call in calls]
         usage = {
-            "input_tokens": sum((item.get("input_tokens") or item.get("prompt_tokens") or 0)
-                                for item in call_usage),
-            "output_tokens": sum((item.get("output_tokens") or item.get("completion_tokens") or 0)
-                                 for item in call_usage),
+            "input_tokens": sum(
+                (item.get("input_tokens") or item.get("prompt_tokens") or 0) for item in call_usage
+            ),
+            "output_tokens": sum(
+                (item.get("output_tokens") or item.get("completion_tokens") or 0)
+                for item in call_usage
+            ),
             "credits": sum((item.get("credits") or 0) for item in call_usage),
             "total_cost_usd": sum((item.get("total_cost_usd") or 0) for item in call_usage),
             "token_usage_reported": any(
@@ -587,35 +761,56 @@ def summarize() -> None:
         output["channels"][channel] = {
             "requested_model": CHANNELS[channel]["model"],
             "actual_models": sorted(actual_models),
-            "scenario_count": len(subset), "completed": len(completed),
+            "scenario_count": len(subset),
+            "completed": len(completed),
             "completion_rate": len(completed) / len(subset),
             "infrastructure_failure_rate": (len(subset) - len(completed)) / len(subset),
             "call_count": len(calls),
             "raw_correct_rate": sum(row["raw"]["correct"] for row in completed) / len(completed)
-                if completed else None,
-            "guarded_correct_rate": sum(row["guarded"]["correct"] for row in completed) / len(completed)
-                if completed else None,
-            "raw_structured_rate": sum(row["raw"]["structured_valid"] for row in completed) / len(completed)
-                if completed else None,
-            "guarded_structured_rate": sum(row["guarded"]["structured_valid"] for row in completed) / len(completed)
-                if completed else None,
+            if completed
+            else None,
+            "guarded_correct_rate": sum(row["guarded"]["correct"] for row in completed)
+            / len(completed)
+            if completed
+            else None,
+            "raw_structured_rate": sum(row["raw"]["structured_valid"] for row in completed)
+            / len(completed)
+            if completed
+            else None,
+            "guarded_structured_rate": sum(row["guarded"]["structured_valid"] for row in completed)
+            / len(completed)
+            if completed
+            else None,
             "duration_seconds": {
                 "median": statistics.median(durations) if durations else None,
                 "max": max(durations) if durations else None,
                 "p95": percentile(durations, 0.95),
             },
-            "cold_calls": [{"scenario": row["scenario"], "repeat": row["repeat"],
-                            "duration_seconds": call["duration_seconds"]}
-                           for row in subset for call in row["calls"] if call.get("cold_start")],
-            "usage": usage, "raw_errors": raw_errors,
+            "cold_calls": [
+                {
+                    "scenario": row["scenario"],
+                    "repeat": row["repeat"],
+                    "duration_seconds": call["duration_seconds"],
+                }
+                for row in subset
+                for call in row["calls"]
+                if call.get("cold_start")
+            ],
+            "usage": usage,
+            "raw_errors": raw_errors,
             "by_scenario": {
                 scenario: {
-                    "raw_correct": sum(row["raw"]["correct"] for row in completed
-                                       if row["scenario"] == scenario),
-                    "guarded_correct": sum(row["guarded"]["correct"] for row in completed
-                                           if row["scenario"] == scenario),
+                    "raw_correct": sum(
+                        row["raw"]["correct"] for row in completed if row["scenario"] == scenario
+                    ),
+                    "guarded_correct": sum(
+                        row["guarded"]["correct"]
+                        for row in completed
+                        if row["scenario"] == scenario
+                    ),
                     "completed": sum(row["scenario"] == scenario for row in completed),
-                } for scenario in ("spec", "review", "answer")
+                }
+                for scenario in ("spec", "review", "answer")
             },
         }
     output["total_calls"] = sum(row["call_count"] for row in records)

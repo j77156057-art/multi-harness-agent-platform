@@ -15,13 +15,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from fastapi.testclient import TestClient
 
 from app.admin.experience import ExperienceStore
 from app.admin.service import AdminHarnessError, AdminService, extract_json_object
 from app.api.app import create_app
 from app.auth.tokens import TokenService
 from app.config import settings
-from fastapi.testclient import TestClient
 from tests.merge_support import build_chain, register_harness
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -152,7 +152,12 @@ def freeze() -> None:
         "script_sha256": sha(Path(__file__).read_text(encoding="utf-8")),
     }
     write_json(FROZEN, protocol)
-    print(json.dumps({"frozen": str(FROZEN), "calls_planned": 18, "cost_limit": COST_LIMIT}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"frozen": str(FROZEN), "calls_planned": 18, "cost_limit": COST_LIMIT},
+            ensure_ascii=False,
+        )
+    )
 
 
 class RealModelService(AdminService):
@@ -178,7 +183,9 @@ class RealModelService(AdminService):
         except Exception:
             return {}
 
-    def _invoke_model(self, prompt: str, route=None, log_key="") -> tuple[dict[str, Any], dict[str, Any]]:
+    def _invoke_model(
+        self, prompt: str, route=None, log_key=""
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.real_calls:
             raise AdminHarnessError("evaluation one-call limit reached")
         self.real_calls += 1
@@ -206,25 +213,30 @@ class RealModelService(AdminService):
             document = response.json()
             ledger_after = self._pool_ledger()
             ledger_cost = None
-            if isinstance(ledger_before.get("credits"), (int, float)) and isinstance(
-                ledger_after.get("credits"), (int, float)
+            if isinstance(ledger_before.get("credits"), int | float) and isinstance(
+                ledger_after.get("credits"), int | float
             ):
                 ledger_cost = ledger_after["credits"] - ledger_before["credits"]
-            record.update({
-                "http_status": response.status_code,
-                "duration_seconds": round(time.monotonic() - started, 3),
-                "actual_model": document.get("model"),
-                "usage": document.get("usage") or {},
-                "finish_reason": (
-                    (document.get("choices") or [{}])[0].get("finish_reason")
-                    if document.get("choices") else None
-                ),
-                "provider_cost": document.get("cost", (document.get("usage") or {}).get("cost")),
-                "ledger_before": ledger_before,
-                "ledger_after": ledger_after,
-                "ledger_cost": ledger_cost,
-                "raw_response": document,
-            })
+            record.update(
+                {
+                    "http_status": response.status_code,
+                    "duration_seconds": round(time.monotonic() - started, 3),
+                    "actual_model": document.get("model"),
+                    "usage": document.get("usage") or {},
+                    "finish_reason": (
+                        (document.get("choices") or [{}])[0].get("finish_reason")
+                        if document.get("choices")
+                        else None
+                    ),
+                    "provider_cost": document.get(
+                        "cost", (document.get("usage") or {}).get("cost")
+                    ),
+                    "ledger_before": ledger_before,
+                    "ledger_after": ledger_after,
+                    "ledger_cost": ledger_cost,
+                    "raw_response": document,
+                }
+            )
             response.raise_for_status()
             content = str(document["choices"][0]["message"].get("content") or "")
             record["content"] = content
@@ -237,10 +249,12 @@ class RealModelService(AdminService):
                 "duration_seconds": record["duration_seconds"],
             }
         except Exception as exc:
-            record.update({
-                "duration_seconds": round(time.monotonic() - started, 3),
-                "error": f"{type(exc).__name__}: {exc}",
-            })
+            record.update(
+                {
+                    "duration_seconds": round(time.monotonic() - started, 3),
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
             write_json(OUT / "calls" / f"{self.case_id}-{self.condition}.json", record)
             if isinstance(exc, AdminHarnessError):
                 raise
@@ -285,11 +299,13 @@ def _score(case: dict[str, Any], result: dict[str, Any] | None) -> dict[str, Any
     elif defect == "missing_failure_acceptance":
         hit = "启动命令" in acceptance and ("失败" in acceptance or "异常" in acceptance)
     elif defect == "entry_not_preserved":
-        hit = "保留" in goal and "保留" in acceptance and (
-            "README.md" in text or "既有入口" in text
+        hit = (
+            "保留" in goal and "保留" in acceptance and ("README.md" in text or "既有入口" in text)
         )
     elif defect == "missing_step_count":
-        hit = ("三条" in acceptance or "3 条" in acceptance or "3条" in acceptance) and "步骤" in acceptance
+        hit = (
+            "三条" in acceptance or "3 条" in acceptance or "3条" in acceptance
+        ) and "步骤" in acceptance
     else:
         hit = "logs/startup.log" in text
     return {
@@ -304,10 +320,10 @@ def _score(case: dict[str, Any], result: dict[str, Any] | None) -> dict[str, Any
 
 def _provider_cost(call: dict[str, Any]) -> float:
     value = call.get("ledger_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     value = call.get("provider_cost")
-    return float(value) if isinstance(value, (int, float)) else 0.0
+    return float(value) if isinstance(value, int | float) else 0.0
 
 
 def run() -> None:
@@ -317,7 +333,9 @@ def run() -> None:
     outcomes: list[dict[str, Any]] = []
     production_experience = Path(settings.data_dir) / "admin" / "experience.json"
     production_before = (
-        sha(production_experience.read_text(encoding="utf-8")) if production_experience.exists() else None
+        sha(production_experience.read_text(encoding="utf-8"))
+        if production_experience.exists()
+        else None
     )
     with tempfile.TemporaryDirectory(prefix="experience-ab-") as temporary:
         chain, api, admin_token, member_token, human_token = _setup(Path(temporary))
@@ -340,18 +358,23 @@ def run() -> None:
 
         for index, case in enumerate(CASES):
             unrelated = CASES[(index + 1) % len(CASES)]
-            context = _post(api, "/api/v1/groups/G-1/dispatch", {
-                "request_id": f"context-{case['case_id']}",
-                "title": f"{case['case_id']} · 缺陷场景",
-                "goal": case["requirement"],
-                "harness_id": MEMBER,
-                "decided_by": ADMIN,
-                "exclusive_paths": [case["path"]],
-                "acceptance": "交付物存在且可检查",
-            }, admin_token)
+            context = _post(
+                api,
+                "/api/v1/groups/G-1/dispatch",
+                {
+                    "request_id": f"context-{case['case_id']}",
+                    "title": f"{case['case_id']} · 缺陷场景",
+                    "goal": case["requirement"],
+                    "harness_id": MEMBER,
+                    "decided_by": ADMIN,
+                    "exclusive_paths": [case["path"]],
+                    "acceptance": "交付物存在且可检查",
+                },
+                admin_token,
+            )
             context_id = context["task_id"]
             store = ExperienceStore(Path(temporary) / "admin" / "experience.json")
-            for role, experience_case in (("relevant", case), ("unrelated", unrelated)):
+            for _role, experience_case in (("relevant", case), ("unrelated", unrelated)):
                 store.record_outcome(
                     kind="request_changes",
                     project=case["case_id"],
@@ -370,13 +393,28 @@ def run() -> None:
             relevant = by_root[case["root_cause"]]
             unrelated_record = by_root[unrelated["root_cause"]]
             decision_base = f"/api/v1/tasks/{context_id}/experiences"
-            _post(api, "/api/v1/experience-injection", {"enabled": False, "decided_by": "human-1"}, human_token)
+            _post(
+                api,
+                "/api/v1/experience-injection",
+                {"enabled": False, "decided_by": "human-1"},
+                human_token,
+            )
 
             for condition in ("A", "B", "C"):
                 if condition == "A":
-                    _post(api, "/api/v1/experience-injection", {"enabled": False, "decided_by": "human-1"}, human_token)
+                    _post(
+                        api,
+                        "/api/v1/experience-injection",
+                        {"enabled": False, "decided_by": "human-1"},
+                        human_token,
+                    )
                 else:
-                    _post(api, "/api/v1/experience-injection", {"enabled": True, "decided_by": "human-1"}, human_token)
+                    _post(
+                        api,
+                        "/api/v1/experience-injection",
+                        {"enabled": True, "decided_by": "human-1"},
+                        human_token,
+                    )
                     selected = relevant if condition == "B" else unrelated_record
                     _post(
                         api,
@@ -400,8 +438,10 @@ def run() -> None:
                     "context_task_id": context_id,
                     "relevant_experience_id": relevant["experience_id"],
                     "injected_experience_id": (
-                        relevant["experience_id"] if condition == "B"
-                        else unrelated_record["experience_id"] if condition == "C"
+                        relevant["experience_id"]
+                        if condition == "B"
+                        else unrelated_record["experience_id"]
+                        if condition == "C"
                         else None
                     ),
                 }
@@ -416,14 +456,19 @@ def run() -> None:
                     )
                     outcome["result"] = result
                     if result.get("tasks"):
-                        draft = _post(api, "/api/v1/adapter/admin/plan_draft", {
-                            "group_id": GROUP,
-                            "title": f"{case['case_id']}-{condition}",
-                            "goal": case["requirement"],
-                            "tasks": result["tasks"],
-                            "reviewer_harness_ids": [MEMBER],
-                            "opened_by": ADMIN,
-                        }, admin_token)
+                        draft = _post(
+                            api,
+                            "/api/v1/adapter/admin/plan_draft",
+                            {
+                                "group_id": GROUP,
+                                "title": f"{case['case_id']}-{condition}",
+                                "goal": case["requirement"],
+                                "tasks": result["tasks"],
+                                "reviewer_harness_ids": [MEMBER],
+                                "opened_by": ADMIN,
+                            },
+                            admin_token,
+                        )
                         outcome["plan_id"] = draft["plan_id"]
                     outcome["machine"] = _score(case, result)
                 except Exception as exc:
@@ -434,8 +479,16 @@ def run() -> None:
                 outcome["receipt"] = {
                     key: call.get(key)
                     for key in (
-                        "requested_model", "actual_model", "parameters", "usage",
-                        "provider_cost", "ledger_cost", "duration_seconds", "finish_reason", "http_status", "error",
+                        "requested_model",
+                        "actual_model",
+                        "parameters",
+                        "usage",
+                        "provider_cost",
+                        "ledger_cost",
+                        "duration_seconds",
+                        "finish_reason",
+                        "http_status",
+                        "error",
                     )
                 }
                 outcomes.append(outcome)
@@ -460,15 +513,20 @@ def run() -> None:
                     )
         settings.data_dir = ROOT / "data"
     production_after = (
-        sha(production_experience.read_text(encoding="utf-8")) if production_experience.exists() else None
+        sha(production_experience.read_text(encoding="utf-8"))
+        if production_experience.exists()
+        else None
     )
-    write_json(OUT / "environment.json", {
-        "temporary_directory_removed": not Path(temporary).exists(),
-        "production_experience_sha256_before": production_before,
-        "production_experience_sha256_after": production_after,
-        "production_unchanged": production_before == production_after,
-        "completed_outcomes": len(outcomes),
-    })
+    write_json(
+        OUT / "environment.json",
+        {
+            "temporary_directory_removed": not Path(temporary).exists(),
+            "production_experience_sha256_before": production_before,
+            "production_experience_sha256_after": production_after,
+            "production_unchanged": production_before == production_after,
+            "completed_outcomes": len(outcomes),
+        },
+    )
 
 
 def _wilson(successes: int, total: int) -> list[float]:
@@ -499,15 +557,23 @@ def summarize() -> None:
         "parameters": PARAMS,
         "outcomes": len(rows),
         "conditions": {},
-        "disagreements": [f"{row['case_id']}-{row['condition']}" for row in rows if row.get("scoring_disagreement")],
+        "disagreements": [
+            f"{row['case_id']}-{row['condition']}"
+            for row in rows
+            if row.get("scoring_disagreement")
+        ],
     }
-    all_calls = [read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows]
+    all_calls = [
+        read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows
+    ]
     preflight = read_json(OUT / "calls" / "PREFLIGHT-preflight.json", {})
     for condition in ("A", "B", "C"):
         group = [row for row in rows if row["condition"] == condition]
         hits = sum(bool((row.get("machine") or {}).get("hit")) for row in group)
         defects = sum(bool((row.get("machine") or {}).get("defect_present")) for row in group)
-        human_hits = sum(bool((row.get("human") or {}).get("hit")) for row in group if row.get("human"))
+        human_hits = sum(
+            bool((row.get("human") or {}).get("hit")) for row in group if row.get("human")
+        )
         summary["conditions"][condition] = {
             "n": len(group),
             "machine_hits": hits,
@@ -523,14 +589,20 @@ def summarize() -> None:
     for case in CASES:
         group = {row["condition"]: row for row in rows if row["case_id"] == case["case_id"]}
         if all(condition in group for condition in ("A", "B", "C")):
-            pairs.append({
-                "case_id": case["case_id"],
-                "B_fixed_A_defect": bool(group["A"]["machine"]["defect_present"] and group["B"]["machine"]["hit"]),
-                "B_regressed": bool(group["A"]["machine"]["hit"] and group["B"]["machine"]["defect_present"]),
-                "C_fixed_A_defect_without_relevant_experience": bool(
-                    group["A"]["machine"]["defect_present"] and group["C"]["machine"]["hit"]
-                ),
-            })
+            pairs.append(
+                {
+                    "case_id": case["case_id"],
+                    "B_fixed_A_defect": bool(
+                        group["A"]["machine"]["defect_present"] and group["B"]["machine"]["hit"]
+                    ),
+                    "B_regressed": bool(
+                        group["A"]["machine"]["hit"] and group["B"]["machine"]["defect_present"]
+                    ),
+                    "C_fixed_A_defect_without_relevant_experience": bool(
+                        group["A"]["machine"]["defect_present"] and group["C"]["machine"]["hit"]
+                    ),
+                }
+            )
     summary["paired"] = {
         "n": len(pairs),
         "B_fixed_A_defect": sum(pair["B_fixed_A_defect"] for pair in pairs),
@@ -546,15 +618,23 @@ def summarize() -> None:
         "pool_tier": MODEL_TIER,
         "cost_note": "actual pool ledger deltas; subscription quota, never an estimated unit price",
         "provider_cost_missing_calls": sum(call.get("provider_cost") is None for call in charged),
-        "prompt_tokens": sum(int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged),
-        "completion_tokens": sum(int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged),
-        "total_tokens": sum(int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged),
+        "prompt_tokens": sum(
+            int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged
+        ),
+        "completion_tokens": sum(
+            int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged
+        ),
+        "total_tokens": sum(
+            int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged
+        ),
         "usage_missing_calls": sum(not call.get("usage") for call in charged),
         "finish_reasons": {
             reason: sum(call.get("finish_reason") == reason for call in charged)
             for reason in sorted({str(call.get("finish_reason")) for call in charged})
         },
-        "duration_median_seconds": statistics.median(float(call.get("duration_seconds") or 0) for call in charged),
+        "duration_median_seconds": statistics.median(
+            float(call.get("duration_seconds") or 0) for call in charged
+        ),
         "duration_max_seconds": max(float(call.get("duration_seconds") or 0) for call in charged),
         "calls_including_preflight": len(charged),
     }

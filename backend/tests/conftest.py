@@ -72,6 +72,25 @@ def project_root() -> Path:
     return PROJECT_ROOT
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_proxy_env():
+    # httpx 构造 Client 时解析宿主机代理变量；NO_PROXY 里的 [::1] 会让
+    # httpx 0.28.1 抛 InvalidURL。测试结果不得取决于宿主机的代理配置。
+    names = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    )
+    saved = {name: os.environ.pop(name) for name in names if name in os.environ}
+    yield
+    os.environ.update(saved)
+
+
 @pytest.fixture(scope="session")
 def spec_path(project_root: Path) -> Path:
     path = project_root / "docs" / "spec" / "0.3-R10.md"

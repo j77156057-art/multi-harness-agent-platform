@@ -94,9 +94,7 @@ class Settings:
         self.review_wait_sla_minutes: int = int(os.environ.get("AP_REVIEW_WAIT_SLA_MINUTES", "60"))
         self.reclaim_grace_minutes: int = int(os.environ.get("AP_RECLAIM_GRACE_MINUTES", "10"))
         # ready 任务超过该分钟数没人领取：没有候选 / 有候选但没人动，都要提醒。
-        self.ready_unclaimed_minutes: int = int(
-            os.environ.get("AP_READY_UNCLAIMED_MINUTES", "10")
-        )
+        self.ready_unclaimed_minutes: int = int(os.environ.get("AP_READY_UNCLAIMED_MINUTES", "10"))
         # 同一条任务的重复提醒间隔（按 (任务, 目标, 原因) 去重）。
         self.ready_unclaimed_reminder_minutes: int = int(
             os.environ.get("AP_READY_UNCLAIMED_REMINDER_MINUTES", "30")
@@ -192,9 +190,13 @@ class Settings:
         #:
         #: 默认关闭：关着时消息完全按今天的样子走，"以给某某：开头的普通消息"不会被悄悄
         #: 拆开（拆错比不拆更坏）。要用的人自己打开这一步。
-        self.relay_mode: bool = os.environ.get(
-            "AP_RELAY_MODE", "0"
-        ).strip().lower() not in {"0", "false", "no", "off", ""}
+        self.relay_mode: bool = os.environ.get("AP_RELAY_MODE", "0").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+            "",
+        }
 
         # --- Git（R10 §13）---
         self.canonical_repo: Path = Path(

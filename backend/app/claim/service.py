@@ -948,9 +948,7 @@ class ClaimService:
             "queue_reason": reason,
         }
         if capacity is not None:
-            payload["unavailability_reasons"] = list(
-                capacity.get("unavailability_reasons", [])
-            )
+            payload["unavailability_reasons"] = list(capacity.get("unavailability_reasons", []))
             payload["earliest_available_at"] = capacity.get("earliest_available_at")
         event = self.store.append(
             event_name=EventKind.CLAIM_DEFERRED_RESOURCE.value,
@@ -1069,9 +1067,7 @@ class ClaimService:
         if self._resource_blocker(conn, resources, moment) is not None:
             return None
         if queue_reason == QUEUE_REASON_WORKTREE:
-            capacity = worktree_capacity(
-                conn, now=moment, limit=settings.concurrent_worktree
-            )
+            capacity = worktree_capacity(conn, now=moment, limit=settings.concurrent_worktree)
             if capacity["at_capacity"]:
                 return None
 

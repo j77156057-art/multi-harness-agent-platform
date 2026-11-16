@@ -87,9 +87,7 @@ def presence_snapshot(
     """
     moment = now or datetime.now(UTC)
     try:
-        rows = database.read(
-            "SELECT harness_id, role, started_at, seen_at FROM harness_presence"
-        )
+        rows = database.read("SELECT harness_id, role, started_at, seen_at FROM harness_presence")
     except Exception:  # pragma: no cover - 表还没建时不该把整个界面拖垮
         return {}
     snapshot: dict[str, dict[str, Any]] = {}

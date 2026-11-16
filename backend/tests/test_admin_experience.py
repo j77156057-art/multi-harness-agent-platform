@@ -148,9 +148,21 @@ def test_records_persist_with_complete_structured_fields(tmp_path):
 
     assert [record["kind"] for record in records] == ["request_changes", "merged"]
     required = {
-        "kind", "project", "task_category", "executor", "spec_summary",
-        "root_cause", "root_key", "action", "result", "contract_id", "diff_hash",
-        "recorded_at", "last_recorded_at", "occurrence_count", "scope",
+        "kind",
+        "project",
+        "task_category",
+        "executor",
+        "spec_summary",
+        "root_cause",
+        "root_key",
+        "action",
+        "result",
+        "contract_id",
+        "diff_hash",
+        "recorded_at",
+        "last_recorded_at",
+        "occurrence_count",
+        "scope",
         "cross_project_confirmed_by",
     }
     for record in records:
@@ -168,14 +180,24 @@ def test_records_persist_with_complete_structured_fields(tmp_path):
 
 def test_legacy_records_default_missing_fields_without_fabricating_history(tmp_path):
     path = tmp_path / "experience.json"
-    path.write_text(json.dumps({"version": 1, "records": [{
-        "kind": "request_changes",
-        "project": "P-old",
-        "task_category": "backend",
-        "executor": "codex",
-        "spec_summary": "旧规格",
-        "findings_summary": "缺少失败路径的验收条件",
-    }]}), encoding="utf-8")
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": [
+                    {
+                        "kind": "request_changes",
+                        "project": "P-old",
+                        "task_category": "backend",
+                        "executor": "codex",
+                        "spec_summary": "旧规格",
+                        "findings_summary": "缺少失败路径的验收条件",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     record = ExperienceStore(path).records()[0]
 
@@ -223,15 +245,28 @@ def test_cross_project_recall_requires_explicit_confirmation(tmp_path):
     store = ExperienceStore(tmp_path / "experience.json")
     with pytest.raises(ValueError, match="explicit confirmation"):
         store.record_outcome(
-            kind="merged", project="P-one", task_category="docs", executor="codex",
-            spec_summary="未确认经验", root_cause="无失败根因", action="完成", result="合并",
+            kind="merged",
+            project="P-one",
+            task_category="docs",
+            executor="codex",
+            spec_summary="未确认经验",
+            root_cause="无失败根因",
+            action="完成",
+            result="合并",
             scope="cross_project",
         )
     _merged(store, "P-one", category="docs")
     store.record_outcome(
-        kind="merged", project="P-one", task_category="docs", executor="codex",
-        spec_summary="已确认经验", root_cause="无失败根因", action="完成", result="合并",
-        scope="cross_project", cross_project_confirmed_by="human-admin",
+        kind="merged",
+        project="P-one",
+        task_category="docs",
+        executor="codex",
+        spec_summary="已确认经验",
+        root_cause="无失败根因",
+        action="完成",
+        result="合并",
+        scope="cross_project",
+        cross_project_confirmed_by="human-admin",
     )
 
     assert store.recall(project="P-two", task_category="docs") == []
@@ -244,8 +279,12 @@ def test_cross_project_recall_requires_explicit_confirmation(tmp_path):
 def test_abandoned_attempt_is_structured_but_not_a_dispatch_lesson(tmp_path):
     store = ExperienceStore(tmp_path / "experience.json")
     store.record_abandoned(
-        project="P-one", task_category="backend", executor="codex",
-        spec_summary="实现接口", reason="执行环境缺少依赖", contract_id="T-1",
+        project="P-one",
+        task_category="backend",
+        executor="codex",
+        spec_summary="实现接口",
+        reason="执行环境缺少依赖",
+        contract_id="T-1",
     )
 
     (record,) = store.records()

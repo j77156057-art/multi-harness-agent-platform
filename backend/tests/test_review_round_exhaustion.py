@@ -19,9 +19,7 @@ from tests.merge_support import REVIEWER, build_chain
 
 
 def _status(chain) -> TaskStatus:
-    rows = chain.database.read(
-        "SELECT status FROM tasks WHERE task_id = ?", (chain.task_id,)
-    )
+    rows = chain.database.read("SELECT status FROM tasks WHERE task_id = ?", (chain.task_id,))
     return TaskStatus(str(rows[0]["status"]))
 
 

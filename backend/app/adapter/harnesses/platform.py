@@ -27,6 +27,7 @@ Two facts it must not fudge:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -90,10 +91,9 @@ class PlatformToolsAdapter(CliHarness):
         }
         path = root / "channel.json"
         path.write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
-        try:
+        # pragma: no cover - Windows ignores POSIX modes
+        with contextlib.suppress(OSError):
             path.chmod(0o600)
-        except OSError:  # pragma: no cover - Windows ignores POSIX modes
-            pass
         self._attempt_dir = root
         return root
 

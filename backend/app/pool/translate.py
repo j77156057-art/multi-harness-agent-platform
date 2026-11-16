@@ -102,8 +102,7 @@ def _openai_tools_to_anthropic(tools: Any) -> list[dict[str, Any]]:
             {
                 "name": str(function.get("name") or ""),
                 "description": str(function.get("description") or ""),
-                "input_schema": function.get("parameters")
-                or {"type": "object", "properties": {}},
+                "input_schema": function.get("parameters") or {"type": "object", "properties": {}},
             }
         )
     return [tool for tool in converted if tool["name"]]
@@ -416,7 +415,8 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
                         "type": "function",
                         "name": str(tool["name"]),
                         "description": str(tool.get("description") or ""),
-                        "parameters": tool.get("parameters") or {"type": "object", "properties": {}},
+                        "parameters": tool.get("parameters")
+                        or {"type": "object", "properties": {}},
                     }
                 )
         converted = [tool for tool in converted if tool["name"]]
@@ -426,7 +426,9 @@ def chat_to_responses(payload: dict[str, Any]) -> dict[str, Any]:
             if isinstance(choice, str) and choice in {"auto", "none", "required"}:
                 body["tool_choice"] = choice
             elif isinstance(choice, dict):
-                function = choice.get("function") if isinstance(choice.get("function"), dict) else {}
+                function = (
+                    choice.get("function") if isinstance(choice.get("function"), dict) else {}
+                )
                 if function.get("name"):
                     body["tool_choice"] = {
                         "type": "function",
@@ -458,7 +460,9 @@ def responses_to_chat(data: dict[str, Any], *, model: str) -> dict[str, Any]:
             arguments = item.get("arguments")
             tool_calls.append(
                 {
-                    "id": str(item.get("call_id") or item.get("id") or f"call_relay_{len(tool_calls)}"),
+                    "id": str(
+                        item.get("call_id") or item.get("id") or f"call_relay_{len(tool_calls)}"
+                    ),
                     "type": "function",
                     "function": {
                         "name": str(item.get("name") or ""),

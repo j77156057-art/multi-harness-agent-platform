@@ -24,9 +24,9 @@ from fastapi.testclient import TestClient
 from app.adapter.harnesses.cli import CliRunResult
 from app.admin.experience import ExperienceStore
 from app.admin.service import (
+    PLATFORM_ASSISTANT_HARNESS_ID,
     AdminHarnessError,
     AdminService,
-    PLATFORM_ASSISTANT_HARNESS_ID,
     extract_json_object,
 )
 from app.api.app import create_app
@@ -139,7 +139,11 @@ ADMIN_WINDOW = "qoder-window-admin"
 
 
 def _refine_service(
-    chain, runner, *, admin: str = ADMIN_WINDOW, scratch: Path | None = None,
+    chain,
+    runner,
+    *,
+    admin: str = ADMIN_WINDOW,
+    scratch: Path | None = None,
     experience: ExperienceStore | None = None,
 ) -> AdminService:
     """细化服务的夹具：默认管理员是一个注册过的窗口，且通道固定为 qoder。"""
@@ -321,10 +325,12 @@ def test_refine_does_not_inject_unconfirmed_experience(tmp_path):
 def test_refine_self_check_adjusts_an_uncheckable_spec_before_dispatch(tmp_path):
     chain = _admin_chain(tmp_path)
     bad = {
-        "tasks": [{
-            **SPEC["tasks"][0],
-            "acceptance": SPEC["tasks"][0]["goal"],
-        }]
+        "tasks": [
+            {
+                **SPEC["tasks"][0],
+                "acceptance": SPEC["tasks"][0]["goal"],
+            }
+        ]
     }
     runner = SequenceRunner([bad, SPEC])
 
@@ -345,10 +351,12 @@ def test_refine_self_check_adjusts_an_uncheckable_spec_before_dispatch(tmp_path)
 def test_refine_self_check_rejects_a_second_still_broken_spec(tmp_path):
     chain = _admin_chain(tmp_path)
     bad = {
-        "tasks": [{
-            **SPEC["tasks"][0],
-            "acceptance": SPEC["tasks"][0]["goal"],
-        }]
+        "tasks": [
+            {
+                **SPEC["tasks"][0],
+                "acceptance": SPEC["tasks"][0]["goal"],
+            }
+        ]
     }
     runner = SequenceRunner([bad, bad])
 
@@ -422,9 +430,7 @@ def test_capacity_counts_only_leases_that_are_still_live(tmp_path):
         )
 
     def member_row():
-        return next(
-            item for item in service.harness_capacity() if item["harness_id"] == MEMBER
-        )
+        return next(item for item in service.harness_capacity() if item["harness_id"] == MEMBER)
 
     assert member_row()["active_leases"] == 0
     assert member_row()["at_capacity"] is False
@@ -734,9 +740,7 @@ def test_approving_a_plan_whose_target_is_offline_is_refused_and_stays_draft(tmp
         json={
             "plan_id": "PL-OFF",
             "snapshot": {
-                "tasks": [
-                    {"id": "T-OFF", "title": "补说明", "assigned_harness_ids": [MEMBER]}
-                ]
+                "tasks": [{"id": "T-OFF", "title": "补说明", "assigned_harness_ids": [MEMBER]}]
             },
         },
     )
@@ -1310,7 +1314,8 @@ def test_the_read_face_says_who_a_private_message_went_to(tmp_path):
         mentions=[],
     )
     group_message = [
-        m for m in service.list_messages(DEFAULT_GROUP, viewer="office-operator")
+        m
+        for m in service.list_messages(DEFAULT_GROUP, viewer="office-operator")
         if m["body"] == "群里说一声。"
     ][0]
     assert group_message["recipients"] == []
@@ -1340,9 +1345,11 @@ def test_private_answer_never_claims_no_executor_when_the_attempt_has_one(tmp_pa
     task = chain.service.list_tasks(DEFAULT_GROUP)[0]
     assert task["owner"] is None
     assert task["executor"] == "harness-1"
-    runner = ScriptedRunner(stdout=_envelope({
-        "answer": "任务 T-1 当前待验收，尚无执行者。下一步由审核人领取审阅并裁决。"
-    }))
+    runner = ScriptedRunner(
+        stdout=_envelope(
+            {"answer": "任务 T-1 当前待验收，尚无执行者。下一步由审核人领取审阅并裁决。"}
+        )
+    )
     service = _refine_service(chain, runner)
     assert "执行者 harness-1" in service._task_ledger(DEFAULT_GROUP)
     assert "（无人）" not in service._task_ledger(DEFAULT_GROUP)

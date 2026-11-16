@@ -35,13 +35,13 @@ def resolve_acceptance(acceptance: str | dict[str, Any]) -> tuple[str, dict[str,
     if isinstance(acceptance, str):
         return acceptance, None
     if not isinstance(acceptance, dict):
-        raise InvalidInput(
-            "acceptance 必须是字符串（旧口径验收说明）或对象 {enabled, profile}"
-        )
+        raise InvalidInput("acceptance 必须是字符串（旧口径验收说明）或对象 {enabled, profile}")
     unknown = sorted(set(acceptance) - _ACCEPTANCE_KEYS)
     if unknown:
         raise InvalidInput(
-            "acceptance 含未知字段：" + ", ".join(unknown) + "（只接受 enabled/profile/description）"
+            "acceptance 含未知字段："
+            + ", ".join(unknown)
+            + "（只接受 enabled/profile/description）"
         )
     if "enabled" not in acceptance:
         raise InvalidInput("acceptance.enabled 必填（布尔值）")
@@ -65,8 +65,7 @@ def resolve_acceptance(acceptance: str | dict[str, Any]) -> tuple[str, dict[str,
         profile = profile or os.environ.get("AP_ACCEPTANCE_PROFILE", "").strip()
         if not profile:
             raise InvalidInput(
-                "acceptance.enabled=true 但没有给 profile，部署也没有默认"
-                " AP_ACCEPTANCE_PROFILE"
+                "acceptance.enabled=true 但没有给 profile，部署也没有默认" " AP_ACCEPTANCE_PROFILE"
             )
         if profile not in KNOWN_ACCEPTANCE_PROFILES:
             raise InvalidInput(
@@ -165,9 +164,7 @@ def dispatch(
 
         tool_problem = tool_capability_problem(member["model_mode"], member["model_id"])
         if tool_problem is not None:
-            raise InvalidInput(
-                f"{tool_problem}; dispatch was refused before any task was created"
-            )
+            raise InvalidInput(f"{tool_problem}; dispatch was refused before any task was created")
         if not exclusive_paths or any(
             p.startswith(("/", ".")) or ":" in p or "\\" in p or ".." in p.split("/")
             for p in exclusive_paths
@@ -202,9 +199,7 @@ def dispatch(
             "require_human_assign": True,
             "capabilities": ["coding"],
             "exclusive_paths": exclusive_paths,
-            "acceptance": [
-                {"id": "MVP-API-001", "check": "human", "description": acceptance_text}
-            ],
+            "acceptance": [{"id": "MVP-API-001", "check": "human", "description": acceptance_text}],
             "risk": "medium",
             "expected_duration_min": 30,
             "budget_tokens": 0,
@@ -289,9 +284,8 @@ def eligible_tasks(database, *, harness_id: str, group_id: str | None, limit: in
         for row in rows:
             if group_id and row["group_id"] != group_id:
                 continue
-            if row["status"] == TaskStatus.QUEUED.value:
-                if not _deferred_to(conn, row, harness_id):
-                    continue
+            if row["status"] == TaskStatus.QUEUED.value and not _deferred_to(conn, row, harness_id):
+                continue
             if ClaimService.eligibility(conn, row, harness_id)[0]:
                 continue
             # §39 硬规则 2 只拦**第一份** attempt（见 ``ClaimService._grant_claim``：

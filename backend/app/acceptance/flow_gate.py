@@ -24,7 +24,9 @@ from app.git.repo import run_git
 
 ROOT = Path(__file__).resolve().parents[3]
 FROZEN_SCRIPT = ROOT / "backend" / "scripts" / "evaluate_experience_acceptance_v5.py"
-FROZEN_FIXTURE = ROOT / "artifacts" / "experience-acceptance-ab" / "v5" / "fixtures" / "v4-ret03-split.md"
+FROZEN_FIXTURE = (
+    ROOT / "artifacts" / "experience-acceptance-ab" / "v5" / "fixtures" / "v4-ret03-split.md"
+)
 
 #: v5 冻结声明（protocol.json 原文）。
 FROZEN = {

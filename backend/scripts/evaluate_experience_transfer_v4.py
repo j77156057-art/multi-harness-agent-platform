@@ -145,7 +145,9 @@ def erased_values(record: dict[str, Any], manual_old_values: list[str]) -> list[
     """Extract concrete value classes from the exact original slot and source text."""
     slot = slot_for_experience(record)
     original_prompt = slot_prompt(slot) if slot else ""
-    text = "\n".join([str(record.get("root_cause") or ""), str(record.get("action") or ""), original_prompt])
+    text = "\n".join(
+        [str(record.get("root_cause") or ""), str(record.get("action") or ""), original_prompt]
+    )
     values: list[str] = []
     for value in manual_old_values:
         _add_value(values, value)
@@ -212,9 +214,7 @@ def erased_values(record: dict[str, Any], manual_old_values: list[str]) -> list[
 
 def derive_constraints() -> list[dict[str, Any]]:
     records = source_records()
-    manual_by_id = {
-        case["old_experience_id"]: primary_old_values(case, records) for case in CASES
-    }
+    manual_by_id = {case["old_experience_id"]: primary_old_values(case, records) for case in CASES}
     rows: list[dict[str, Any]] = []
     for record in records.values():
         slot = slot_for_experience(record)
@@ -222,7 +222,11 @@ def derive_constraints() -> list[dict[str, Any]]:
             continue
         root = str(record.get("root_cause") or "")
         matched = next(
-            ((name, pattern, text) for name, pattern, text in TEMPLATE_RULES if re.search(pattern, root, re.I)),
+            (
+                (name, pattern, text)
+                for name, pattern, text in TEMPLATE_RULES
+                if re.search(pattern, root, re.I)
+            ),
             None,
         )
         if matched is None:
@@ -231,39 +235,57 @@ def derive_constraints() -> list[dict[str, Any]]:
         erased = erased_values(record, manual_by_id.get(record["experience_id"], []))
         leaks = [value for value in erased if value in derived]
         if leaks:
-            raise RuntimeError(f"derived constraint retains old values for {record['experience_id']}: {leaks}")
+            raise RuntimeError(
+                f"derived constraint retains old values for {record['experience_id']}: {leaks}"
+            )
         original_slot = slot_prompt(slot)
-        derived_slot = slot_prompt({
-            "slot": "acceptance_check",
-            "target_field": "验收.必检项",
-            "expected": derived,
-            "rule": derived,
-            "evidence_task": "",
-        })
-        reparsed = slot_for_experience({
-            "kind": "request_changes", "root_cause": derived,
-            "action": derived, "source_task_id": "",
-        })
-        if not reparsed or reparsed["slot"] != "acceptance_check" or reparsed["expected"] != derived:
-            raise RuntimeError(f"derived constraint is not injectable for {record['experience_id']}")
-        rows.append({
-            "experience_id": record["experience_id"],
-            "source_task_id": record["source_task_id"],
-            "template_id": template_id,
-            "template_match_pattern": pattern,
-            "derived_constraint": derived,
-            "erased_values": erased,
-            "original_slot_sha256": base.sha(original_slot),
-            "derived_slot_prompt": derived_slot,
-            "derived_slot_sha256": base.sha(derived_slot),
-            "derivation": "first matching frozen regex selects a fixed template; no model rewriting",
-        })
+        derived_slot = slot_prompt(
+            {
+                "slot": "acceptance_check",
+                "target_field": "验收.必检项",
+                "expected": derived,
+                "rule": derived,
+                "evidence_task": "",
+            }
+        )
+        reparsed = slot_for_experience(
+            {
+                "kind": "request_changes",
+                "root_cause": derived,
+                "action": derived,
+                "source_task_id": "",
+            }
+        )
+        if (
+            not reparsed
+            or reparsed["slot"] != "acceptance_check"
+            or reparsed["expected"] != derived
+        ):
+            raise RuntimeError(
+                f"derived constraint is not injectable for {record['experience_id']}"
+            )
+        rows.append(
+            {
+                "experience_id": record["experience_id"],
+                "source_task_id": record["source_task_id"],
+                "template_id": template_id,
+                "template_match_pattern": pattern,
+                "derived_constraint": derived,
+                "erased_values": erased,
+                "original_slot_sha256": base.sha(original_slot),
+                "derived_slot_prompt": derived_slot,
+                "derived_slot_sha256": base.sha(derived_slot),
+                "derivation": "first matching frozen regex selects a fixed template; no model rewriting",
+            }
+        )
     if len(rows) != 15:
         raise RuntimeError(f"expected 15 acceptance_check rows, got {len(rows)}")
     return rows
 
 
-def _record_original(store: ExperienceStore, case: dict[str, Any], role: str, record: dict[str, Any]) -> None:
+def _record_original(
+    store: ExperienceStore, case: dict[str, Any], role: str, record: dict[str, Any]
+) -> None:
     store.record_outcome(
         kind="request_changes",
         project=case["case_id"],
@@ -285,15 +307,20 @@ def _prepare_case(case: dict[str, Any], temporary: Path, records: dict[str, dict
     chain, api, admin_token, member_token, human_token = base._setup(temporary)
     old = records[case["old_experience_id"]]
     unrelated = records[case["unrelated_experience_id"]]
-    context = base._post(api, "/api/v1/groups/G-1/dispatch", {
-        "request_id": f"transfer-{case['case_id']}",
-        "title": f"{case['case_id']} · 新值迁移场景",
-        "goal": case["requirement"],
-        "harness_id": base.MEMBER,
-        "decided_by": base.ADMIN,
-        "exclusive_paths": [case["path"]],
-        "acceptance": "交付物存在且满足最新验收约束",
-    }, admin_token)
+    context = base._post(
+        api,
+        "/api/v1/groups/G-1/dispatch",
+        {
+            "request_id": f"transfer-{case['case_id']}",
+            "title": f"{case['case_id']} · 新值迁移场景",
+            "goal": case["requirement"],
+            "harness_id": base.MEMBER,
+            "decided_by": base.ADMIN,
+            "exclusive_paths": [case["path"]],
+            "acceptance": "交付物存在且满足最新验收约束",
+        },
+        admin_token,
+    )
     store = ExperienceStore(temporary / "admin" / "experience.json")
     _record_original(store, case, "relevant", old)
     _record_original(store, case, "unrelated", unrelated)
@@ -312,16 +339,25 @@ def _prepare_case(case: dict[str, Any], temporary: Path, records: dict[str, dict
 
 
 def _prepare_arm(
-    prepared: dict[str, Any], case: dict[str, Any], condition: str, derived_by_id: dict[str, dict[str, Any]],
+    prepared: dict[str, Any],
+    case: dict[str, Any],
+    condition: str,
+    derived_by_id: dict[str, dict[str, Any]],
     temporary: Path,
 ):
     api = prepared["api"]
     human_token = prepared["human_token"]
     context_id = prepared["context_id"]
     store = prepared["store"]
-    base._post(api, "/api/v1/experience-injection", {
-        "enabled": condition != "A", "decided_by": "human-1",
-    }, human_token)
+    base._post(
+        api,
+        "/api/v1/experience-injection",
+        {
+            "enabled": condition != "A",
+            "decided_by": "human-1",
+        },
+        human_token,
+    )
     selected = None
     derived = None
     if condition != "A":
@@ -345,7 +381,8 @@ def _prepare_arm(
                 source="live",
             )
             selected = next(
-                record for record in store.records()
+                record
+                for record in store.records()
                 if record["root_cause"] == derived["derived_constraint"]
             )
         base._post(
@@ -395,21 +432,30 @@ def build_prompt_plan(derived_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 )
                 prompt = _prompt_for(service, case)
                 prompt_hash = base.sha(prompt)
-                old_v3 = read_json(V3_OUT / "calls" / f"{case['case_id']}-{condition}.json", {}) if condition != "D" else {}
+                old_v3 = (
+                    read_json(V3_OUT / "calls" / f"{case['case_id']}-{condition}.json", {})
+                    if condition != "D"
+                    else {}
+                )
                 injected_old_values = (
                     derived_by_id[case["old_experience_id"]]["erased_values"]
-                    if condition == "B" else []
+                    if condition == "B"
+                    else []
                 )
-                new_literals = [
-                    value for group in case["required_groups"] for value in group
-                ]
+                new_literals = [value for group in case["required_groups"] for value in group]
                 discriminating_injected_old_values = [
-                    value for value in injected_old_values
+                    value
+                    for value in injected_old_values
                     if not any(value in new_value for new_value in new_literals)
                 ]
-                expanded = list(dict.fromkeys([
-                    *primary_old_values(case, records), *discriminating_injected_old_values,
-                ]))
+                expanded = list(
+                    dict.fromkeys(
+                        [
+                            *primary_old_values(case, records),
+                            *discriminating_injected_old_values,
+                        ]
+                    )
+                )
                 row = {
                     "case_id": case["case_id"],
                     "condition": condition,
@@ -417,17 +463,22 @@ def build_prompt_plan(derived_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                     "derived_template_id": derived["template_id"] if derived else None,
                     "prompt_sha256": prompt_hash,
                     "v3_prompt_sha256": old_v3.get("prompt_sha256"),
-                    "matches_v3_prompt": prompt_hash == old_v3.get("prompt_sha256") if condition != "D" else None,
+                    "matches_v3_prompt": prompt_hash == old_v3.get("prompt_sha256")
+                    if condition != "D"
+                    else None,
                     "injected_old_values": injected_old_values,
                     "expanded_old_values": expanded,
                 }
                 if condition == "D":
                     leaked = [
-                        value for value in derived["erased_values"]
+                        value
+                        for value in derived["erased_values"]
                         if value in derived["derived_slot_prompt"]
                     ]
                     if leaked:
-                        raise RuntimeError(f"D prompt contains erased values for {case['case_id']}: {leaked}")
+                        raise RuntimeError(
+                            f"D prompt contains erased values for {case['case_id']}: {leaked}"
+                        )
                 plan.append(row)
                 if condition != "A":
                     base._post(
@@ -436,7 +487,9 @@ def build_prompt_plan(derived_rows: list[dict[str, Any]]) -> list[dict[str, Any]
                         {"action": "revoke", "decided_by": "human-1"},
                         prepared["human_token"],
                     )
-    mismatches = [f"{row['case_id']}-{row['condition']}" for row in plan if row["matches_v3_prompt"] is False]
+    mismatches = [
+        f"{row['case_id']}-{row['condition']}" for row in plan if row["matches_v3_prompt"] is False
+    ]
     if mismatches:
         raise RuntimeError(f"A/B prompts differ from v3: {mismatches}")
     return plan
@@ -484,13 +537,15 @@ def protocol() -> dict[str, Any]:
             },
             "expanded_old_values": {
                 "effect": "record only; never changes primary category and never compared directly with v3 counts",
-                "rule": "union of case primary old values and erased_values for every original experience injected into that arm; A adds none, B adds the original relevant source values, D adds none because derived injection is value-free; the same rule would add unrelated injected values for any C arm; additional injected values contained in a required-new literal are removed as non-discriminating", 
+                "rule": "union of case primary old values and erased_values for every original experience injected into that arm; A adds none, B adds the original relevant source values, D adds none because derived injection is value-free; the same rule would add unrelated injected values for any C arm; additional injected values contained in a required-new literal are removed as non-discriminating",
                 "category": "rerun the same four-tier rule using expanded_old_values",
                 "change_label": "由判据扩展导致 when primary transferred becomes expanded copied_wrong",
             },
         },
         "prompt_plan": prompt_plan,
-        "previous_artifacts_sha256": {version: v3.tree_sha(path) for version, path in PREVIOUS.items()},
+        "previous_artifacts_sha256": {
+            version: v3.tree_sha(path) for version, path in PREVIOUS.items()
+        },
         "source_sha256": base.sha(SOURCE.read_text(encoding="utf-8")),
         "script_sha256": base.sha(SCRIPT.read_text(encoding="utf-8")),
     }
@@ -501,10 +556,18 @@ def _task_text(result: dict[str, Any] | None) -> str:
     if not tasks:
         return "\n".join((result or {}).get("questions") or [])
     task = tasks[0]
-    return str(task.get("goal") or "") + "\n" + str(task.get("acceptance") or "") + "\n" + "\n".join(task.get("exclusive_paths") or [])
+    return (
+        str(task.get("goal") or "")
+        + "\n"
+        + str(task.get("acceptance") or "")
+        + "\n"
+        + "\n".join(task.get("exclusive_paths") or [])
+    )
 
 
-def _category_with_values(case: dict[str, Any], result: dict[str, Any] | None, old_values: list[str]) -> tuple[str, list[str]]:
+def _category_with_values(
+    case: dict[str, Any], result: dict[str, Any] | None, old_values: list[str]
+) -> tuple[str, list[str]]:
     tasks = (result or {}).get("tasks") or []
     if not tasks:
         questions = "\n".join((result or {}).get("questions") or [])
@@ -517,7 +580,9 @@ def _category_with_values(case: dict[str, Any], result: dict[str, Any] | None, o
     old_hits = [value for value in old_values if value in text]
     if old_hits:
         return "copied_wrong", old_hits
-    missing = [group for group in case["required_groups"] if not any(value in text for value in group)]
+    missing = [
+        group for group in case["required_groups"] if not any(value in text for value in group)
+    ]
     if missing:
         return "missed", []
     return "transferred", []
@@ -526,8 +591,10 @@ def _category_with_values(case: dict[str, Any], result: dict[str, Any] | None, o
 def semantic_review(text: str, old_hits: list[str]) -> dict[str, Any]:
     if not old_hits:
         return {
-            "label": "not_applicable", "negative_or_exclusion_values": [],
-            "positive_or_unclear_values": [], "effect": "record only",
+            "label": "not_applicable",
+            "negative_or_exclusion_values": [],
+            "positive_or_unclear_values": [],
+            "effect": "record only",
         }
     clauses = [part for part in re.split(r"[。；;\n]+", text) if part]
     negative: list[str] = []
@@ -538,13 +605,19 @@ def semantic_review(text: str, old_hits: list[str]) -> dict[str, Any]:
             start = clause.find(value)
             if start < 0:
                 continue
-            prefix = clause[max(0, start - 40):start]
-            suffix = clause[start + len(value):start + len(value) + 20]
+            prefix = clause[max(0, start - 40) : start]
+            suffix = clause[start + len(value) : start + len(value) + 20]
             if NEGATIVE_PREFIX_RE.search(prefix) or NEGATIVE_SUFFIX_RE.search(suffix):
                 is_negative = True
                 break
         (negative if is_negative else positive).append(value)
-    label = "mixed" if negative and positive else "negative_or_exclusion" if negative else "positive_or_unclear"
+    label = (
+        "mixed"
+        if negative and positive
+        else "negative_or_exclusion"
+        if negative
+        else "positive_or_unclear"
+    )
     return {
         "label": label,
         "negative_or_exclusion_values": negative,
@@ -557,8 +630,16 @@ def _receipt(call: dict[str, Any]) -> dict[str, Any]:
     return {
         key: call.get(key)
         for key in (
-            "requested_model", "actual_model", "parameters", "usage", "provider_cost",
-            "ledger_cost", "duration_seconds", "finish_reason", "http_status", "error",
+            "requested_model",
+            "actual_model",
+            "parameters",
+            "usage",
+            "provider_cost",
+            "ledger_cost",
+            "duration_seconds",
+            "finish_reason",
+            "http_status",
+            "error",
         )
     }
 
@@ -583,7 +664,11 @@ def run_one(case_id: str, condition: str) -> None:
         raise RuntimeError(f"refusing to repeat {key}")
     case = next(case for case in CASES if case["case_id"] == case_id)
     case = {**case, "old_values": frozen["primary_old_values_by_case"][case_id]}
-    plan = next(row for row in frozen["prompt_plan"] if row["case_id"] == case_id and row["condition"] == condition)
+    plan = next(
+        row
+        for row in frozen["prompt_plan"]
+        if row["case_id"] == case_id and row["condition"] == condition
+    )
     derived_by_id = {row["experience_id"]: row for row in frozen["derived_constraints"]}
     records = source_records()
     production_before = base.sha(SOURCE.read_text(encoding="utf-8"))
@@ -603,7 +688,9 @@ def run_one(case_id: str, condition: str) -> None:
             temporary_name = temporary
             prepared = _prepare_case(case, Path(temporary) / case["case_id"], records)
             outcome["context_task_id"] = prepared["context_id"]
-            service, selected, derived = _prepare_arm(prepared, case, condition, derived_by_id, Path(temporary))
+            service, selected, derived = _prepare_arm(
+                prepared, case, condition, derived_by_id, Path(temporary)
+            )
             outcome["injected_experience_id"] = selected["experience_id"] if selected else None
             try:
                 result = service.refine(
@@ -615,14 +702,19 @@ def run_one(case_id: str, condition: str) -> None:
                 )
                 outcome["result"] = result
                 if result.get("tasks"):
-                    draft = base._post(prepared["api"], "/api/v1/adapter/admin/plan_draft", {
-                        "group_id": base.GROUP,
-                        "title": f"{case_id}-{condition}-derived-transfer-v4",
-                        "goal": case["requirement"],
-                        "tasks": result["tasks"],
-                        "reviewer_harness_ids": [base.MEMBER],
-                        "opened_by": base.ADMIN,
-                    }, prepared["admin_token"])
+                    draft = base._post(
+                        prepared["api"],
+                        "/api/v1/adapter/admin/plan_draft",
+                        {
+                            "group_id": base.GROUP,
+                            "title": f"{case_id}-{condition}-derived-transfer-v4",
+                            "goal": case["requirement"],
+                            "tasks": result["tasks"],
+                            "reviewer_harness_ids": [base.MEMBER],
+                            "opened_by": base.ADMIN,
+                        },
+                        prepared["admin_token"],
+                    )
                     outcome["plan_id"] = draft["plan_id"]
             except Exception as exc:
                 outcome["error"] = f"{type(exc).__name__}: {exc}"
@@ -645,7 +737,9 @@ def run_one(case_id: str, condition: str) -> None:
         call.get("prompt_sha256") == plan["v3_prompt_sha256"] if condition != "D" else None
     )
     category, old_hits = _category_with_values(case, outcome.get("result"), case["old_values"])
-    expanded_category, expanded_hits = _category_with_values(case, outcome.get("result"), plan["expanded_old_values"])
+    expanded_category, expanded_hits = _category_with_values(
+        case, outcome.get("result"), plan["expanded_old_values"]
+    )
     outcome["category"] = category
     outcome["copied_old_values"] = old_hits
     outcome["semantic_review"] = semantic_review(_task_text(outcome.get("result")), old_hits)
@@ -653,12 +747,16 @@ def run_one(case_id: str, condition: str) -> None:
         "category": expanded_category,
         "old_value_hits": expanded_hits,
         "changed_from_primary": expanded_category != category,
-        "note": "由判据扩展导致" if category == "transferred" and expanded_category == "copied_wrong" else "",
+        "note": "由判据扩展导致"
+        if category == "transferred" and expanded_category == "copied_wrong"
+        else "",
         "effect": "record only; not directly comparable with v3",
     }
     write_json(outcome_path, outcome)
     environment = {
-        "temporary_directory_removed": not Path(temporary_name).exists() if temporary_name else True,
+        "temporary_directory_removed": not Path(temporary_name).exists()
+        if temporary_name
+        else True,
         "production_experience_sha256_before": production_before,
         "production_experience_sha256_after": base.sha(SOURCE.read_text(encoding="utf-8")),
         "production_unchanged": production_before == base.sha(SOURCE.read_text(encoding="utf-8")),
@@ -673,13 +771,23 @@ def run_one(case_id: str, condition: str) -> None:
     spent = sum(base._provider_cost(item) for item in charged)
     if spent > base.COST_LIMIT:
         raise RuntimeError(f"cost limit reached: {spent}")
-    print(json.dumps({
-        "key": key, "category": category, "expanded_category": expanded_category,
-        "semantic": outcome["semantic_review"]["label"], "finish_reason": call.get("finish_reason"),
-        "usage": call.get("usage"), "ledger_cost": call.get("ledger_cost"),
-        "prompt_matches_frozen": outcome["prompt_matches_frozen"],
-        "prompt_matches_v3": outcome["prompt_matches_v3"], "error": outcome.get("error"),
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "key": key,
+                "category": category,
+                "expanded_category": expanded_category,
+                "semantic": outcome["semantic_review"]["label"],
+                "finish_reason": call.get("finish_reason"),
+                "usage": call.get("usage"),
+                "ledger_cost": call.get("ledger_cost"),
+                "prompt_matches_frozen": outcome["prompt_matches_frozen"],
+                "prompt_matches_v3": outcome["prompt_matches_v3"],
+                "error": outcome.get("error"),
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def finalize() -> None:
@@ -697,41 +805,66 @@ def finalize() -> None:
                     missing.append(key)
                     continue
                 case = {**case, "old_values": frozen["primary_old_values_by_case"][case["case_id"]]}
-                plan = next(item for item in frozen["prompt_plan"] if item["case_id"] == case["case_id"] and item["condition"] == condition)
+                plan = next(
+                    item
+                    for item in frozen["prompt_plan"]
+                    if item["case_id"] == case["case_id"] and item["condition"] == condition
+                )
                 category, hits = _category_with_values(case, None, case["old_values"])
-                expanded_category, expanded_hits = _category_with_values(case, None, plan["expanded_old_values"])
+                expanded_category, expanded_hits = _category_with_values(
+                    case, None, plan["expanded_old_values"]
+                )
                 row = {
-                    "case_id": case["case_id"], "condition": condition,
+                    "case_id": case["case_id"],
+                    "condition": condition,
                     "old_experience_id": case["old_experience_id"],
                     "source_experience_id": plan["source_experience_id"],
                     "derived_template_id": plan["derived_template_id"],
-                    "error": call.get("error") or "process ended before outcome persistence; no retry",
+                    "error": call.get("error")
+                    or "process ended before outcome persistence; no retry",
                     "terminal_state": "recovered_from_call_receipt",
-                    "receipt": _receipt(call), "category": category, "copied_old_values": hits,
+                    "receipt": _receipt(call),
+                    "category": category,
+                    "copied_old_values": hits,
                     "semantic_review": semantic_review("", []),
                     "expanded_review": {
-                        "category": expanded_category, "old_value_hits": expanded_hits,
-                        "changed_from_primary": expanded_category != category, "note": "",
+                        "category": expanded_category,
+                        "old_value_hits": expanded_hits,
+                        "changed_from_primary": expanded_category != category,
+                        "note": "",
                     },
                 }
                 write_json(path, row)
             rows.append(row)
     if missing:
-        raise RuntimeError(f"calls never attempted; invoke each exactly once before finalize: {missing}")
+        raise RuntimeError(
+            f"calls never attempted; invoke each exactly once before finalize: {missing}"
+        )
     write_json(RESULTS, rows)
-    environments = [read_json(OUT / "environments" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows]
+    environments = [
+        read_json(OUT / "environments" / f"{row['case_id']}-{row['condition']}.json", {})
+        for row in rows
+    ]
     environment = {
         "completed_outcomes": len(rows),
         "all_terminal": len(rows) == 18 and all(row.get("terminal_state") for row in rows),
-        "temporary_directories_removed": all(item.get("temporary_directory_removed") for item in environments),
+        "temporary_directories_removed": all(
+            item.get("temporary_directory_removed") for item in environments
+        ),
         "production_unchanged": all(item.get("production_unchanged") for item in environments),
         "script_unchanged": all(item.get("script_unchanged") for item in environments),
-        "production_experience_sha256_before": environments[0].get("production_experience_sha256_before"),
+        "production_experience_sha256_before": environments[0].get(
+            "production_experience_sha256_before"
+        ),
         "production_experience_sha256_after": base.sha(SOURCE.read_text(encoding="utf-8")),
         "script_sha256": base.sha(SCRIPT.read_text(encoding="utf-8")),
-        "previous_artifacts_sha256_after": {version: v3.tree_sha(path) for version, path in PREVIOUS.items()},
+        "previous_artifacts_sha256_after": {
+            version: v3.tree_sha(path) for version, path in PREVIOUS.items()
+        },
     }
-    environment["previous_artifacts_unchanged"] = environment["previous_artifacts_sha256_after"] == frozen["previous_artifacts_sha256"]
+    environment["previous_artifacts_unchanged"] = (
+        environment["previous_artifacts_sha256_after"] == frozen["previous_artifacts_sha256"]
+    )
     write_json(OUT / "environment.json", environment)
     print(json.dumps(environment, ensure_ascii=False, indent=2))
 
@@ -752,22 +885,40 @@ def summarize() -> None:
     }
     for row in rows:
         evidence = {
-            "case_id": row["case_id"], "condition": row["condition"],
+            "case_id": row["case_id"],
+            "condition": row["condition"],
             "old_values": row["copied_old_values"],
             "semantic_review": row["semantic_review"],
-            "goal": (row["result"]["tasks"][0].get("goal") if row.get("result") and row["result"].get("tasks") else None),
-            "acceptance": (row["result"]["tasks"][0].get("acceptance") if row.get("result") and row["result"].get("tasks") else None),
-            "exclusive_paths": (row["result"]["tasks"][0].get("exclusive_paths") if row.get("result") and row["result"].get("tasks") else None),
+            "goal": (
+                row["result"]["tasks"][0].get("goal")
+                if row.get("result") and row["result"].get("tasks")
+                else None
+            ),
+            "acceptance": (
+                row["result"]["tasks"][0].get("acceptance")
+                if row.get("result") and row["result"].get("tasks")
+                else None
+            ),
+            "exclusive_paths": (
+                row["result"]["tasks"][0].get("exclusive_paths")
+                if row.get("result") and row["result"].get("tasks")
+                else None
+            ),
         }
         if row["category"] == "copied_wrong":
             summary["copied_wrong_evidence"].append(evidence)
         if row["expanded_review"]["category"] == "copied_wrong":
-            summary["expanded_copied_wrong_evidence"].append({
-                **evidence,
-                "old_values": row["expanded_review"]["old_value_hits"],
-                "note": row["expanded_review"]["note"] or "primary and expanded both copied_wrong",
-            })
-    calls = [read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows]
+            summary["expanded_copied_wrong_evidence"].append(
+                {
+                    **evidence,
+                    "old_values": row["expanded_review"]["old_value_hits"],
+                    "note": row["expanded_review"]["note"]
+                    or "primary and expanded both copied_wrong",
+                }
+            )
+    calls = [
+        read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows
+    ]
     for condition in ARMS:
         group = [row for row in rows if row["condition"] == condition]
         counts = Counter(row["category"] for row in group)
@@ -775,16 +926,25 @@ def summarize() -> None:
         semantic_counts = Counter(row["semantic_review"]["label"] for row in group)
         summary["conditions"][condition] = {
             "n": len(group),
-            "counts": {name: counts.get(name, 0) for name in ("transferred", "copied_wrong", "missed", "escalated")},
+            "counts": {
+                name: counts.get(name, 0)
+                for name in ("transferred", "copied_wrong", "missed", "escalated")
+            },
             "transferred_wilson_95": base._wilson(counts["transferred"], len(group)),
             "semantic_review_counts": dict(sorted(semantic_counts.items())),
-            "expanded_counts": {name: expanded_counts.get(name, 0) for name in ("transferred", "copied_wrong", "missed", "escalated")},
+            "expanded_counts": {
+                name: expanded_counts.get(name, 0)
+                for name in ("transferred", "copied_wrong", "missed", "escalated")
+            },
             "extension_changed": [
                 {
-                    "case_id": row["case_id"], "primary": row["category"],
-                    "expanded": row["expanded_review"]["category"], "note": row["expanded_review"]["note"],
+                    "case_id": row["case_id"],
+                    "primary": row["category"],
+                    "expanded": row["expanded_review"]["category"],
+                    "note": row["expanded_review"]["note"],
                 }
-                for row in group if row["expanded_review"]["changed_from_primary"]
+                for row in group
+                if row["expanded_review"]["changed_from_primary"]
             ],
         }
     summary["historical_reference_not_pooled"] = {
@@ -797,23 +957,37 @@ def summarize() -> None:
         "rule": "v3 is a historical anchor only; v1/v2/v3 rows are excluded from all v4 distributions",
     }
     summary["prompt_comparability"] = {
-        "all_A_B_prompts_match_v3": all(row["prompt_matches_v3"] for row in rows if row["condition"] != "D"),
+        "all_A_B_prompts_match_v3": all(
+            row["prompt_matches_v3"] for row in rows if row["condition"] != "D"
+        ),
         "all_prompts_match_frozen": all(row["prompt_matches_frozen"] for row in rows),
-        "mismatches": [f"{row['case_id']}-{row['condition']}" for row in rows if not row["prompt_matches_frozen"]],
+        "mismatches": [
+            f"{row['case_id']}-{row['condition']}"
+            for row in rows
+            if not row["prompt_matches_frozen"]
+        ],
     }
     summary["cost"] = {
         "provider_returned_cost_sum": round(sum(base._provider_cost(call) for call in calls), 6),
         "provider_cost_missing_calls": sum(call.get("provider_cost") is None for call in calls),
         "ledger_cost_sum": round(sum(float(call.get("ledger_cost") or 0) for call in calls), 6),
-        "prompt_tokens": sum(int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in calls),
-        "completion_tokens": sum(int((call.get("usage") or {}).get("completion_tokens") or 0) for call in calls),
-        "total_tokens": sum(int((call.get("usage") or {}).get("total_tokens") or 0) for call in calls),
+        "prompt_tokens": sum(
+            int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in calls
+        ),
+        "completion_tokens": sum(
+            int((call.get("usage") or {}).get("completion_tokens") or 0) for call in calls
+        ),
+        "total_tokens": sum(
+            int((call.get("usage") or {}).get("total_tokens") or 0) for call in calls
+        ),
         "usage_missing_calls": sum(not call.get("usage") for call in calls),
         "finish_reasons": {
             reason: sum(call.get("finish_reason") == reason for call in calls)
             for reason in sorted({str(call.get("finish_reason")) for call in calls})
         },
-        "duration_median_seconds": statistics.median(float(call.get("duration_seconds") or 0) for call in calls),
+        "duration_median_seconds": statistics.median(
+            float(call.get("duration_seconds") or 0) for call in calls
+        ),
         "duration_max_seconds": max(float(call.get("duration_seconds") or 0) for call in calls),
         "calls": len(calls),
         "per_call": [
@@ -853,18 +1027,37 @@ def main() -> None:
     base.PARAMS = {**base.PARAMS, "max_tokens": 8192}
     if args.command == "preview":
         value = protocol()
-        print(json.dumps({
-            "derived_count": len(value["derived_constraints"]),
-            "derived": value["derived_constraints"],
-            "all_A_B_prompts_match_v3": all(row["matches_v3_prompt"] for row in value["prompt_plan"] if row["condition"] != "D"),
-            "prompt_plan": value["prompt_plan"],
-        }, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "derived_count": len(value["derived_constraints"]),
+                    "derived": value["derived_constraints"],
+                    "all_A_B_prompts_match_v3": all(
+                        row["matches_v3_prompt"]
+                        for row in value["prompt_plan"]
+                        if row["condition"] != "D"
+                    ),
+                    "prompt_plan": value["prompt_plan"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     elif args.command == "freeze":
         if FROZEN.exists():
             raise RuntimeError("v4 frozen protocol already exists; refusing to rewrite")
         value = protocol()
         write_json(FROZEN, value)
-        print(json.dumps({"frozen": str(FROZEN), "derived": len(value["derived_constraints"]), "calls_planned": 18}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "frozen": str(FROZEN),
+                    "derived": len(value["derived_constraints"]),
+                    "calls_planned": 18,
+                },
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "run-one":
         run_one(args.case_id, args.condition)
     elif args.command == "finalize":

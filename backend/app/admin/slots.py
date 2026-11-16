@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -16,7 +15,9 @@ SLOT_NAMES = (
 )
 NO_LESSON = "no_lesson"
 UNACTIONABLE = "unactionable"
-_PATH = re.compile(r"(?<![\w.-])(?:[\w.-]+/)*[\w.-]+\.(?:md|txt|log|json|py|js|ts|tsx|css|html)(?![\w.-])", re.I)
+_PATH = re.compile(
+    r"(?<![\w.-])(?:[\w.-]+/)*[\w.-]+\.(?:md|txt|log|json|py|js|ts|tsx|css|html)(?![\w.-])", re.I
+)
 _LOG_PATH = re.compile(r"(?<![\w.-])(?:[\w.-]+/)*[\w.-]+\.log(?![\w.-])", re.I)
 _PATH_PROBLEM = re.compile(
     r"路径不明|路径不明确|未明确.{0,8}路径|缺少.{0,8}路径|没有指定.{0,8}路径|"
@@ -36,7 +37,11 @@ def _quote(root: str, pattern: str | re.Pattern[str]) -> str:
     """Keep the exact source sentence as the classification receipt."""
     parts = [part.strip() for part in re.split(r"(?<=。)|；", root) if part.strip()]
     for part in parts:
-        matched = pattern.search(part) if isinstance(pattern, re.Pattern) else re.search(pattern, part, re.I)
+        matched = (
+            pattern.search(part)
+            if isinstance(pattern, re.Pattern)
+            else re.search(pattern, part, re.I)
+        )
         if matched:
             return part
     return ""

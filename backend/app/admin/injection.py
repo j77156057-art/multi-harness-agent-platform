@@ -99,12 +99,15 @@ def decide_experience(
             "experience category does not match the task", code="experience.scope_mismatch"
         )
     same_project = record["project"] == project
-    if action == "confirm" and not same_project:
-        if record["scope"] != "cross_project" or not record["cross_project_confirmed_by"]:
-            raise Conflict(
-                "cross-project experience requires explicit scope and confirmation",
-                code="experience.cross_project_unconfirmed",
-            )
+    if (
+        action == "confirm"
+        and not same_project
+        and (record["scope"] != "cross_project" or not record["cross_project_confirmed_by"])
+    ):
+        raise Conflict(
+            "cross-project experience requires explicit scope and confirmation",
+            code="experience.cross_project_unconfirmed",
+        )
 
     status = {"confirm": "confirmed", "ignore": "ignored", "revoke": "revoked"}[action]
     existing = confirmation_for(database, task_id=str(task["task_id"]), experience_id=experience_id)

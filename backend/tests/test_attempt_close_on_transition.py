@@ -95,9 +95,7 @@ def test_verify_passed_closes_the_attempt_that_was_sitting_in_verifying(open_att
         (TaskStatus.IN_PROGRESS, EventKind.STUCK_THRESHOLD_REACHED, "in_progress"),
     ],
 )
-def test_every_escalation_edge_closes_the_attempt(
-    open_attempt, current, event, attempt_status
-):
+def test_every_escalation_edge_closes_the_attempt(open_attempt, current, event, attempt_status):
     """升级不是「先挂着」：任务交给人类时，attempt 必须已经关掉。"""
     database, seed = open_attempt
     seed(task_status=current.value, attempt_status=attempt_status)
@@ -240,15 +238,14 @@ def test_the_reconcile_sweep_closes_a_bypassed_close(tmp_path):
         "by_task_status": {"awaiting_review": 1},
     }
     closed = database.read(
-        "SELECT status, closed_at, close_reason FROM task_attempts"
-        " WHERE attempt_id = 'T-1.a1'"
+        "SELECT status, closed_at, close_reason FROM task_attempts" " WHERE attempt_id = 'T-1.a1'"
     )[0]
     assert closed["status"] == "reconciled", "不冒充 merged / abandoned"
     assert closed["closed_at"] is not None
     assert closed["close_reason"] == "reconcile: task awaiting_review"
-    live = database.read(
-        "SELECT status, closed_at FROM task_attempts WHERE attempt_id = 'T-2.a1'"
-    )[0]
+    live = database.read("SELECT status, closed_at FROM task_attempts WHERE attempt_id = 'T-2.a1'")[
+        0
+    ]
     assert live["status"] == "in_progress" and live["closed_at"] is None
 
     # 幂等：第二轮没有可关的行，actions 归零。

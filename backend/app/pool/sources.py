@@ -116,7 +116,8 @@ def withdraw_upstream_tier(name: str, *, config_path: Path | None = None) -> boo
     kept = [
         entry
         for entry in raw
-        if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+        if isinstance(entry, dict)
+        and str(entry.get("name") or "").strip()
         and str(entry.get("name")) != upstream_name
     ]
     if len(kept) == len([entry for entry in raw if isinstance(entry, dict)]):

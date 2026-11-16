@@ -12,16 +12,14 @@
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 from app.adapter import installers
+from app.adapter.formal_worker import ADAPTER_TYPES
 from app.adapter.harnesses import generic, market_cli
 from app.adapter.harnesses.cli import CliHarness, CliUnavailable, ProviderRoute
-from app.adapter.formal_worker import ADAPTER_TYPES
 from app.adapter.protocol import HarnessRegistration
-from tests.api_support import make_client
+
 # R10 §7 的动词表在 test_adapter 里已经有一份解析（同一个来源），复用而不是再写一遍。
 from tests.test_adapter import section_7_verbs
 
@@ -84,9 +82,7 @@ def test_every_market_cli_is_registered_and_installable(base):
 @pytest.mark.parametrize("base", sorted(market_cli.MARKET_ADAPTERS))
 def test_the_work_order_lands_where_the_cli_documents_it(base, tmp_path, monkeypatch):
     monkeypatch.setenv("AMP_API_KEY", "test-key")
-    monkeypatch.setattr(
-        market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary
-    )
+    monkeypatch.setattr(market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary)
     adapter = adapter_for(base)
     order = "do the thing"
 
@@ -105,9 +101,7 @@ def test_the_work_order_lands_where_the_cli_documents_it(base, tmp_path, monkeyp
 def test_only_a_real_read_only_mode_becomes_a_reviewer(base, tmp_path, monkeypatch):
     """审阅不许动文件：没有硬保证的 CLI 必须**拒绝**，不能退回可写模式。"""
     monkeypatch.setenv("AMP_API_KEY", "test-key")
-    monkeypatch.setattr(
-        market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary
-    )
+    monkeypatch.setattr(market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary)
     adapter = adapter_for(base)
 
     if base in READ_ONLY:
@@ -121,9 +115,7 @@ def test_only_a_real_read_only_mode_becomes_a_reviewer(base, tmp_path, monkeypat
 
 def test_the_read_only_flags_are_the_documented_ones(tmp_path, monkeypatch):
     """五条只读 flag 逐条钉住：改错一个，审阅者就能写文件了。"""
-    monkeypatch.setattr(
-        market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary
-    )
+    monkeypatch.setattr(market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary)
     expected = {
         "gemini": ("--approval-mode", "plan"),
         "qwen-code": ("--approval-mode", "plan"),
@@ -140,9 +132,7 @@ def test_the_read_only_flags_are_the_documented_ones(tmp_path, monkeypatch):
 def test_amp_refuses_before_it_would_hang_on_a_login_flow(tmp_path, monkeypatch):
     """Amp 没有 key 会转设备登录并一直等（实测 >75 秒）——这里必须直接拒绝。"""
     monkeypatch.delenv("AMP_API_KEY", raising=False)
-    monkeypatch.setattr(
-        market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary
-    )
+    monkeypatch.setattr(market_cli.MarketCliAdapter, "_binary", lambda self: self.spec.binary)
 
     with pytest.raises(CliUnavailable, match="AMP_API_KEY"):
         adapter_for("amp").command("x", tmp_path)

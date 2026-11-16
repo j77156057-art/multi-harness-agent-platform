@@ -222,9 +222,7 @@ def pool_roster_probe_state(principal: _guard("harness:register")) -> dict[str, 
 
 
 @router.post("/pool/model-test")
-def pool_model_test(
-    body: dict[str, Any], principal: _guard("harness:register")
-) -> dict[str, Any]:
+def pool_model_test(body: dict[str, Any], principal: _guard("harness:register")) -> dict[str, Any]:
     """测一个模型能不能用：真的调用它一次，只发一句话、只让它回几个字。
 
     这会**花一次额度** —— 所以必须由人点名一个模型才做，平台不自己跑批。

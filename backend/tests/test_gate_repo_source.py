@@ -178,11 +178,7 @@ def test_approve_rejects_when_the_profile_entry_is_missing(tmp_path):
     _commit_files_on_integration(
         repo,
         tmp_path,
-        {
-            "verify-profiles.json": _repo_policy(
-                "repo-check", ["python", "docs/check.py"]
-            )
-        },
+        {"verify-profiles.json": _repo_policy("repo-check", ["python", "docs/check.py"])},
         tag="profile-missing",
     )
     bootstrap(client)
@@ -191,9 +187,7 @@ def test_approve_rejects_when_the_profile_entry_is_missing(tmp_path):
         tasks=[{"id": "T-1", "exclusive_paths": ["docs/a.md"]}],
     )
 
-    response = client.post(
-        "/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"}
-    )
+    response = client.post("/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"})
 
     assert response.status_code == 409, response.text
     error = response.json()["error"]
@@ -213,9 +207,7 @@ def test_approve_passes_when_the_repository_profile_is_runnable(tmp_path):
         repo,
         tmp_path,
         {
-            "verify-profiles.json": _repo_policy(
-                "repo-check", ["python", "docs/check.py"]
-            ),
+            "verify-profiles.json": _repo_policy("repo-check", ["python", "docs/check.py"]),
             "docs/check.py": "raise SystemExit(0)\n",
         },
         tag="profile-present",
@@ -231,8 +223,6 @@ def test_approve_passes_when_the_repository_profile_is_runnable(tmp_path):
     assert preflight.json()["profile"] is None
     assert preflight.json()["approvable"] is True
 
-    response = client.post(
-        "/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"}
-    )
+    response = client.post("/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"})
     assert response.status_code == 200, response.text
     assert response.json()["scope_warnings"] == []

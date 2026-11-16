@@ -884,7 +884,17 @@ def test_opencode_review_argv_is_the_form_that_actually_ran(tmp_path):
     """
     order = "reply with OK"
     # C 形（旧实现）：--agent 落在 run 之前。
-    old = ["opencode", "--agent", "plan", "run", "--standalone", "--format", "json", "--auto", order]
+    old = [
+        "opencode",
+        "--agent",
+        "plan",
+        "run",
+        "--standalone",
+        "--format",
+        "json",
+        "--auto",
+        order,
+    ]
     new = OpenCodeAdapter(client=None, platform="posix").review_command(order, tmp_path)
     # B 形（新实现）：--agent 落在 run 之后。
     assert new == [

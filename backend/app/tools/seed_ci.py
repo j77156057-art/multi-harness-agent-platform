@@ -265,9 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         {"decided_by": operator_id},
         token=operator_token,
     )
-    if status not in (200, 201) and not (
-        status == 409 and "already" in str(payload).lower()
-    ):
+    if status not in (200, 201) and not (status == 409 and "already" in str(payload).lower()):
         raise SystemExit(f"approve plan failed: {status} {payload}")
 
     status, tasks = _request(

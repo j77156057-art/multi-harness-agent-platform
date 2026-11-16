@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts import evaluate_experience_slots_ab as slot
 from scripts import evaluate_experience_injection_ab as base
+from scripts import evaluate_experience_slots_ab as slot
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "artifacts" / "experience-slot-ab03-8192" / "v1"
@@ -60,7 +60,8 @@ def run() -> None:
 
 def summarize() -> None:
     previous = [
-        row for row in json.loads((PREVIOUS / "results.json").read_text(encoding="utf-8"))
+        row
+        for row in json.loads((PREVIOUS / "results.json").read_text(encoding="utf-8"))
         if row["case_id"] == "AB-03"
     ]
     current = json.loads((OUT / "results.json").read_text(encoding="utf-8"))
@@ -83,18 +84,25 @@ def summarize() -> None:
             for condition in ("A", "B", "C")
         },
         "environment": json.loads((OUT / "environment.json").read_text(encoding="utf-8")),
-        "previous_artifacts_sha256_before": json.loads(FROZEN.read_text(encoding="utf-8"))["previous_artifacts_sha256"],
+        "previous_artifacts_sha256_before": json.loads(FROZEN.read_text(encoding="utf-8"))[
+            "previous_artifacts_sha256"
+        ],
         "previous_artifacts_sha256_after": tree_sha(PREVIOUS),
     }
     summary["previous_artifacts_unchanged"] = (
         summary["previous_artifacts_sha256_before"] == summary["previous_artifacts_sha256_after"]
     )
     write_json(SUMMARY, summary)
-    print(json.dumps({
-        "B_no_longer_length": summary["B_no_longer_length"],
-        "B_acceptance_check_hit": summary["B_acceptance_check_hit"],
-        "previous_artifacts_unchanged": summary["previous_artifacts_unchanged"],
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "B_no_longer_length": summary["B_no_longer_length"],
+                "B_acceptance_check_hit": summary["B_acceptance_check_hit"],
+                "previous_artifacts_unchanged": summary["previous_artifacts_unchanged"],
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def main() -> None:

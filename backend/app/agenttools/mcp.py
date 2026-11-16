@@ -183,5 +183,7 @@ def spec_paths(content_json: str, task_id: str) -> tuple[str, ...]:
     tasks = document.get("tasks") if isinstance(document, dict) else None
     for item in tasks or []:
         if isinstance(item, dict) and str(item.get("id")) == task_id:
-            return tuple(str(path) for path in (item.get("exclusive_paths") or []) if str(path).strip())
+            return tuple(
+                str(path) for path in (item.get("exclusive_paths") or []) if str(path).strip()
+            )
     return ()

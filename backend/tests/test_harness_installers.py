@@ -43,13 +43,18 @@ def shimmed(monkeypatch, tmp_path):
 
     def install(name: str, *, version: str = "9.9.9", exit_code: int = 0) -> Path:
         body = (
-            f'echo "{version}"' if exit_code == 0 else f'echo "boom" & exit /b {exit_code}'
-        ) if sys.platform == "win32" else (
-            f'echo "{version}"' if exit_code == 0 else f'echo boom; exit {exit_code}'
+            (f'echo "{version}"' if exit_code == 0 else f'echo "boom" & exit /b {exit_code}')
+            if sys.platform == "win32"
+            else (f'echo "{version}"' if exit_code == 0 else f"echo boom; exit {exit_code}")
         )
         return _write_shim(tmp_path, name, body=body)
 
-    monkeypatch.setenv("PATH", str(tmp_path) + (";" if sys.platform == "win32" else ":") + (__import__("os").environ.get("PATH") or ""))
+    monkeypatch.setenv(
+        "PATH",
+        str(tmp_path)
+        + (";" if sys.platform == "win32" else ":")
+        + (__import__("os").environ.get("PATH") or ""),
+    )
     return install
 
 
@@ -112,16 +117,24 @@ def test_probing_another_platform_claims_nothing(shimmed):
 
 def test_a_found_command_that_prints_a_version_is_ready(shimmed, monkeypatch):
     """Found + version printed = the adapter could start it."""
-    monkeypatch.setattr(installers, "CATALOG", (
-        installers.CliInstall(
-            harness_id="probe-case",
-            display_name="Probe Case",
-            provider="test",
-            command="probectl",
-            official_url="https://example.invalid/",
-            install={"windows": "echo install", "macos": "echo install", "linux": "echo install"},
+    monkeypatch.setattr(
+        installers,
+        "CATALOG",
+        (
+            installers.CliInstall(
+                harness_id="probe-case",
+                display_name="Probe Case",
+                provider="test",
+                command="probectl",
+                official_url="https://example.invalid/",
+                install={
+                    "windows": "echo install",
+                    "macos": "echo install",
+                    "linux": "echo install",
+                },
+            ),
         ),
-    ))
+    )
     shimmed("probectl", version="1.2.3")
 
     row = installers.probe(harness_id="probe-case")[0]
@@ -133,16 +146,24 @@ def test_a_found_command_that_prints_a_version_is_ready(shimmed, monkeypatch):
 
 def test_a_found_command_that_fails_is_not_ready(shimmed, monkeypatch):
     """Installed but unusable has to look different from working."""
-    monkeypatch.setattr(installers, "CATALOG", (
-        installers.CliInstall(
-            harness_id="probe-case",
-            display_name="Probe Case",
-            provider="test",
-            command="probectl",
-            official_url="https://example.invalid/",
-            install={"windows": "echo install", "macos": "echo install", "linux": "echo install"},
+    monkeypatch.setattr(
+        installers,
+        "CATALOG",
+        (
+            installers.CliInstall(
+                harness_id="probe-case",
+                display_name="Probe Case",
+                provider="test",
+                command="probectl",
+                official_url="https://example.invalid/",
+                install={
+                    "windows": "echo install",
+                    "macos": "echo install",
+                    "linux": "echo install",
+                },
+            ),
         ),
-    ))
+    )
     shimmed("probectl", version="0.0.1", exit_code=3)
 
     row = installers.probe(harness_id="probe-case")[0]
@@ -154,16 +175,24 @@ def test_a_found_command_that_fails_is_not_ready(shimmed, monkeypatch):
 
 def test_a_missing_command_says_where_to_look(shimmed, monkeypatch):
     """'not installed' has to name the command and the PATH catch."""
-    monkeypatch.setattr(installers, "CATALOG", (
-        installers.CliInstall(
-            harness_id="probe-case",
-            display_name="Probe Case",
-            provider="test",
-            command="definitely-not-installed-xyz",
-            official_url="https://example.invalid/",
-            install={"windows": "echo install", "macos": "echo install", "linux": "echo install"},
+    monkeypatch.setattr(
+        installers,
+        "CATALOG",
+        (
+            installers.CliInstall(
+                harness_id="probe-case",
+                display_name="Probe Case",
+                provider="test",
+                command="definitely-not-installed-xyz",
+                official_url="https://example.invalid/",
+                install={
+                    "windows": "echo install",
+                    "macos": "echo install",
+                    "linux": "echo install",
+                },
+            ),
         ),
-    ))
+    )
 
     row = installers.probe(harness_id="probe-case")[0]
 
@@ -174,17 +203,25 @@ def test_a_missing_command_says_where_to_look(shimmed, monkeypatch):
 
 def test_an_alias_counts_as_found(shimmed, monkeypatch):
     """Qoder ships under more than one name; the probe accepts the documented ones."""
-    monkeypatch.setattr(installers, "CATALOG", (
-        installers.CliInstall(
-            harness_id="probe-case",
-            display_name="Probe Case",
-            provider="test",
-            command="probe-primary",
-            aliases=("probe-alias",),
-            official_url="https://example.invalid/",
-            install={"windows": "echo install", "macos": "echo install", "linux": "echo install"},
+    monkeypatch.setattr(
+        installers,
+        "CATALOG",
+        (
+            installers.CliInstall(
+                harness_id="probe-case",
+                display_name="Probe Case",
+                provider="test",
+                command="probe-primary",
+                aliases=("probe-alias",),
+                official_url="https://example.invalid/",
+                install={
+                    "windows": "echo install",
+                    "macos": "echo install",
+                    "linux": "echo install",
+                },
+            ),
         ),
-    ))
+    )
     shimmed("probe-alias", version="5.0.0")
 
     row = installers.probe(harness_id="probe-case")[0]

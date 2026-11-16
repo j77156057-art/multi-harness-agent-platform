@@ -266,7 +266,7 @@ def test_checkpoint_captures_timeout_work_without_recycling(tmp_path):
     assert snapshot["untracked_files"] == ["out/one.py", "out/three.py", "out/two.py"]
     with tarfile.open(snapshot["untracked_archive"]) as archive:
         names = archive.getnames()
-    assert {name for name in names} == {"out/one.py", "out/three.py", "out/two.py"}
+    assert set(names) == {"out/one.py", "out/three.py", "out/two.py"}
     assert ".env" not in names
     assert worktree.path.exists(), "timeout keeps the worktree for replay"
     assert (worktree.path / ".env").exists()
@@ -304,9 +304,7 @@ def test_a_real_harness_timeout_still_archives_bundle_and_patch(tmp_path):
     assert time.monotonic() - started < 10, "deadline really kills the child"
 
     archive_root = fixture.rest / "archives"
-    snapshot = fixture.manager.checkpoint(
-        attempt_id=item.attempt_id, archive_root=archive_root
-    )
+    snapshot = fixture.manager.checkpoint(attempt_id=item.attempt_id, archive_root=archive_root)
     assert snapshot is not None and snapshot["deliverable"] is False
     assert worktree.path.exists(), "timeout keeps the worktree for replay"
 
@@ -336,9 +334,7 @@ def test_archive_keeps_the_worktree_when_a_secret_is_the_only_dirty_file(tmp_pat
     (worktree.path / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
 
     archive_root = fixture.rest / "archives"
-    fixture.manager.archive_and_recycle(
-        attempt_id=item.attempt_id, archive_root=archive_root
-    )
+    fixture.manager.archive_and_recycle(attempt_id=item.attempt_id, archive_root=archive_root)
     manifest = json.loads(
         (archive_root / item.attempt_id / "manifest.json").read_text(encoding="utf-8")
     )
@@ -349,4 +345,3 @@ def test_archive_keeps_the_worktree_when_a_secret_is_the_only_dirty_file(tmp_pat
         / item.attempt_id
         / f"checkpoint-{_attempt_suffix(item.attempt_id)}.untracked.tar"
     ).exists()
-

@@ -31,9 +31,9 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from app.adapter.scope import path_in_scope
 
@@ -56,12 +56,39 @@ _DENIED_DIRS = (".git", ".hg", ".svn")
 #: Destructive or exfiltrating command shapes (ported from the author's
 #: workbench, which learned each line from a real incident).
 _DANGEROUS_PATTERNS = (
-    "rm -rf", "rm -r ", "rm -fr", "del /s", "del /q", "rd /s", "rmdir /s",
-    "rmdir /q", "format ", "shutdown", "mkfs", "dd if=", "> /dev/sd", "> /dev/null",
-    "git clean", "git reset --hard", "git push -f", "git push --force",
-    "chmod -r", "chmod 777", "chmod 666", ":(){", "fork bomb",
-    "remove-item", "ri -recurse", "del -recurse", "format-volume", "clear-disk",
-    "invoke-expression", "iex ", "iex(", "downloadstring", "downloadfile",
+    "rm -rf",
+    "rm -r ",
+    "rm -fr",
+    "del /s",
+    "del /q",
+    "rd /s",
+    "rmdir /s",
+    "rmdir /q",
+    "format ",
+    "shutdown",
+    "mkfs",
+    "dd if=",
+    "> /dev/sd",
+    "> /dev/null",
+    "git clean",
+    "git reset --hard",
+    "git push -f",
+    "git push --force",
+    "chmod -r",
+    "chmod 777",
+    "chmod 666",
+    ":(){",
+    "fork bomb",
+    "remove-item",
+    "ri -recurse",
+    "del -recurse",
+    "format-volume",
+    "clear-disk",
+    "invoke-expression",
+    "iex ",
+    "iex(",
+    "downloadstring",
+    "downloadfile",
 )
 
 #: First words that are always refused: mass deletion, network transfer,
@@ -69,23 +96,83 @@ _DANGEROUS_PATTERNS = (
 #: ``python x.py`` or ``npm run build`` is the work; the patterns above catch
 #: the destructive thing such a script would have to spell out.
 _BLOCKED_COMMANDS = {
-    "rm", "del", "erase", "rd", "rmdir", "format", "shutdown", "restart", "reboot",
-    "mkfs", "fdisk", "diskpart", "dd", "chkdsk", "chown", "chmod", "cacls", "icacls",
-    "shred", "wipe", "cipher",
-    "curl", "wget", "invoke-webrequest", "iwr", "invoke-restmethod", "irm",
-    "nc", "netcat", "ncat", "telnet", "ssh", "scp", "sftp", "ftp", "certutil",
-    "reg", "wmic", "mshta", "rundll32", "schtasks", "wsl", "taskkill", "net",
+    "rm",
+    "del",
+    "erase",
+    "rd",
+    "rmdir",
+    "format",
+    "shutdown",
+    "restart",
+    "reboot",
+    "mkfs",
+    "fdisk",
+    "diskpart",
+    "dd",
+    "chkdsk",
+    "chown",
+    "chmod",
+    "cacls",
+    "icacls",
+    "shred",
+    "wipe",
+    "cipher",
+    "curl",
+    "wget",
+    "invoke-webrequest",
+    "iwr",
+    "invoke-restmethod",
+    "irm",
+    "nc",
+    "netcat",
+    "ncat",
+    "telnet",
+    "ssh",
+    "scp",
+    "sftp",
+    "ftp",
+    "certutil",
+    "reg",
+    "wmic",
+    "mshta",
+    "rundll32",
+    "schtasks",
+    "wsl",
+    "taskkill",
+    "net",
 }
 
 #: ``git`` subcommands that write.  ``status``/``log``/``diff``/``show`` stay.
 _GIT_WRITE_SUBCOMMANDS = {
-    "commit", "push", "merge", "rebase", "revert", "reset", "clean",
-    "checkout", "switch", "apply", "cherry-pick", "stash", "am",
-    "update-ref", "worktree", "restore", "rm", "filter-branch", "replace",
+    "commit",
+    "push",
+    "merge",
+    "rebase",
+    "revert",
+    "reset",
+    "clean",
+    "checkout",
+    "switch",
+    "apply",
+    "cherry-pick",
+    "stash",
+    "am",
+    "update-ref",
+    "worktree",
+    "restore",
+    "rm",
+    "filter-branch",
+    "replace",
 }
 _GIT_OPTIONS_WITH_VALUE = {
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace",
-    "--exec-path", "--super-prefix", "--list-submodules",
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--exec-path",
+    "--super-prefix",
+    "--list-submodules",
 }
 
 
@@ -161,9 +248,7 @@ def _normalize_relative(raw: str) -> str:
             continue
         if piece == "..":
             if not parts:
-                raise FloorRefused(
-                    f"路径「{text}」试图走出工作树。只能在本任务的工作树里读写。"
-                )
+                raise FloorRefused(f"路径「{text}」试图走出工作树。只能在本任务的工作树里读写。")
             parts.pop()
             continue
         parts.append(piece)
@@ -204,18 +289,12 @@ class Floor:
         lowered = relative.lower()
         head = lowered.split("/", 1)[0]
         if head in _DENIED_DIRS:
-            raise FloorRefused(
-                f"`{relative}` 在版本库元数据目录里，平台自己管提交，工具不进去。"
-            )
+            raise FloorRefused(f"`{relative}` 在版本库元数据目录里，平台自己管提交，工具不进去。")
         if _CREDENTIAL_NAMES.search("/" + lowered):
-            raise FloorRefused(
-                f"`{relative}` 是凭据类文件（密钥 / 环境变量），工具一律不读不写。"
-            )
+            raise FloorRefused(f"`{relative}` 是凭据类文件（密钥 / 环境变量），工具一律不读不写。")
         candidate = (self.root / relative).resolve()
         if candidate != self.root and not _is_under(candidate, self.root):
-            raise FloorRefused(
-                f"`{relative}` 解析后落在工作树之外（软链接或联接点），工具不进去。"
-            )
+            raise FloorRefused(f"`{relative}` 解析后落在工作树之外（软链接或联接点），工具不进去。")
         if write:
             self.check_scope(relative)
         return candidate

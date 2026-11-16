@@ -54,27 +54,33 @@ def test_goal_mentioning_a_path_outside_the_contract_is_flagged():
 
 def test_bare_file_name_is_matched_by_the_full_path_in_the_contract():
     """goal 写裸名 ``conftest.py``，契约写 ``tests/conftest.py``：同一件事，不报。"""
-    assert goal_scope_warnings(
-        [
-            {
-                "id": "T-1",
-                "goal": "Register the fixture via conftest.py",
-                "exclusive_paths": ["tests/conftest.py"],
-            }
-        ]
-    ) == []
+    assert (
+        goal_scope_warnings(
+            [
+                {
+                    "id": "T-1",
+                    "goal": "Register the fixture via conftest.py",
+                    "exclusive_paths": ["tests/conftest.py"],
+                }
+            ]
+        )
+        == []
+    )
 
 
 def test_no_warning_when_every_mentioned_path_is_in_scope():
-    assert goal_scope_warnings(
-        [
-            {
-                "id": "T-1",
-                "goal": "在 tests/conftest.py 里加 fixture，并修改 docs/guide.md",
-                "exclusive_paths": ["tests/conftest.py", "docs/guide.md"],
-            }
-        ]
-    ) == []
+    assert (
+        goal_scope_warnings(
+            [
+                {
+                    "id": "T-1",
+                    "goal": "在 tests/conftest.py 里加 fixture，并修改 docs/guide.md",
+                    "exclusive_paths": ["tests/conftest.py", "docs/guide.md"],
+                }
+            ]
+        )
+        == []
+    )
 
 
 def test_extraction_covers_via_locative_and_modify_phrasings():

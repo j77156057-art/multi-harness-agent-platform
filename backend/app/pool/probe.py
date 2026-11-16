@@ -267,7 +267,9 @@ def test_model(model_id: str, service: Any, *, consumer: str = "") -> dict[str, 
     return _answer_of(model_id, started, answer, declared=True)
 
 
-def _answer_of(model_id: str, started: float, answer: dict[str, Any], *, declared: bool) -> dict[str, Any]:
+def _answer_of(
+    model_id: str, started: float, answer: dict[str, Any], *, declared: bool
+) -> dict[str, Any]:
     choices = answer.get("choices") or []
     text = ""
     if choices and isinstance(choices[0], dict):

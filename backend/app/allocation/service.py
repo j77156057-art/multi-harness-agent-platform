@@ -547,9 +547,9 @@ class AllocationService:
                 ).fetchall()
                 tasks_by_application: dict[str, list[str]] = {}
                 for link in application_tasks:
-                    tasks_by_application.setdefault(
-                        str(link["application_id"]), []
-                    ).append(str(link["task_id"]))
+                    tasks_by_application.setdefault(str(link["application_id"]), []).append(
+                        str(link["task_id"])
+                    )
                 # 这一轮**要分配的是哪些活**：分配轮绑的是方案快照，快照里带着
                 # 任务和它指定的执行窗口。没有这一面，成员不知道"这一轮有我的
                 # 活吗"，管理员也不知道"这条活本来是给谁的"——申请与改派邀请
@@ -598,7 +598,9 @@ class AllocationService:
                 )
             return out
 
-    def _snapshot_tasks(self, conn: sqlite3.Connection, plan_snapshot_id: str) -> list[dict[str, Any]]:
+    def _snapshot_tasks(
+        self, conn: sqlite3.Connection, plan_snapshot_id: str
+    ) -> list[dict[str, Any]]:
         """The tasks a plan snapshot holds, with the window each one names.
 
         The allocation round is bound to a **plan snapshot**, and the snapshot is

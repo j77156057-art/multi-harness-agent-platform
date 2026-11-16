@@ -328,9 +328,7 @@ class AdminService:
             f"收到的意见：\n{comments}\n\n"
             "只输出那个 JSON 对象，不要别的文字。"
         )
-        payload, model = self._invoke_model(
-            prompt, route=route, log_key=f"revise-{plan_id}"
-        )
+        payload, model = self._invoke_model(prompt, route=route, log_key=f"revise-{plan_id}")
         if isinstance(payload, list):
             payload = {"tasks": payload}
         revised = payload.get("tasks") if isinstance(payload, dict) else None
@@ -561,7 +559,9 @@ class AdminService:
                 for harness_id in available
                 if self._provider(harness_id) != admin_provider
             ]
-        available = [harness_id for harness_id in available if self.harness_has_credential(harness_id)]
+        available = [
+            harness_id for harness_id in available if self.harness_has_credential(harness_id)
+        ]
         if needs_tools:
             # 工作请求必带 read/edit/write 工具定义。被选到 CLI 档的窗口只能在
             # 开流前被池层拒掉（``relay_cli_cannot_use_tools``，502），代价是
@@ -664,9 +664,7 @@ class AdminService:
         # 模型通道来自**管理员是谁**，不是写死的 qoder：管理员 harness 换成别的
         # CLI，细化就必须走它自己的那条通道。选不出来就明确失败，不退回一条
         # "看起来能用"的默认通道 —— 那会让回执里的 `model.adapter` 说谎。
-        payload, model = self._invoke_model(
-            prompt, route=route, log_key=f"refine-{group_id}"
-        )
+        payload, model = self._invoke_model(prompt, route=route, log_key=f"refine-{group_id}")
         questions = _questions(payload)
         result: dict[str, Any] = {
             "harness_id": self.harness_id,
@@ -740,9 +738,7 @@ class AdminService:
                         selections=experience_selections,
                     )
                 result["experience_injection_count"] = len(experience_selections)
-                result.update(
-                    {"status": "ok", "tasks": final_specs, "questions": []}
-                )
+                result.update({"status": "ok", "tasks": final_specs, "questions": []})
         # Posted for BOTH outcomes: the owner's global view is the group
         # conversation, so a question the admin refused to guess must land there
         # too, not only in an HTTP response the owner never sees.
@@ -780,9 +776,7 @@ class AdminService:
             # never sees and that still claims to be an answer.
             raise AdminHarnessError("refusing to answer the administrator's own message")
         prompt = self._answer_prompt(text, group_id=group_id, asker=recipient)
-        payload, model = self._invoke_model(
-            prompt, route=route, log_key=f"answer-{recipient}"
-        )
+        payload, model = self._invoke_model(prompt, route=route, log_key=f"answer-{recipient}")
         answer = str(payload.get("answer") or "").strip()
         if not answer:
             raise AdminHarnessError("the administrator model returned no answer text")
@@ -1023,7 +1017,9 @@ class AdminService:
             raise AdminHarnessError("request_changes requires at least one finding")
         failure_class = str(payload.get("failure_class") or "unknown").strip()
         if failure_class not in {"spec", "prompt", "execution", "unknown"}:
-            raise AdminHarnessError("review failure_class must be spec, prompt, execution or unknown")
+            raise AdminHarnessError(
+                "review failure_class must be spec, prompt, execution or unknown"
+            )
         return {
             "verdict": verdict,
             "findings": findings,

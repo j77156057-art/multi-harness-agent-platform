@@ -34,8 +34,12 @@ def test_concept_key_is_high_precision_shortcut_and_vector_is_candidate_only():
 
     assert shadow.old_decision(same, identity)
     assert not shadow.old_decision(different, identity)
-    assert shadow.candidate_decision(different, identity, _vectors(different, [1.0, 0.0], [0.9, 0.1]))[0]
-    assert not shadow.candidate_decision(different, identity, _vectors(different, [1.0, 0.0], [0.0, 1.0]))[0]
+    assert shadow.candidate_decision(
+        different, identity, _vectors(different, [1.0, 0.0], [0.9, 0.1])
+    )[0]
+    assert not shadow.candidate_decision(
+        different, identity, _vectors(different, [1.0, 0.0], [0.0, 1.0])
+    )[0]
 
 
 def test_cluster_metric_catches_transitive_third_issue():
@@ -54,7 +58,8 @@ def test_cluster_metric_catches_transitive_third_issue():
 
 def test_pair_metrics_include_sample_counts_and_wilson_intervals():
     rows = [
-        {"id": "P", "label": 1}, {"id": "N", "label": 0},
+        {"id": "P", "label": 1},
+        {"id": "N", "label": 0},
         {"id": "H", "label": 0},
     ]
 
@@ -92,8 +97,11 @@ def test_rebuild_is_atomic_and_original_experience_bytes_are_unchanged(tmp_path,
     output = tmp_path / "shadow.json"
     store = ExperienceStore(experience)
     store.record_request_changes(
-        project="P-one", task_category="backend", executor="codex",
-        spec_summary="覆盖失败路径", findings_summary="缺少失败路径的验收条件",
+        project="P-one",
+        task_category="backend",
+        executor="codex",
+        spec_summary="覆盖失败路径",
+        findings_summary="缺少失败路径的验收条件",
     )
     original = experience.read_bytes()
     monkeypatch.setattr(shadow, "EXPERIENCE", experience)
@@ -115,6 +123,7 @@ def test_rebuild_empty_real_file_does_not_call_embedding(tmp_path, monkeypatch):
     monkeypatch.setattr(shadow, "EXPERIENCE", experience)
     monkeypatch.setattr(shadow, "REAL_INDEX", tmp_path / "shadow.json")
     monkeypatch.setattr(shadow, "model_fingerprint", lambda: "model-digest")
+
     def no_network(texts):
         assert texts == []
         return []

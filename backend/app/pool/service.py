@@ -32,6 +32,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.net import http_client
 from app.pool import user_keys
 from app.pool.balance import cached_balances
 from app.pool.inventory import build_inventory, cached_minimax_quota
@@ -334,7 +335,7 @@ class PoolService:
             candidates.insert(0, upstream.base_url + "/v1/models")
         for url in candidates:
             try:
-                with httpx.Client(timeout=8.0) as client:
+                with http_client(timeout=8.0) as client:
                     response = client.get(url, headers=headers)
             except httpx.HTTPError:
                 continue
@@ -454,7 +455,7 @@ class PoolService:
         else:
             url = upstream.base_url + "/chat/completions"
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with http_client(timeout=self.timeout) as client:
                 response = client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
             raise PoolError(f"upstream {upstream.name} is unreachable: {exc}") from exc
@@ -513,7 +514,7 @@ class PoolService:
             else:
                 url = upstream.base_url + "/chat/completions"
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with http_client(timeout=self.timeout) as client:
                 response = client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
             raise PoolError(f"upstream {upstream.name} is unreachable: {exc}") from exc
@@ -575,7 +576,7 @@ class PoolService:
                 url = upstream.base_url + "/chat/completions"
             body = chat_payload
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with http_client(timeout=self.timeout) as client:
                 response = client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
             raise PoolError(f"upstream {upstream.name} is unreachable: {exc}") from exc
@@ -644,7 +645,7 @@ class PoolService:
         self, url: str, body: dict[str, Any], headers: dict[str, str]
     ) -> Iterator[str]:
         with (
-            httpx.Client(timeout=self.timeout) as client,
+            http_client(timeout=self.timeout) as client,
             client.stream("POST", url, json=body, headers=headers) as response,
         ):
             if response.status_code >= 400:

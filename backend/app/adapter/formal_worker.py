@@ -9,9 +9,9 @@ import os
 import re
 import shutil
 import time
+from collections.abc import Callable
 from pathlib import Path
-
-import httpx
+from typing import Any
 
 from app.adapter import cli_output, presence
 from app.adapter.harnesses.claude_code import ClaudeCodeAdapter
@@ -43,6 +43,7 @@ from app.config import settings
 from app.db.connection import Database
 from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeCapacityExceeded, WorktreeManager
+from app.net import http_client
 from app.review_kinds import REVIEW_FINDING_HEADINGS, REVIEW_FINDING_KINDS, group_findings
 from app.tasks.service import SchedulerService
 from app.verify.formal_artifact import PROFILE_NAME as FORMAL_ARTIFACT_PROFILE
@@ -187,7 +188,7 @@ class ScopedRunner(SubprocessRunner):
         spec: dict,
         base: str,
         *,
-        platform_commit: bool | Any = False,
+        platform_commit: bool | Callable[[], bool] = False,
         commit_message: str = "chore(formal): submit harness deliverable",
         transient: Any = None,
     ):
@@ -677,8 +678,7 @@ def submit_circulation_review(
 
 
 ALLOCATION_APPLICATION_REASON = (
-    "本窗口申请执行这条任务：方案里指派的执行窗口就是它，"
-    "范围与验收标准已在方案快照中写明。"
+    "本窗口申请执行这条任务：方案里指派的执行窗口就是它，" "范围与验收标准已在方案快照中写明。"
 )
 
 
@@ -758,9 +758,7 @@ def submit_allocation_applications(client, *, harness_id: str, group: str) -> bo
                     "harness_id": harness_id,
                     "task_ids": task_ids,
                     "reason": ALLOCATION_APPLICATION_REASON,
-                    "body": (
-                        "本窗口按方案快照的指派申请执行：" + "、".join(task_ids)
-                    ),
+                    "body": ("本窗口按方案快照的指派申请执行：" + "、".join(task_ids)),
                 },
             )
         except Exception as exc:
@@ -955,8 +953,7 @@ def build_goal(
             "\n\n=== The sections below were assembled by the platform from the previous round;"
             " they are NOT part of the task specification. ===\n"
             "The specification above is the authoritative contract. If anything below contradicts"
-            " it, follow the specification and say so in your hand-off note.\n"
-            + "\n".join(extras)
+            " it, follow the specification and say so in your hand-off note.\n" + "\n".join(extras)
         )
     return goal
 
@@ -1123,7 +1120,11 @@ def _provider_outage_hint(exc: BaseException) -> str:
     line = ""
     for candidate in text.splitlines():
         stripped = candidate.strip()
-        if stripped and _PROVIDER_TROUBLE.search(stripped) and not _NOT_MODEL_TROUBLE.search(stripped):
+        if (
+            stripped
+            and _PROVIDER_TROUBLE.search(stripped)
+            and not _NOT_MODEL_TROUBLE.search(stripped)
+        ):
             line = stripped
             break
     if not line:
@@ -1203,9 +1204,7 @@ def _classify_failure(
         # 原因里带最早可用时间：否则人只看到 "capacity"，不知道等多久。
         earliest = exc.earliest_available_at
         suffix = f"; earliest available at {earliest}" if earliest else ""
-        return True, (
-            "the platform has no free worktree slot right now (capacity)" + suffix
-        )
+        return True, ("the platform has no free worktree slot right now (capacity)" + suffix)
     if isinstance(exc, CliUnavailable):
         # The binary is not on PATH: the same window would fail the same way.
         # 带上适配器自己给的原因（"缺 AMP_API_KEY"这类），否则人只知道
@@ -1524,9 +1523,7 @@ def run_one(
         record = exc.record
         # 结构化记录跟 abandon 一起交给平台：状态机事件与验收记录表里都能
         # 读到退回计数、缺项和终态，不用去翻 evidence 目录。
-        adapter.abandon(
-            task_id=task["task_id"], reason=exc.abandon_reason(), acceptance=record
-        )
+        adapter.abandon(task_id=task["task_id"], reason=exc.abandon_reason(), acceptance=record)
         recycled: dict[str, object] = {"status": "archived"}
         if attempt_id:
             with contextlib.suppress(Exception):
@@ -1838,7 +1835,7 @@ def main():
     allocation_every_seconds = 10.0
     last_allocation_at = 0.0
     worker_token = args.token_file.read_text().strip()
-    with httpx.Client(
+    with http_client(
         base_url=args.url,
         headers={"Authorization": "Bearer " + worker_token},
         timeout=30,
@@ -1884,9 +1881,7 @@ def main():
                             client, harness_id=args.harness_id, group=args.group
                         )
                     with contextlib.suppress(Exception):
-                        accept_allocation(
-                            client, harness_id=args.harness_id, group=args.group
-                        )
+                        accept_allocation(client, harness_id=args.harness_id, group=args.group)
                 completed = run_one(
                     client,
                     database,

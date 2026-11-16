@@ -483,21 +483,17 @@ def test_a_gated_group_still_lists_and_runs_a_rework(tmp_path, monkeypatch):
     ``changes_requested``（owner 为空、不在 ready 列表、也没有新分配轮次）。
     """
     chain = _failed_chain(tmp_path)
-    monkeypatch.setattr(
-        settings, "allocation_required_groups", frozenset({DEFAULT_GROUP})
-    )
+    monkeypatch.setattr(settings, "allocation_required_groups", frozenset({DEFAULT_GROUP}))
 
     listed = eligible_tasks(
         chain.database, harness_id="harness-2", group_id=DEFAULT_GROUP, limit=10
     )
 
     assert [row["task_id"] for row in listed] == ["T-1"], (
-        "开了门禁也不能把返工从拉取列表里删掉："
-        "Claim 侧的 CLAIM_FOR_REVISION 刻意不过门禁"
+        "开了门禁也不能把返工从拉取列表里删掉：" "Claim 侧的 CLAIM_FOR_REVISION 刻意不过门禁"
     )
 
     item, _worktree, _head = _rework_attempt(chain, tmp_path)
 
     assert item.attempt_id == "T-1.a2"
     assert _status(chain.database) == "awaiting_review", "返工要能真的跑完一轮"
-

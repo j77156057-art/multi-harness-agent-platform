@@ -20,8 +20,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from app.adapter.formal_worker import ProviderUnavailable, _classify_failure, ask_pool_plan
 from app.adapter.harnesses.cli import CliFailed, CliRunResult
 from app.auth.tokens import TokenService
@@ -181,9 +179,7 @@ def test_approve_blocks_a_cli_only_window_before_any_attempt(tmp_path, monkeypat
     bootstrap(client)
     for harness_id, provider in (("w-cli", "codebuddy"), ("w-pro", "relay")):
         register_harness(database, harness_id, provider=provider)
-        TokenService(database).issue(
-            subject_type="harness", subject_id=harness_id, label="test"
-        )
+        TokenService(database).issue(subject_type="harness", subject_id=harness_id, label="test")
     with database.transaction() as conn:
         conn.execute(
             "UPDATE harnesses SET status = 'online', model_mode = 'pool',"
@@ -221,9 +217,7 @@ def test_approve_blocks_a_cli_only_window_before_any_attempt(tmp_path, monkeypat
     response = client.post("/api/v1/plans/PL-1/approve", json={"decided_by": "human-1"})
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "plan.targets_unavailable"
-    assert count(
-        database, "SELECT COUNT(*) FROM task_attempts WHERE task_id = 'T-1'"
-    ) == 0
+    assert count(database, "SELECT COUNT(*) FROM task_attempts WHERE task_id = 'T-1'") == 0
 
 
 # -------------------------------------------------- retryable:false
@@ -243,8 +237,8 @@ def _cli_failed(stderr: str) -> CliFailed:
 
 
 REFUSAL = (
-    "API error 502: {\"code\":\"relay_cli_cannot_use_tools\","
-    "\"message\":\"this model is served by a CLI slot\",\"retryable\":false}"
+    'API error 502: {"code":"relay_cli_cannot_use_tools",'
+    '"message":"this model is served by a CLI slot","retryable":false}'
 )
 
 
@@ -263,7 +257,7 @@ def test_retryable_false_is_classified_as_not_retryable():
 
 def test_retryable_true_is_still_retried():
     retryable, reason = _classify_failure(
-        _cli_failed("API error 502: {\"retryable\":true}"),
+        _cli_failed('API error 502: {"retryable":true}'),
         task={"task_id": "T-1", "max_attempts": 3, "attempt_no": 1},
         manager=None,
         attempt_id="T-1.a1",
@@ -333,9 +327,11 @@ def test_a_retryable_failure_still_gets_a_second_attempt(tmp_path):
     database = make_database(tmp_path)
     seed_project(database)
     seed_task(database)
-    first = ClaimService(database).claim(
-        ClaimRequest(claim_request_id="cr-1", harness_id="w-1", task_ids=("T-1",))
-    ).items[0]
+    first = (
+        ClaimService(database)
+        .claim(ClaimRequest(claim_request_id="cr-1", harness_id="w-1", task_ids=("T-1",)))
+        .items[0]
+    )
 
     SchedulerService(database).release(
         task_id="T-1",

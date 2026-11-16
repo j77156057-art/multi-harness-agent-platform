@@ -199,9 +199,7 @@ def test_the_grace_window_falls_back_to_stale_when_nobody_answers(claimed):
         "lease_expire",
     ]
     # 兜底这件事本身也要在决策记录里写清，别让人以为是自己答的。
-    decided = database.read(
-        "SELECT answer, decided_seq FROM task_decisions WHERE task_id='T-1'"
-    )[0]
+    decided = database.read("SELECT answer, decided_seq FROM task_decisions WHERE task_id='T-1'")[0]
     assert decided["answer"] and "超时" in decided["answer"]
     assert decided["decided_seq"] is not None
 
@@ -228,7 +226,9 @@ def test_a_second_sweep_is_a_no_op(claimed):
     assert expire_stale_leases(database, now=later) == ["T-1"]
     # 第二遍：租约已经释放、任务已经停在等人确认，不该再产生第二个事件。
     assert expire_stale_leases(database, now=later) == []
-    assert count(database, "SELECT COUNT(*) FROM task_events WHERE event_name='lease_uncertain'") == 1
+    assert (
+        count(database, "SELECT COUNT(*) FROM task_events WHERE event_name='lease_uncertain'") == 1
+    )
     assert count(database, "SELECT COUNT(*) FROM task_decisions WHERE task_id='T-1'") == 1
 
 
@@ -318,9 +318,7 @@ def test_stale_task_can_be_reclaimed_and_taken_over(claimed):
 
 
 def _attempt_status(database, attempt_id: str) -> dict[str, object]:
-    return database.read(
-        "SELECT * FROM task_attempts WHERE attempt_id = ?", (attempt_id,)
-    )[0]
+    return database.read("SELECT * FROM task_attempts WHERE attempt_id = ?", (attempt_id,))[0]
 
 
 def _lease_row(database, task_id: str = "T-1") -> dict[str, object]:
@@ -432,8 +430,7 @@ def test_close_attempt_is_idempotent(claimed):
             reason="second_reason",
         )
     row = database.read(
-        "SELECT status, closed_at, close_reason FROM task_attempts"
-        " WHERE attempt_id = ?",
+        "SELECT status, closed_at, close_reason FROM task_attempts" " WHERE attempt_id = ?",
         (item.attempt_id,),
     )[0]
     assert row["status"] == "abandoned"
@@ -526,18 +523,16 @@ def test_the_owner_closing_invariants_hold(tmp_path):
     database = make_database(tmp_path)
     seed_project(database)
     seed_task(database)
-    item = ClaimService(database).claim(
-        ClaimRequest(claim_request_id="cr-1", harness_id="harness-1", task_ids=("T-1",))
-    ).items[0]
+    item = (
+        ClaimService(database)
+        .claim(ClaimRequest(claim_request_id="cr-1", harness_id="harness-1", task_ids=("T-1",)))
+        .items[0]
+    )
     _start_attempt(database, item)
     service = SchedulerService(database)
     with database.transaction() as conn:
-        item = conn.execute(
-            "SELECT attempt_id FROM task_attempts WHERE task_id = 'T-1'"
-        ).fetchone()
-        epoch = conn.execute(
-            "SELECT current_epoch FROM tasks WHERE task_id = 'T-1'"
-        ).fetchone()
+        item = conn.execute("SELECT attempt_id FROM task_attempts WHERE task_id = 'T-1'").fetchone()
+        epoch = conn.execute("SELECT current_epoch FROM tasks WHERE task_id = 'T-1'").fetchone()
     service.abandon(
         task_id="T-1",
         attempt_id=str(item["attempt_id"]),

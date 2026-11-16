@@ -17,7 +17,7 @@ import pytest
 from app.adapter.harnesses.platform import PlatformToolsAdapter
 from app.agenttools.floor import Floor, FloorRefused, command_refusal
 from app.agenttools.loop import PlatformLoop
-from app.agenttools.registry import ToolRefused, build_registry
+from app.agenttools.registry import build_registry
 
 
 def _worktree(tmp_path: Path) -> Path:
@@ -96,7 +96,9 @@ def test_dangerous_commands_are_refused(command: str) -> None:
     assert len(reason) > 10  # 是一句话，不是一个错误码
 
 
-@pytest.mark.parametrize("command", ["python -m pytest -q", "npm run build", "git status", "ls docs"])
+@pytest.mark.parametrize(
+    "command", ["python -m pytest -q", "npm run build", "git status", "ls docs"]
+)
 def test_ordinary_commands_are_allowed(command: str) -> None:
     assert command_refusal(command) is None
 
@@ -155,7 +157,7 @@ def test_review_mode_can_look_but_not_touch(tmp_path: Path) -> None:
 
 def test_run_command_reports_the_exit_code(tmp_path: Path) -> None:
     tools = build_registry(Floor(root=_worktree(tmp_path), paths=("docs",)))
-    answer = tools["run_command"].run({"cmd": "python -c \"raise SystemExit(3)\""})
+    answer = tools["run_command"].run({"cmd": 'python -c "raise SystemExit(3)"'})
     assert answer.startswith("[exit 3]")
 
 
@@ -171,7 +173,11 @@ class Scripted:
 
     def text(self, prompt: str) -> str:
         self.prompts.append(prompt)
-        return self.answers.pop(0) if self.answers else '{"tool": "finish", "input": {"summary": "没话说"}}'
+        return (
+            self.answers.pop(0)
+            if self.answers
+            else '{"tool": "finish", "input": {"summary": "没话说"}}'
+        )
 
 
 def _loop(tmp_path: Path, answers: list[str], **kwargs) -> tuple[PlatformLoop, Scripted]:
@@ -260,9 +266,7 @@ def test_the_step_budget_ends_honestly(tmp_path: Path) -> None:
 def test_by_default_there_is_no_step_cap(tmp_path: Path) -> None:
     """步数不设上限：一次跑多少步取决于活，不该由启动参数替它猜。"""
     many = ['{"tool": "list_files", "input": {}}'] * 12
-    loop, model = _loop(
-        tmp_path, many + ['{"tool": "finish", "input": {"summary": "跑完了"}}']
-    )
+    loop, model = _loop(tmp_path, many + ['{"tool": "finish", "input": {"summary": "跑完了"}}'])
     assert loop.max_steps is None
     result = loop.run()
     assert result.ok, result.error

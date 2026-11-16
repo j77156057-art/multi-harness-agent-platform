@@ -280,7 +280,6 @@ def test_a_flaky_ref_write_is_retried_instead_of_failing_the_task(monkeypatch) -
     assert calls["n"] == 3, "第三次才成功，说明重试生效"
 
 
-
 def test_the_cmd_transport_script_carries_the_model(tmp_path: Path, monkeypatch) -> None:
     """Windows 那条 cmd 分支也必须带 --model。
 
@@ -289,7 +288,10 @@ def test_the_cmd_transport_script_carries_the_model(tmp_path: Path, monkeypatch)
     """
     worktree = _worktree(tmp_path)
     adapter = OpenCodeAdapter(
-        FakeClient(), platform="nt", bash_path="C:/WINDOWS/bash.exe", model="opencode/flint-40b-free"
+        FakeClient(),
+        platform="nt",
+        bash_path="C:/WINDOWS/bash.exe",
+        model="opencode/flint-40b-free",
     )
     monkeypatch.setattr(adapter, "_needs_cmd_transport_file", lambda: True)
     adapter.prepare_work_order("干活", worktree)
@@ -302,7 +304,9 @@ def test_the_cmd_transport_script_carries_the_model(tmp_path: Path, monkeypatch)
 
 
 def test_the_direct_argv_path_carries_the_model(tmp_path: Path) -> None:
-    adapter = OpenCodeAdapter(FakeClient(), platform="nt", bash_path="", model="opencode/flint-40b-free")
+    adapter = OpenCodeAdapter(
+        FakeClient(), platform="nt", bash_path="", model="opencode/flint-40b-free"
+    )
     argv = adapter.command("干活", _worktree(tmp_path))
     assert "--model" in argv
     assert argv[argv.index("--model") + 1] == "opencode/flint-40b-free"

@@ -13,14 +13,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from app.adapter import cli_output
 from app.api.app import create_app
 from app.config import settings
-from tests.claim_support import DEFAULT_GROUP, make_database, seed_project
+from tests.claim_support import make_database, seed_project
 
 SNAPSHOT = "snap-0001"
 PLAN = "plan-0001"

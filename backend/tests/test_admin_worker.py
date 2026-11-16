@@ -55,9 +55,7 @@ class FakeAdmin:
                     "available_slots": max(0, limit - active),
                     "idle": active == 0,
                     "at_capacity": active >= limit,
-                    "earliest_available_at": (
-                        "2026-01-01T00:00:00+00:00" if active else None
-                    ),
+                    "earliest_available_at": ("2026-01-01T00:00:00+00:00" if active else None),
                 }
             )
         return rows
@@ -270,9 +268,7 @@ class AllocationClient(FakeClient):
             }
         if path == "/allocation/candidates":
             return {
-                "candidates": [
-                    {"application_id": "app-1", "harness_id": "m-1", "state": "frozen"}
-                ]
+                "candidates": [{"application_id": "app-1", "harness_id": "m-1", "state": "frozen"}]
             }
         return super().get(path, **params)
 
@@ -283,9 +279,7 @@ class AllocationClient(FakeClient):
         return super().post(path, body)
 
 
-def test_the_allocation_state_is_cleared_when_the_round_is_fully_decided(
-    tmp_path, monkeypatch
-):
+def test_the_allocation_state_is_cleared_when_the_round_is_fully_decided(tmp_path, monkeypatch):
     """一轮分配裁完，就把 pending 清掉 —— 否则平台自己卡死。
 
     2026-10-29 的真实演练：管理员把一轮的任务全裁完了，``pending_allocation``
@@ -762,12 +756,14 @@ def test_prompt_failure_revises_the_goal_and_redispatches_through_admin_routes(
     }
     client = FakeClient(
         tasks=[task],
-        context={"spec": {
-            "title": task["title"],
-            "goal": "补一条说明",
-            "exclusive_paths": ["docs/demo.md"],
-            "acceptance": "说明存在且既有入口未删除",
-        }},
+        context={
+            "spec": {
+                "title": task["title"],
+                "goal": "补一条说明",
+                "exclusive_paths": ["docs/demo.md"],
+                "acceptance": "说明存在且既有入口未删除",
+            }
+        },
     )
     worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
 
@@ -818,10 +814,16 @@ def test_prompt_repair_runs_through_real_api_sqlite_and_git(tmp_path, monkeypatc
     def post(path, body, token):
         return api.post(path, json=body, headers={"Authorization": f"Bearer {token}"})
 
-    assert post("/api/v1/projects", {"project_id": "P-live", "name": "DEMO"}, human_token).status_code == 200
-    assert post(
-        "/api/v1/projects/P-live/groups", {"group_id": "G-live", "name": "g"}, human_token
-    ).status_code == 200
+    assert (
+        post("/api/v1/projects", {"project_id": "P-live", "name": "DEMO"}, human_token).status_code
+        == 200
+    )
+    assert (
+        post(
+            "/api/v1/projects/P-live/groups", {"group_id": "G-live", "name": "g"}, human_token
+        ).status_code
+        == 200
+    )
     dispatched = post(
         "/api/v1/groups/G-live/dispatch",
         {
@@ -902,7 +904,7 @@ def test_prompt_repair_runs_through_real_api_sqlite_and_git(tmp_path, monkeypatc
 
     worker._review_one(task, attempt["attempt_id"])
 
-    remaining = LiveClient().get(f"/groups/G-live/tasks")["tasks"]
+    remaining = LiveClient().get("/groups/G-live/tasks")["tasks"]
     new_task_id = next(row["task_id"] for row in remaining if row["task_id"] != task_id)
     new_context = LiveClient().get(f"/adapter/context/{new_task_id}")
     assert new_context["spec"]["goal"] == verdict["revised_goal"]
@@ -961,21 +963,29 @@ def test_abandon_writes_experience_through_real_api(tmp_path, monkeypatch):
 
     post("/api/v1/projects", {"project_id": "P-live", "name": "DEMO"}, human_token)
     post("/api/v1/projects/P-live/groups", {"group_id": "G-live", "name": "g"}, human_token)
-    dispatched = post("/api/v1/groups/G-live/dispatch", {
-        "request_id": "admin-abandon-1",
-        "title": "DEMO · 放弃路径经验",
-        "goal": "补一条说明",
-        "harness_id": "member-window",
-        "decided_by": "admin-window",
-        "exclusive_paths": ["abandon.txt"],
-        "acceptance": "abandon.txt 存在",
-    }, admin_token)
+    dispatched = post(
+        "/api/v1/groups/G-live/dispatch",
+        {
+            "request_id": "admin-abandon-1",
+            "title": "DEMO · 放弃路径经验",
+            "goal": "补一条说明",
+            "harness_id": "member-window",
+            "decided_by": "admin-window",
+            "exclusive_paths": ["abandon.txt"],
+            "acceptance": "abandon.txt 存在",
+        },
+        admin_token,
+    )
     task_id = dispatched["task_id"]
-    claimed = post("/api/v1/adapter/claim", {
-        "claim_request_id": "claim-abandon-1",
-        "harness_id": "member-window",
-        "task_ids": [task_id],
-    }, member_token)
+    claimed = post(
+        "/api/v1/adapter/claim",
+        {
+            "claim_request_id": "claim-abandon-1",
+            "harness_id": "member-window",
+            "task_ids": [task_id],
+        },
+        member_token,
+    )
     attempt = claimed["items"][0]
     scheduler(chain.database).start_task(
         task_id=task_id,
@@ -984,12 +994,16 @@ def test_abandon_writes_experience_through_real_api(tmp_path, monkeypatch):
         worktrees=worktree_manager(tmp_path, chain.database),
     )
 
-    abandoned = post("/api/v1/adapter/abandon", {
-        "task_id": task_id,
-        "attempt_id": attempt["attempt_id"],
-        "fencing_epoch": attempt["fencing_epoch"],
-        "reason": "执行环境缺少必要依赖",
-    }, member_token)
+    abandoned = post(
+        "/api/v1/adapter/abandon",
+        {
+            "task_id": task_id,
+            "attempt_id": attempt["attempt_id"],
+            "fencing_epoch": attempt["fencing_epoch"],
+            "reason": "执行环境缺少必要依赖",
+        },
+        member_token,
+    )
 
     assert abandoned["experience_recorded"] is True
     (record,) = ExperienceStore(tmp_path / "admin" / "experience.json").records()
@@ -1008,12 +1022,14 @@ def test_abandon_writes_experience_through_real_api(tmp_path, monkeypatch):
 def test_spec_failure_waits_for_owner_reapproval_instead_of_rewriting_acceptance(
     tmp_path, monkeypatch
 ):
-    admin = FakeAdmin(verdict={
-        "verdict": "request_changes",
-        "findings": [{"message": "验收与目标冲突"}],
-        "failure_class": "spec",
-        "correction": "请群主重审验收条款",
-    })
+    admin = FakeAdmin(
+        verdict={
+            "verdict": "request_changes",
+            "findings": [{"message": "验收与目标冲突"}],
+            "failure_class": "spec",
+            "correction": "请群主重审验收条款",
+        }
+    )
     task = {
         "task_id": "FD-1",
         "attempt_id": "FD-1.a1",

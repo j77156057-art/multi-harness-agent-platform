@@ -75,9 +75,11 @@ def test_expired_lease_slot_is_recycled_and_capacity_returns(tmp_path, monkeypat
     assert capacity["active"] == 0
     assert capacity["at_capacity"] is False
     seed_task(fixture.database, task_id="T-2")
-    second = ClaimService(fixture.database).claim(
-        ClaimRequest(claim_request_id="cr-T-2", harness_id="harness-1", task_ids=("T-2",))
-    ).items[0]
+    second = (
+        ClaimService(fixture.database)
+        .claim(ClaimRequest(claim_request_id="cr-T-2", harness_id="harness-1", task_ids=("T-2",)))
+        .items[0]
+    )
     assert second.attempt_id is not None, "the expired slot no longer occupies the cap"
     new_tree = provision(fixture, task_id="T-2", attempt_id=second.attempt_id)
     assert new_tree.path.exists()
@@ -89,9 +91,7 @@ def test_expired_lease_slot_is_recycled_and_capacity_returns(tmp_path, monkeypat
     assert report.detail["recycled"] == [first.attempt_id]
     assert not worktree.path.exists()
     assert not worktree.gitdir.exists()
-    rows = fixture.database.read(
-        "SELECT attempt_id, status FROM workspaces ORDER BY rowid"
-    )
+    rows = fixture.database.read("SELECT attempt_id, status FROM workspaces ORDER BY rowid")
     assert [(row["attempt_id"], row["status"]) for row in rows] == [
         (first.attempt_id, "archived"),
         (second.attempt_id, "active"),
@@ -163,9 +163,12 @@ def test_archive_verification_failure_keeps_the_tree(tmp_path, monkeypatch):
     assert (worktree.path / "keep.txt").exists()
     rows = fixture.database.read("SELECT status FROM workspaces")
     assert [row["status"] for row in rows] == ["active"]
-    assert fixture.database.read(
-        "SELECT COUNT(*) AS n FROM artifacts WHERE attempt_id = ?", (item.attempt_id,)
-    )[0]["n"] == 0, "the failed recycle rolled the archive rows back"
+    assert (
+        fixture.database.read(
+            "SELECT COUNT(*) AS n FROM artifacts WHERE attempt_id = ?", (item.attempt_id,)
+        )[0]["n"]
+        == 0
+    ), "the failed recycle rolled the archive rows back"
 
 
 def test_capacity_full_queues_claim_with_reason_and_earliest(tmp_path, monkeypatch):
@@ -199,15 +202,19 @@ def test_capacity_full_queues_claim_with_reason_and_earliest(tmp_path, monkeypat
     assert task["queue_reason"] == "worktree_capacity"
     assert task["owner"] is None
     assert task["current_attempt_id"] is None
-    assert fixture.database.read(
-        "SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'"
-    )[0]["n"] == 0
-    assert fixture.database.read(
-        "SELECT COUNT(*) AS n FROM leases WHERE task_id = 'T-2'"
-    )[0]["n"] == 0
-    assert fixture.database.read(
-        "SELECT COUNT(*) AS n FROM workspaces WHERE task_id = 'T-2'"
-    )[0]["n"] == 0
+    assert (
+        fixture.database.read("SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'")[0][
+            "n"
+        ]
+        == 0
+    )
+    assert (
+        fixture.database.read("SELECT COUNT(*) AS n FROM leases WHERE task_id = 'T-2'")[0]["n"] == 0
+    )
+    assert (
+        fixture.database.read("SELECT COUNT(*) AS n FROM workspaces WHERE task_id = 'T-2'")[0]["n"]
+        == 0
+    )
 
     deferred = fixture.database.read(
         "SELECT release_reason FROM task_claims WHERE task_id = 'T-2'"
@@ -236,17 +243,14 @@ def test_queued_worktree_claim_is_completed_by_its_worker_not_opened_by_the_swee
     service = ClaimService(fixture.database)
     request_id = "formal-T-2-a1"  # formal_worker 的确定性 request id
     queued = service.claim(
-        ClaimRequest(
-            claim_request_id=request_id, harness_id="harness-1", task_ids=("T-2",)
-        )
+        ClaimRequest(claim_request_id=request_id, harness_id="harness-1", task_ids=("T-2",))
     )
     assert queued.items[0].outcome == OUTCOME_QUEUED
 
     # 容量释放：占位者的开发租约被释放（工位目录暂未回收）。
     with fixture.database.transaction() as conn:
         conn.execute(
-            "UPDATE leases SET released_at = ?"
-            " WHERE attempt_id = ? AND kind = 'development'",
+            "UPDATE leases SET released_at = ?" " WHERE attempt_id = ? AND kind = 'development'",
             (datetime.now(UTC).isoformat(), held.attempt_id),
         )
 
@@ -254,9 +258,9 @@ def test_queued_worktree_claim_is_completed_by_its_worker_not_opened_by_the_swee
     report = sweep_resources(fixture.database, datetime.now(UTC))
     assert report.actions == 0
     assert (
-        fixture.database.read(
-            "SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'"
-        )[0]["n"]
+        fixture.database.read("SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'")[0][
+            "n"
+        ]
         == 0
     ), "the sweep must not open an attempt nobody will provision"
     still = fixture.database.read(
@@ -273,9 +277,7 @@ def test_queued_worktree_claim_is_completed_by_its_worker_not_opened_by_the_swee
 
     # 3) 原 id 重试 → 原地完成领取（不是 replay 出 queued），worker 立刻开工。
     retried = service.claim(
-        ClaimRequest(
-            claim_request_id=request_id, harness_id="harness-1", task_ids=("T-2",)
-        )
+        ClaimRequest(claim_request_id=request_id, harness_id="harness-1", task_ids=("T-2",))
     ).items[0]
     assert retried.outcome == "claimed"
     assert retried.attempt_id == "T-2.a1"
@@ -298,9 +300,9 @@ def test_queued_worktree_claim_is_completed_by_its_worker_not_opened_by_the_swee
     # 4) 再扫也不会重复开 attempt。
     assert sweep_resources(fixture.database, datetime.now(UTC)).actions == 0
     assert (
-        fixture.database.read(
-            "SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'"
-        )[0]["n"]
+        fixture.database.read("SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = 'T-2'")[0][
+            "n"
+        ]
         == 1
     )
 
@@ -323,19 +325,21 @@ def test_two_concurrent_claims_cannot_share_one_unprovisioned_slot(tmp_path, mon
 
     def claim(task_id: str) -> None:
         try:
-            results[task_id] = ClaimService(fixture.database).claim(
-                ClaimRequest(
-                    claim_request_id=f"formal-{task_id}-a1",
-                    harness_id="harness-1",
-                    task_ids=(task_id,),
+            results[task_id] = (
+                ClaimService(fixture.database)
+                .claim(
+                    ClaimRequest(
+                        claim_request_id=f"formal-{task_id}-a1",
+                        harness_id="harness-1",
+                        task_ids=(task_id,),
+                    )
                 )
-            ).items[0]
+                .items[0]
+            )
         except Exception as exc:  # pragma: no cover - a raised claim is a failure
             results[task_id] = exc
 
-    threads = [
-        threading.Thread(target=claim, args=(task_id,)) for task_id in ("T-1", "T-2")
-    ]
+    threads = [threading.Thread(target=claim, args=(task_id,)) for task_id in ("T-1", "T-2")]
     for thread in threads:
         thread.start()
     for thread in threads:
@@ -368,9 +372,11 @@ def test_two_concurrent_claims_cannot_share_one_unprovisioned_slot(tmp_path, mon
 
     # 位子现在真的被占住了：再来一条只能排队。
     seed_task(fixture.database, task_id="T-3")
-    third = ClaimService(fixture.database).claim(
-        ClaimRequest(claim_request_id="cr-T-3", harness_id="harness-1", task_ids=("T-3",))
-    ).items[0]
+    third = (
+        ClaimService(fixture.database)
+        .claim(ClaimRequest(claim_request_id="cr-T-3", harness_id="harness-1", task_ids=("T-3",)))
+        .items[0]
+    )
     assert third.outcome == "queued"
     assert third.queue_reason == "worktree_capacity"
 

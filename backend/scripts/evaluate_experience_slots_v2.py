@@ -11,9 +11,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.admin.slots import SLOT_NAMES, classify_experience
-from scripts import evaluate_experience_slots_ab as slot
+from app.admin.slots import classify_experience
 from scripts import evaluate_experience_injection_ab as base
+from scripts import evaluate_experience_slots_ab as slot
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "artifacts" / "experience-slot-v2-ab-real-model" / "v1"
@@ -53,15 +53,17 @@ def classification_migration() -> dict[str, Any]:
     rows = []
     for record in records:
         classified = classify_experience(record)
-        rows.append({
-            "experience_id": record["experience_id"],
-            "source_task_id": record["source_task_id"],
-            "kind": record["kind"],
-            "previous_category": previous_by_id[record["experience_id"]]["slot"],
-            "category": classified["category"],
-            "expected": classified["expected"],
-            "evidence_quote": classified["evidence_quote"],
-        })
+        rows.append(
+            {
+                "experience_id": record["experience_id"],
+                "source_task_id": record["source_task_id"],
+                "kind": record["kind"],
+                "previous_category": previous_by_id[record["experience_id"]]["slot"],
+                "category": classified["category"],
+                "expected": classified["expected"],
+                "evidence_quote": classified["evidence_quote"],
+            }
+        )
     distribution = Counter(row["category"] for row in rows)
     moved_from_delivery = [row for row in rows if row["previous_category"] == "delivery_path"]
     return {
@@ -71,8 +73,12 @@ def classification_migration() -> dict[str, Any]:
         "from_delivery_path": {
             "total": len(moved_from_delivery),
             "to_no_lesson": sum(row["category"] == "no_lesson" for row in moved_from_delivery),
-            "to_other_categories": sum(row["category"] != "no_lesson" for row in moved_from_delivery),
-            "breakdown": dict(sorted(Counter(row["category"] for row in moved_from_delivery).items())),
+            "to_other_categories": sum(
+                row["category"] != "no_lesson" for row in moved_from_delivery
+            ),
+            "breakdown": dict(
+                sorted(Counter(row["category"] for row in moved_from_delivery).items())
+            ),
         },
         "rows": rows,
     }
@@ -113,11 +119,16 @@ def freeze() -> None:
         "script_sha256": base.sha(Path(__file__).read_text(encoding="utf-8")),
     }
     write_json(FROZEN, protocol)
-    print(json.dumps({
-        "frozen": str(FROZEN),
-        "distribution": migration["distribution"],
-        "from_delivery_path": migration["from_delivery_path"],
-    }, ensure_ascii=False))
+    print(
+        json.dumps(
+            {
+                "frozen": str(FROZEN),
+                "distribution": migration["distribution"],
+                "from_delivery_path": migration["from_delivery_path"],
+            },
+            ensure_ascii=False,
+        )
+    )
 
 
 def run() -> None:
@@ -170,9 +181,15 @@ def summarize() -> None:
         "parameters": base.PARAMS,
         "outcomes": len(rows),
         "conditions": {},
-        "disagreements": [f"{row['case_id']}-{row['condition']}" for row in rows if row.get("scoring_disagreement")],
+        "disagreements": [
+            f"{row['case_id']}-{row['condition']}"
+            for row in rows
+            if row.get("scoring_disagreement")
+        ],
     }
-    calls = [read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows]
+    calls = [
+        read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows
+    ]
     preflight = read_json(OUT / "calls" / "PREFLIGHT-preflight.json", {})
     for condition in ("A", "B", "C"):
         group = [row for row in rows if row["condition"] == condition]
@@ -180,13 +197,22 @@ def summarize() -> None:
         non_other = len(group) - counts["other"]
         human_group = [row for row in group if row.get("human")]
         human_hits = sum(row["human"]["category"] == "hit" for row in human_group)
-        human_escalations = sum(row["human"]["category"] == "resolved_by_escalation" for row in human_group)
+        human_escalations = sum(
+            row["human"]["category"] == "resolved_by_escalation" for row in human_group
+        )
         summary["conditions"][condition] = {
             "n": len(group),
-            "counts": {name: counts.get(name, 0) for name in ("hit", "miss", "resolved_by_escalation", "other")},
+            "counts": {
+                name: counts.get(name, 0)
+                for name in ("hit", "miss", "resolved_by_escalation", "other")
+            },
             "hit_rate": base._wilson(counts["hit"], len(group)),
-            "hit_plus_escalation_rate": base._wilson(counts["hit"] + counts["resolved_by_escalation"], len(group)),
-            "effective_processing_rate": base._wilson(counts["hit"] + counts["resolved_by_escalation"], non_other),
+            "hit_plus_escalation_rate": base._wilson(
+                counts["hit"] + counts["resolved_by_escalation"], len(group)
+            ),
+            "effective_processing_rate": base._wilson(
+                counts["hit"] + counts["resolved_by_escalation"], non_other
+            ),
             "human_reviewed": len(human_group),
             "human_hits": human_hits,
             "human_resolved_by_escalation": human_escalations,
@@ -195,15 +221,23 @@ def summarize() -> None:
     previous_rows = read_json(PREVIOUS / "results.json", [])
     comparison = []
     for case in base.CASES:
-        previous_b = next(row for row in previous_rows if row["case_id"] == case["case_id"] and row["condition"] == "B")
-        current_b = next(row for row in rows if row["case_id"] == case["case_id"] and row["condition"] == "B")
-        comparison.append({
-            "case_id": case["case_id"],
-            "previous_hit": previous_b["machine"]["hit"],
-            "current_hit": current_b["category"] == "hit",
-            "current_category": current_b["category"],
-            "human_category": (current_b.get("human") or {}).get("category"),
-        })
+        previous_b = next(
+            row
+            for row in previous_rows
+            if row["case_id"] == case["case_id"] and row["condition"] == "B"
+        )
+        current_b = next(
+            row for row in rows if row["case_id"] == case["case_id"] and row["condition"] == "B"
+        )
+        comparison.append(
+            {
+                "case_id": case["case_id"],
+                "previous_hit": previous_b["machine"]["hit"],
+                "current_hit": current_b["category"] == "hit",
+                "current_category": current_b["category"],
+                "human_category": (current_b.get("human") or {}).get("category"),
+            }
+        )
     current_b_hits = sum(row["current_hit"] for row in comparison)
     summary["previous_comparison"] = {
         "previous_machine_B_hits": 2,
@@ -217,22 +251,32 @@ def summarize() -> None:
         "provider_returned_cost_sum": round(sum(base._provider_cost(call) for call in charged), 6),
         "pool_tier": base.MODEL_TIER,
         "provider_cost_missing_calls": sum(call.get("provider_cost") is None for call in charged),
-        "prompt_tokens": sum(int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged),
-        "completion_tokens": sum(int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged),
-        "total_tokens": sum(int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged),
+        "prompt_tokens": sum(
+            int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged
+        ),
+        "completion_tokens": sum(
+            int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged
+        ),
+        "total_tokens": sum(
+            int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged
+        ),
         "usage_missing_calls": sum(not call.get("usage") for call in charged),
         "finish_reasons": {
             reason: sum(call.get("finish_reason") == reason for call in charged)
             for reason in sorted({str(call.get("finish_reason")) for call in charged})
         },
-        "duration_median_seconds": statistics.median(float(call.get("duration_seconds") or 0) for call in charged),
+        "duration_median_seconds": statistics.median(
+            float(call.get("duration_seconds") or 0) for call in charged
+        ),
         "duration_max_seconds": max(float(call.get("duration_seconds") or 0) for call in charged),
         "calls_including_preflight": len(charged),
     }
     summary["environment"] = read_json(OUT / "environment.json", {})
     summary["previous_artifacts_sha256_before"] = read_json(FROZEN, {})["previous_artifacts_sha256"]
     summary["previous_artifacts_sha256_after"] = tree_sha(PREVIOUS)
-    summary["previous_artifacts_unchanged"] = summary["previous_artifacts_sha256_before"] == summary["previous_artifacts_sha256_after"]
+    summary["previous_artifacts_unchanged"] = (
+        summary["previous_artifacts_sha256_before"] == summary["previous_artifacts_sha256_after"]
+    )
     summary["classification_migration"] = read_json(FROZEN, {})["classification_migration"]
     write_json(SUMMARY, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))

@@ -20,7 +20,7 @@ from app.db.connection import Database
 
 
 def receipt_id_for(task_id: str, attempt_id: str, commit: str) -> str:
-    digest = hashlib.sha256(f"{task_id}:{attempt_id}:{commit}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{task_id}:{attempt_id}:{commit}".encode()).hexdigest()
     return "ar-" + digest[:20]
 
 
@@ -52,7 +52,9 @@ def record_acceptance(
         return summary
 
     rounds = record.get("rounds") or []
-    retries = int(record.get("retries") if record.get("retries") is not None else max(len(rounds) - 1, 0))
+    retries = int(
+        record.get("retries") if record.get("retries") is not None else max(len(rounds) - 1, 0)
+    )
     attempt_state = str(record.get("attempt_state") or _state_from(record.get("state")))
     retry_state = record.get("retry_state")
     profile = str(record.get("profile") or "")
@@ -141,7 +143,9 @@ def acceptance_for(
     return _summary(dict(rows[0])) if rows else None
 
 
-def acceptance_history(database: Database, *, task_id: str, limit: int = 10) -> list[dict[str, Any]]:
+def acceptance_history(
+    database: Database, *, task_id: str, limit: int = 10
+) -> list[dict[str, Any]]:
     rows = database.read(
         "SELECT * FROM acceptance_receipts WHERE task_id = ? ORDER BY rowid DESC LIMIT ?",
         (task_id, limit),

@@ -269,8 +269,7 @@ def test_capacity_comes_back_after_recycle(tmp_path, monkeypatch):
     )
     with chain.database.transaction() as conn:
         conn.execute(
-            "UPDATE leases SET released_at = NULL WHERE attempt_id = ?"
-            " AND kind = 'development'",
+            "UPDATE leases SET released_at = NULL WHERE attempt_id = ?" " AND kind = 'development'",
             (chain.attempt_id,),
         )
 

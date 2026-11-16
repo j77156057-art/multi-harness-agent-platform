@@ -35,7 +35,11 @@ def wilson(successes: int, total: int) -> list[float]:
 
 def load() -> list[dict[str, Any]]:
     records = json.loads(SOURCE.read_text(encoding="utf-8"))["records"]
-    return [record for record in records if (slot_for_experience(record) or {}).get("slot") == "delivery_path"]
+    return [
+        record
+        for record in records
+        if (slot_for_experience(record) or {}).get("slot") == "delivery_path"
+    ]
 
 
 def sample() -> None:
@@ -43,26 +47,33 @@ def sample() -> None:
     selected = []
     for kind, count in (("merged", 6), ("request_changes", 4)):
         group = [record for record in records if record["kind"] == kind]
-        group.sort(key=lambda record: hashlib.sha256(f"{SEED}:{record['experience_id']}".encode()).hexdigest())
+        group.sort(
+            key=lambda record: hashlib.sha256(
+                f"{SEED}:{record['experience_id']}".encode()
+            ).hexdigest()
+        )
         selected.extend(group[:count])
     rows = []
     for record in selected:
         slot = slot_for_experience(record)
         expected = slot["expected"]
         positions = [
-            field for field in ("root_cause", "action", "spec_summary")
+            field
+            for field in ("root_cause", "action", "spec_summary")
             if expected in str(record.get(field) or "")
         ]
-        rows.append({
-            "experience_id": record["experience_id"],
-            "source_task_id": record["source_task_id"],
-            "kind": record["kind"],
-            "root_cause": record["root_cause"],
-            "action": record["action"],
-            "expected": expected,
-            "expected_positions": positions,
-            "expected_verbatim": bool(positions),
-        })
+        rows.append(
+            {
+                "experience_id": record["experience_id"],
+                "source_task_id": record["source_task_id"],
+                "kind": record["kind"],
+                "root_cause": record["root_cause"],
+                "action": record["action"],
+                "expected": expected,
+                "expected_positions": positions,
+                "expected_verbatim": bool(positions),
+            }
+        )
     protocol = {
         "seed": SEED,
         "selection": "SHA256(seed:experience_id) ascending within each kind; 6 merged + 4 request_changes",
@@ -71,7 +82,12 @@ def sample() -> None:
         "rows": rows,
     }
     write_json(OUT / "sample.json", protocol)
-    print(json.dumps({"sample": str(OUT / "sample.json"), "ids": [row["experience_id"] for row in rows]}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"sample": str(OUT / "sample.json"), "ids": [row["experience_id"] for row in rows]},
+            ensure_ascii=False,
+        )
+    )
 
 
 def summarize() -> None:
@@ -87,12 +103,28 @@ def summarize() -> None:
     machine = []
     for record in records:
         root = str(record["root_cause"] or "")
-        path_problem = any(term in root for term in (
-            "路径不明", "路径不明确", "未明确路径", "缺少路径", "没有路径", "交付路径",
-            "产出物路径", "文件位置", "存放位置", "输出位置", "写到哪里", "落在哪", "落点",
-        ))
+        path_problem = any(
+            term in root
+            for term in (
+                "路径不明",
+                "路径不明确",
+                "未明确路径",
+                "缺少路径",
+                "没有路径",
+                "交付路径",
+                "产出物路径",
+                "文件位置",
+                "存放位置",
+                "输出位置",
+                "写到哪里",
+                "落在哪",
+                "落点",
+            )
+        )
         verdict = "真路径" if record["kind"] == "merged" or path_problem else "被压成路径"
-        machine.append({"experience_id": record["experience_id"], "kind": record["kind"], "verdict": verdict})
+        machine.append(
+            {"experience_id": record["experience_id"], "kind": record["kind"], "verdict": verdict}
+        )
     summary = {
         "sample_size": len(rows),
         "sample_true_path": true_count,

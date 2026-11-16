@@ -26,10 +26,11 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from app.config import PROJECT_ROOT, settings
 
@@ -99,14 +100,14 @@ def _pid_alive(pid: int) -> bool:
     if os.name == "nt":
         import ctypes
 
-        SYNCHRONIZE = 0x00100000
-        WAIT_TIMEOUT = 0x00000102
+        synchronize = 0x00100000
+        wait_timeout = 0x00000102
         kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
+        handle = kernel32.OpenProcess(synchronize, False, pid)
         if not handle:
             return False
         try:
-            return kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+            return kernel32.WaitForSingleObject(handle, 0) == wait_timeout
         finally:
             kernel32.CloseHandle(handle)
     try:
@@ -127,7 +128,7 @@ def read_status(root: Path, *, now: float | None = None) -> RelayStatus:
     age = max(0.0, current - stamp)
     return RelayStatus(
         running=age <= RUNNING_WINDOW_SECONDS,
-        heartbeat_at=datetime.fromtimestamp(stamp, timezone.utc).isoformat(timespec="seconds"),
+        heartbeat_at=datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds"),
         age_seconds=round(age, 1),
         pid=_read_pid(root),
     )
@@ -172,7 +173,12 @@ def ensure_relay_worker(
     admin_list = [item for item in (admins or []) if item]
     status = read_status(mailbox_root, now=now)
     if status.running:
-        return {"running": True, "started": False, "pid": status.pid, "note": "已经在跑，不重复启动"}
+        return {
+            "running": True,
+            "started": False,
+            "pid": status.pid,
+            "note": "已经在跑，不重复启动",
+        }
 
     # 还没打心跳，但进程还活着：它正在启动。这时候再加一个就会两个 worker 抢同一个 outbox。
     if status.pid and _pid_alive(status.pid):
@@ -231,9 +237,10 @@ def _spawn_detached(command: list[str], mailbox_root: Path) -> int:
             subprocess, "DETACHED_PROCESS", 0
         )
     # 用 with 打开：句柄交给子进程之后这边就该关掉，否则每次拉起都漏一个文件句柄。
-    with (logs / "relay-worker.out.log").open("a", encoding="utf-8") as out, (
-        logs / "relay-worker.err.log"
-    ).open("a", encoding="utf-8") as err:
+    with (
+        (logs / "relay-worker.out.log").open("a", encoding="utf-8") as out,
+        (logs / "relay-worker.err.log").open("a", encoding="utf-8") as err,
+    ):
         process = subprocess.Popen(  # noqa: S603 - 命令是这里拼的，不接收外部输入
             command,
             cwd=str(PROJECT_ROOT / "backend"),

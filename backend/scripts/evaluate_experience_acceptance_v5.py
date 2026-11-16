@@ -13,9 +13,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
-import re
 import sys
-import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,7 +76,9 @@ FIXTURE_SPECS = [
     },
 ]
 
-SKELETON_RULE = "可见文本 -> 逐字符保留字母/数字/汉字统一表意文字，丢弃其余全部字符（间隔符） -> 连续骨架"
+SKELETON_RULE = (
+    "可见文本 -> 逐字符保留字母/数字/汉字统一表意文字，丢弃其余全部字符（间隔符） -> 连续骨架"
+)
 
 
 # -----------------------------------------------------------------------------
@@ -123,7 +123,9 @@ def banned_hits(text: str, tokens: list[str]) -> list[dict[str, Any]]:
                 "skeleton_hit": found,
                 "skeleton_index": index,
                 "skeleton_fragment": fragment,
-                "skeleton_context": skel[max(0, index - 10) : index + len(fragment) + 10] if found else "",
+                "skeleton_context": skel[max(0, index - 10) : index + len(fragment) + 10]
+                if found
+                else "",
             }
         )
     return hits
@@ -217,7 +219,9 @@ def all_texts() -> list[dict[str, Any]]:
                 "path": path,
                 "text": text,
                 "old_verdict": "pass" if first["mechanical_pass"] else "fail",
-                "old_ban_hits": v3_ban_hits(text, BANNED_TOKENS[f"v1/{item['case_id']}"]) if text else [],
+                "old_ban_hits": v3_ban_hits(text, BANNED_TOKENS[f"v1/{item['case_id']}"])
+                if text
+                else [],
                 "other_checks_pass": all(c["pass"] for c in first["checks"]),
             }
         )
@@ -299,7 +303,11 @@ def new_verdict(row: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     hits = banned_hits(row["text"], BANNED_TOKENS[f"{row['source']}/{row['case_id']}"])
     if hits:
         return "fail", hits
-    return ("pass" if row["other_checks_pass"] and row["old_verdict"] in {"pass", "still_bypassing"} else row["old_verdict"]), []
+    return (
+        "pass"
+        if row["other_checks_pass"] and row["old_verdict"] in {"pass", "still_bypassing"}
+        else row["old_verdict"]
+    ), []
 
 
 # -----------------------------------------------------------------------------
@@ -327,9 +335,18 @@ def freeze() -> None:
         "post_freeze_changes": [],
     }
     write_json(PROTOCOL, protocol)
-    print(json.dumps({"frozen_at": protocol["frozen_at"], "script": protocol["script"]["sha256"],
-                      "check_spec": protocol["check_spec"]["sha256"],
-                      "v4_fixture": protocol["v4_fixture"]["sha256"]}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "frozen_at": protocol["frozen_at"],
+                "script": protocol["script"]["sha256"],
+                "check_spec": protocol["check_spec"]["sha256"],
+                "v4_fixture": protocol["v4_fixture"]["sha256"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def verify_frozen() -> dict[str, Any]:
@@ -372,7 +389,11 @@ def run() -> None:
             "name": "v4_real_delivery",
             "sha256": sha(v4_text),
             "old_v3": {"hits": v4_old, "verdict": "pass" if not v4_old else "fail"},
-            "new_v5": {"hits": [hit["token"] for hit in v4_new], "evidence": v4_new, "verdict": "pass" if not v4_new else "fail"},
+            "new_v5": {
+                "hits": [hit["token"] for hit in v4_new],
+                "evidence": v4_new,
+                "verdict": "pass" if not v4_new else "fail",
+            },
             "assert_old_pass": not v4_old,
             "assert_new_fail": bool(v4_new),
         }
@@ -399,7 +420,11 @@ def run() -> None:
         )
     write_json(RESULTS, rows)
 
-    false_positives = [row for row in rows if row["source"] == "v1" and row["old_verdict"] == "pass" and row["new_verdict"] == "fail"]
+    false_positives = [
+        row
+        for row in rows
+        if row["source"] == "v1" and row["old_verdict"] == "pass" and row["new_verdict"] == "fail"
+    ]
     missed = [row for row in rows if row["new_verdict"] == "pass" and row["old_ban_hits"]]
     summary = {
         "dataset_version": DATASET_VERSION,
@@ -408,13 +433,16 @@ def run() -> None:
         "counts": {
             "pass": sum(1 for row in rows if row["new_verdict"] == "pass"),
             "fail": sum(1 for row in rows if row["new_verdict"] == "fail"),
-            "unjudgeable_no_text": sum(1 for row in rows if row["new_verdict"] == "unjudgeable_no_text"),
+            "unjudgeable_no_text": sum(
+                1 for row in rows if row["new_verdict"] == "unjudgeable_no_text"
+            ),
             "changed": sum(1 for row in rows if row["changed"]),
         },
         "v1_false_positives": false_positives,
         "v5_missed_old_hits": missed,
         "fixture_assertions": {
-            row["name"]: {"old_pass": row["assert_old_pass"], "new_fail": row["assert_new_fail"]} for row in fixture_rows
+            row["name"]: {"old_pass": row["assert_old_pass"], "new_fail": row["assert_new_fail"]}
+            for row in fixture_rows
         },
         "criteria": {
             "script_sha256": protocol["script"]["sha256"],
@@ -422,7 +450,8 @@ def run() -> None:
             "post_freeze_changes": protocol.get("post_freeze_changes", []),
         },
         "environment": {
-            "production_unchanged": env_before["production_sha256"] == snapshot_environment()["production_sha256"],
+            "production_unchanged": env_before["production_sha256"]
+            == snapshot_environment()["production_sha256"],
             "production_sha256": env_before["production_sha256"],
         },
     }
@@ -434,7 +463,8 @@ def run() -> None:
         {
             **env_before,
             "production_sha256_after": env_after["production_sha256"],
-            "production_unchanged": env_before["production_sha256"] == env_after["production_sha256"],
+            "production_unchanged": env_before["production_sha256"]
+            == env_after["production_sha256"],
             "history_sha256_after": env_after["history"],
             "history_unchanged": env_before["history"] == env_after["history"],
             "previous_dirs_after": env_after["previous_dirs"],
@@ -448,7 +478,9 @@ def snapshot_environment() -> dict[str, Any]:
     return {
         "production_sha256": file_sha(SOURCE),
         "history": {version: tree_sha(HISTORY / version) for version in HISTORY_VERSIONS},
-        "previous_dirs": {name: tree_sha(path) for name, path in (("v1", V1), ("v2", V2), ("v3", V3), ("v4", V4))},
+        "previous_dirs": {
+            name: tree_sha(path) for name, path in (("v1", V1), ("v2", V2), ("v3", V3), ("v4", V4))
+        },
     }
 
 

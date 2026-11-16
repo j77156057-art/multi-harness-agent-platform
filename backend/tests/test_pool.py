@@ -419,10 +419,7 @@ def test_a_paid_model_is_not_declared_free():
     """
     from app.pool.sources import DEFAULT_CLI_SLOTS
 
-    paid = {
-        (slot["name"], slot["model"]): slot.get("tier")
-        for slot in DEFAULT_CLI_SLOTS
-    }
+    paid = {(slot["name"], slot["model"]): slot.get("tier") for slot in DEFAULT_CLI_SLOTS}
     assert paid[("codebuddy", "minimax-m3.1-flash")] == "metered"
     # 别把整家都改成收费：hy3 确实是 codebuddy 账号里免费的那一档。
     assert paid[("codebuddy", "hy3")] == "free"
@@ -987,9 +984,7 @@ def test_the_streaming_path_refuses_tools_before_it_opens_the_stream():
     assert service.refuse_tools_for_cli(_Route(), {"messages": []}) is None
     # 有工具：立刻拒绝，且话说清楚该怎么办。
     with pytest.raises(PoolError) as caught:
-        service.refuse_tools_for_cli(
-            _Route(), {"messages": [], "tools": [{"type": "function"}]}
-        )
+        service.refuse_tools_for_cli(_Route(), {"messages": [], "tools": [{"type": "function"}]})
     assert caught.value.status == 502
     assert caught.value.code == "relay_cli_cannot_use_tools"
     assert "tool_calls" in str(caught.value)
@@ -1168,9 +1163,9 @@ def test_a_tool_result_rides_back_as_the_protocol_expects():
             ],
         }
     )
-    assistant_turn = [
-        item for item in anthropic_body["messages"] if item["role"] == "assistant"
-    ][-1]
+    assistant_turn = [item for item in anthropic_body["messages"] if item["role"] == "assistant"][
+        -1
+    ]
     assert assistant_turn["content"][0]["type"] == "tool_use"
     assert assistant_turn["content"][0]["input"] == {"text": "hi"}
     result_turn = anthropic_body["messages"][-1]

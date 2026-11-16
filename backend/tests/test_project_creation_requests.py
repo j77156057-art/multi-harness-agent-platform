@@ -21,16 +21,22 @@ def _env(tmp_path, monkeypatch):
     tokens = TokenService(database)
     human = tokens.issue(subject_type="human", subject_id=OPERATOR)
     agent = tokens.issue(subject_type="harness", subject_id=AGENT)
-    assert client.post(
-        "/api/v1/projects",
-        json={"project_id": "P-source", "name": "来源项目"},
-        headers=bearer(human),
-    ).status_code == 200
-    assert client.post(
-        "/api/v1/projects/P-source/groups",
-        json={"group_id": "G-1", "name": "来源群"},
-        headers=bearer(human),
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/projects",
+            json={"project_id": "P-source", "name": "来源项目"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/v1/projects/P-source/groups",
+            json={"group_id": "G-1", "name": "来源群"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
     return client, database, human, agent
 
 
@@ -93,9 +99,12 @@ def test_agent_only_applies_and_human_approval_creates_with_audit(tmp_path, monk
     assert row["decision_reason"] == "用途与范围明确，同意隔离验证"
     assert database.read("SELECT 1 FROM projects WHERE project_id = 'P-approved'")
     assert database.read("SELECT 1 FROM groups WHERE group_id = 'G-approved'")
-    assert database.read(
-        "SELECT status FROM integration_health WHERE project_id = 'P-approved'"
-    )[0]["status"] == "green"
+    assert (
+        database.read("SELECT status FROM integration_health WHERE project_id = 'P-approved'")[0][
+            "status"
+        ]
+        == "green"
+    )
 
 
 def test_rejection_requires_reason_and_never_creates(tmp_path, monkeypatch):
@@ -139,14 +148,22 @@ def test_approval_conflict_rolls_back_project_group_and_decision(tmp_path, monke
     client, database, human, agent = _env(tmp_path, monkeypatch)
     applied = _apply(client, agent, _application("P-atomic", "G-conflict"))
     request_id = applied.json()["request"]["request_id"]
-    assert client.post(
-        "/api/v1/projects", json={"project_id": "P-other", "name": "其他项目"}, headers=bearer(human)
-    ).status_code == 200
-    assert client.post(
-        "/api/v1/projects/P-other/groups",
-        json={"group_id": "G-conflict", "name": "已存在群"},
-        headers=bearer(human),
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/v1/projects",
+            json={"project_id": "P-other", "name": "其他项目"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/v1/projects/P-other/groups",
+            json={"group_id": "G-conflict", "name": "已存在群"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
 
     conflict = client.post(
         f"/api/v1/project-creation-requests/{request_id}/approve",
@@ -165,15 +182,19 @@ def test_approval_conflict_rolls_back_project_group_and_decision(tmp_path, monke
 
 def test_revised_approval_creates_final_ids_and_keeps_original_audit(tmp_path, monkeypatch):
     client, database, human, agent = _env(tmp_path, monkeypatch)
-    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"]["request_id"]
+    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"][
+        "request_id"
+    ]
 
     approved = client.post(
         f"/api/v1/project-creation-requests/{request_id}/approve",
         json={
             "decided_by": OPERATOR,
             "reason": "修订 ID 以隔离既有命名空间",
-            "project_id": "P-final", "project_name": "最终项目",
-            "group_id": "G-final", "group_name": "最终主群",
+            "project_id": "P-final",
+            "project_name": "最终项目",
+            "group_id": "G-final",
+            "group_name": "最终主群",
         },
         headers=bearer(human),
     )
@@ -182,8 +203,10 @@ def test_revised_approval_creates_final_ids_and_keeps_original_audit(tmp_path, m
     row = approved.json()["request"]
     assert row["project_id"] == "P-final" and row["group_id"] == "G-final"
     assert row["original"] == {
-        "project_id": "P-original", "project_name": "授权项目",
-        "group_id": "G-original", "group_name": "授权项目主群",
+        "project_id": "P-original",
+        "project_name": "授权项目",
+        "group_id": "G-original",
+        "group_name": "授权项目主群",
     }
     assert row["revision"]["project_id"] == "P-final"
     assert row["revision"]["reason"] == "修订 ID 以隔离既有命名空间"
@@ -193,11 +216,14 @@ def test_revised_approval_creates_final_ids_and_keeps_original_audit(tmp_path, m
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'P-original'")
     audit = database.read(
         "SELECT original_project_id, final_project_id, reason, revised_by_id"
-        " FROM project_creation_request_revisions WHERE request_id = ?", (request_id,)
+        " FROM project_creation_request_revisions WHERE request_id = ?",
+        (request_id,),
     )[0]
     assert dict(audit) == {
-        "original_project_id": "P-original", "final_project_id": "P-final",
-        "reason": "修订 ID 以隔离既有命名空间", "revised_by_id": OPERATOR,
+        "original_project_id": "P-original",
+        "final_project_id": "P-final",
+        "reason": "修订 ID 以隔离既有命名空间",
+        "revised_by_id": OPERATOR,
     }
     # 同一申请重复批准仍然冲突，不可能创建第二份项目。
     duplicate = client.post(
@@ -211,14 +237,19 @@ def test_revised_approval_creates_final_ids_and_keeps_original_audit(tmp_path, m
 
 def test_revised_rejection_keeps_revision_audit_but_creates_nothing(tmp_path, monkeypatch):
     client, database, human, agent = _env(tmp_path, monkeypatch)
-    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"]["request_id"]
+    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"][
+        "request_id"
+    ]
 
     rejected = client.post(
         f"/api/v1/project-creation-requests/{request_id}/reject",
         json={
-            "decided_by": OPERATOR, "reason": "修订后仍不符合预算",
-            "project_id": "P-revised-rejected", "project_name": "修订后拒绝项目",
-            "group_id": "G-revised-rejected", "group_name": "修订后拒绝群",
+            "decided_by": OPERATOR,
+            "reason": "修订后仍不符合预算",
+            "project_id": "P-revised-rejected",
+            "project_name": "修订后拒绝项目",
+            "group_id": "G-revised-rejected",
+            "group_name": "修订后拒绝群",
         },
         headers=bearer(human),
     )
@@ -229,14 +260,22 @@ def test_revised_rejection_keeps_revision_audit_but_creates_nothing(tmp_path, mo
     assert row["project_id"] == "P-revised-rejected"
     assert row["original"]["project_id"] == "P-original"
     assert row["revision"]["group_id"] == "G-revised-rejected"
-    assert not database.read("SELECT 1 FROM projects WHERE project_id IN ('P-original', 'P-revised-rejected')")
-    assert not database.read("SELECT 1 FROM groups WHERE group_id IN ('G-original', 'G-revised-rejected')")
-    assert database.read("SELECT 1 FROM project_creation_request_revisions WHERE request_id = ?", (request_id,))
+    assert not database.read(
+        "SELECT 1 FROM projects WHERE project_id IN ('P-original', 'P-revised-rejected')"
+    )
+    assert not database.read(
+        "SELECT 1 FROM groups WHERE group_id IN ('G-original', 'G-revised-rejected')"
+    )
+    assert database.read(
+        "SELECT 1 FROM project_creation_request_revisions WHERE request_id = ?", (request_id,)
+    )
 
 
 def test_revision_requires_reason_and_does_not_partially_write(tmp_path, monkeypatch):
     client, database, human, agent = _env(tmp_path, monkeypatch)
-    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"]["request_id"]
+    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"][
+        "request_id"
+    ]
 
     response = client.post(
         f"/api/v1/project-creation-requests/{request_id}/approve",
@@ -247,7 +286,10 @@ def test_revision_requires_reason_and_does_not_partially_write(tmp_path, monkeyp
     assert response.status_code in {400, 422}, response.text
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'P-final'")
     assert not database.read("SELECT 1 FROM project_creation_request_revisions")
-    row = database.read("SELECT project_id, status FROM project_creation_requests WHERE request_id = ?", (request_id,))[0]
+    row = database.read(
+        "SELECT project_id, status FROM project_creation_requests WHERE request_id = ?",
+        (request_id,),
+    )[0]
     assert row["project_id"] == "P-original" and row["status"] == "pending"
 
     blank = client.post(
@@ -256,32 +298,58 @@ def test_revision_requires_reason_and_does_not_partially_write(tmp_path, monkeyp
         headers=bearer(human),
     )
     assert blank.status_code in {400, 422}, blank.text
-    row = database.read("SELECT project_name, status FROM project_creation_requests WHERE request_id = ?", (request_id,))[0]
+    row = database.read(
+        "SELECT project_name, status FROM project_creation_requests WHERE request_id = ?",
+        (request_id,),
+    )[0]
     assert row["project_name"] == "授权项目" and row["status"] == "pending"
 
 
 def test_revision_conflict_rolls_back_revision_and_creation(tmp_path, monkeypatch):
     client, database, human, agent = _env(tmp_path, monkeypatch)
-    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"]["request_id"]
-    assert client.post(
-        "/api/v1/projects", json={"project_id": "P-other", "name": "其他项目"}, headers=bearer(human)
-    ).status_code == 200
-    assert client.post(
-        "/api/v1/projects/P-other/groups",
-        json={"group_id": "G-final", "name": "已存在群"}, headers=bearer(human),
-    ).status_code == 200
+    request_id = _apply(client, agent, _application("P-original", "G-original")).json()["request"][
+        "request_id"
+    ]
+    assert (
+        client.post(
+            "/api/v1/projects",
+            json={"project_id": "P-other", "name": "其他项目"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/v1/projects/P-other/groups",
+            json={"group_id": "G-final", "name": "已存在群"},
+            headers=bearer(human),
+        ).status_code
+        == 200
+    )
 
     response = client.post(
         f"/api/v1/project-creation-requests/{request_id}/approve",
-        json={"decided_by": OPERATOR, "reason": "尝试修订", "project_id": "P-final", "group_id": "G-final"},
+        json={
+            "decided_by": OPERATOR,
+            "reason": "尝试修订",
+            "project_id": "P-final",
+            "group_id": "G-final",
+        },
         headers=bearer(human),
     )
 
     assert response.status_code == 409, response.text
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'P-final'")
     assert not database.read("SELECT 1 FROM project_creation_request_revisions")
-    row = database.read("SELECT project_id, group_id, status FROM project_creation_requests WHERE request_id = ?", (request_id,))[0]
-    assert row["project_id"] == "P-original" and row["group_id"] == "G-original" and row["status"] == "pending"
+    row = database.read(
+        "SELECT project_id, group_id, status FROM project_creation_requests WHERE request_id = ?",
+        (request_id,),
+    )[0]
+    assert (
+        row["project_id"] == "P-original"
+        and row["group_id"] == "G-original"
+        and row["status"] == "pending"
+    )
 
 
 def test_requests_are_readable_with_scope_and_decision_facts(tmp_path, monkeypatch):

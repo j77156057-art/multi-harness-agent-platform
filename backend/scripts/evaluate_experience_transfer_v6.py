@@ -238,9 +238,9 @@ def freeze() -> None:
         prompt_q = _prompt_text(case, str(decision["text"]))
         case["prompt_sha256_a"] = base.sha(prompt_a)
         case["prompt_sha256_q"] = base.sha(prompt_q)
-        case["prompts_equal_when_not_triggered"] = (
-            not decision["triggered"] and base.sha(prompt_a) == base.sha(prompt_q)
-        )
+        case["prompts_equal_when_not_triggered"] = not decision["triggered"] and base.sha(
+            prompt_a
+        ) == base.sha(prompt_q)
         cases.append(case)
 
     triggered = [case["case_id"] for case in cases if case["freeze_gate"]["triggered"]]
@@ -292,7 +292,9 @@ def freeze() -> None:
     )
 
 
-def _record_experiences(store: ExperienceStore, case: dict[str, Any], records: dict[str, dict[str, Any]]) -> None:
+def _record_experiences(
+    store: ExperienceStore, case: dict[str, Any], records: dict[str, dict[str, Any]]
+) -> None:
     for role, experience_id in (
         ("relevant", case["old_experience_id"]),
         ("unrelated", case["unrelated_experience_id"]),
@@ -446,7 +448,7 @@ def run() -> None:
     if not FROZEN.exists():
         raise RuntimeError("freeze the v6 protocol first")
     frozen = read_json(FROZEN, {})
-    cases = {case["case_id"]: case for case in frozen["cases"]}
+    {case["case_id"]: case for case in frozen["cases"]}
     records = _source_records()
     production_before = base.sha(SOURCE.read_text(encoding="utf-8"))
     history_before = history_sha()
@@ -568,7 +570,10 @@ def finalize() -> None:
         counts = Counter(row["semantic"] for row in group)
         arms[arm] = {
             "n": len(group),
-            "counts": {name: counts.get(name, 0) for name in ("transferred", "copied_wrong", "missed", "escalated", "unjudgeable")},
+            "counts": {
+                name: counts.get(name, 0)
+                for name in ("transferred", "copied_wrong", "missed", "escalated", "unjudgeable")
+            },
             "literal_counts": {
                 name: sum(row["literal"] == name for row in group)
                 for name in ("transferred", "copied_wrong", "missed", "escalated")
@@ -579,14 +584,16 @@ def finalize() -> None:
             "unjudgeable": counts.get("unjudgeable", 0),
         }
 
-    triggered_cases = [
-        row for row in rows if row["arm"] == "Q" and row["triggered"]
-    ]
+    triggered_cases = [row for row in rows if row["arm"] == "Q" and row["triggered"]]
     prompt_equality_violations = []
     for case in frozen["cases"]:
         if not case["freeze_gate"]["triggered"]:
-            a_row = next(row for row in rows if row["case_id"] == case["case_id"] and row["arm"] == "A")
-            q_row = next(row for row in rows if row["case_id"] == case["case_id"] and row["arm"] == "Q")
+            a_row = next(
+                row for row in rows if row["case_id"] == case["case_id"] and row["arm"] == "A"
+            )
+            q_row = next(
+                row for row in rows if row["case_id"] == case["case_id"] and row["arm"] == "Q"
+            )
             if a_row["prompt_sha256"] != q_row["prompt_sha256"]:
                 prompt_equality_violations.append(case["case_id"])
 
@@ -604,21 +611,23 @@ def finalize() -> None:
                 "q_triggered": q_row["triggered"],
                 "q_gap_filled": q_row["gap_filled"],
                 "pollution_direction": (
-                    "fewer" if a_row["semantic"] == "copied_wrong" and q_row["semantic"] != "copied_wrong"
-                    else "more" if q_row["semantic"] == "copied_wrong" and a_row["semantic"] != "copied_wrong"
+                    "fewer"
+                    if a_row["semantic"] == "copied_wrong" and q_row["semantic"] != "copied_wrong"
+                    else "more"
+                    if q_row["semantic"] == "copied_wrong" and a_row["semantic"] != "copied_wrong"
                     else "same"
                 ),
                 "transfer_direction": (
-                    "up" if a_row["semantic"] != "transferred" and q_row["semantic"] == "transferred"
-                    else "down" if a_row["semantic"] == "transferred" and q_row["semantic"] != "transferred"
+                    "up"
+                    if a_row["semantic"] != "transferred" and q_row["semantic"] == "transferred"
+                    else "down"
+                    if a_row["semantic"] == "transferred" and q_row["semantic"] != "transferred"
                     else "same"
                 ),
             }
         )
 
-    calls = [
-        read_json(OUT / "calls" / f"{row['case_id']}-{row['arm']}.json", {}) for row in rows
-    ]
+    calls = [read_json(OUT / "calls" / f"{row['case_id']}-{row['arm']}.json", {}) for row in rows]
     preflight = read_json(OUT / "calls" / "PREFLIGHT-preflight.json", {})
     charged = [*calls, preflight]
     environment = read_json(ENVIRONMENT, {})
@@ -637,7 +646,8 @@ def finalize() -> None:
                 "gap_filled": bool(row["gap_filled"]),
                 "semantic": row["semantic"],
                 "a_semantic": next(
-                    item["semantic"] for item in rows
+                    item["semantic"]
+                    for item in rows
                     if item["case_id"] == row["case_id"] and item["arm"] == "A"
                 ),
             }
@@ -657,11 +667,21 @@ def finalize() -> None:
             ),
         },
         "cost": {
-            "provider_returned_cost_sum": round(sum(base._provider_cost(call) for call in charged), 6),
-            "provider_cost_missing_calls": sum(call.get("provider_cost") is None for call in charged),
-            "prompt_tokens": sum(int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged),
-            "completion_tokens": sum(int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged),
-            "total_tokens": sum(int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged),
+            "provider_returned_cost_sum": round(
+                sum(base._provider_cost(call) for call in charged), 6
+            ),
+            "provider_cost_missing_calls": sum(
+                call.get("provider_cost") is None for call in charged
+            ),
+            "prompt_tokens": sum(
+                int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged
+            ),
+            "completion_tokens": sum(
+                int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged
+            ),
+            "total_tokens": sum(
+                int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged
+            ),
             "usage_missing_calls": sum(not call.get("usage") for call in charged),
             "finish_reasons": dict(Counter(str(call.get("finish_reason")) for call in charged)),
             "calls_including_preflight": len(charged),
@@ -671,10 +691,21 @@ def finalize() -> None:
         "history_sha256_after": history_sha(),
         "rows": rows,
     }
-    summary["history_unchanged"] = summary["history_sha256_frozen"] == summary["history_sha256_after"]
+    summary["history_unchanged"] = (
+        summary["history_sha256_frozen"] == summary["history_sha256_after"]
+    )
     write_json(SUMMARY, summary)
     write_json(OUT / "rows.json", rows)
-    print(json.dumps({key: summary[key] for key in ("arms", "triggered_cases", "gap_filled", "direction_counts", "cost")}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                key: summary[key]
+                for key in ("arms", "triggered_cases", "gap_filled", "direction_counts", "cost")
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def main() -> None:

@@ -42,9 +42,9 @@ class CliError(RuntimeError):
 
 def _client(base_url: str) -> Any:
     """真实使用时用 httpx；测试通过注入绕开它。"""
-    import httpx
+    from app.net import http_client
 
-    return httpx.Client(base_url=base_url, timeout=30.0)
+    return http_client(base_url=base_url, timeout=30.0)
 
 
 def _unwrap(response: Any) -> Any:

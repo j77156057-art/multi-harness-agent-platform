@@ -60,7 +60,9 @@ def prepare_output_registrations(
             declaration.get("type"),
             declaration.get("schema_version"),
         )
-        if not all(isinstance(value, str) and value.strip() for value in (name, kind, schema_version)):
+        if not all(
+            isinstance(value, str) and value.strip() for value in (name, kind, schema_version)
+        ):
             raise OutputError(f"task {task_id} outputs need name, type and schema_version")
         _validate_output_name(name)
         registrations.append(
@@ -106,9 +108,9 @@ def insert_output_registrations(
     """
     for item in registrations:
         conn.execute(
-            'INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,'
+            "INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,"
             ' schema_version, actual_hash, "commit", merged_seq)'
-            ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(task_id, attempt_id, name) DO UPDATE SET"
             " type = excluded.type,"
             " schema_version = excluded.schema_version,"
@@ -167,7 +169,7 @@ def dependency_output_satisfied(
     ):
         return False
     rows = database.read(
-        'SELECT * FROM task_outputs WHERE task_id = ? AND name = ? AND merged_seq = ?',
+        "SELECT * FROM task_outputs WHERE task_id = ? AND name = ? AND merged_seq = ?",
         (upstream_task_id, output_name, merged_seq),
     )
     if len(rows) != 1:
@@ -219,7 +221,10 @@ def canonical_output_hash(
             return _large_artifact_hash(
                 database, task_id=task_id, attempt_id=attempt_id, name=name, size=size
             )
-        return "sha256:" + hashlib.sha256(_git_bytes(repo, "cat-file", "blob", object_name)).hexdigest()
+        return (
+            "sha256:"
+            + hashlib.sha256(_git_bytes(repo, "cat-file", "blob", object_name)).hexdigest()
+        )
     if kind.stdout.strip() != "tree":
         raise OutputError(f"output {name!r} is neither a file nor a directory")
 

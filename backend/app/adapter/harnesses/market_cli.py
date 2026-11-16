@@ -381,9 +381,7 @@ class MarketCliAdapter(CliHarness):
 
     def review_command(self, prompt: str, workdir: Path) -> list[str]:
         if self.spec.review is None:
-            raise CliUnavailable(
-                f"{self.spec.base}: 这条 CLI 没有可依赖的只读模式，不能当审阅者"
-            )
+            raise CliUnavailable(f"{self.spec.base}: 这条 CLI 没有可依赖的只读模式，不能当审阅者")
         return self._argv(self.spec.review, prompt)
 
     # ------------------------------------------------------------------ 池子

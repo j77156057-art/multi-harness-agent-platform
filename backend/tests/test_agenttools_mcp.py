@@ -36,7 +36,12 @@ def _tools(tmp_path: Path) -> dict:
 
 def test_initialize_names_the_protocol_and_the_tool_capability(tmp_path: Path) -> None:
     answer = mcp.handle(
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18"},
+        },
         _tools(tmp_path),
     )
     assert answer["id"] == 1
@@ -65,7 +70,10 @@ def test_a_call_runs_the_tool_and_returns_text(tmp_path: Path) -> None:
             "jsonrpc": "2.0",
             "id": 3,
             "method": "tools/call",
-            "params": {"name": "create_file", "arguments": {"path": "docs/b.md", "content": "内容"}},
+            "params": {
+                "name": "create_file",
+                "arguments": {"path": "docs/b.md", "content": "内容"},
+            },
         },
         tools,
     )
@@ -75,14 +83,19 @@ def test_a_call_runs_the_tool_and_returns_text(tmp_path: Path) -> None:
     assert (tmp_path / "wt" / "docs" / "b.md").read_text(encoding="utf-8") == "内容"
 
 
-def test_a_write_outside_the_authorized_paths_is_an_error_the_model_can_read(tmp_path: Path) -> None:
+def test_a_write_outside_the_authorized_paths_is_an_error_the_model_can_read(
+    tmp_path: Path,
+) -> None:
     tools = _tools(tmp_path)
     answer = mcp.handle(
         {
             "jsonrpc": "2.0",
             "id": 4,
             "method": "tools/call",
-            "params": {"name": "create_file", "arguments": {"path": "elsewhere/x.md", "content": "x"}},
+            "params": {
+                "name": "create_file",
+                "arguments": {"path": "elsewhere/x.md", "content": "x"},
+            },
         },
         tools,
     )
@@ -123,7 +136,10 @@ def test_finish_is_explained_instead_of_run(tmp_path: Path) -> None:
 
 
 def test_a_notification_gets_no_answer(tmp_path: Path) -> None:
-    assert mcp.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}, _tools(tmp_path)) is None
+    assert (
+        mcp.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}, _tools(tmp_path))
+        is None
+    )
 
 
 def test_an_unknown_method_is_a_jsonrpc_error(tmp_path: Path) -> None:
@@ -136,7 +152,7 @@ def test_settled_paths_come_from_the_snapshot_not_the_request() -> None:
         {
             "tasks": [
                 {"id": "T-1", "exclusive_paths": ["docs/a.md"]},
-                {"id": "T-2", "exclusive_paths": ["docs/b.md", " " ]},
+                {"id": "T-2", "exclusive_paths": ["docs/b.md", " "]},
             ]
         },
         ensure_ascii=False,
@@ -211,9 +227,16 @@ def _call(client, *, attempt_id: str, token: str, body: dict):
     )
 
 
-def test_a_window_can_use_its_own_attempt_tools(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_window_can_use_its_own_attempt_tools(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, _database, attempt_id, token = _ready_attempt(tmp_path, monkeypatch)
-    listed = _call(client, attempt_id=attempt_id, token=token, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    listed = _call(
+        client,
+        attempt_id=attempt_id,
+        token=token,
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert listed.status_code == 200, listed.text
     names = {tool["name"] for tool in listed.json()["result"]["tools"]}
     assert "create_file" in names
@@ -226,7 +249,10 @@ def test_a_window_can_use_its_own_attempt_tools(tmp_path: Path, monkeypatch: pyt
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": {"name": "create_file", "arguments": {"path": "docs/a.md", "content": "# 乙\n"}},
+            "params": {
+                "name": "create_file",
+                "arguments": {"path": "docs/a.md", "content": "# 乙\n"},
+            },
         },
     )
     assert written.status_code == 200, written.text
@@ -234,19 +260,33 @@ def test_a_window_can_use_its_own_attempt_tools(tmp_path: Path, monkeypatch: pyt
     assert (tmp_path / "wt" / attempt_id / "docs" / "a.md").read_text(encoding="utf-8") == "# 乙\n"
 
 
-def test_another_window_cannot_borrow_the_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_another_window_cannot_borrow_the_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, database, attempt_id, _token = _ready_attempt(tmp_path, monkeypatch)
     _register(database, "h-B")
     other = TokenService(database).issue(subject_type="harness", subject_id="h-B")
-    refused = _call(client, attempt_id=attempt_id, token=other, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    refused = _call(
+        client,
+        attempt_id=attempt_id,
+        token=other,
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert refused.status_code == 403, refused.text
     assert "别的窗口" in refused.text
 
 
-def test_a_human_token_is_not_a_window_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_human_token_is_not_a_window_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, database, attempt_id, _token = _ready_attempt(tmp_path, monkeypatch)
     human = TokenService(database).issue(subject_type="human", subject_id="operator")
-    refused = _call(client, attempt_id=attempt_id, token=human, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    refused = _call(
+        client,
+        attempt_id=attempt_id,
+        token=human,
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert refused.status_code == 403, refused.text
 
 
@@ -265,7 +305,12 @@ def test_a_stale_attempt_is_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     client, database, attempt_id, token = _ready_attempt(tmp_path, monkeypatch)
     with database.transaction() as conn:
         conn.execute("UPDATE tasks SET current_attempt_id = ? WHERE task_id = ?", ("T-1.a9", "T-1"))
-    refused = _call(client, attempt_id=attempt_id, token=token, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    refused = _call(
+        client,
+        attempt_id=attempt_id,
+        token=token,
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert refused.status_code == 409, refused.text
     assert "当前尝试" in refused.text
 
@@ -280,6 +325,11 @@ def test_a_worktree_outside_the_station_directory_is_refused(
             "UPDATE workspaces SET path = ? WHERE attempt_id = ?",
             (str(tmp_path / "somewhere-else"), attempt_id),
         )
-    refused = _call(client, attempt_id=attempt_id, token=token, body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    refused = _call(
+        client,
+        attempt_id=attempt_id,
+        token=token,
+        body={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+    )
     assert refused.status_code == 409, refused.text
     assert "工位目录" in refused.text

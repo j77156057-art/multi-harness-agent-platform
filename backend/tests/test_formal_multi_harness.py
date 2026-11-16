@@ -87,7 +87,9 @@ def test_pi_adapter_isolates_ollama_config_and_enables_tools(tmp_path):
 
 def test_pi_adapter_keeps_an_explicitly_configured_model(tmp_path):
     """人点名要的模型就是那个模型：装没装都照用，不悄悄换一个。"""
-    adapter = PiAdapter(SimpleNamespace(), config_root=tmp_path / "pi-config", model="ollama/chosen:1b")
+    adapter = PiAdapter(
+        SimpleNamespace(), config_root=tmp_path / "pi-config", model="ollama/chosen:1b"
+    )
     assert adapter.resolve_model() == "ollama/chosen:1b"
 
 

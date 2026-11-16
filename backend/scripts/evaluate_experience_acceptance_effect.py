@@ -162,7 +162,6 @@ from app.acceptance.flow_gate import (  # noqa: E402
     visible_text,
 )
 
-
 # -----------------------------------------------------------------------------
 # 基础工具
 # -----------------------------------------------------------------------------
@@ -482,13 +481,13 @@ def call_pool(prompt: str, tag: str, token: str, expect_files: bool = True) -> d
                 "actual_model": document.get("model"),
                 "usage": usage,
                 "finish_reason": (document.get("choices") or [{}])[0].get("finish_reason"),
-                "provider_cost": cost if isinstance(cost, (int, float)) else None,
+                "provider_cost": cost if isinstance(cost, int | float) else None,
                 "ledger_before": before,
                 "ledger_after": after,
                 "ledger_cost": (
                     after.get("credits") - before.get("credits")
-                    if isinstance(after.get("credits"), (int, float))
-                    and isinstance(before.get("credits"), (int, float))
+                    if isinstance(after.get("credits"), int | float)
+                    and isinstance(before.get("credits"), int | float)
                     else None
                 ),
                 "content": content,
@@ -626,7 +625,6 @@ def run_arm(case: dict[str, Any], arm: str, token: str) -> dict[str, Any]:
         task_id=f"AE-{case['template']}-E",
         expected_paths=[case["path"]],
     )
-    repo_tag = f"{case['template']}-{arm}"
     # 验收器作用于真实提交；本函数只读仓库，不调用 persist（不写生产 data/acceptance）。
     record1 = _gate_check(gate, first, case)
     row["gate"] = {"rounds": [record1], "retry_used": False}
@@ -769,9 +767,12 @@ def freeze() -> None:
         "preflight_prompt_sha256": sha('Return only {"ready":true}.'),
         "reference_hashes": {"production_experience": file_sha(SOURCE)},
         "order": [
-            "BANNED-D", "BANNED-E",
-            "PATH-E", "PATH-D",
-            "COUNT-D", "COUNT-E",
+            "BANNED-D",
+            "BANNED-E",
+            "PATH-E",
+            "PATH-D",
+            "COUNT-D",
+            "COUNT-E",
         ],
     }
     write_json(PROTOCOL, protocol)
@@ -811,10 +812,10 @@ def verify_frozen() -> dict[str, Any]:
 
 def _provider_cost(record: dict[str, Any]) -> float:
     value = record.get("provider_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     value = record.get("ledger_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     return 0.0
 
@@ -908,16 +909,14 @@ def finalize() -> None:
                 )
                 if second is not None
                 else [],
-                "still_failing_rules": final["score"]["failed_rules"]
-                if second is not None
-                else [],
+                "still_failing_rules": final["score"]["failed_rules"] if second is not None else [],
                 "committed_files": final["committed_files"],
                 "terminal_state": final["terminal_state"],
                 "prompt_sha256": final["prompt_sha256"],
                 "score": final["score"],
                 "tokens": {
-                    "first": int(((first.get("usage") or {}).get("total_tokens") or 0)),
-                    "retry": int((((second or {}).get("usage") or {}).get("total_tokens") or 0)),
+                    "first": int((first.get("usage") or {}).get("total_tokens") or 0),
+                    "retry": int(((second or {}).get("usage") or {}).get("total_tokens") or 0),
                 },
             }
         )
@@ -926,9 +925,7 @@ def finalize() -> None:
         return [row for row in table if row["arm"] == arm]
 
     counts = {
-        "first_round_fail": {
-            arm: sum(row["first_fail"] for row in arm_rows(arm)) for arm in ARMS
-        },
+        "first_round_fail": {arm: sum(row["first_fail"] for row in arm_rows(arm)) for arm in ARMS},
         "final_fail": {arm: sum(row["final_fail"] for row in arm_rows(arm)) for arm in ARMS},
         "retried": {arm: sum(row["retried"] for row in arm_rows(arm)) for arm in ARMS},
     }
@@ -976,11 +973,15 @@ def finalize() -> None:
         "cost": {
             "total_calls": len(receipts),
             "calls_by_arm": dict(by_arm_calls),
-            "prompt_tokens": sum(int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts),
+            "prompt_tokens": sum(
+                int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts
+            ),
             "completion_tokens": sum(
                 int((item.get("usage") or {}).get("completion_tokens") or 0) for item in receipts
             ),
-            "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts),
+            "total_tokens": sum(
+                int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts
+            ),
             "total_tokens_by_arm": {
                 arm: sum(
                     int((item.get("usage") or {}).get("total_tokens") or 0)
@@ -990,8 +991,12 @@ def finalize() -> None:
                 for arm in ARMS
             },
             "provider_cost_sum": round(sum(_provider_cost(item) for item in receipts), 6),
-            "provider_cost_missing_calls": sum(item.get("provider_cost") is None for item in receipts),
-            "ledger_cost_sum": round(sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6),
+            "provider_cost_missing_calls": sum(
+                item.get("provider_cost") is None for item in receipts
+            ),
+            "ledger_cost_sum": round(
+                sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6
+            ),
             "finish_reasons": dict(Counter(str(item.get("finish_reason")) for item in receipts)),
         },
         "environment": read_json(ENVIRONMENT, {}),
@@ -1015,7 +1020,13 @@ def finalize() -> None:
     }
     write_json(SUMMARY, summary)
     write_json(OUT / "rows.json", table)
-    print(json.dumps({key: summary[key] for key in ("counts", "retry_stats", "cost")}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {key: summary[key] for key in ("counts", "retry_stats", "cost")},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 # -----------------------------------------------------------------------------

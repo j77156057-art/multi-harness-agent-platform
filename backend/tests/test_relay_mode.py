@@ -54,8 +54,14 @@ def test_an_unknown_recipient_returns_the_whole_letter():
 
 
 def test_an_empty_block_or_a_self_block_is_refused():
-    assert parse("给 opencode：\n   \n", known=KNOWN, admins=ADMINS, sender="codex").problem == "message.relay_empty_block"
-    assert parse("给 codex：\n自己给自己\n", known=KNOWN, admins=ADMINS, sender="codex").problem == "message.relay_self"
+    assert (
+        parse("给 opencode：\n   \n", known=KNOWN, admins=ADMINS, sender="codex").problem
+        == "message.relay_empty_block"
+    )
+    assert (
+        parse("给 codex：\n自己给自己\n", known=KNOWN, admins=ADMINS, sender="codex").problem
+        == "message.relay_self"
+    )
 
 
 def test_a_letter_declares_its_author_on_the_first_line():
@@ -93,7 +99,9 @@ class FakeClient:
         return {"ok": True}
 
 
-def _worker(tmp_path: Path, *, harnesses: list[str] | None = None) -> tuple[RelayWorker, FakeClient, Mailbox]:
+def _worker(
+    tmp_path: Path, *, harnesses: list[str] | None = None
+) -> tuple[RelayWorker, FakeClient, Mailbox]:
     mailbox = Mailbox(root=tmp_path / "relay")
     mailbox.ensure()
     client = FakeClient(harnesses)
@@ -133,7 +141,10 @@ def test_a_letter_is_delivered_to_every_named_block(tmp_path):
         assert "来自 codex" in text and expected in text
     # 消息面各记一条：作者是 relay 自己，不是被假冒的 codex
     assert [post["json"]["author_id"] for post in client.posts] == ["relay", "relay"]
-    assert [post["json"]["mentions"] for post in client.posts] == [["codex-window-admin"], ["opencode"]]
+    assert [post["json"]["mentions"] for post in client.posts] == [
+        ["codex-window-admin"],
+        ["opencode"],
+    ]
     assert "来自 codex" in client.posts[0]["json"]["body"]
     # 投过的信挪走：不会投第二次
     assert mailbox.pending() == []
@@ -308,4 +319,3 @@ def test_a_returned_letter_does_not_burn_the_windows_it_never_reached(tmp_path):
     assert client.posts == []
     # opencode 那份额度一次都没动过
     assert worker.exchanges.recent("codex", "opencode") == []
-

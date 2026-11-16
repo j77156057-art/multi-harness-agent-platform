@@ -72,7 +72,11 @@ def test_an_old_heartbeat_gets_the_worker_started(tmp_path):
         return 4242
 
     result = ensure_relay_worker(
-        root=root, group="G-1", admins=["codex-window-admin"], token_file=_token(tmp_path), spawner=spawner
+        root=root,
+        group="G-1",
+        admins=["codex-window-admin"],
+        token_file=_token(tmp_path),
+        spawner=spawner,
     )
 
     assert result["started"] is True
@@ -102,7 +106,9 @@ def test_without_the_relays_own_credential_nothing_is_started(tmp_path):
     assert spawned == []
 
 
-def test_a_process_that_never_beats_is_reported_as_started_but_not_delivering(tmp_path, monkeypatch):
+def test_a_process_that_never_beats_is_reported_as_started_but_not_delivering(
+    tmp_path, monkeypatch
+):
     """spawn 成功不等于在投递：心跳没来就说没来，别把人哄过去。"""
     from app.relay import supervisor as module
 
@@ -146,7 +152,9 @@ def test_a_spawn_failure_says_why(tmp_path):
     def boom(command, _root):
         raise OSError("python not found")
 
-    result = ensure_relay_worker(root=_mailbox(tmp_path), group="G-1", token_file=_token(tmp_path), spawner=boom)
+    result = ensure_relay_worker(
+        root=_mailbox(tmp_path), group="G-1", token_file=_token(tmp_path), spawner=boom
+    )
 
     assert result["running"] is False
     assert result["started"] is False

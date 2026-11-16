@@ -48,7 +48,17 @@ _ALL_FIELDS = _COMMON_FIELDS | _STRUCTURED_FIELDS | {"findings_summary"}
 
 # 本地概念词表：不调用外部模型或服务。未命中概念时回退到原有文本精确匹配。
 _TOPIC_CONCEPTS = {
-    "failure_path": ("失败路径", "异常路径", "异常流程", "异常分支", "错误路径", "错误分支", "失败分支", "异常场景", "失败场景"),
+    "failure_path": (
+        "失败路径",
+        "异常路径",
+        "异常流程",
+        "异常分支",
+        "错误路径",
+        "错误分支",
+        "失败分支",
+        "异常场景",
+        "失败场景",
+    ),
     "success_path": ("成功路径", "正常路径", "正常流程", "成功分支"),
     "acceptance": ("验收", "检查标准", "检查条件", "验证标准", "验证条件", "校验标准", "校验条件"),
     "tests": ("测试", "用例", "test"),
@@ -58,7 +68,19 @@ _TOPIC_CONCEPTS = {
     "responsive": ("响应式", "窄屏", "小屏", "移动端"),
 }
 _OPERATION_CONCEPTS = {
-    "missing": ("缺少", "缺失", "没有", "未包含", "未覆盖", "漏了", "遗漏", "没写", "未写", "未给出", "未提供"),
+    "missing": (
+        "缺少",
+        "缺失",
+        "没有",
+        "未包含",
+        "未覆盖",
+        "漏了",
+        "遗漏",
+        "没写",
+        "未写",
+        "未给出",
+        "未提供",
+    ),
     "preserve": ("保留", "不删除", "不删", "不得删除", "删除", "被删", "去掉"),
 }
 
@@ -411,7 +433,11 @@ class ExperienceStore:
     ) -> dict[str, Any]:
         if kind not in {"request_changes", "merged", "abandoned"}:
             raise ValueError("kind must be request_changes, merged or abandoned")
-        if isinstance(occurrence_count, bool) or not isinstance(occurrence_count, int) or occurrence_count < 1:
+        if (
+            isinstance(occurrence_count, bool)
+            or not isinstance(occurrence_count, int)
+            or occurrence_count < 1
+        ):
             raise ValueError("occurrence_count must be a positive integer")
         scope = _text(scope, "scope", 20)
         if scope not in {"project", "cross_project"}:
@@ -450,8 +476,10 @@ class ExperienceStore:
         findings = None
         if findings_summary is not None:
             findings = _text(findings_summary, "findings_summary", MAX_FINDINGS_SUMMARY_LENGTH)
-        cause = root_cause or findings or (
-            "无失败根因：验收与合并通过" if kind == "merged" else "未记录根因"
+        cause = (
+            root_cause
+            or findings
+            or ("无失败根因：验收与合并通过" if kind == "merged" else "未记录根因")
         )
         cause = _text(cause, "root_cause", MAX_ROOT_CAUSE_LENGTH)
         if root_key is None or not str(root_key).strip():
@@ -460,11 +488,13 @@ class ExperienceStore:
             else:
                 root_key = "failure|" + finding_cluster_key(cause)
         root_key = _text(root_key, "root_key", MAX_ROOT_CAUSE_LENGTH + 16)
-        first_time = _now() if recorded_at is None else _optional_text(
-            recorded_at, "recorded_at", 80
+        first_time = (
+            _now() if recorded_at is None else _optional_text(recorded_at, "recorded_at", 80)
         )
-        last_time = first_time if last_recorded_at is None else _optional_text(
-            last_recorded_at, "last_recorded_at", 80
+        last_time = (
+            first_time
+            if last_recorded_at is None
+            else _optional_text(last_recorded_at, "last_recorded_at", 80)
         )
         record: dict[str, Any] = {
             "kind": kind,
@@ -533,9 +563,7 @@ class ExperienceStore:
                 )
             if existing["scope"] == "cross_project" and record["scope"] == "project":
                 combined["scope"] = "cross_project"
-                combined["cross_project_confirmed_by"] = existing[
-                    "cross_project_confirmed_by"
-                ]
+                combined["cross_project_confirmed_by"] = existing["cross_project_confirmed_by"]
             records[index] = combined
             return records, "merge"
         records.append(record)
@@ -580,9 +608,7 @@ class ExperienceStore:
             try:
                 # Additive v1 fields are optional on read. Missing values are defaults,
                 # never fabricated timestamps or cross-project approval.
-                record = self._record(
-                    **{"recorded_at": "", "last_recorded_at": "", **item}
-                )
+                record = self._record(**{"recorded_at": "", "last_recorded_at": "", **item})
             except (TypeError, ValueError) as exc:
                 raise ExperienceStoreError(f"invalid experience values: {self.path}") from exc
             records.append(record)
@@ -592,7 +618,9 @@ class ExperienceStore:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise ExperienceStoreError(f"cannot create experience directory: {self.path.parent}") from exc
+            raise ExperienceStoreError(
+                f"cannot create experience directory: {self.path.parent}"
+            ) from exc
 
         temporary: Path | None = None
         try:

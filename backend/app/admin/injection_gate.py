@@ -36,9 +36,7 @@ _BAN_CLAUSE = re.compile("不得出现|不能出现|不得使用|不能使用|�
 _PER_ITEM = re.compile("逐条|逐项|分别|每条|每项|单独|一一")
 
 _SOURCE_NOUN = re.compile("来源|依据文件")
-_VERIFICATION = re.compile(
-    "实际存在|可核查|可核实|核实|章节|段落|不得泛指|不能泛指|具体路径|确证"
-)
+_VERIFICATION = re.compile("实际存在|可核查|可核实|核实|章节|段落|不得泛指|不能泛指|具体路径|确证")
 
 #: Topic is read from root_cause/action only. The list is ordered: the first
 #: match wins, so a source-inventory lesson is not mistaken for a path lesson.
@@ -47,7 +45,12 @@ _TOPIC_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("banned_words", re.compile("禁用词|禁词|不得出现|不能出现")),
     ("table_structure", re.compile("映射表|表格|列固定|列名")),
     ("diff_scope", re.compile("可读的实际 diff|实际 diff|readable patch|readable diff|diff")),
-    ("delivery_path", re.compile("路径不明|路径不明确|交付路径|产出物路径|文件位置|required new file|exclusive path")),
+    (
+        "delivery_path",
+        re.compile(
+            "路径不明|路径不明确|交付路径|产出物路径|文件位置|required new file|exclusive path"
+        ),
+    ),
     ("step_count", re.compile("步骤条数|启动步骤|恰好.{0,4}步")),
     ("log_path", re.compile("日志路径|日志")),
     ("entry_preserved", re.compile("既有入口|保留.{0,6}入口|入口可能被删除")),
@@ -160,7 +163,9 @@ def _missing_dimensions(text: str) -> tuple[list[str], dict[str, bool], dict[str
     return missing, signals, reasons
 
 
-def decide(*, dispatch_text: str, items: list[dict[str, Any]], enabled: bool = True) -> dict[str, Any]:
+def decide(
+    *, dispatch_text: str, items: list[dict[str, Any]], enabled: bool = True
+) -> dict[str, Any]:
     """Decide which check types, if any, enter the administrator prompt.
 
     ``items`` are ``(record, selection)`` pairs already revalidated by the caller.

@@ -17,6 +17,7 @@ are covered by static regressions, with no extra model calls.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import html
 import json
@@ -95,14 +96,26 @@ RET03: dict[str, Any] = {
     "seeds": {"README.md": README_SEED},
     "checks": [
         _m("delivery_path_exists", "交付路径真实存在", {"path": "ops/acceptance-wording.md"}),
-        _m("content_min_length", "可见正文非空且达到最低长度", {"path": "ops/acceptance-wording.md", "min_chars": 40}),
+        _m(
+            "content_min_length",
+            "可见正文非空且达到最低长度",
+            {"path": "ops/acceptance-wording.md", "min_chars": 40},
+        ),
         _m(
             "banned_new_absent",
             "可见文本不得出现当前三个禁词",
             {"path": "ops/acceptance-wording.md", "tokens": ["草稿", "待定", "稍后补充"]},
         ),
-        _m("old_values_absent", "可见文本不得出现旧禁词清单", {"path": "ops/acceptance-wording.md", "tokens": []}),
-        _m("topic_token_present", "可见正文确实在写验收说明", {"path": "ops/acceptance-wording.md", "tokens": ["验收"]}),
+        _m(
+            "old_values_absent",
+            "可见文本不得出现旧禁词清单",
+            {"path": "ops/acceptance-wording.md", "tokens": []},
+        ),
+        _m(
+            "topic_token_present",
+            "可见正文确实在写验收说明",
+            {"path": "ops/acceptance-wording.md", "tokens": ["验收"]},
+        ),
         _m("diff_only_allowed", "git diff 只动允许路径", {"paths": ["ops/acceptance-wording.md"]}),
         _m("worktree_clean", "提交后工作区干净", {"porcelain": ""}),
     ],
@@ -297,7 +310,9 @@ def case_spec(case: dict[str, Any]) -> dict[str, Any]:
         expected = dict(check["expected"])
         if check["id"] == "old_values_absent":
             expected["tokens"] = list(case["old_values"])
-        checks.append({"id": check["id"], "kind": check["kind"], "text": check["text"], "expected": expected})
+        checks.append(
+            {"id": check["id"], "kind": check["kind"], "text": check["text"], "expected": expected}
+        )
     return {
         "case_id": case["case_id"],
         "defect": case["defect"],
@@ -309,15 +324,26 @@ def case_spec(case: dict[str, Any]) -> dict[str, Any]:
         "path": case["path"],
         "old_values": list(case["old_values"]),
         "new_values": list(case["new_values"]),
-        "seed_files": [{"path": path, "sha256": sha(content)} for path, content in case["seeds"].items()],
+        "seed_files": [
+            {"path": path, "sha256": sha(content)} for path, content in case["seeds"].items()
+        ],
         "checks": checks,
-        "fixture": {"path": str(FIXTURE.relative_to(ROOT)), "sha256": file_sha(FIXTURE), "must_fail": ["old_values_absent"]},
+        "fixture": {
+            "path": str(FIXTURE.relative_to(ROOT)),
+            "sha256": file_sha(FIXTURE),
+            "must_fail": ["old_values_absent"],
+        },
     }
 
 
 def regression_spec() -> list[dict[str, Any]]:
     return [
-        {"kind": "bypass", "name": item["name"], "text": item["text"], "expect_hit": item["expect_hit"]}
+        {
+            "kind": "bypass",
+            "name": item["name"],
+            "text": item["text"],
+            "expect_hit": item["expect_hit"],
+        }
         for item in BYPASS_CASES
     ] + [
         {
@@ -363,7 +389,9 @@ CONFLICT_RULE = (
 
 def executor_prompt(case: dict[str, Any]) -> str:
     dispatch = json.dumps(case["dispatch"], ensure_ascii=False, indent=2)
-    seeds = "\n\n".join(f"--- 文件 {path} ---\n{content}" for path, content in case["seeds"].items())
+    seeds = "\n\n".join(
+        f"--- 文件 {path} ---\n{content}" for path, content in case["seeds"].items()
+    )
     return (
         "你是本仓库的执行者。请按下面的派单完成交付，在仓库中真实创建或修改文件。\n\n"
         f"派单（JSON）：\n{dispatch}\n\n"
@@ -403,7 +431,9 @@ def retry_prompt(case: dict[str, Any], gaps: list[str], files: dict[str, str]) -
 
 def ledger(token: str) -> dict[str, Any]:
     try:
-        response = httpx.get(POOL_STATUS, headers={"Authorization": f"Bearer {token}"}, timeout=30.0)
+        response = httpx.get(
+            POOL_STATUS, headers={"Authorization": f"Bearer {token}"}, timeout=30.0
+        )
         response.raise_for_status()
         upstreams = (response.json().get("usage") or {}).get("upstreams") or {}
         return dict(upstreams.get("minimax") or {})
@@ -479,12 +509,13 @@ def call_pool(prompt: str, case_id: str, attempt: int, token: str) -> dict[str, 
                 "actual_model": document.get("model"),
                 "usage": usage,
                 "finish_reason": (document.get("choices") or [{}])[0].get("finish_reason"),
-                "provider_cost": cost if isinstance(cost, (int, float)) else None,
+                "provider_cost": cost if isinstance(cost, int | float) else None,
                 "ledger_before": before,
                 "ledger_after": after,
                 "ledger_cost": (
                     after.get("credits") - before.get("credits")
-                    if isinstance(after.get("credits"), (int, float)) and isinstance(before.get("credits"), (int, float))
+                    if isinstance(after.get("credits"), int | float)
+                    and isinstance(before.get("credits"), int | float)
                     else None
                 ),
                 "content": content,
@@ -548,10 +579,8 @@ def force_rmtree(path: Path) -> bool:
             pass
 
     for item in path.rglob("*"):
-        try:
+        with contextlib.suppress(Exception):
             os.chmod(item, stat.S_IWRITE)
-        except Exception:
-            pass
     shutil.rmtree(path, onerror=onerror)
     return not path.exists()
 
@@ -644,7 +673,9 @@ def store_repo_artifacts(case_id: str, attempt: int, repo: Path, base_sha: str) 
     head = git(repo, "rev-parse", "HEAD", check=False).stdout.strip()
     patch = git(repo, "diff", base_sha, head).stdout if head and head != base_sha else ""
     (target / "diff.patch").write_text(patch, encoding="utf-8")
-    stat_text = git(repo, "diff", "--stat", base_sha, head).stdout if head and head != base_sha else ""
+    stat_text = (
+        git(repo, "diff", "--stat", base_sha, head).stdout if head and head != base_sha else ""
+    )
     (target / "diff-stat.txt").write_text(stat_text, encoding="utf-8")
     (target / "status.txt").write_text(git(repo, "status", "--porcelain").stdout, encoding="utf-8")
 
@@ -686,7 +717,9 @@ def run_checks(
     checks = case_spec(case)["checks"]
     results: list[dict[str, Any]] = []
 
-    def add(check: dict[str, Any], passed: bool, observed: Any, evidence: str, gap: str | None = None):
+    def add(
+        check: dict[str, Any], passed: bool, observed: Any, evidence: str, gap: str | None = None
+    ):
         results.append(
             {
                 "check_id": check["id"],
@@ -709,13 +742,17 @@ def run_checks(
 
         if check_id == "delivery_path_exists":
             passed = text is not None and bool(text.strip())
-            add(check, passed, f"{path} {'存在' if passed else '不存在'}", f"{len(text or '')} 字符")
+            add(
+                check, passed, f"{path} {'存在' if passed else '不存在'}", f"{len(text or '')} 字符"
+            )
             continue
 
         if check_id == "content_min_length":
             minimum = int(expected["min_chars"])
             actual = len(re.sub(r"\s+", "", visible))
-            add(check, actual >= minimum, f"{actual} 个可见非空白字符", f"{path}; 要求 >= {minimum}")
+            add(
+                check, actual >= minimum, f"{actual} 个可见非空白字符", f"{path}; 要求 >= {minimum}"
+            )
             continue
 
         if check_id == "banned_new_absent":
@@ -810,7 +847,9 @@ CLASSIFICATION_RULES = {
 }
 
 
-def structured_conflicts(case: dict[str, Any], payload: dict[str, Any] | None) -> list[dict[str, str]]:
+def structured_conflicts(
+    case: dict[str, Any], payload: dict[str, Any] | None
+) -> list[dict[str, str]]:
     if not isinstance(payload, dict):
         return []
     kind = case.get("conflict_kind")
@@ -828,7 +867,9 @@ def structured_conflicts(case: dict[str, Any], payload: dict[str, Any] | None) -
         acceptance_value = entry.get("acceptance_value")
         if not name or dispatch_value is None or acceptance_value is None:
             continue
-        if not any(token_hit(visible_text(name), token) for token in case.get("conflict_item_tokens", [])):
+        if not any(
+            token_hit(visible_text(name), token) for token in case.get("conflict_item_tokens", [])
+        ):
             continue
         left = visible_text(str(dispatch_value)).strip()
         right = visible_text(str(acceptance_value)).strip()
@@ -896,7 +937,11 @@ def execute_attempt(
     outcome: dict[str, Any] = {}
     try:
         repo, base_sha = init_repo(case, root)
-        prompt = executor_prompt(case) if feedback is None else retry_prompt(case, feedback[0], feedback[1])
+        prompt = (
+            executor_prompt(case)
+            if feedback is None
+            else retry_prompt(case, feedback[0], feedback[1])
+        )
         call = call_pool(prompt, case["case_id"], attempt, token)
         written: list[str] = []
         rejected: list[str] = []
@@ -928,7 +973,9 @@ def execute_attempt(
             "base_sha": base_sha,
             "head_sha": head_sha,
             "diff": diff_paths(repo, base_sha, head_sha),
-            "diff_stat": git(repo, "diff", "--stat", base_sha, head_sha).stdout.strip() if head_sha != base_sha else "",
+            "diff_stat": git(repo, "diff", "--stat", base_sha, head_sha).stdout.strip()
+            if head_sha != base_sha
+            else "",
             "files": files,
             "visible_snippet": visible_snippet(files.get(case["path"], "")),
             "checks": checks,
@@ -1022,12 +1069,20 @@ def conflict_regressions() -> list[dict[str, Any]]:
 
     run(
         "structured_count_conflict",
-        {"conflicts": [{"item": "待补项数量", "dispatch_value": "3 条", "acceptance_value": "2 条"}]},
+        {
+            "conflicts": [
+                {"item": "待补项数量", "dispatch_value": "3 条", "acceptance_value": "2 条"}
+            ]
+        },
         True,
     )
     run(
         "equal_values_not_conflict",
-        {"conflicts": [{"item": "待补项数量", "dispatch_value": "2 条", "acceptance_value": "2 条"}]},
+        {
+            "conflicts": [
+                {"item": "待补项数量", "dispatch_value": "2 条", "acceptance_value": "2 条"}
+            ]
+        },
         False,
     )
     run(
@@ -1124,7 +1179,9 @@ def verify_frozen() -> dict[str, Any]:
     ]
     current = file_sha(Path(__file__).resolve())
     if current not in allowed:
-        raise RuntimeError("判分脚本在冻结后被修改，且没有 post_freeze_changes 记录；必须按 bug 流程重新全量跑")
+        raise RuntimeError(
+            "判分脚本在冻结后被修改，且没有 post_freeze_changes 记录；必须按 bug 流程重新全量跑"
+        )
     if spec_sha() != protocol["initial_freeze"]["check_spec_sha256"]:
         raise RuntimeError("期望值或回归夹具在冻结后被修改；必须按 bug 流程重新全量跑")
     return protocol
@@ -1136,7 +1193,14 @@ def archive_attempts(reason: str) -> None:
     index = len(list(archives.glob("attempt-*"))) + 1
     target = archives / f"attempt-{index}"
     target.mkdir(parents=True, exist_ok=True)
-    for name in ("results.json", "summary.json", "environment.json", "regressions.json", "calls", "repos"):
+    for name in (
+        "results.json",
+        "summary.json",
+        "environment.json",
+        "regressions.json",
+        "calls",
+        "repos",
+    ):
         source = OUT / name
         if source.exists():
             shutil.move(str(source), str(target / name))
@@ -1172,7 +1236,7 @@ def refreeze(note: str, evidence: str) -> None:
 
 
 def run() -> None:
-    protocol = verify_frozen()
+    verify_frozen()
     regressions = run_regressions()
     if not regressions["all_pass"]:
         raise RuntimeError("静态回归未通过，未发起任何模型调用；先修实现 bug 再按流程重冻")
@@ -1208,7 +1272,9 @@ def run() -> None:
         row["new_problems"] = new_problems(first, second)
         row["fixed_checks"] = sorted(set(first["failed_checks"]) - set(second["failed_checks"]))
         row["final_classification"] = second["classification"]
-        row["correct_behavior"] = second["mechanical_pass"] or second["classification"] == "flagged_conflict"
+        row["correct_behavior"] = (
+            second["mechanical_pass"] or second["classification"] == "flagged_conflict"
+        )
         row["final_pass"] = second["mechanical_pass"]
     results = [row]
     write_json(RESULTS, results)
@@ -1247,10 +1313,10 @@ def run() -> None:
 
 def _provider_cost(record: dict[str, Any]) -> float:
     value = record.get("provider_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     value = record.get("ledger_cost")
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     return 0.0
 
@@ -1300,7 +1366,9 @@ def finalize() -> None:
         "retry_used": bool(table[0]["retry_used"]),
         "fixed_after_retry": bool(table[0]["retry_used"] and table[0]["final_pass"]),
         "flagged_conflict": table[0]["final_classification"] == "flagged_conflict",
-        "still_failing": bool(not table[0]["final_pass"] and table[0]["final_classification"] != "flagged_conflict"),
+        "still_failing": bool(
+            not table[0]["final_pass"] and table[0]["final_classification"] != "flagged_conflict"
+        ),
         "new_problems": len(table[0]["new_problems"]),
     }
     regressions = read_json(REGRESSIONS, {})
@@ -1329,11 +1397,21 @@ def finalize() -> None:
         },
         "cost": {
             "provider_returned_cost_sum": round(sum(_provider_cost(item) for item in receipts), 6),
-            "provider_cost_missing_calls": sum(item.get("provider_cost") is None for item in receipts),
-            "ledger_cost_sum": round(sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6),
-            "prompt_tokens": sum(int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts),
-            "completion_tokens": sum(int((item.get("usage") or {}).get("completion_tokens") or 0) for item in receipts),
-            "total_tokens": sum(int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts),
+            "provider_cost_missing_calls": sum(
+                item.get("provider_cost") is None for item in receipts
+            ),
+            "ledger_cost_sum": round(
+                sum(float(item.get("ledger_cost") or 0.0) for item in receipts), 6
+            ),
+            "prompt_tokens": sum(
+                int((item.get("usage") or {}).get("prompt_tokens") or 0) for item in receipts
+            ),
+            "completion_tokens": sum(
+                int((item.get("usage") or {}).get("completion_tokens") or 0) for item in receipts
+            ),
+            "total_tokens": sum(
+                int((item.get("usage") or {}).get("total_tokens") or 0) for item in receipts
+            ),
             "finish_reasons": dict(Counter(str(item.get("finish_reason")) for item in receipts)),
             "calls": len(receipts),
         },
@@ -1347,7 +1425,13 @@ def finalize() -> None:
     }
     write_json(SUMMARY, summary)
     write_json(OUT / "rows.json", table)
-    print(json.dumps({key: summary[key] for key in ("counts", "regressions", "cost")}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {key: summary[key] for key in ("counts", "regressions", "cost")},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 # -----------------------------------------------------------------------------

@@ -34,7 +34,14 @@ CASES = [
         "requirement": "做第二轮复盘。最新验收约束：创建 ops/review-round-2.md；意见映射表必须恰好五列，列名为意见编号、审查意见、本轮处置、状态、证据链接。",
         "path": "ops/review-round-2.md",
         "old_values": ["docs/review-loop-cb/round-2.md", "四列", "第二轮处置"],
-        "required_groups": [["ops/review-round-2.md"], ["意见编号"], ["审查意见"], ["本轮处置"], ["状态"], ["证据链接"]],
+        "required_groups": [
+            ["ops/review-round-2.md"],
+            ["意见编号"],
+            ["审查意见"],
+            ["本轮处置"],
+            ["状态"],
+            ["证据链接"],
+        ],
         "expected": "使用新路径和五列，不带旧路径、四列或第二轮处置",
     },
     {
@@ -54,7 +61,10 @@ CASES = [
         "requirement": "整理第一轮交付说明。最新验收约束：写入 ops/first-round.md，并且恰好两条待补项。",
         "path": "ops/first-round.md",
         "old_values": ["docs/review-loop/round-1.md", "至少 3 条", "至少3条", "至少三条"],
-        "required_groups": [["ops/first-round.md"], ["恰好两条", "恰好 2 条", "两条", "2 条", "2条"]],
+        "required_groups": [
+            ["ops/first-round.md"],
+            ["恰好两条", "恰好 2 条", "两条", "2 条", "2条"],
+        ],
         "expected": "使用新路径和恰好两条，不带旧路径或至少三条",
     },
     {
@@ -143,7 +153,12 @@ def freeze() -> None:
         "script_sha256": base.sha(Path(__file__).read_text(encoding="utf-8")),
     }
     write_json(FROZEN, protocol)
-    print(json.dumps({"frozen": str(FROZEN), "cases": len(CASES), "parameters": base.PARAMS}, ensure_ascii=False))
+    print(
+        json.dumps(
+            {"frozen": str(FROZEN), "cases": len(CASES), "parameters": base.PARAMS},
+            ensure_ascii=False,
+        )
+    )
 
 
 def _spec_paths(record: dict[str, Any]) -> list[str]:
@@ -152,14 +167,23 @@ def _spec_paths(record: dict[str, Any]) -> list[str]:
     except ValueError:
         return []
     paths = spec.get("exclusive_paths") if isinstance(spec, dict) else []
-    path_pattern = re.compile(r"(?<![\w.-])(?:[\w.-]+/)*[\w.-]+\.(?:md|txt|log|json|py|js|ts|tsx|css|html)(?![\w.-])", re.I)
+    path_pattern = re.compile(
+        r"(?<![\w.-])(?:[\w.-]+/)*[\w.-]+\.(?:md|txt|log|json|py|js|ts|tsx|css|html)(?![\w.-])",
+        re.I,
+    )
     original_paths = [str(path) for path in paths or [] if isinstance(path, str) and path]
-    original_paths.extend(match.group(0) for match in path_pattern.finditer(str(record.get("root_cause") or "")))
-    original_paths.extend(match.group(0) for match in path_pattern.finditer(str(record.get("action") or "")))
+    original_paths.extend(
+        match.group(0) for match in path_pattern.finditer(str(record.get("root_cause") or ""))
+    )
+    original_paths.extend(
+        match.group(0) for match in path_pattern.finditer(str(record.get("action") or ""))
+    )
     return list(dict.fromkeys(original_paths))
 
 
-def _category(case: dict[str, Any], result: dict[str, Any] | None, error: str | None) -> tuple[str, list[str]]:
+def _category(
+    case: dict[str, Any], result: dict[str, Any] | None, error: str | None
+) -> tuple[str, list[str]]:
     tasks = (result or {}).get("tasks") or []
     if not tasks:
         questions = "\n".join((result or {}).get("questions") or [])
@@ -169,11 +193,19 @@ def _category(case: dict[str, Any], result: dict[str, Any] | None, error: str | 
             return "escalated", []
         return "missed", []
     task = tasks[0]
-    text = str(task.get("goal") or "") + "\n" + str(task.get("acceptance") or "") + "\n" + "\n".join(task.get("exclusive_paths") or [])
+    text = (
+        str(task.get("goal") or "")
+        + "\n"
+        + str(task.get("acceptance") or "")
+        + "\n"
+        + "\n".join(task.get("exclusive_paths") or [])
+    )
     old_hits = [value for value in case["old_values"] if value in text]
     if old_hits:
         return "copied_wrong", old_hits
-    missing = [group for group in case["required_groups"] if not any(value in text for value in group)]
+    missing = [
+        group for group in case["required_groups"] if not any(value in text for value in group)
+    ]
     if missing:
         return "missed", []
     return "transferred", []
@@ -211,15 +243,20 @@ def run() -> None:
             old = source_records[case["old_experience_id"]]
             case["old_values"] = list(dict.fromkeys([*case["old_values"], *_spec_paths(old)]))
             unrelated = source_records[case["unrelated_experience_id"]]
-            context = base._post(api, "/api/v1/groups/G-1/dispatch", {
-                "request_id": f"transfer-{case['case_id']}",
-                "title": f"{case['case_id']} · 新值迁移场景",
-                "goal": case["requirement"],
-                "harness_id": base.MEMBER,
-                "decided_by": base.ADMIN,
-                "exclusive_paths": [case["path"]],
-                "acceptance": "交付物存在且满足最新验收约束",
-            }, admin_token)
+            context = base._post(
+                api,
+                "/api/v1/groups/G-1/dispatch",
+                {
+                    "request_id": f"transfer-{case['case_id']}",
+                    "title": f"{case['case_id']} · 新值迁移场景",
+                    "goal": case["requirement"],
+                    "harness_id": base.MEMBER,
+                    "decided_by": base.ADMIN,
+                    "exclusive_paths": [case["path"]],
+                    "acceptance": "交付物存在且满足最新验收约束",
+                },
+                admin_token,
+            )
             context_id = context["task_id"]
             store = ExperienceStore(Path(temporary) / "admin" / "experience.json")
             for role, old_record in (("relevant", old), ("unrelated", unrelated)):
@@ -239,9 +276,7 @@ def run() -> None:
                     source="live",
                 )
             records = store.records()
-            by_id = {
-                record["root_cause"]: record for record in records
-            }
+            by_id = {record["root_cause"]: record for record in records}
             relevant = by_id[old["root_cause"]]
             unrelated_record = by_id[unrelated["root_cause"]]
             decision_base = f"/api/v1/tasks/{context_id}/experiences"
@@ -276,8 +311,10 @@ def run() -> None:
                     "context_task_id": context_id,
                     "old_experience_id": old["experience_id"],
                     "injected_experience_id": (
-                        relevant["experience_id"] if condition == "B"
-                        else unrelated_record["experience_id"] if condition == "C"
+                        relevant["experience_id"]
+                        if condition == "B"
+                        else unrelated_record["experience_id"]
+                        if condition == "C"
                         else None
                     ),
                 }
@@ -293,14 +330,19 @@ def run() -> None:
                     )
                     outcome["result"] = result
                     if result.get("tasks"):
-                        draft = base._post(api, "/api/v1/adapter/admin/plan_draft", {
-                            "group_id": base.GROUP,
-                            "title": f"{case['case_id']}-{condition}-transfer",
-                            "goal": case["requirement"],
-                            "tasks": result["tasks"],
-                            "reviewer_harness_ids": [base.MEMBER],
-                            "opened_by": base.ADMIN,
-                        }, admin_token)
+                        draft = base._post(
+                            api,
+                            "/api/v1/adapter/admin/plan_draft",
+                            {
+                                "group_id": base.GROUP,
+                                "title": f"{case['case_id']}-{condition}-transfer",
+                                "goal": case["requirement"],
+                                "tasks": result["tasks"],
+                                "reviewer_harness_ids": [base.MEMBER],
+                                "opened_by": base.ADMIN,
+                            },
+                            admin_token,
+                        )
                         outcome["plan_id"] = draft["plan_id"]
                 except Exception as exc:
                     error = f"{type(exc).__name__}: {exc}"
@@ -313,30 +355,53 @@ def run() -> None:
                 outcome["receipt"] = {
                     key: call.get(key)
                     for key in (
-                        "requested_model", "actual_model", "parameters", "usage",
-                        "provider_cost", "ledger_cost", "duration_seconds", "finish_reason",
-                        "http_status", "error",
+                        "requested_model",
+                        "actual_model",
+                        "parameters",
+                        "usage",
+                        "provider_cost",
+                        "ledger_cost",
+                        "duration_seconds",
+                        "finish_reason",
+                        "http_status",
+                        "error",
                     )
                 }
                 outcomes.append(outcome)
                 write_json(RESULTS, outcomes)
                 spent = sum(
-                    base._provider_cost(read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}))
+                    base._provider_cost(
+                        read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {})
+                    )
                     for row in outcomes
                 ) + base._provider_cost(preflight_call)
                 if spent > base.COST_LIMIT:
                     raise RuntimeError(f"cost limit reached: {spent}")
                 if condition == "B":
-                    base._post(api, f"{decision_base}/{relevant['experience_id']}/decision", {"action": "revoke", "decided_by": "human-1"}, human_token)
+                    base._post(
+                        api,
+                        f"{decision_base}/{relevant['experience_id']}/decision",
+                        {"action": "revoke", "decided_by": "human-1"},
+                        human_token,
+                    )
                 elif condition == "C":
-                    base._post(api, f"{decision_base}/{unrelated_record['experience_id']}/decision", {"action": "revoke", "decided_by": "human-1"}, human_token)
-    write_json(OUT / "environment.json", {
-        "temporary_directory_removed": not Path(temporary).exists(),
-        "production_experience_sha256_before": production_before,
-        "production_experience_sha256_after": base.sha(SOURCE.read_text(encoding="utf-8")),
-        "production_unchanged": production_before == base.sha(SOURCE.read_text(encoding="utf-8")),
-        "completed_outcomes": len(outcomes),
-    })
+                    base._post(
+                        api,
+                        f"{decision_base}/{unrelated_record['experience_id']}/decision",
+                        {"action": "revoke", "decided_by": "human-1"},
+                        human_token,
+                    )
+    write_json(
+        OUT / "environment.json",
+        {
+            "temporary_directory_removed": not Path(temporary).exists(),
+            "production_experience_sha256_before": production_before,
+            "production_experience_sha256_after": base.sha(SOURCE.read_text(encoding="utf-8")),
+            "production_unchanged": production_before
+            == base.sha(SOURCE.read_text(encoding="utf-8")),
+            "completed_outcomes": len(outcomes),
+        },
+    )
 
 
 def summarize() -> None:
@@ -352,42 +417,66 @@ def summarize() -> None:
                 "case_id": row["case_id"],
                 "condition": row["condition"],
                 "old_values": row["copied_old_values"],
-                "goal": (row["result"]["tasks"][0].get("goal") if row.get("result") and row["result"].get("tasks") else None),
-                "acceptance": (row["result"]["tasks"][0].get("acceptance") if row.get("result") and row["result"].get("tasks") else None),
+                "goal": (
+                    row["result"]["tasks"][0].get("goal")
+                    if row.get("result") and row["result"].get("tasks")
+                    else None
+                ),
+                "acceptance": (
+                    row["result"]["tasks"][0].get("acceptance")
+                    if row.get("result") and row["result"].get("tasks")
+                    else None
+                ),
             }
-            for row in rows if row["category"] == "copied_wrong"
+            for row in rows
+            if row["category"] == "copied_wrong"
         ],
     }
-    calls = [read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows]
+    calls = [
+        read_json(OUT / "calls" / f"{row['case_id']}-{row['condition']}.json", {}) for row in rows
+    ]
     preflight = read_json(OUT / "calls" / "PREFLIGHT-preflight.json", {})
     for condition in ("A", "B", "C"):
         group = [row for row in rows if row["condition"] == condition]
         counts = Counter(row["category"] for row in group)
         summary["conditions"][condition] = {
             "n": len(group),
-            "counts": {name: counts.get(name, 0) for name in ("transferred", "copied_wrong", "missed", "escalated")},
+            "counts": {
+                name: counts.get(name, 0)
+                for name in ("transferred", "copied_wrong", "missed", "escalated")
+            },
             "transferred_wilson_95": base._wilson(counts["transferred"], len(group)),
         }
     charged = [*calls, preflight]
     summary["cost"] = {
         "provider_returned_cost_sum": round(sum(base._provider_cost(call) for call in charged), 6),
         "provider_cost_missing_calls": sum(call.get("provider_cost") is None for call in charged),
-        "prompt_tokens": sum(int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged),
-        "completion_tokens": sum(int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged),
-        "total_tokens": sum(int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged),
+        "prompt_tokens": sum(
+            int((call.get("usage") or {}).get("prompt_tokens") or 0) for call in charged
+        ),
+        "completion_tokens": sum(
+            int((call.get("usage") or {}).get("completion_tokens") or 0) for call in charged
+        ),
+        "total_tokens": sum(
+            int((call.get("usage") or {}).get("total_tokens") or 0) for call in charged
+        ),
         "usage_missing_calls": sum(not call.get("usage") for call in charged),
         "finish_reasons": {
             reason: sum(call.get("finish_reason") == reason for call in charged)
             for reason in sorted({str(call.get("finish_reason")) for call in charged})
         },
-        "duration_median_seconds": statistics.median(float(call.get("duration_seconds") or 0) for call in charged),
+        "duration_median_seconds": statistics.median(
+            float(call.get("duration_seconds") or 0) for call in charged
+        ),
         "duration_max_seconds": max(float(call.get("duration_seconds") or 0) for call in charged),
         "calls_including_preflight": len(charged),
     }
     summary["environment"] = read_json(OUT / "environment.json", {})
     summary["previous_artifacts_sha256_before"] = read_json(FROZEN, {})["previous_artifacts_sha256"]
     summary["previous_artifacts_sha256_after"] = tree_sha(PREVIOUS)
-    summary["previous_artifacts_unchanged"] = summary["previous_artifacts_sha256_before"] == summary["previous_artifacts_sha256_after"]
+    summary["previous_artifacts_unchanged"] = (
+        summary["previous_artifacts_sha256_before"] == summary["previous_artifacts_sha256_after"]
+    )
     write_json(SUMMARY, summary)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 

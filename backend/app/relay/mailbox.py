@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 #: 只认 .md：别的文件放在 outbox 里不是"信"，不去碰它。
@@ -73,7 +73,7 @@ class Mailbox:
         """记一次心跳。只写时间，不记别的（它只是"我还活着"）。"""
         self.root.mkdir(parents=True, exist_ok=True)
         self.heartbeat.write_text(
-            datetime.now(timezone.utc).isoformat(timespec="seconds"), encoding="utf-8", newline="\n"
+            datetime.now(UTC).isoformat(timespec="seconds"), encoding="utf-8", newline="\n"
         )
         return self.heartbeat
 
@@ -89,21 +89,23 @@ class Mailbox:
         if not self.outbox.is_dir():
             return []
         return sorted(
-            path for path in self.outbox.iterdir() if path.is_file() and path.suffix.lower() == LETTER_SUFFIX
+            path
+            for path in self.outbox.iterdir()
+            if path.is_file() and path.suffix.lower() == LETTER_SUFFIX
         )
 
     def deliver(self, recipient: str, *, name: str, text: str) -> Path:
         """投一封进某个窗口的收件箱，返回信落在哪。"""
         folder = self.inbox(recipient)
         folder.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         target = folder / f"{stamp}-{_safe(name)}"
         target.write_text(text, encoding="utf-8", newline="\n")
         return target
 
     def archive_letter(self, letter: Path) -> Path:
         self.archive.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         target = self.archive / f"{stamp}-{_safe(letter.name)}"
         letter.replace(target)
         return target
@@ -111,12 +113,12 @@ class Mailbox:
     def return_letter(self, letter: Path, reason: str) -> Path:
         """退回：信挪到 returned/，旁边放一份原因（人一眼能看出为什么没投）。"""
         self.returned.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         target = self.returned / f"{stamp}-{_safe(letter.name)}"
         letter.replace(target)
         (self.returned / f"{stamp}-{_safe(letter.name)}.reason.md").write_text(
             f"# 这封信没有投出去\n\n- 原因：{reason}\n- 原文件：{letter.name}\n"
-            f"- 时间：{datetime.now(timezone.utc).isoformat(timespec='seconds')}\n\n"
+            f"- 时间：{datetime.now(UTC).isoformat(timespec='seconds')}\n\n"
             "改好格式之后重新放进 `relay/outbox/` 即可。\n",
             encoding="utf-8",
             newline="\n",
@@ -146,7 +148,7 @@ def envelope_for_delivery(
     各的**（谁也不该读到写给别人的那段），但"这封还发给了谁"是同一件事的一部分 ——
     不说，收信方会以为这事只有自己知道，重复转达或干脆漏掉。所以只报名字，不给内容。
     """
-    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
     trace = f"来自 {sender}（转接于 {stamp}）"
     if thread_id:
         trace += f"\n线程 {thread_id} · 第 {hop} 跳（回信请写：回复 {thread_id}）"

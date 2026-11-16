@@ -51,9 +51,7 @@ def test_prompt_and_arguments_never_reach_the_log(capsys):
 
 
 def test_tool_names_are_capped_and_counted(capsys):
-    tools = [
-        {"type": "function", "function": {"name": f"tool_{index:02d}"}} for index in range(25)
-    ]
+    tools = [{"type": "function", "function": {"name": f"tool_{index:02d}"}} for index in range(25)]
     log_pool_request("/pool/v1/messages", {"model": "m", "tools": tools})
     record = _last_record(capsys)
     assert len(record["tools"]["names"]) == 20

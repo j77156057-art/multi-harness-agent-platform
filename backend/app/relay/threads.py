@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 #: 一条线程最多转几跳。到了就停：再转下去两个窗口只会互相客气。
@@ -56,7 +56,7 @@ class ThreadState:
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 class ThreadLedgerError(RuntimeError):
@@ -155,4 +155,4 @@ class ExchangeLedger:
 def _now(value: float | None) -> float:
     if value is not None:
         return value
-    return datetime.now(timezone.utc).timestamp()
+    return datetime.now(UTC).timestamp()

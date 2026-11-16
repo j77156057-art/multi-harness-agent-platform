@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.api.auth_deps import DatabaseDep, Principal, require_for
@@ -61,9 +61,7 @@ def relay_roster(
     """收件人候选：谁是窗口、谁是人。界面据此分组，投递侧据此校验 —— 同一份来源。"""
     known, kinds = _known(database)
     people = [{"id": name, "kind": "human"} for name, kind in kinds.items() if kind == "human"]
-    windows = [
-        {"id": name, "kind": "harness"} for name, kind in kinds.items() if kind == "harness"
-    ]
+    windows = [{"id": name, "kind": "harness"} for name, kind in kinds.items() if kind == "harness"]
     return {
         "enabled": relay_enabled(),
         "people": sorted(people, key=lambda item: item["id"]),
@@ -161,9 +159,7 @@ def write_letter(
         hop = state.hops + 1
 
     name = letter_text.filename(author=author)
-    text = letter_text.compose(
-        author=author, recipients=accepted, body=body, reply_to=thread_id
-    )
+    text = letter_text.compose(author=author, recipients=accepted, body=body, reply_to=thread_id)
     letter_text.write_letter(default_root(), name=name, text=text)
     return {
         "letter": name,

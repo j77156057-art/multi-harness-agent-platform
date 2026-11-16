@@ -101,14 +101,18 @@ def test_confirm_inject_revoke_and_audit_through_real_api(tmp_path, monkeypatch)
     new_task_id = result["tasks"][0]["id"]
 
     # 经过真实 plan_draft 后，审计可以按新任务 ID 反查。
-    post("/api/v1/adapter/admin/plan_draft", {
-        "group_id": DEFAULT_GROUP,
-        "title": "经验注入验证",
-        "goal": "帮我加一份启动说明",
-        "tasks": result["tasks"],
-        "reviewer_harness_ids": [MEMBER],
-        "opened_by": ADMIN_WINDOW,
-    }, token=admin_token)
+    post(
+        "/api/v1/adapter/admin/plan_draft",
+        {
+            "group_id": DEFAULT_GROUP,
+            "title": "经验注入验证",
+            "goal": "帮我加一份启动说明",
+            "tasks": result["tasks"],
+            "reviewer_harness_ids": [MEMBER],
+            "opened_by": ADMIN_WINDOW,
+        },
+        token=admin_token,
+    )
     audited = api.get(
         f"/api/v1/tasks/{new_task_id}/experience-injections",
         headers={"Authorization": f"Bearer {human_token}"},
@@ -139,10 +143,15 @@ def test_confirm_inject_revoke_and_audit_through_real_api(tmp_path, monkeypatch)
     runner = ScriptedRunner(stdout=_envelope(SPEC))
     refine(runner)
     assert "check_type: path" not in runner.calls[0]["argv"][-1]
-    assert len(api.get(
-        f"/api/v1/tasks/{new_task_id}/experience-injections",
-        headers={"Authorization": f"Bearer {human_token}"},
-    ).json()["injections"]) == 1
+    assert (
+        len(
+            api.get(
+                f"/api/v1/tasks/{new_task_id}/experience-injections",
+                headers={"Authorization": f"Bearer {human_token}"},
+            ).json()["injections"]
+        )
+        == 1
+    )
 
 
 def test_cross_project_confirmation_is_rejected_without_explicit_scope(tmp_path):

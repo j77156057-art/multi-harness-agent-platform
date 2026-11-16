@@ -14,9 +14,7 @@ from app.config import settings
 
 
 def _rows(database: Path) -> tuple[list[sqlite3.Row], dict[str, dict[str, Any]]]:
-    connection = sqlite3.connect(
-        "file:" + database.as_posix() + "?mode=ro", uri=True
-    )
+    connection = sqlite3.connect("file:" + database.as_posix() + "?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         merged = connection.execute(
@@ -101,7 +99,7 @@ def _snapshot(row: sqlite3.Row, spec: dict[str, Any]) -> dict[str, Any]:
         },
         "spec": spec,
     }
-    if "review_id" in row.keys():
+    if "review_id" in row.keys():  # noqa: SIM118 - sqlite3.Row 迭代的是值，不是键
         original["review"] = {
             "review_id": row["review_id"],
             "attempt_id": row["attempt_id"],
@@ -117,7 +115,7 @@ def build_records(database: Path, store: ExperienceStore) -> list[dict[str, Any]
     records: list[dict[str, Any]] = []
     for row in rows:
         spec = _spec(row, snapshots)
-        is_review = "review_id" in row.keys()
+        is_review = "review_id" in row.keys()  # noqa: SIM118 - sqlite3.Row 迭代的是值，不是键
         findings: list[dict[str, Any]] = []
         if is_review:
             try:
@@ -132,9 +130,7 @@ def build_records(database: Path, store: ExperienceStore) -> list[dict[str, Any]
         if is_review and not finding_text:
             finding_text = "历史验收返修，原始记录未提供具体意见"
         kind = "request_changes" if is_review else "merged"
-        source_event = (
-            f"review:{row['review_id']}" if is_review else f"merged:{row['task_id']}"
-        )
+        source_event = f"review:{row['review_id']}" if is_review else f"merged:{row['task_id']}"
         records.append(
             store._record(
                 kind=kind,
@@ -154,9 +150,7 @@ def build_records(database: Path, store: ExperienceStore) -> list[dict[str, Any]
                     else "按工单交付，并通过验证、审核与合并"
                 ),
                 result=(
-                    "验收结论 request_changes（历史回填）"
-                    if is_review
-                    else "已合并（历史回填）"
+                    "验收结论 request_changes（历史回填）" if is_review else "已合并（历史回填）"
                 ),
                 contract_id=str(row["task_id"]),
                 diff_hash=str((row["reviewed_commit"] if is_review else row["head_commit"]) or ""),

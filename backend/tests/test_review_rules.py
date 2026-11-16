@@ -23,7 +23,9 @@ def test_a_changed_file_changes_the_standard(tmp_path: Path) -> None:
     """项目主人改文件 = 改评审标准，不用碰代码。"""
     target = tmp_path / "review-rules.json"
     target.write_text(
-        json.dumps({"criteria": ["approve unless the acceptance is contradicted."]}, ensure_ascii=False),
+        json.dumps(
+            {"criteria": ["approve unless the acceptance is contradicted."]}, ensure_ascii=False
+        ),
         encoding="utf-8",
     )
     criteria, problem = load_review_rules(target)

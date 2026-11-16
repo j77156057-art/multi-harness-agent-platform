@@ -80,9 +80,7 @@ def _occurrences(text: str, value: str) -> list[int]:
         start = hit + len(value)
 
 
-def _judge_value(
-    text: str, value: str
-) -> tuple[bool, str, dict[str, Any] | None]:
+def _judge_value(text: str, value: str) -> tuple[bool, str, dict[str, Any] | None]:
     """Return (requires_old_item, context_kind, evidence) for one old value."""
     positive: dict[str, Any] | None = None
     seen_negative = False
@@ -126,7 +124,9 @@ def _scan(
                 }
             )
         elif kind == "excluded" and evidence is None:
-            excluded.append({"value": value, "json_path": location, "context": "negated_or_removed"})
+            excluded.append(
+                {"value": value, "json_path": location, "context": "negated_or_removed"}
+            )
     return positives, excluded
 
 
@@ -156,7 +156,9 @@ def judge(
         if not tasks and questions:
             question_text = "\n".join(questions)
             old_hits = [value for value in old_values if value in question_text]
-            new_hits = [value for group in required_groups for value in group if value in question_text]
+            new_hits = [
+                value for group in required_groups for value in group if value in question_text
+            ]
             if old_hits and new_hits and _CONFLICT.search(question_text):
                 return {
                     "semantic": "escalated",
@@ -196,9 +198,7 @@ def judge(
         positives.extend(hits)
         excluded.extend(skipped)
     for index, path in enumerate(task.get("exclusive_paths") or []):
-        hits, skipped = _scan(
-            str(path), old_values, location=f"tasks[0].exclusive_paths[{index}]"
-        )
+        hits, skipped = _scan(str(path), old_values, location=f"tasks[0].exclusive_paths[{index}]")
         positives.extend(hits)
         excluded.extend(skipped)
 

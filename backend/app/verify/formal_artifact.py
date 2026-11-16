@@ -48,9 +48,7 @@ def _clean_exclusive_paths(exclusive_paths: object) -> list[str]:
     else cannot be handed to the checker without guessing what the author
     meant, so it is refused instead of run.
     """
-    if isinstance(exclusive_paths, str | bytes) or not isinstance(
-        exclusive_paths, Iterable
-    ):
+    if isinstance(exclusive_paths, str | bytes) or not isinstance(exclusive_paths, Iterable):
         raise FormalArtifactUnavailable("exclusive_paths is not a list of paths")
     cleaned: list[str] = []
     for item in exclusive_paths:

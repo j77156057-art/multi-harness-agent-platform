@@ -25,6 +25,7 @@ last line of stderr is the sentence a human reads on the task card.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -34,10 +35,9 @@ from pathlib import Path
 def _utf8_stdout() -> None:
     """Chinese output must not die on a cp936 console."""
     for stream in (sys.stdout, sys.stderr):
-        try:
+        # pragma: no cover - already utf-8
+        with contextlib.suppress(AttributeError, ValueError):
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):  # pragma: no cover - already utf-8
-            pass
 
 
 RESULT_MARKER = "PLATFORM-TOOLS-RESULT"
@@ -142,7 +142,9 @@ def _scope_of(raw: str) -> list[str]:
             parsed = json.loads(text)
         except ValueError:
             return []
-        return [str(item) for item in parsed if str(item).strip()] if isinstance(parsed, list) else []
+        return (
+            [str(item) for item in parsed if str(item).strip()] if isinstance(parsed, list) else []
+        )
     return [piece.strip() for piece in text.split(",") if piece.strip()]
 
 

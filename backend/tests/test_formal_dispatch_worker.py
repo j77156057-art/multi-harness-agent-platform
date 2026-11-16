@@ -75,9 +75,7 @@ def test_out_of_scope_refusal_names_the_path_and_the_allowed_scope(tmp_path: Pat
     run_git("commit", "--allow-empty", "-m", "seed", cwd=tmp_path)
     base = run_git("rev-parse", "HEAD", cwd=tmp_path).stdout.strip()
     (tmp_path / "README.md").write_text("escape", encoding="utf-8")
-    runner = ScopedRunner(
-        {"exclusive_paths": ["probe/pi-scope/"]}, base, platform_commit=True
-    )
+    runner = ScopedRunner({"exclusive_paths": ["probe/pi-scope/"]}, base, platform_commit=True)
     import sys
 
     with pytest.raises(OutOfScopeSubmission) as info:

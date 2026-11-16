@@ -106,7 +106,10 @@ def test_removing_a_project_puts_it_in_the_trash_and_leaves_the_data_alone(tmp_p
         headers=bearer(token),
     )
 
-    assert client.post(f"/api/v1/projects/{project_id}/trash", headers=bearer(token)).status_code == 200
+    assert (
+        client.post(f"/api/v1/projects/{project_id}/trash", headers=bearer(token)).status_code
+        == 200
+    )
 
     # 默认列表里没有了……
     listed = client.get("/api/v1/projects", headers=bearer(token)).json()["projects"]
@@ -132,12 +135,12 @@ def test_removing_twice_keeps_the_first_timestamp(tmp_path, monkeypatch):
         json={"project_id": project_id, "name": "点两次"},
         headers=bearer(token),
     )
-    first = client.post(
-        f"/api/v1/projects/{project_id}/trash", headers=bearer(token)
-    ).json()["trashed_at"]
-    second = client.post(
-        f"/api/v1/projects/{project_id}/trash", headers=bearer(token)
-    ).json()["trashed_at"]
+    first = client.post(f"/api/v1/projects/{project_id}/trash", headers=bearer(token)).json()[
+        "trashed_at"
+    ]
+    second = client.post(f"/api/v1/projects/{project_id}/trash", headers=bearer(token)).json()[
+        "trashed_at"
+    ]
     assert first == second
 
 

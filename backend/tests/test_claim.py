@@ -415,7 +415,9 @@ def test_claim_reports_a_missing_task_as_rejected(database):
 
 
 def _board_row(database, task_id="T-1"):
-    rows = [row for row in SchedulerService(database).list_tasks("G-1") if row["task_id"] == task_id]
+    rows = [
+        row for row in SchedulerService(database).list_tasks("G-1") if row["task_id"] == task_id
+    ]
     assert len(rows) == 1
     return rows[0]
 
@@ -429,7 +431,9 @@ def test_list_tasks_projects_the_live_claim_start_and_drops_it_on_release(databa
     seed_task(database)
     claim_one(database)
 
-    live = database.read("SELECT claimed_at FROM task_claims WHERE task_id = 'T-1'")[0]["claimed_at"]
+    live = database.read("SELECT claimed_at FROM task_claims WHERE task_id = 'T-1'")[0][
+        "claimed_at"
+    ]
     assert _board_row(database)["claimed_at"] == live
 
     with database.transaction() as conn:

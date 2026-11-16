@@ -143,7 +143,7 @@ def _unquote_path(path: str) -> str:
 
 def _artifact_id(attempt_id: str, kind: str) -> str:
     """Deterministic id so a timeout snapshot and a later recycle dedupe."""
-    digest = hashlib.sha256(f"{attempt_id}:{kind}".encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(f"{attempt_id}:{kind}".encode()).hexdigest()
     return "art-" + digest[:32]
 
 
@@ -232,12 +232,16 @@ def worktree_capacity(
     active = len(rows)
     at_capacity = active >= cap
     earliest = str(rows[0]["lease_until"]) if at_capacity and rows else None
-    reasons = [
-        f"{row['attempt_id']} ({row['owner'] or 'unknown'}) holds"
-        f" {row['path'] or 'a slot awaiting provisioning'}"
-        f" until {row['lease_until']}"
-        for row in rows
-    ] if at_capacity else []
+    reasons = (
+        [
+            f"{row['attempt_id']} ({row['owner'] or 'unknown'}) holds"
+            f" {row['path'] or 'a slot awaiting provisioning'}"
+            f" until {row['lease_until']}"
+            for row in rows
+        ]
+        if at_capacity
+        else []
+    )
     return {
         "limit": cap,
         "active": active,
@@ -643,9 +647,7 @@ class WorktreeManager:
 
         # 完整 diff（staged + unstaged 对 HEAD）。未跟踪文件不在 diff 里，
         # 因此另有 untracked tar + manifest 清单。
-        dirty_diff.write_text(
-            run_git("diff", "HEAD", cwd=path).stdout, encoding="utf-8"
-        )
+        dirty_diff.write_text(run_git("diff", "HEAD", cwd=path).stdout, encoding="utf-8")
 
         modified_files: list[str] = []
         deleted_files: list[str] = []
@@ -684,9 +686,7 @@ class WorktreeManager:
         changed_files = sorted(set(tracked_changes) | set(untracked_files))
         entries: list[dict[str, object]] = []
         if bundle is not None:
-            entries.append(
-                {"kind": "git_bundle", "path": str(bundle), "deliverable": True}
-            )
+            entries.append({"kind": "git_bundle", "path": str(bundle), "deliverable": True})
         if patch is not None:
             entries.append({"kind": "patch", "path": str(patch), "deliverable": True})
         entries.append(
@@ -798,9 +798,7 @@ class WorktreeManager:
         caller has not updated the row or removed the directory at that point.
         """
         if not bundle.is_file():
-            raise WorktreeArchiveVerificationError(
-                f"bundle missing for {attempt_id}: {bundle}"
-            )
+            raise WorktreeArchiveVerificationError(f"bundle missing for {attempt_id}: {bundle}")
         verify = run_git("bundle", "verify", str(bundle), cwd=path, check=False)
         if verify.returncode != 0:
             raise WorktreeArchiveVerificationError(
@@ -822,8 +820,16 @@ class WorktreeManager:
             )
 
         checks = (
-            ("checkpoint_modified", snapshot.get("modified_archive"), manifest.get("modified_files", [])),
-            ("checkpoint_untracked", snapshot.get("untracked_archive"), manifest.get("untracked_files", [])),
+            (
+                "checkpoint_modified",
+                snapshot.get("modified_archive"),
+                manifest.get("modified_files", []),
+            ),
+            (
+                "checkpoint_untracked",
+                snapshot.get("untracked_archive"),
+                manifest.get("untracked_files", []),
+            ),
         )
         for kind, archive_path, files in checks:
             expected = [str(item) for item in files]
@@ -835,8 +841,10 @@ class WorktreeManager:
                 )
             with tarfile.open(str(archive_path), "r") as archive:
                 members = {
-                    name.replace("\\", "/"): member for name, member in
-                    ((name, archive.getmember(name)) for name in archive.getnames())
+                    name.replace("\\", "/"): member
+                    for name, member in (
+                        (name, archive.getmember(name)) for name in archive.getnames()
+                    )
                 }
                 for item in expected:
                     if _is_secret_path(item):
@@ -860,9 +868,10 @@ class WorktreeManager:
                         )
                     archived_bytes = extracted.read()
                     disk_bytes = source.read_bytes()
-                    if hashlib.sha256(archived_bytes).hexdigest() != hashlib.sha256(
-                        disk_bytes
-                    ).hexdigest():
+                    if (
+                        hashlib.sha256(archived_bytes).hexdigest()
+                        != hashlib.sha256(disk_bytes).hexdigest()
+                    ):
                         raise WorktreeArchiveVerificationError(
                             f"{kind} bytes differ for {item} in {attempt_id}"
                         )
@@ -913,9 +922,7 @@ class WorktreeManager:
             if probe.returncode == 0:
                 return None
             detail = probe.stderr or ""
-            match = re.search(
-                r"bad boolean config value '([^']+)' for '([^']+)'", detail
-            )
+            match = re.search(r"bad boolean config value '([^']+)' for '([^']+)'", detail)
             if match is None:
                 return None
             value, key = match.group(1), match.group(2)

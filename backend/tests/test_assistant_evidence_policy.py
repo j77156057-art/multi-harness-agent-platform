@@ -45,9 +45,7 @@ def test_the_memory_line_names_who_spoke():
     turns = thread_turns(
         [
             _message(10, "office-operator", "上一轮问的"),
-            _message(
-                11, "office-assistant", "上一轮答的", recipients=["office-operator"]
-            ),
+            _message(11, "office-assistant", "上一轮答的", recipients=["office-operator"]),
         ],
         asker_id="office-operator",
     )

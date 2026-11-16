@@ -127,9 +127,7 @@ def close_attempt(
     if status not in CLOSED_ATTEMPT_STATUSES:
         raise ValueError(f"unknown closed attempt status: {status}")
     moment = now or datetime.now(UTC)
-    open_statuses = (
-        TRANSITION_ATTEMPT_STATUSES if include_verifying else OPEN_ATTEMPT_STATUSES
-    )
+    open_statuses = TRANSITION_ATTEMPT_STATUSES if include_verifying else OPEN_ATTEMPT_STATUSES
     placeholders = ", ".join(["?"] * len(open_statuses))
     cursor = conn.execute(
         "UPDATE task_attempts SET status = ?, head_commit = COALESCE(?, head_commit),"
@@ -326,9 +324,7 @@ class SchedulerService:
     # ------------------------------------------------------------- creation
 
     @staticmethod
-    def _insert_project(
-        conn: sqlite3.Connection, *, project_id: str, name: str, now: str
-    ) -> None:
+    def _insert_project(conn: sqlite3.Connection, *, project_id: str, name: str, now: str) -> None:
         exists = conn.execute(
             "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
         ).fetchone()
@@ -408,9 +404,7 @@ class SchedulerService:
                 "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
             ).fetchone():
                 raise Conflict(f"project {project_id} already exists")
-            if conn.execute(
-                "SELECT 1 FROM groups WHERE group_id = ?", (group_id,)
-            ).fetchone():
+            if conn.execute("SELECT 1 FROM groups WHERE group_id = ?", (group_id,)).fetchone():
                 raise Conflict(f"group {group_id} already exists")
             conn.execute(
                 "INSERT INTO project_creation_requests("
@@ -2190,7 +2184,11 @@ class SchedulerService:
                 "next": (
                     "escalated"
                     if exhausted
-                    else (TaskStatus.APPROVED.value if verdict == "approve" else TaskStatus.CHANGES_REQUESTED.value)
+                    else (
+                        TaskStatus.APPROVED.value
+                        if verdict == "approve"
+                        else TaskStatus.CHANGES_REQUESTED.value
+                    )
                 ),
             }
 
@@ -2480,9 +2478,7 @@ class SchedulerService:
                 f" WHERE message_id IN ({placeholders})",
                 tuple(ids),
             ):
-                recipients.setdefault(str(row["message_id"]), []).append(
-                    str(row["recipient_id"])
-                )
+                recipients.setdefault(str(row["message_id"]), []).append(str(row["recipient_id"]))
         for message in messages:
             message["recipients"] = recipients.get(str(message["message_id"]), [])
         return messages
@@ -2855,12 +2851,8 @@ class SchedulerService:
             else:
                 median = None
             merged = entry["merged"]
-            entry["first_pass_rate"] = (
-                entry["first_pass"] / merged if merged else None
-            )
-            entry["median_duration_seconds"] = (
-                None if median is None else round(median, 1)
-            )
+            entry["first_pass_rate"] = entry["first_pass"] / merged if merged else None
+            entry["median_duration_seconds"] = None if median is None else round(median, 1)
             for key in totals:
                 totals[key] += int(entry[key])
             out.append(entry)

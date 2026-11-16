@@ -20,7 +20,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from app.messages.relay import ADMIN_ALIASES, parse, parse_letter
+from app.messages.relay import parse, parse_letter
+from app.net import http_client
 from app.relay.mailbox import Mailbox, envelope_for_delivery
 from app.relay.threads import (
     EXCHANGE_WINDOW_SECONDS,
@@ -145,7 +146,9 @@ class RelayWorker:
         return self._known
 
     # ------------------------------------------------------------- deliver
-    def _post_message(self, recipient: str, body: str, *, thread_id: str = "", hop: int = 0) -> None:
+    def _post_message(
+        self, recipient: str, body: str, *, thread_id: str = "", hop: int = 0
+    ) -> None:
         """把这块内容记成一条定向消息。
 
         作者是 **relay 自己**（作者必须等于令牌主体这条规矩），正文首行写「来自 X」——
@@ -228,7 +231,12 @@ class RelayWorker:
                 f"；要接着谈，请把它当成一件新的事重新起一封"
             )
             self.mailbox.return_letter(letter, reason)
-            return {"letter": letter.name, "status": "returned", "reason": reason, "thread": thread_id}
+            return {
+                "letter": letter.name,
+                "status": "returned",
+                "reason": reason,
+                "thread": thread_id,
+            }
 
         # 不依赖协议的回路闸门：同一对窗口在窗口期内来回太多次就停（模型会忘记写线程）。
         recipients = [block.recipient for block in plan.blocks]
@@ -242,7 +250,12 @@ class RelayWorker:
                     f"（上限 {MAX_EXCHANGES}），停下来让人看看是不是绕住了"
                 )
                 self.mailbox.return_letter(letter, reason)
-                return {"letter": letter.name, "status": "returned", "reason": reason, "thread": thread_id}
+                return {
+                    "letter": letter.name,
+                    "status": "returned",
+                    "reason": reason,
+                    "thread": thread_id,
+                }
         # 闸门都过了才记账：这封信确实要投给这几个窗口。
         for recipient in recipients:
             self.exchanges.record(sender, recipient)
@@ -273,7 +286,10 @@ class RelayWorker:
             # 消息面记一条：界面里看得见，有投递记录，作者是 relay 自己。
             try:
                 self._post_message(
-                    block.recipient, f"来自 {sender}：\n\n{block.body}", thread_id=thread_id, hop=hop
+                    block.recipient,
+                    f"来自 {sender}：\n\n{block.body}",
+                    thread_id=thread_id,
+                    hop=hop,
                 )
             except Exception as problem:  # noqa: BLE001 - 一次投递失败不该吃掉整封信
                 return {
@@ -305,14 +321,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token-file", type=Path, required=True)
     parser.add_argument("--group", required=True)
     parser.add_argument("--relay-id", default="relay")
-    parser.add_argument("--root", type=Path, default=None, help="relay directory (default <repo>/relay)")
-    parser.add_argument("--db", type=Path, default=None, help="state.db to read the window roster from")
+    parser.add_argument(
+        "--root", type=Path, default=None, help="relay directory (default <repo>/relay)"
+    )
+    parser.add_argument(
+        "--db", type=Path, default=None, help="state.db to read the window roster from"
+    )
     parser.add_argument("--admin", action="append", default=[], help="admin window id (repeatable)")
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args(argv)
-
-    import httpx
 
     root = args.root or (Path(__file__).resolve().parents[3] / "relay")
     db_path = args.db or (Path(__file__).resolve().parents[3] / "data" / "state.db")
@@ -326,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
         roster=lambda: _roster_from_db(db_path),
         owner_source=lambda: _humans_from_db(db_path),
     )
-    with httpx.Client(
+    with http_client(
         base_url=args.url, headers={"Authorization": "Bearer " + token}, timeout=30
     ) as client:
         worker.client = client

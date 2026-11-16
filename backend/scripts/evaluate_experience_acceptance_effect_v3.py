@@ -51,7 +51,9 @@ README_SEED = """# 工作区
 
 INPUT_ROWS = [("张三", "北京", 1280), ("李四", "上海", 960), ("王五", "深圳", 1500)]
 INPUT_TEXT = "".join(f"{name}|{city}|{amount}\n" for name, city, amount in INPUT_ROWS)
-EXPECTED_ROWS = [{"name": name, "city": city, "amount": amount} for name, city, amount in INPUT_ROWS]
+EXPECTED_ROWS = [
+    {"name": name, "city": city, "amount": amount} for name, city, amount in INPUT_ROWS
+]
 EXPECTED_TOTAL = sum(amount for _, _, amount in INPUT_ROWS)
 INPUT_NAME = "输入 数据.txt"
 OUTPUT_REL = "out/结果.json"
@@ -130,6 +132,7 @@ def read_json(path: Path, default: Any) -> Any:
 
 def remove_tree(path: Path) -> bool:
     """Windows：git 对象只读，rmtree 会失败；清只读位后再退回 rmdir /s /q。"""
+
     def _onerror(func, target, _exc):
         try:
             os.chmod(target, stat.S_IWRITE)
@@ -190,13 +193,31 @@ def executor_prompt() -> str:
 
 def rule_definitions() -> dict[str, Any]:
     return {
-        "deliverables_exist": {"kind": "mechanical", "expected": "tool/run.py 与 tool/README.md 存在且非空"},
-        "readme_command": {"kind": "mechanical", "expected": "README 含 `python -S tool/run.py`，去空白 >= 120 字符"},
+        "deliverables_exist": {
+            "kind": "mechanical",
+            "expected": "tool/run.py 与 tool/README.md 存在且非空",
+        },
+        "readme_command": {
+            "kind": "mechanical",
+            "expected": "README 含 `python -S tool/run.py`，去空白 >= 120 字符",
+        },
         "stdlib_only": {"kind": "mechanical", "expected": "tool/run.py 的 import 全部来自标准库"},
-        "target_exit_zero": {"kind": "target-run", "expected": "目标环境 python -S tool/run.py 退出码 0"},
-        "output_file_exists": {"kind": "target-run", "expected": "out/结果.json 在目标环境生成且非空"},
-        "output_format": {"kind": "target-run", "expected": "out/结果.json 为 UTF-8，rows 顺序/字段/total/count 与输入一致"},
-        "digest_matches": {"kind": "target-run", "expected": "stdout 的 sha256 等于 out/结果.json 实际字节的 SHA-256"},
+        "target_exit_zero": {
+            "kind": "target-run",
+            "expected": "目标环境 python -S tool/run.py 退出码 0",
+        },
+        "output_file_exists": {
+            "kind": "target-run",
+            "expected": "out/结果.json 在目标环境生成且非空",
+        },
+        "output_format": {
+            "kind": "target-run",
+            "expected": "out/结果.json 为 UTF-8，rows 顺序/字段/total/count 与输入一致",
+        },
+        "digest_matches": {
+            "kind": "target-run",
+            "expected": "stdout 的 sha256 等于 out/结果.json 实际字节的 SHA-256",
+        },
         "banned_hits_absent": {
             "kind": "frozen-v5",
             "source": "flow_gate.banned_hits（可见文本 + 字母数字骨架）",
@@ -249,12 +270,16 @@ def check_output(target: dict[str, Any]) -> tuple[bool, str]:
             problems.append(f"rows[{index}] 不是对象")
             continue
         if {key: actual.get(key) for key in expected} != expected:
-            problems.append(f"rows[{index}]={ {key: actual.get(key) for key in expected} } != {expected}")
+            problems.append(
+                f"rows[{index}]={ {key: actual.get(key) for key in expected} } != {expected}"
+            )
     if doc.get("count") != len(EXPECTED_ROWS):
         problems.append(f"count={doc.get('count')!r} != {len(EXPECTED_ROWS)}")
     if doc.get("total") != EXPECTED_TOTAL:
         problems.append(f"total={doc.get('total')!r} != {EXPECTED_TOTAL}")
-    return (not problems), ("；".join(problems) if problems else "UTF-8 JSON，3 行顺序与金额/合计一致")
+    return (not problems), (
+        "；".join(problems) if problems else "UTF-8 JSON，3 行顺序与金额/合计一致"
+    )
 
 
 def check_digest(target: dict[str, Any]) -> tuple[bool, str]:
@@ -339,7 +364,9 @@ def score_delivery(
         {
             "rule": "stdlib_only",
             "pass": not extra,
-            "detail": ("非标准库 import：" + ", ".join(extra)) if extra else f"仅标准库：{', '.join(sorted(imported))}",
+            "detail": ("非标准库 import：" + ", ".join(extra))
+            if extra
+            else f"仅标准库：{', '.join(sorted(imported))}",
         }
     )
 
@@ -592,9 +619,7 @@ def _evidence(record: dict[str, Any], work: Path) -> dict[str, Any]:
     data = record.pop("output_bytes", None)
     keep = {key: value for key, value in record.items() if key not in {"output_bytes"}}
     keep["output_sha256"] = sha256_bytes(data) if data else None
-    keep["output_preview"] = (
-        data.decode("utf-8", errors="replace")[:400] if data else None
-    )
+    keep["output_preview"] = data.decode("utf-8", errors="replace")[:400] if data else None
     keep["input_kind"] = "gbk" if "数据 目录" in str(work) else "utf-8"
     keep["input_readonly"] = bool(
         (work / INPUT_NAME).exists() and not os.access(work / INPUT_NAME, os.W_OK)
@@ -776,14 +801,20 @@ def run(out_dir: Path) -> None:
         "predictability_tally": tally,
         "usage": {
             "calls": len(rows),
-            "prompt_tokens": sum(int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows),
+            "prompt_tokens": sum(
+                int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows
+            ),
             "completion_tokens": sum(
                 int((row.get("usage") or {}).get("completion_tokens") or 0) for row in rows
             ),
-            "total_tokens": sum(int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows),
+            "total_tokens": sum(
+                int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows
+            ),
         },
         "cleanup": {
-            "temporary_directories_removed": all(row["temporary_directory_removed"] for row in rows),
+            "temporary_directories_removed": all(
+                row["temporary_directory_removed"] for row in rows
+            ),
             "leftover_dirs": len(list(Path(tempfile.gettempdir()).glob("ae3-*"))),
         },
         "production_experience": {
@@ -852,14 +883,26 @@ def selftest(out_dir: Path) -> None:
 
         base = dict(target)
         fake = {
-            "依赖缺失": dict(base, returncode=1, stderr="ModuleNotFoundError: No module named 'yaml'"),
+            "依赖缺失": dict(
+                base, returncode=1, stderr="ModuleNotFoundError: No module named 'yaml'"
+            ),
             "编码": dict(base, returncode=0, output_bytes="中文".encode("gbk"), output_exists=True),
             "校验和对不上": dict(base, returncode=0, printed_digest="0" * 64),
             "输出格式": dict(base, returncode=0, output_bytes=b'{"rows":[],"total":0,"count":0}'),
-            "路径": dict(base, returncode=1, output_bytes=None, output_exists=False,
-                        stderr="FileNotFoundError: [Errno 2] No such file or directory: '输入 数据.txt'"),
-            "权限": dict(base, returncode=1, output_bytes=None, output_exists=False,
-                        stderr="PermissionError: [Errno 13] Permission denied: 'out/结果.json'"),
+            "路径": dict(
+                base,
+                returncode=1,
+                output_bytes=None,
+                output_exists=False,
+                stderr="FileNotFoundError: [Errno 2] No such file or directory: '输入 数据.txt'",
+            ),
+            "权限": dict(
+                base,
+                returncode=1,
+                output_bytes=None,
+                output_exists=False,
+                stderr="PermissionError: [Errno 13] Permission denied: 'out/结果.json'",
+            ),
         }
         for name, target_case in fake.items():
             scored = score_delivery(files, target_case, sandbox)
@@ -869,18 +912,27 @@ def selftest(out_dir: Path) -> None:
             cases.append((name, got))
 
         static = score_delivery({**files, "tool/run.py": BAD_RUN_NON_STDLIB}, target, sandbox)
-        if "stdlib_only" not in static["failed_rules"] or static.get("failure_category") != "依赖缺失":
+        if (
+            "stdlib_only" not in static["failed_rules"]
+            or static.get("failure_category") != "依赖缺失"
+        ):
             raise AssertionError(f"非标准库样例判定错误：{static}")
         cases.append(("非标准库 import", "依赖缺失"))
 
-        no_readme = score_delivery({"README.md": README_SEED, "tool/run.py": GOOD_RUN}, target, sandbox)
+        no_readme = score_delivery(
+            {"README.md": README_SEED, "tool/run.py": GOOD_RUN}, target, sandbox
+        )
         if "readme_command" not in no_readme["failed_rules"]:
             raise AssertionError(f"缺 README 未被判失败：{no_readme['failed_rules']}")
         cases.append(("缺 README", "交付缺失"))
     finally:
         removed = remove_tree(root)
     assert removed, "自检临时目录未清理"
-    print(json.dumps({"selftest": "ok", "cases": cases, "cleanup": True}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {"selftest": "ok", "cases": cases, "cleanup": True}, ensure_ascii=False, indent=2
+        )
+    )
 
 
 def main() -> None:

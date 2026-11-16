@@ -77,9 +77,7 @@ def configured_model(harness_id: str, *, home: Path | None = None) -> dict[str, 
     # ``AP_MODEL_HOME`` lets CI point the lookup at a throwaway profile instead
     # of the runner's real ``~``; unset means the real home, as before.
     configured_home = (
-        home
-        if home is not None
-        else Path(os.environ.get("AP_MODEL_HOME") or Path.home())
+        home if home is not None else Path(os.environ.get("AP_MODEL_HOME") or Path.home())
     )
     path = configured_home / relative
     if path.suffix == ".toml":

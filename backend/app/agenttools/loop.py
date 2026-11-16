@@ -33,14 +33,13 @@ Three rules the loop keeps, each because the alternative lies:
 
 from __future__ import annotations
 
-import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from app.admin.service import AdminHarnessError, extract_json_object
 from app.agenttools.floor import Floor, FloorRefused, describe
 from app.agenttools.registry import Tool, ToolRefused, tool_plans
-from app.admin.service import AdminHarnessError, extract_json_object
 
 
 class Model(Protocol):
@@ -146,7 +145,15 @@ class PlatformLoop:
         return CONTRACT.format(tools="\n".join(tool_plans(self.tools)))
 
     def turn_prompt(self, steps: list[Step]) -> str:
-        parts = [self.system_prompt(), "", "## 场地", *describe(self.floor), "", "## 这条活", self.goal.strip()]
+        parts = [
+            self.system_prompt(),
+            "",
+            "## 场地",
+            *describe(self.floor),
+            "",
+            "## 这条活",
+            self.goal.strip(),
+        ]
         if steps:
             parts += ["", "## 到目前为止"]
             for step in steps:
@@ -154,10 +161,14 @@ class PlatformLoop:
                     f"第 {step.no} 步 · thought: {step.thought or '（没写）'}\n"
                     f"  调用: {step.tool or '（没写工具）'}"
                 )
-                observation = step.observation if len(step.observation) <= 6000 else (
-                    step.observation[:2000]
-                    + f"\n...（观察太长，中间 {len(step.observation) - 4000} 字略）...\n"
-                    + step.observation[-2000:]
+                observation = (
+                    step.observation
+                    if len(step.observation) <= 6000
+                    else (
+                        step.observation[:2000]
+                        + f"\n...（观察太长，中间 {len(step.observation) - 4000} 字略）...\n"
+                        + step.observation[-2000:]
+                    )
                 )
                 parts.append(f"  结果: {observation or '（空）'}")
         else:
@@ -287,7 +298,9 @@ class PlatformLoop:
         except (ToolRefused, FloorRefused) as exc:
             return f"拒绝：{exc}"
         except Exception as exc:  # noqa: BLE001 - a tool bug must not end the run
-            return f"工具 `{name}` 自己出错了（{type(exc).__name__}: {exc}）。换个做法，或换别的工具。"
+            return (
+                f"工具 `{name}` 自己出错了（{type(exc).__name__}: {exc}）。换个做法，或换别的工具。"
+            )
 
     def _where(self, steps: list[Step]) -> str:
         """An honest hand-off: what was done, and that the work is not finished."""

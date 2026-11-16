@@ -348,7 +348,7 @@ def test_the_heartbeat_keeps_reporting_while_the_worker_is_busy():
         busy.wait(0.2)  # 模拟主循环卡住时 HTTP 客户端还在忙
         calls.append(dict(body))
 
-    thread = start_heartbeat(post, role="member", every_seconds=0.05)
+    start_heartbeat(post, role="member", every_seconds=0.05)
     try:
         deadline = time.monotonic() + 5.0
         while len(calls) < 2 and time.monotonic() < deadline:

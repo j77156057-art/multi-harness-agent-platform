@@ -130,7 +130,7 @@ def _output_dep_rig(tmp_path):
     )
     with database.transaction() as conn:
         conn.execute(
-            'INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,'
+            "INSERT INTO task_outputs(output_id, task_id, attempt_id, name, type,"
             ' schema_version, actual_hash, "commit", merged_seq)'
             " VALUES ('out-1', 'T-UP', 'T-UP.a1', 'flag.txt', 'code', 'v1',"
             " 'sha256:good', 'merge-commit', ?)",
@@ -140,9 +140,7 @@ def _output_dep_rig(tmp_path):
 
 
 def _use_canonical_hash(monkeypatch, digest: str) -> None:
-    monkeypatch.setattr(
-        "app.merge.outputs.canonical_output_hash", lambda *args, **kwargs: digest
-    )
+    monkeypatch.setattr("app.merge.outputs.canonical_output_hash", lambda *args, **kwargs: digest)
 
 
 def test_output_dependency_unlocks_with_a_matching_canonical_hash(tmp_path, monkeypatch):
@@ -199,9 +197,7 @@ def test_plan_materialises_the_dependency_output_name(tmp_path):
                 {
                     "id": "T-1",
                     "depends_on": ["T-UP"],
-                    "consumes": [
-                        {"output": "flag.txt", "type": "code", "schema_version": "v1"}
-                    ],
+                    "consumes": [{"output": "flag.txt", "type": "code", "schema_version": "v1"}],
                 },
             ]
         },
@@ -325,9 +321,7 @@ def test_one_failing_sweep_does_not_take_the_others_down(tmp_path, monkeypatch):
         calls.append("fine")
         return SweepReport("fine", 0, {})
 
-    monkeypatch.setattr(
-        "app.scheduler.runner.SWEEPS", (("boom", boom), ("fine", fine))
-    )
+    monkeypatch.setattr("app.scheduler.runner.SWEEPS", (("boom", boom), ("fine", fine)))
     reports = run_all_sweeps(database, now=NOW)
 
     assert calls == ["boom", "fine"], "the second sweep still ran"

@@ -123,6 +123,7 @@ def read_json(path: Path, default: Any) -> Any:
 
 def remove_tree(path: Path) -> bool:
     """Windows：git 对象只读，rmtree 会失败；清只读位后再退回 rmdir /s /q。"""
+
     def _onerror(func, target, _exc):
         try:
             os.chmod(target, stat.S_IWRITE)
@@ -251,7 +252,13 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
             if manifest.get("entry_count") != 3:
                 problems.append(f"entry_count={manifest.get('entry_count')!r} != 3")
             detail = "；".join(problems) if problems else "artifacts 与磁盘一致（5 条）"
-    items.append({"rule": "manifest_artifacts", "pass": manifest is not None and detail.startswith("artifacts"), "detail": detail})
+    items.append(
+        {
+            "rule": "manifest_artifacts",
+            "pass": manifest is not None and detail.startswith("artifacts"),
+            "detail": detail,
+        }
+    )
 
     chain_detail: list[str] = []
     chain_ok = True
@@ -293,7 +300,9 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
         {
             "rule": "entries_chain",
             "pass": chain_ok,
-            "detail": "；".join(chain_detail) if chain_detail else "E1<-E2<-E3 链与 artifact 引用一致",
+            "detail": "；".join(chain_detail)
+            if chain_detail
+            else "E1<-E2<-E3 链与 artifact 引用一致",
         }
     )
 
@@ -314,7 +323,12 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
     for path in FILES:
         for hit in banned_hits(str(files.get(path, "")), list(TOKENS)):
             hit_rows.append(
-                {"path": path, "token": hit["token"], "visible": hit["visible_hit"], "skeleton": hit["skeleton_hit"]}
+                {
+                    "path": path,
+                    "token": hit["token"],
+                    "visible": hit["visible_hit"],
+                    "skeleton": hit["skeleton_hit"],
+                }
             )
     items.append(
         {
@@ -353,7 +367,13 @@ def checker_run(files: dict[str, str], tag: str, out_dir: Path) -> dict[str, Any
                 "pass": proc.returncode == 0 and "OK" in proc.stdout,
             }
         except subprocess.TimeoutExpired:
-            record = {"returncode": None, "stdout": "", "stderr": "", "pass": False, "timeout": True}
+            record = {
+                "returncode": None,
+                "stdout": "",
+                "stderr": "",
+                "pass": False,
+                "timeout": True,
+            }
         write_json(out_dir / f"checker-{tag}.json", record)
         return record
     finally:
@@ -620,17 +640,27 @@ def run(out_dir: Path) -> None:
         "fail_rules": [row["score"]["failed_rules"] for row in rows],
         "usage": {
             "calls": len(rows),
-            "prompt_tokens": sum(int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows),
+            "prompt_tokens": sum(
+                int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows
+            ),
             "completion_tokens": sum(
                 int((row.get("usage") or {}).get("completion_tokens") or 0) for row in rows
             ),
-            "total_tokens": sum(int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows),
+            "total_tokens": sum(
+                int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows
+            ),
         },
         "cleanup": {
-            "temporary_directories_removed": all(row["temporary_directory_removed"] for row in rows),
+            "temporary_directories_removed": all(
+                row["temporary_directory_removed"] for row in rows
+            ),
             "leftover_dirs": len(list(Path(tempfile.gettempdir()).glob("ae2-*"))),
         },
-        "production_experience": {"before": before, "after": file_sha(SOURCE), "unchanged": before == file_sha(SOURCE)},
+        "production_experience": {
+            "before": before,
+            "after": file_sha(SOURCE),
+            "unchanged": before == file_sha(SOURCE),
+        },
         "frozen": read_json(protocol_path(out_dir), {})["initial_freeze"],
     }
     write_json(out_dir / "summary.json", summary)
@@ -660,20 +690,37 @@ print("OK")
 
 GOOD_FILES = {
     "handoff/manifest.json": json.dumps(
-        {"version": 1, "artifacts": list(NON_MANIFEST), "entry_count": 3}, ensure_ascii=False, indent=2
+        {"version": 1, "artifacts": list(NON_MANIFEST), "entry_count": 3},
+        ensure_ascii=False,
+        indent=2,
     ),
     "handoff/entries/E1.json": json.dumps(
-        {"id": "E1", "artifact": "handoff/entries/E1.json", "depends_on": [], "summary": "整理第一轮材料"},
+        {
+            "id": "E1",
+            "artifact": "handoff/entries/E1.json",
+            "depends_on": [],
+            "summary": "整理第一轮材料",
+        },
         ensure_ascii=False,
         indent=2,
     ),
     "handoff/entries/E2.json": json.dumps(
-        {"id": "E2", "artifact": "handoff/entries/E2.json", "depends_on": ["E1"], "summary": "在 E1 基础上补充证据"},
+        {
+            "id": "E2",
+            "artifact": "handoff/entries/E2.json",
+            "depends_on": ["E1"],
+            "summary": "在 E1 基础上补充证据",
+        },
         ensure_ascii=False,
         indent=2,
     ),
     "handoff/entries/E3.json": json.dumps(
-        {"id": "E3", "artifact": "handoff/entries/E3.json", "depends_on": ["E2"], "summary": "汇总前两条并给出结论"},
+        {
+            "id": "E3",
+            "artifact": "handoff/entries/E3.json",
+            "depends_on": ["E2"],
+            "summary": "汇总前两条并给出结论",
+        },
         ensure_ascii=False,
         indent=2,
     ),
@@ -700,13 +747,24 @@ def selftest(out_dir: Path) -> None:
 
     bad_cases = {
         "缺文件": {k: v for k, v in files.items() if k != "handoff/check.py"},
-        "清单漏列": {**files, "handoff/manifest.json": json.dumps(
-            {"version": 1, "artifacts": NON_MANIFEST[:4], "entry_count": 3}, ensure_ascii=False
-        )},
-        "依赖链错": {**files, "handoff/entries/E3.json": json.dumps(
-            {"id": "E3", "artifact": "handoff/entries/E3.json", "depends_on": ["E1"], "summary": "x"},
-            ensure_ascii=False,
-        )},
+        "清单漏列": {
+            **files,
+            "handoff/manifest.json": json.dumps(
+                {"version": 1, "artifacts": NON_MANIFEST[:4], "entry_count": 3}, ensure_ascii=False
+            ),
+        },
+        "依赖链错": {
+            **files,
+            "handoff/entries/E3.json": json.dumps(
+                {
+                    "id": "E3",
+                    "artifact": "handoff/entries/E3.json",
+                    "depends_on": ["E1"],
+                    "summary": "x",
+                },
+                ensure_ascii=False,
+            ),
+        },
         "脚本退出1": {**files, "handoff/check.py": "import sys\nprint('MISSING')\nsys.exit(1)\n"},
     }
     expected = {

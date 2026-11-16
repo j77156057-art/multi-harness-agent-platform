@@ -146,6 +146,7 @@ def read_json(path: Path, default: Any) -> Any:
 
 def remove_tree(path: Path) -> bool:
     """Windows：git 对象只读，rmtree 会失败；清只读位后再退回 rmdir /s /q。"""
+
     def _onerror(func, target, _exc):
         try:
             os.chmod(target, stat.S_IWRITE)
@@ -282,7 +283,13 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
             if manifest.get("entry_count") != 8:
                 problems.append(f"entry_count={manifest.get('entry_count')!r} != 8")
             detail = "；".join(problems) if problems else "artifacts 与磁盘一致（12 条）"
-    items.append({"rule": "manifest_artifacts", "pass": manifest is not None and detail.startswith("artifacts"), "detail": detail})
+    items.append(
+        {
+            "rule": "manifest_artifacts",
+            "pass": manifest is not None and detail.startswith("artifacts"),
+            "detail": detail,
+        }
+    )
 
     chain_detail: list[str] = []
     chain_ok = True
@@ -351,7 +358,9 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
         {
             "rule": "entries_chain",
             "pass": chain_ok,
-            "detail": "；".join(chain_detail) if chain_detail else "E1..E8 累加链与 predecessor/artifact/cited_summary 一致",
+            "detail": "；".join(chain_detail)
+            if chain_detail
+            else "E1..E8 累加链与 predecessor/artifact/cited_summary 一致",
         }
     )
 
@@ -394,7 +403,9 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
     )
 
     trace_detail: list[str] = []
-    trace_lines = [line.strip() for line in files.get("handoff/trace.md", "").splitlines() if line.strip()]
+    trace_lines = [
+        line.strip() for line in files.get("handoff/trace.md", "").splitlines() if line.strip()
+    ]
     if len(trace_lines) != 7:
         trace_detail.append(f"非空行 {len(trace_lines)} != 7")
     for offset, line in enumerate(trace_lines, start=2):
@@ -415,7 +426,9 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
         {
             "rule": "trace_consistent",
             "pass": not trace_detail,
-            "detail": "；".join(trace_detail) if trace_detail else "trace.md 7 行与 E1..E7 的 summary 原文一致",
+            "detail": "；".join(trace_detail)
+            if trace_detail
+            else "trace.md 7 行与 E1..E7 的 summary 原文一致",
         }
     )
 
@@ -436,7 +449,12 @@ def score_delivery(files: dict[str, str]) -> dict[str, Any]:
     for path in FILES:
         for hit in banned_hits(str(files.get(path, "")), list(TOKENS)):
             hit_rows.append(
-                {"path": path, "token": hit["token"], "visible": hit["visible_hit"], "skeleton": hit["skeleton_hit"]}
+                {
+                    "path": path,
+                    "token": hit["token"],
+                    "visible": hit["visible_hit"],
+                    "skeleton": hit["skeleton_hit"],
+                }
             )
     items.append(
         {
@@ -475,7 +493,13 @@ def checker_run(files: dict[str, str], tag: str, out_dir: Path) -> dict[str, Any
                 "pass": proc.returncode == 0 and "OK" in proc.stdout,
             }
         except subprocess.TimeoutExpired:
-            record = {"returncode": None, "stdout": "", "stderr": "", "pass": False, "timeout": True}
+            record = {
+                "returncode": None,
+                "stdout": "",
+                "stderr": "",
+                "pass": False,
+                "timeout": True,
+            }
         write_json(out_dir / f"checker-{tag}.json", record)
         return record
     finally:
@@ -742,17 +766,27 @@ def run(out_dir: Path) -> None:
         "fail_rules": [row["score"]["failed_rules"] for row in rows],
         "usage": {
             "calls": len(rows),
-            "prompt_tokens": sum(int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows),
+            "prompt_tokens": sum(
+                int((row.get("usage") or {}).get("prompt_tokens") or 0) for row in rows
+            ),
             "completion_tokens": sum(
                 int((row.get("usage") or {}).get("completion_tokens") or 0) for row in rows
             ),
-            "total_tokens": sum(int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows),
+            "total_tokens": sum(
+                int((row.get("usage") or {}).get("total_tokens") or 0) for row in rows
+            ),
         },
         "cleanup": {
-            "temporary_directories_removed": all(row["temporary_directory_removed"] for row in rows),
+            "temporary_directories_removed": all(
+                row["temporary_directory_removed"] for row in rows
+            ),
             "leftover_dirs": len(list(Path(tempfile.gettempdir()).glob("ae2-*"))),
         },
-        "production_experience": {"before": before, "after": file_sha(SOURCE), "unchanged": before == file_sha(SOURCE)},
+        "production_experience": {
+            "before": before,
+            "after": file_sha(SOURCE),
+            "unchanged": before == file_sha(SOURCE),
+        },
         "frozen": read_json(protocol_path(out_dir), {})["initial_freeze"],
     }
     write_json(out_dir / "summary.json", summary)
@@ -829,17 +863,25 @@ def _entry(i: int) -> str:
         indent=2,
     )
 
+
 GOOD_FILES = {
     "handoff/manifest.json": json.dumps(
-        {"version": 4, "artifacts": list(NON_MANIFEST), "entry_count": 8}, ensure_ascii=False, indent=2
+        {"version": 4, "artifacts": list(NON_MANIFEST), "entry_count": 8},
+        ensure_ascii=False,
+        indent=2,
     ),
     **{f"handoff/entries/E{i}.json": _entry(i) for i in range(1, 9)},
-    "handoff/trace.md": "\n".join(f"- E{i} <- E{i-1}: {SUMMARIES[i-2]}" for i in range(2, 9)) + "\n",
+    "handoff/trace.md": "\n".join(f"- E{i} <- E{i-1}: {SUMMARIES[i-2]}" for i in range(2, 9))
+    + "\n",
     "handoff/index.json": json.dumps(
-        {"artifact_count": 12, "entry_count": 8,
-         "citation_chars": sum(len(text) for text in SUMMARIES[:7]),
-         "checker": "handoff/check.py",
-         "readme": "handoff/README.md", "trace": "handoff/trace.md"},
+        {
+            "artifact_count": 12,
+            "entry_count": 8,
+            "citation_chars": sum(len(text) for text in SUMMARIES[:7]),
+            "checker": "handoff/check.py",
+            "readme": "handoff/README.md",
+            "trace": "handoff/trace.md",
+        },
         ensure_ascii=False,
         indent=2,
     ),
@@ -874,15 +916,22 @@ def selftest(out_dir: Path) -> None:
 
     bad_cases = {
         "缺文件": {k: v for k, v in files.items() if k != "handoff/check.py"},
-        "清单漏列": {**files, "handoff/manifest.json": json.dumps(
-            {"version": 1, "artifacts": NON_MANIFEST[:4], "entry_count": 3}, ensure_ascii=False
-        )},
+        "清单漏列": {
+            **files,
+            "handoff/manifest.json": json.dumps(
+                {"version": 1, "artifacts": NON_MANIFEST[:4], "entry_count": 3}, ensure_ascii=False
+            ),
+        },
         "依赖链错": mutate("handoff/entries/E5.json", depends_on=["E3", "E4"]),
         "引用漂移": mutate("handoff/entries/E4.json", cited_summary=SUMMARIES[2] + "。"),
         "index 不一致": mutate("handoff/index.json", entry_count=7),
         "字符数错": mutate("handoff/index.json", citation_chars=999),
-        "trace 漂移": {**files, "handoff/trace.md": "- E2 <- E1: 整理第一轮材料并登记来源（改）\n"
-            + "\n".join(f"- E{i} <- E{i-1}: {SUMMARIES[i-2]}" for i in range(3, 9)) + "\n"},
+        "trace 漂移": {
+            **files,
+            "handoff/trace.md": "- E2 <- E1: 整理第一轮材料并登记来源（改）\n"
+            + "\n".join(f"- E{i} <- E{i-1}: {SUMMARIES[i-2]}" for i in range(3, 9))
+            + "\n",
+        },
         "脚本退出1": {**files, "handoff/check.py": "import sys\nprint('MISSING')\nsys.exit(1)\n"},
     }
     expected = {

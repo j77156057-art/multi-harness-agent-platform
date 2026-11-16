@@ -306,8 +306,7 @@ def expire_stale_leases(
                 attempt_id=attempt_id,
                 actor="scheduler",
                 question=(
-                    f"「{task_id}」的执行方断线了（租约到期没续）。"
-                    "要等它回来，还是现在换人？"
+                    f"「{task_id}」的执行方断线了（租约到期没续）。" "要等它回来，还是现在换人？"
                 ),
                 options=["等它回来", "现在换人", "取消这条活"],
                 scope="lease_uncertain",

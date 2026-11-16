@@ -87,9 +87,7 @@ def commit_files_to_integration(
     return commit
 
 
-def seed_repository_profile(
-    client: TestClient, tmp_path: Path, *, name: str = "repo-check"
-) -> str:
+def seed_repository_profile(client: TestClient, tmp_path: Path, *, name: str = "repo-check") -> str:
     """Give the test repository a runnable integration profile of its own.
 
     F3 makes approve refuse when the merge-check profile cannot run in the

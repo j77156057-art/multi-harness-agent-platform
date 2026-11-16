@@ -319,9 +319,9 @@ def test_an_idle_window_that_never_claims_is_also_reported(tmp_path):
 
     assert report.detail["notified"] == ["T-1"]
     assert "一直没人动" in _decisions(database)[0]["question"]
-    reminder = database.read(
-        "SELECT reason FROM ready_unclaimed_reminders WHERE task_id = 'T-1'"
-    )[0]
+    reminder = database.read("SELECT reason FROM ready_unclaimed_reminders WHERE task_id = 'T-1'")[
+        0
+    ]
     assert reminder["reason"] == "candidate_idle"
 
 

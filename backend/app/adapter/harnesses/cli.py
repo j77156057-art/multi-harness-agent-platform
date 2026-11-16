@@ -70,7 +70,6 @@ class HarnessStalled(RuntimeError):
         self.stalled_seconds = stalled_seconds
 
 
-
 class HarnessTimeout(RuntimeError):
     """The CLI exceeded its deadline and was killed.
 
@@ -168,7 +167,9 @@ class ProviderUnavailable(RuntimeError):
     non-retryable.
     """
 
-    def __init__(self, message: str, *, reason_code: str = "", required_tools: tuple[str, ...] = ()) -> None:
+    def __init__(
+        self, message: str, *, reason_code: str = "", required_tools: tuple[str, ...] = ()
+    ) -> None:
         super().__init__(message)
         self.reason_code = reason_code
         self.required_tools = required_tools

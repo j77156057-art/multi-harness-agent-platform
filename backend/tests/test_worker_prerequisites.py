@@ -64,7 +64,7 @@ def test_worker_refuses_to_start_and_never_joins_the_pool(tmp_path: Path):
     """真实进程级验证：缺失变量时 worker 立刻退出，并给出可检索的原因码。"""
     token = tmp_path / "codebuddy.key"
     token.write_text("test-token", encoding="utf-8")
-    env = {key: value for key, value in os.environ.items()}
+    env = dict(os.environ.items())
     env.pop("CODEBUDDY_CODE_GIT_BASH_PATH", None)
     env["AP_AUTH_MODE"] = "enforce"
     env["AP_DATA_DIR"] = str(tmp_path / "data")
