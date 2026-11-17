@@ -89,14 +89,23 @@ def _usage_triplet(usage: dict[str, Any]) -> tuple[int, int, int] | None:
     return None
 
 
-def _opencode_step(tokens: dict[str, Any]) -> tuple[int, int, int] | None:
-    """opencode 的一步：``input`` 不含 ``cache.read``。"""
-    if "input" not in tokens and "output" not in tokens:
+def opencode_token_counts(tokens: dict[str, Any]) -> tuple[int, int, int] | None:
+    """opencode 的一步 → (含缓存读的 input, 缓存读, output)；认不出就是 None。
+
+    额度池读 CLI 自有 store（app.pool.cli_usage）与这里读 stdout 共用这一份
+    归一化：opencode 的 ``input`` 本身不含 ``cache.read``，两本账都必须加上。
+    """
+    if (
+        "input" not in tokens
+        and "output" not in tokens
+        and "input_tokens" not in tokens
+        and "output_tokens" not in tokens
+    ):
         return None
     cache = tokens.get("cache")
     read = _int(cache.get("read")) if isinstance(cache, dict) else 0
-    fresh = _int(tokens.get("input"))
-    return fresh + read, read, _int(tokens.get("output"))
+    fresh = _int(tokens.get("input") or tokens.get("input_tokens"))
+    return fresh + read, read, _int(tokens.get("output") or tokens.get("output_tokens"))
 
 
 def parse_cli_usage(text: str) -> ReportedUsage | None:
@@ -125,7 +134,7 @@ def parse_cli_usage(text: str) -> ReportedUsage | None:
         if isinstance(part, dict):
             tokens = part.get("tokens")
             if isinstance(tokens, dict):
-                step = _opencode_step(tokens)
+                step = opencode_token_counts(tokens)
                 if step is not None:
                     steps[str(part.get("id") or obj.get("uuid") or "")] = step
         # 顶层 usage：可能是整场汇总，也可能只是一次请求

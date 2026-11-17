@@ -162,6 +162,27 @@ def _write_model_config(model: str) -> str:
     return str(path)
 
 
+def _seed_free_tier() -> None:
+    """Declare the seeded opencode upstream free, so the assistant's live
+    free-tier catalogue has a model it can actually reach (the CI stub)."""
+    import os
+
+    data_dir = os.environ.get("AP_DATA_DIR")
+    if not data_dir:
+        return
+    path = Path(data_dir) / "pool" / "config.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    tiers = [
+        entry
+        for entry in (document.get("upstream_tiers") or [])
+        if isinstance(entry, dict) and entry.get("name") != "opencode:1"
+    ]
+    tiers.append({"name": "opencode:1", "tier": "free"})
+    document["upstream_tiers"] = tiers
+    path.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _seed_opencode_config() -> None:
     """An opencode provider config so the pool discovers an opencode upstream.
 
@@ -227,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = Path(args.data_dir)
     _seed_opencode_store()
     _seed_opencode_config()
+    _seed_free_tier()
 
     operator_token = _issue_token("human", "operator", "ci operator")
     _write(data_dir / "office-operator.key", operator_token)
@@ -237,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # codex/claude-code/qoder 是办公室「成员列表」脚本点名要的三个窗口；
     # 再补 N 个普通成员窗口，让「管理员 + 成员」都有得选。
-    windows = [ADMIN_HARNESS, "claude-code", "qoder"] + [
+    windows = [ADMIN_HARNESS, "claude-code", "qoder", "office-assistant"] + [
         f"codex-member-{i}" for i in range(1, args.members + 1)
     ]
     for index, harness_id in enumerate(windows):
@@ -252,7 +274,9 @@ def main(argv: list[str] | None = None) -> int:
                 "provider": "openai",
                 "adapter": "codex-exec",
                 "adapter_version": "1.0.0",
-                "capabilities": ["coding"],
+                # 助手是只读巡检/回话身份，不是劳动力：capability 与真成员区分，
+                # 任何按 capability 过滤的消费方都不该把它当可执行窗口。
+                "capabilities": ["assistant"] if harness_id == "office-assistant" else ["coding"],
                 "max_parallel_tasks": 1,
                 "status": "online",
                 "registration_version": f"ci-{index + 1:03d}",

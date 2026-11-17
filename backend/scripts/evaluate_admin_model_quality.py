@@ -1,6 +1,6 @@
 """四通道固定场景评估；只写独立评估产物，不改变产品运行配置。
 
-用法（在 backend/ 下）：
+用法（**手动入口**：仓库内无自动调用方，不进 `make check`；在 backend/ 下）：
   python -m scripts.evaluate_admin_model_quality freeze
   python -m scripts.evaluate_admin_model_quality run
   python -m scripts.evaluate_admin_model_quality summarize

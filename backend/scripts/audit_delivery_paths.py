@@ -1,4 +1,8 @@
-"""Deterministic stratified audit of delivery_path slots; manual verdicts stay separate."""
+"""Deterministic stratified audit of delivery_path slots; manual verdicts stay separate.
+
+用法（**手动入口**：仓库内无自动调用方，不进 `make check`）：
+    python -m scripts.audit_delivery_paths [--out <dir>]
+"""
 
 from __future__ import annotations
 

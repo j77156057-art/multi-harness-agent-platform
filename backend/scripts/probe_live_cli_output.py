@@ -5,7 +5,8 @@
 运行期间日志文件就已经有内容了——这正是"办公室屏幕能显示 harness 原话"所
 依赖的那一环。
 
-用法：python -m scripts.probe_live_cli_output <minutes>
+用法（**手动入口**：需要本机真装了 claude CLI；仓库内无自动调用方）：
+    python -m scripts.probe_live_cli_output <minutes>
 """
 
 from __future__ import annotations

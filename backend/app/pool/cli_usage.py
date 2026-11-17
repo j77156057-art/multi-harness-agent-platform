@@ -18,6 +18,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from app.usage.cli_reported import opencode_token_counts
+
 #: How long to wait for the CLI's last write to land.  The CLI writes the
 #: message as it goes, but the final one may land just before it exits.
 SETTLE_SECONDS = 0.4
@@ -64,13 +66,13 @@ def opencode_message_usage(message_ids: list[str]) -> dict[str, int] | None:
             tokens = data.get("tokens")
             if not isinstance(tokens, dict):
                 continue
+            # 与 stdout 那本账共用归一化（input 含 cache.read）。
+            counts = opencode_token_counts(tokens)
+            if counts is None:
+                continue
             found += 1
-            # 与额度池那本账同口径：input 一律含缓存读（opencode 的 input
-            # 本身不含 cache.read，见 app.usage.cli_reported._opencode_step）。
-            cache = tokens.get("cache")
-            read = int(cache.get("read") or 0) if isinstance(cache, dict) else 0
-            prompt += int(tokens.get("input") or tokens.get("input_tokens") or 0) + read
-            completion += int(tokens.get("output") or tokens.get("output_tokens") or 0)
+            prompt += counts[0]
+            completion += counts[2]
         if not found:
             continue
         return {"prompt_tokens": prompt, "completion_tokens": completion}

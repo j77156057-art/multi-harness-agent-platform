@@ -3,7 +3,9 @@
 同一批输入（v1–v4 的 15 条历史交付文本）各判一次，逐条比对 old→new。
 任何一条变了就 exit 1 —— 说明接线改到了判定，必须停下来。
 
-用法：
+用法（手动/发布流程；仓库内无自动调用方）：
+    make flow-regression
+  等价于：
     PYTHONPATH=backend python backend/scripts/experience_acceptance_flow_regression.py
 """
 
