@@ -156,8 +156,17 @@ def test_long_task_ids_do_not_lengthen_the_physical_path(tmp_path):
     in the branch name. That choice is what keeps deep roots + long task ids
     under Windows' classic 260-char limit -- proven here end to end
     (provision -> commit -> archive) instead of asserted in prose.
+
+    深度是**按可用余量算出来的**，不是写死 100：tmp_path 的长度取决于运行器
+    （串行 / xdist 会多插一层 popen-gw3，CI 的临时目录也更长），写死就会在
+    某个布局下把路径顶过上限，失败原因变成"路径太长"而不是"物理路径够短"。
+
+    目标：根目录总长约 170 字符 —— 这样「若把 92 字符的任务 id 放进物理路径」
+    就会超过 260（170+92=262），测试因此仍然有牙齿；而实际的工作树路径
+    （根 + wt + 短 id）与 git 内部路径都留在上限内。
     """
-    deep = tmp_path / ("d" * 100)
+    depth = max(8, min(100, 170 - len(str(tmp_path)) - 1))
+    deep = tmp_path / ("d" * depth)
     deep.mkdir()
     fixture = make_fixture(deep)
     long_task = "T-" + "a" * 90
@@ -167,6 +176,8 @@ def test_long_task_ids_do_not_lengthen_the_physical_path(tmp_path):
     assert long_task in worktree.branch, "the branch still carries the long identity"
     assert len(str(worktree.path)) < 260
     assert len(str(worktree.gitdir)) < 260
+    assert len(str(deep / "canonical.git")) < 260, "根目录本身也要留在上限内"
+    assert len(str(deep)) + len(long_task) > 260, "根要深到长任务 id 塞进路径就会超限"
 
     commit_in(worktree, filename="a.txt", content="hello\n", message="feat: long path")
     result = fixture.manager.archive_and_recycle(
