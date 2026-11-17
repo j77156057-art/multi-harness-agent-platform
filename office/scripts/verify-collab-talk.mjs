@@ -1,6 +1,7 @@
 // 私聊与平台助手：真发一句、真等回话，把回话原文记下来。
 //
 // 用法：$env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-collab-talk.mjs
+import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -86,6 +87,20 @@ try {
         'verify-collab-talk.mjs',
         `${entry.waitedSeconds}s 内平台助手没有回话 —— 这条要一个真的会调模型的助手窗口（CI 没有真实模型）；` +
           '「能发出这一句」已经验过，回话内容没验',
+      );
+    } else if (process.env.TALK_EXPECT_STUB) {
+      // CI 里模型是 ci-stack 的 stub：回话必须是**过得了引证门**的答案。
+      // 助手在取证不到可引证结论时会给诚实 IOU（"没能查出可回查的结论"），
+      // 那条路验的是「没编答案」，不是「答对了」——stub 模式下不算通过。
+      const iou = /没能查出可回查的结论|budget exhausted|time budget exceeded/;
+      assert.ok(
+        !iou.test(entry.reply),
+        `助手回了诚实 IOU 而不是可引证的答案：${entry.reply.slice(0, 160)}`,
+      );
+      assert.match(
+        entry.reply,
+        /CI-STUB-REPLY/,
+        'stub 的可引证答复走到了界面（内容正确，不只是"有回话"）',
       );
     }
   }

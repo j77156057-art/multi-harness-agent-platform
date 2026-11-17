@@ -48,6 +48,7 @@ const STATUS = {
   harnesses: [
     { harness_id: 'm1', name: '成员一', status: 'online', capabilities: ['coding'], credential_count: 1 },
     { harness_id: 'admin-window', name: '管理员', status: 'online', capabilities: ['coding'], credential_count: 1 },
+    { harness_id: 'office-assistant', name: '平台助手', status: 'online', capabilities: ['assistant'], credential_count: 1 },
   ],
   base_adapters: [],
 };
@@ -165,6 +166,35 @@ try {
   }
   const poolSummary = await page.locator('.flat-card-fold > details').first().innerText();
   assert.match(poolSummary, /额度池/, '收起时也写着这是什么');
+
+  // 5. 大厅「可执行窗口」口径：助手与管理员不算劳动力（2026-11-17 真栈走查
+  //    实测助手曾被算成唯一可执行成员；谓词只匹配模型身份 id 是根因）。
+  await page.reload();
+  const hint = page.locator('[data-worker-hint]');
+  await hint.waitFor({ state: 'visible', timeout: 15000 });
+  const hintText = await hint.innerText();
+  assert.match(hintText, /成员一/, '真成员在口径里');
+  assert.doesNotMatch(hintText, /平台助手/, '助手不是可执行劳动力');
+  assert.doesNotMatch(hintText, /管理员/, '管理员不算成员容量');
+  assert.match(hintText, /1 家 Harness 共 1 个窗口/, '计数只数真成员');
+
+  // 6. 待配置项目点「去配置」：进项目即开向导，不能把人丢在未配置的空办公室。
+  await page.evaluate(() => {
+    localStorage.setItem(
+      'agent-office.projects.v1',
+      JSON.stringify([{ id: 'cfg-probe', name: '待配置探针', phase: 'phone', index: '9', createdAt: '2026-11-17 00:00' }]),
+    );
+  });
+  await page.reload();
+  const cfgCard = page.locator('.project-card', { hasText: '待配置探针' });
+  await cfgCard.waitFor({ state: 'visible', timeout: 15000 });
+  await cfgCard.locator('.project-card-open').click();
+  await page.waitForSelector('#openingDialog[open]', { timeout: 15000 });
+  assert.match(
+    await page.locator('#openingDialog').innerText(),
+    /待配置探针/,
+    '向导开在正确的项目上',
+  );
 
   assert.deepEqual(errors, [], '页面没有报错');
   console.log('verify-office-lobby: ok');

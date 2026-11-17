@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +27,35 @@ const backendPort = process.env.CI_BACKEND_PORT || '8848';
 const officePort = process.env.CI_OFFICE_PORT || '4174';
 const base = `http://127.0.0.1:${backendPort}`;
 const officeUrl = `http://127.0.0.1:${officePort}`;
+
+// 端口预检：被占时直接报「谁占的、怎么办」，不起栈。否则后端 bind 失败而
+// waitFor 会摸到占端口者的响应，seed 再报 no database 这类二手症状
+// （2026-11-17 常驻走查栈占 8848 真撞过一次）。
+function portBusy(port) {
+  return new Promise((resolveBusy) => {
+    const sock = net.connect({ port: Number(port), host: '127.0.0.1' });
+    const done = (busy) => {
+      sock.destroy();
+      resolveBusy(busy);
+    };
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
+    setTimeout(() => done(false), 1500);
+  });
+}
+for (const [label, port, envName] of [
+  ['backend', backendPort, 'CI_BACKEND_PORT'],
+  ['office', officePort, 'CI_OFFICE_PORT'],
+]) {
+  if (await portBusy(port)) {
+    console.error(
+      `[ci] ${label} 端口 ${port} 已被占用：先停掉占它的进程` +
+        `（netstat -ano | findstr :${port}），或设 ${envName} 换端口。` +
+        '不在被占端口上起栈。',
+    );
+    process.exit(1);
+  }
+}
 
 const dataDir = mkdtempSync(join(tmpdir(), 'ap-ci-'));
 const modelHome = join(dataDir, 'home');
@@ -147,6 +177,17 @@ try {
   const ensureCode = await waitForExit(ensure);
   if (ensureCode !== 0) throw new Error('canonical repo setup failed');
 
+  // 档位声明要**在起后端之前**写：池子发现上游后有 TTL 缓存，seed 在后端起来
+  // 之后再写，界面仍显示代码默认档（opencode:1 显示「按量计费」而不是免费）。
+  // 声明的是 stub 链：CI 里它不花钱，但助手只走免费档的实况目录。
+  const poolConfigDir = join(dataDir, 'pool');
+  mkdirSync(poolConfigDir, { recursive: true });
+  writeFileSync(
+    join(poolConfigDir, 'config.json'),
+    JSON.stringify({ upstream_tiers: [{ name: 'opencode:1', tier: 'free' }] }, null, 2) + '\n',
+    'utf8',
+  );
+
   const backend = start(python, ['-m', 'app.main'], { cwd: backendDir, env });
   await waitFor(`${base}/health`, 'backend');
 
@@ -224,6 +265,83 @@ try {
     ollamaServing = true;
   });
 
+  // 助手回话走 pool 免费档 → opencode:1 上游（seed 的 baseURL 8402）。CI 没有
+  // 真链：补一个 OpenAI 兼容 stub，让 collab-talk「真等回话」真的被执行；
+  // 8402 被本机真链占着时直接用现成的（与 ollama 同款容忍）。
+  //
+  // stub 必须说**助手循环的协议**，不是人话：引擎每轮要一个 JSON 对象
+  // （取证用 tool / 作答用 final），终局还要过机械引证门（每条引用必须解析到
+  // 真实的步或上下文行）与自检轮。回普通句子会被判「没有可引证的结论」，
+  // 助手只能回诚实 IOU —— 那验的是「没编答案」，不是「答对了」。
+  // 阶段靠 prompt 里的「终局自检」区分（app/assistant/loop.py::_transcript）。
+  const STUB_MARKER = 'CI-STUB-REPLY';
+  const chain = createServer((request, response) => {
+    const url = request.url || '';
+    if (url.endsWith('/models')) {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ object: 'list', data: [{ id: 'minimax-m3.1-flash-free', object: 'model' }] }),
+      );
+      return;
+    }
+    let raw = '';
+    request.on('data', (chunk) => {
+      raw += chunk;
+    });
+    request.on('end', () => {
+      const reflect = raw.includes('终局自检');
+      const content = reflect
+        ? JSON.stringify({ verdict: 'pass', thought: 'CI stub 自检轮：草稿符合清单。' })
+        : JSON.stringify({
+            thought: 'CI stub：按平台已落档的事实作答。',
+            final: {
+              text: `${STUB_MARKER} 已收到问题；这是冒烟验证用的可引证固定答复。`,
+              cites: ['[c1]'],
+            },
+          });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          id: 'chatcmpl-ci-stub',
+          object: 'chat.completion',
+          choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+      );
+    });
+  });
+  chain.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log('[ci] 8402 已被本机真链占用，直接用现成的');
+      return;
+    }
+    throw error;
+  });
+  chain.listen(8402, '127.0.0.1');
+
+  // collab-talk 三段回话各来自「被问窗口的助手 worker」：office-assistant 回
+  // 助手栏，codex 回管理员私聊与私聊页（默认收件人）。模型走上面的 stub。
+  for (const assistantId of ['office-assistant', 'codex']) {
+    start(
+      python,
+      [
+        '-m',
+        'app.assistant.worker',
+        '--url',
+        base,
+        '--token-file',
+        join(tokens, `${assistantId}.key`),
+        '--group',
+        'demo-group',
+        '--assistant-id',
+        assistantId,
+        '--interval',
+        '2',
+      ],
+      { cwd: backendDir, env },
+    );
+  }
+
   const verifyEnv = {
     ...officeEnv,
     OFFICE_URL: officeUrl,
@@ -234,9 +352,18 @@ try {
     // 这里就是 seed 登记的 codex）；署成别的 id 界面不会把它当成管理员报的失败。
     OFFICE_ALERTS_STUB_SENDER: 'codex',
     // 对话类脚本要真实回话；CI 没有会回话的窗口，20 秒确认后明确跳过。
-    TALK_REPLY_TIMEOUT_MS: '20000',
+    TALK_REPLY_TIMEOUT_MS: '30000',
+    // 模型是本栈的 stub（8402）：回话必须是过得了引证门的答案，不接受诚实 IOU。
+    TALK_EXPECT_STUB: '1',
     GITHUB_STEP_SUMMARY: process.env.GITHUB_STEP_SUMMARY,
   };
+  // 探索走查用：CI_KEEP=1 起栈后常驻（不跑 verify、不清理），供浏览器逐功能
+  // 走查与 API 探针；Ctrl+C 退出时照常杀子进程删临时目录。
+  if (process.env.CI_KEEP) {
+    console.log(`[ci] keep-alive: backend=${base} office=${officeUrl}`);
+    console.log(`[ci] data=${dataDir} tokens=${tokens}`);
+    await new Promise(() => {});
+  }
   const verify = start(process.execPath, [join(officeRoot, 'scripts', 'verify.mjs')], {
     cwd: officeRoot,
     env: verifyEnv,

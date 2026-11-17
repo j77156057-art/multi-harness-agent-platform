@@ -253,3 +253,29 @@ OFFICE_FORMAL_ADMIN_TOKEN_FILE=<管理员令牌文件>
 OFFICE_FORMAL_PROJECT=111
 OFFICE_FORMAL_GROUP=office-formal
 ```
+
+## 级联与懒加载约束（改样式或拆包前必读）
+
+2026-11-17 一轮实证（design 对比度门禁 + 四态对照实验）固化的顺序约束：
+
+- **加载顺序即级联**：index 页 CSS 的实际顺序是 opening-host → flat-office →
+  各组件 css → app-shell（main.js 的 import 顺序）。app-shell 里 `.ao-workspace
+  .flat-*` 覆盖规则靠**在后**赢同特异性；flat-office 基础规则靠在后赢中间组件 css
+  的元素级规则。任何改 import 顺序/合并文件/拆 chunk 的动作都会翻其中一处胜负。
+- **flat-office.css 必须静态 import 在 main.js 原槽位**：flat-office.js 是懒加载
+  chunk（主包 JS 344.7→134.2 kB），但懒 chunk 的 CSS 在 chunk 加载时才注入，晚于
+  主 CSS → 级联翻转 → 计数粗体等元素落回 faint 色，对比度门禁红。JS 懒、CSS 不懒。
+- **双 CSS 文件不合并**：把 app-shell 的 `.flat-*` 规则移进 flat-office.css（头部或
+  尾部）、或把 flat-office.css 并进 app-shell，两个方向都实证翻序（中间组件 css
+  与懒注入顺序参与胜负）。保序的唯一单文件化是按 import 序合并整页全部 CSS，
+  收益不抵风险，维持双文件。
+- **demo fixture 仅 demo 模式构造**（`ensureDemoRuntime`）：连平台时不构造本地样例，
+  省启动开销；`state.source === 'demo'` 分支才触发。
+- **冒烟脚本约定**：跳过必须自己说明原因（退出码 2 + `<脚本>: 跳过 —— <原因>`），
+  单个脚本 5 分钟无退出即熔断记失败并点名；创建项目后开工向导可能已自动打开，
+  脚本点 `#aoStartBtn` 前要容忍 dialog 已开；review-gate 这类静态扫描按语法单元
+  （fetch 调用括号配平）取上下文，不要用「±N 字符窗口」——LF 行尾下会跨调用借词。
+- **CI 真栈隔离**：ci-stack 起栈前探测 8848/4174，被占直接报端口与换端口变量；
+  栈内要隔离 HOME（上游发现读 `Path.home()` 下的各家 CLI 配置）、XDG_DATA_HOME
+  与 PATH（CLI stub），否则开发机的真配置会掩盖 CI 的缺口。
+

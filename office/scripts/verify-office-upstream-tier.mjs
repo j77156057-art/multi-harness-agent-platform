@@ -8,7 +8,9 @@
 //   1. 非 CLI 那一组（如 `opencode`）的每一行都有「改档」；
 //   2. 点「改档 → 按免费」：模型标成免费，且平台侧 `upstream_tiers` 记下了这条覆盖；
 //   3. 再「改档 → 撤档」：回到代码默认，覆盖记录消失；
-//   4. 用户自己的 key 那一组不给「改档」（那一档不是价格，是"这笔钱是用户的"）。
+//   4. **跑完把测前的声明写回去**（原本有覆盖就恢复它）：撤档是真删记录，
+//      不恢复就等于这条脚本把操作员在真平台上写的覆盖悄悄删了；
+//   5. 用户自己的 key 那一组不给「改档」（那一档不是价格，是"这笔钱是用户的"）。
 //
 // 用法：
 //   $env:OFFICE_URL='http://127.0.0.1:4174'; node scripts/verify-office-upstream-tier.mjs
@@ -182,6 +184,19 @@ try {
   const before = await groupState(groupName);
   const rowBefore = before.rows.find((row) => row.id === target);
   assert.ok(rowBefore, `要找到 ${target}`);
+
+  // 测前记住**这一条上游原本的档位声明**：撤档会真删记录，跑完必须写回，
+  // 否则这条脚本会把操作员在真平台上写的覆盖悄悄删掉（CI 里是声明没了，
+  // 界面上 opencode:1 从「免费」退回「按量计费」）。
+  const prior = await page.evaluate(async (modelId) => {
+    const response = await fetch('/api/formal/pool', {cache: 'no-store'});
+    const payload = await response.json();
+    const upstream = (payload.upstreams || []).find((u) =>
+      (u.models || []).some((m) => String(m).includes(modelId)) || u.name === modelId);
+    const name = upstream ? upstream.name : null;
+    const declared = (payload.upstream_tiers || []).find((t) => t.name === name) || null;
+    return {name, tier: declared ? declared.tier : null};
+  }, target);
   assert.ok(
     rowBefore.actions.includes('edit-tier'),
     `非 CLI 上游这一行也要有「改档」，实际：${JSON.stringify(rowBefore)}`,
@@ -220,6 +235,19 @@ try {
   assert.notEqual(rowBack.mark, '免费', `撤档后不该还是免费，实际：${rowBack.mark}`);
   const thirdShot = await shot('3-withdrawn');
 
+  // 恢复现场：把测前记下的声明写回去（原本没有声明就保持撤档后的默认档）。
+  if (prior.name && prior.tier) {
+    const restored = await page.evaluate(async ({name, tier}) => {
+      const response = await fetch('/api/formal/pool/upstream-tier', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Office-Formal': '1'},
+        body: JSON.stringify({name, tier}),
+      });
+      return response.ok;
+    }, prior);
+    assert.ok(restored, `要把 ${prior.name} 的档位声明写回（${prior.tier}）`);
+  }
+
   console.log(JSON.stringify({
     harness,
     group: groupName,
@@ -227,6 +255,7 @@ try {
     before: rowBefore.mark,
     afterFree: rowFree.mark,
     afterWithdraw: rowBack.mark,
+    restored: prior,
     note: '用户自己的 key 那一档界面上不给「改档」（见代码：tier === user 时不出编辑按钮）',
     shots: [firstShot, secondShot, thirdShot],
     errors,
