@@ -6,7 +6,7 @@
 PY := .venv/Scripts/python.exe
 PIP := .venv/Scripts/pip.exe
 
-.PHONY: help install dev test lint fmt fmt-check docstate discipline check merge lock clean
+.PHONY: help install dev test lint fmt fmt-check docstate discipline check merge lock clean smoke flow-regression
 
 help:
 	@echo "make install   - 创建 venv 并安装依赖"
@@ -17,6 +17,8 @@ help:
 	@echo "make docstate  - 只跑规范一致性检查"
 	@echo "make discipline- 只跑协作纪律检查"
 	@echo "make check     - 完整门禁 (docstate + discipline + lint + test) —— 提交前必须全绿"
+	@echo "make smoke     - 真栈冒烟 (真后端 + vite + playwright，需浏览器与网络；不进 check)"
+	@echo "make flow-regression - 接入前后判定一致性回归（手动；不进 check）"
 	@echo "make merge BR  - 受控地把分支合入 main（带互斥锁，须在根工作区执行）"
 	@echo "make lock      - 打印当前合并锁状态"
 	@echo "make clean     - 清理缓存与运行期数据"
@@ -29,8 +31,10 @@ install:
 dev:
 	cd backend && ../$(PY) -m app.main
 
+# 并行跑：串行 25 分钟 → 4 worker 约 10 分钟。--dist loadfile 按文件分片，
+# 模块级状态不跨文件互相污染。AP_TEST_WORKERS=1 可退回串行（怀疑顺序依赖时）。
 test:
-	cd backend && ../$(PY) -m pytest
+	cd backend && ../$(PY) -m pytest -n $(or $(AP_TEST_WORKERS),4) --dist loadfile
 
 lint:
 	cd backend && ../.venv/Scripts/ruff.exe check .
@@ -61,6 +65,16 @@ lock:
 check: docstate discipline lint test
 	@echo ""
 	@echo "=== 全量门禁通过 ==="
+
+# 真栈冒烟单列：check 必须离线可跑，smoke 要真起栈 + 浏览器，二者不混。
+# PYTHON 指到本仓库 venv（ci-stack 默认找 PATH 上的 python，会拿错解释器）。
+smoke:
+	cd office && PYTHON=../$(PY) node scripts/ci-stack.mjs
+
+# 判定一致性回归：v5 冻结判据 vs 接入后的交付验收层。手动/发布流程用，
+# 不进 check（它比对历史落盘产物，不该挡住日常门禁）。
+flow-regression:
+	cd backend && PYTHONPATH=.. ../$(PY) scripts/experience_acceptance_flow_regression.py
 
 clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

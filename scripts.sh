@@ -7,7 +7,10 @@ PY=".venv/Scripts/python.exe"
 cmd_docstate()   { "$PY" tools/docstate/docstate.py; }
 cmd_discipline() { "$PY" tools/discipline/discipline.py; }
 cmd_lint()       { (cd backend && ../.venv/Scripts/ruff.exe check . && ../.venv/Scripts/ruff.exe format --check .); }
-cmd_test()       { (cd backend && ../$PY -m pytest); }
+# 并行跑：串行 25 分钟 → 4 worker 约 10 分钟。--dist loadfile 按文件分片，
+# 模块级状态不跨文件互相污染（默认 load 会把同一文件里的用例打散）。
+# AP_TEST_WORKERS=1 可退回串行（怀疑顺序依赖时）。
+cmd_test()       { (cd backend && ../$PY -m pytest -n "${AP_TEST_WORKERS:-4}" --dist loadfile); }
 cmd_check()      { cmd_docstate; cmd_discipline; cmd_lint; cmd_test; echo; echo "=== 全量门禁通过 ==="; }
 cmd_merge()      { shift; "$PY" tools/mergeguard/cli.py merge "$@"; }
 cmd_lock()       { "$PY" tools/mergeguard/cli.py status; }

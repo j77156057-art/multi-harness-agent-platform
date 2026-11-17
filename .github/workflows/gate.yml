@@ -18,10 +18,10 @@ jobs:
         os: [windows-latest, ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -40,14 +40,16 @@ jobs:
         run: ruff format --check .
 
       # ---- Backend tests ----
+      # 与 `make test` / `scripts.sh test` 同一条命令（门禁三处必须等价）。
+      # --dist loadfile 按文件分片，模块级状态不跨文件互相污染。
       - name: pytest
         working-directory: backend
-        run: pytest -v
+        run: pytest -n 4 --dist loadfile
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
 
       - name: Build office frontend
         working-directory: office

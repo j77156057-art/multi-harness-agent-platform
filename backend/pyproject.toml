@@ -35,5 +35,4 @@ addopts = "-q --strict-markers --durations=15"
 asyncio_default_fixture_loop_scope = "function"
 markers = [
     "slow: 耗时较长的测试",
-    "integration: 需要真实 git 仓库或子进程",
 ]
