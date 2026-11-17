@@ -1,8 +1,10 @@
 // 注册表里同时有成员窗口和管理员窗口。管理员窗口的 instance_id 目前统一以
-// `-admin` 结尾，显示名也带“管理员”；`office-admin` 还是平台助手的模型身份，
-// 不是群主可选的外部管理员窗口。成员候选必须先排掉它们，避免同一个窗口既当
+// `-admin` 结尾，显示名也带“管理员”。成员候选必须先排掉它们，避免同一个窗口既当
 // 管理员又当普通成员。
-export const PLATFORM_ASSISTANT_HARNESS_ID = 'office-admin';
+// 助手在注册表里有两个 id：office-assistant 是 worker 实际登记的 harness id，
+// office-admin 是它的模型身份（后端 AdminService 通道用后者）。两个都要排掉，
+// 只排一个会把助手算成可执行成员（2026-11-17 真栈走查实测：可执行成员唯一一个是助手）。
+const PLATFORM_ASSISTANT_HARNESS_IDS = ['office-admin', 'office-assistant'];
 
 export function isAdministratorHarness(item, adminIdentity = null) {
   const id = String(item?.harness_id || item?.id || '').trim();
@@ -13,7 +15,7 @@ export function isAdministratorHarness(item, adminIdentity = null) {
 }
 
 export function isPlatformAssistantHarness(item) {
-  return String(item?.harness_id || item?.id || '') === PLATFORM_ASSISTANT_HARNESS_ID;
+  return PLATFORM_ASSISTANT_HARNESS_IDS.includes(String(item?.harness_id || item?.id || ''));
 }
 
 // 一个窗口属于哪一家 Harness（品牌）。

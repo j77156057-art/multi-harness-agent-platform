@@ -5,6 +5,7 @@ import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } fr
 import { probedAtLine, readInstallCache, writeInstallCache } from './install-cache.js';
 import { formal } from './formal-api.js';
 import { escapeHtml } from './html-escape.js';
+import { fullTime, nowTime } from './time-format.js';
 const clone = value => structuredClone(value);
 
 // 项目历史必须跨刷新保留。此前它只活在这个模块的数组里：刷新、换标签页或
@@ -27,7 +28,7 @@ function readStoredProjects() {
         index: String(project.index || '').padStart(2, '0'),
         createdAt: typeof project.createdAt === 'string' && project.createdAt
           ? project.createdAt
-          : new Date().toLocaleString('zh-CN', {hour12: false}),
+          : nowTime(),
         phase: project.phase === 'scene' ? 'scene' : 'phone',
         source: project.source === 'mock' ? 'mock' : 'platform',
         members: Array.isArray(project.members) ? project.members : [],
@@ -271,7 +272,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       id: `platform-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
       name: project.name,
-      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      createdAt: nowTime(),
       // 平台上已经在做的事，不是"待开工"。
       phase: 'scene',
       source: 'platform',
@@ -788,7 +789,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       card.querySelector('.project-card-open').addEventListener('click', () => {
         activeId = project.id;
         persistActive();
-        onOpenProject(clone(project));
+        // 待开工的项目点「去配置」：进项目即开向导，与创建路径同口径。
+        // 只进办公室不开向导会把人丢在未配置的空台账里（2026-11-17 用户报障复现）。
+        onOpenProject(clone(project), { openAfterCreate: project.phase !== 'scene' });
       });
       card
         .querySelector('.project-card-rename')
@@ -1081,7 +1084,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
       name: repoRelayProject.name,
-      createdAt: new Date(repoRelayProject.created_at || Date.now()).toLocaleString('zh-CN', { hour12: false }),
+      createdAt: fullTime(repoRelayProject.created_at || Date.now(), 'Invalid Date'),
       // 信箱里有东西，就说明这个项目已经在跑了 —— 不装成"待开工"。
       phase: 'scene',
       source: 'platform',
@@ -1201,7 +1204,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
       name,
-      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      createdAt: nowTime(),
       phase: 'phone',
       source: projectSource.value,
       // 平台上的那两个 id：改名、移除、找回都按 id 走，不按名字。
@@ -1243,7 +1246,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       id: `project-${String(sequence).padStart(3, '0')}`,
       index: String(sequence).padStart(2, '0'),
       name: recoverable.name,
-      createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      createdAt: nowTime(),
       // 恢复出来的项目在平台上**已经有活了**（taskIds 是从平台读回来的），
       // 所以它不是"待开工"，而是"已经在干"：卡片上要写「已开工 / 进入办公室」，
       // 而不是"先配置一下"——点下去直接就是办公室，写错了会让人以为还得再配一次。

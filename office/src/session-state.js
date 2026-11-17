@@ -173,7 +173,10 @@ export function forgetDraft(name) {
   }
 }
 
-/** 清空全部草稿（测试与「别处重置」用）。 */
+/**
+ * 清空全部草稿：**仅测试使用**（office/scripts/verify-session-state.mjs）。
+ * 应用代码零调用 —— 「别处重置」走的是按项删除，不是全清。
+ */
 export function clearDrafts() {
   try {
     storage()?.removeItem(DRAFT_KEY);
@@ -247,7 +250,7 @@ export function writeViewState(viewState) {
   }
 }
 
-/** 清空视图状态（测试用）。 */
+/** 清空视图状态：**仅测试使用**（office/scripts/verify-session-state.mjs）。 */
 export function clearViewState() {
   try {
     storage()?.removeItem(VIEW_KEY);

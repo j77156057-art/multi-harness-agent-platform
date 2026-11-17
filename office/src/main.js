@@ -20,7 +20,6 @@ import '../contributions/office-opening-phone/office-opening-phone.js';
 import './opening-host.css';
 import { mountOpeningHost, OPENING_GOAL_MAX, openingProjectName } from './opening-host.js';
 import './flat-office.css';
-import { mountAdminAgent } from './admin-agent.js';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { mountRelayWorkspace } from './relay-workspace.js';
 import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
@@ -299,7 +298,8 @@ const projectWorkspace = mountProjectWorkspace({
     $('#aoStartBtn').hidden = relayProject;
     // 页面所处的阶段（大厅 / 进场）：样式与冒烟脚本都看这个标记。
     document.body.dataset.projectPhase = project.phase || 'scene';
-    adminAgent.setAdminHarness?.(ADMIN_IDENTITY);
+    pendingAdminHarness = ADMIN_IDENTITY;
+    adminAgent?.setAdminHarness?.(ADMIN_IDENTITY);
     // 开工向导的**实例表**：按平台注册表现算（规则见 opening-candidates.js）。
     // 这里刻意不再拼 project.members —— 成员名单不是"平台上现在有哪些窗口"，
     // 拼进来正好会掩盖"新注册的窗口没进候选"这个缺陷（P2-7）。
@@ -393,12 +393,17 @@ Object.defineProperty(window, 'officePreviewState', {
 });
 
 // 平台助手（巡检 + 上报）不是管理员：它只读。入口放在顶栏，不跟项目入口混。
-const adminAgent = mountAdminAgent({
-  launchArea: $('#aoTopActions'),
-  phoneArea: null,
-  members: memberCandidates.map((h) => ({ harness_id: h.harness_id, name: h.name })),
-  bootstrap: true,
-  adminHarness: ADMIN_IDENTITY,
+// 首屏不需要巡检面板：独立 chunk，异步加载完成即挂载（按钮晚一拍进顶栏）。
+let adminAgent = null;
+let pendingAdminHarness = ADMIN_IDENTITY;
+import('./admin-agent.js').then(({ mountAdminAgent }) => {
+  adminAgent = mountAdminAgent({
+    launchArea: $('#aoTopActions'),
+    phoneArea: null,
+    members: memberCandidates.map((h) => ({ harness_id: h.harness_id, name: h.name })),
+    bootstrap: true,
+    adminHarness: pendingAdminHarness,
+  });
 });
 
 // 平台没连上时，大厅里说清楚，别让人对着空界面猜。

@@ -57,7 +57,11 @@ export function writeInstallCache(payload) {
   }
 }
 
-/** 清缓存：人点了探测但结果作废（例如读失败）时用不到，留给测试与将来。 */
+/**
+ * 清缓存：**仅测试使用**（office/scripts/verify-install-cache.mjs）。
+ * 应用代码零调用 —— 人点了探测但结果作废时也不需要清（缓存坏了
+ * readInstallCache 自己会丢掉它）。留着是因为测试要能从干净状态开始。
+ */
 export function clearInstallCache() {
   try {
     storage()?.removeItem(KEY);

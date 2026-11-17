@@ -12,6 +12,7 @@ import { DONE_STATES, FAILED_STATES, outcomeLabel, stateLabel } from './state-la
 import { escapeHtml } from './html-escape.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
 import { formalJson } from './formal-api.js';
+import { minuteTime } from './time-format.js';
 const $ = (selector) => document.querySelector(selector);
 const escape = escapeHtml;
 
@@ -30,17 +31,7 @@ function harnessName(id) {
   return (hit && hit.name) || id;
 }
 
-function when(value) {
-  const at = Date.parse(value || '');
-  if (Number.isNaN(at)) return '';
-  return new Date(at).toLocaleString('zh-CN', {
-    hour12: false,
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+const when = (value) => minuteTime(value, '');
 
 /** 列表里的任务名：去掉重复的项目名前缀（页面顶上已经写了是哪个项目）。 */
 function titleOf(item) {

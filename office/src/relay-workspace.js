@@ -17,6 +17,7 @@
  */
 import './relay-workspace.css';
 import { escapeHtml } from './html-escape.js';
+import { fullTime } from './time-format.js';
 
 const OVERVIEW = '/api/formal/relay/overview';
 const ROSTER = '/api/formal/relay/roster';
@@ -24,12 +25,7 @@ const LETTERS = '/api/formal/relay/letters';
 /** 与后端 `MAX_HOPS` 同一个口径（后端是权威，这里只用来标"快到上限了"）。 */
 const MAX_HOPS = 6;
 
-function when(iso) {
-  if (!iso) return '时间未记';
-  const stamp = new Date(iso);
-  if (Number.isNaN(stamp.getTime())) return '时间未记';
-  return stamp.toLocaleString('zh-CN', { hour12: false });
-}
+const when = (iso) => fullTime(iso, '时间未记');
 
 async function fetchJson(url) {
   const response = await fetch(url, { cache: 'no-store' });

@@ -54,6 +54,10 @@ export function createRoutedMessage({
   });
 }
 
+/**
+ * 构造一条定向收件人：**仅测试使用**（office/scripts/verify-routed-messages.mjs）。
+ * 应用代码走 createRoutedMessage 的真实路径，不经过这个薄封装。
+ */
 export function routedRecipient(instanceId, displayName, role = 'member') {
   return normalizeRecipient({ instance_id: instanceId, display_name: displayName, role });
 }

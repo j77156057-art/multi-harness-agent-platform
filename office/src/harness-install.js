@@ -18,7 +18,7 @@ import { shortenPath } from './cli-transcript.js';
 import { escapeHtml as escape } from './html-escape.js';
 
 /** 平台给的状态 -> 人读的一句话。顺序就是该先看哪个。 */
-export const INSTALL_STATUS = {
+const INSTALL_STATUS = {
   missing: { label: '未安装', tone: 'bad' },
   version_failed: { label: '装了但读不到版本', tone: 'warn' },
   ready: { label: '已找到', tone: 'ok' },

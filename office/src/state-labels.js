@@ -53,7 +53,7 @@ export const stateLabel = (status) => STATE_LABEL[status] || String(status || ''
  * 事件列表是给人看"这条活经历了什么"的，印机器名等于让人自己翻译。
  * 不认识的事件名照实显示（宁可原样，也不要编一个错的动作）。
  */
-export const EVENT_LABEL = {
+const EVENT_LABEL = {
   claim: '已有人领取该任务',
   claim_for_revision: '已领回返工',
   start: '开始执行',
@@ -103,7 +103,7 @@ export const eventLabel = (name) => EVENT_LABEL[name] || String(name || '');
  *
  * 界面上统一成书面说法；**比较仍然用平台原值** —— 拿显示词去比数据会错。
  */
-export const OUTCOME_LABEL = {
+const OUTCOME_LABEL = {
   '交上去了': '已提交',
   '交了东西': '已提交',
   '放开了': '已释放',

@@ -18,6 +18,7 @@
  */
 
 import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { fullTime, minuteTime, shortTime } from './time-format.js';
 import { createOfficeReadRuntime } from './office-read-runtime.js';
 import { createOfficeReadFixture } from './office-read-fixture.js';
 import { ACTION_HINT, ACTION_LABEL, CANCEL_STATES, humanDecisionActions, releaseNeedsOverride } from './human-actions.js';
@@ -162,11 +163,7 @@ const TIER_LABEL = { free: '免费', reserve: '兜底', metered: '计量', user:
 
 
 // 转义统一走 `html-escape.js`（那里是照这份抄的原始实现，别再手抄第二份）。
-const timeOf = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN', { hour12: false });
-};
+const timeOf = (value) => fullTime(value, '—');
 
 /**
  * 事件行里的**短时间**：`10/18 20:20`。
@@ -174,30 +171,10 @@ const timeOf = (value) => {
  * 事件列表那一列很窄，完整的 `2026/10/18 20:20:08` 放不下（窄屏会横向溢出）。
  * 完整时间留在 title 里。
  */
-const timeShort = (value) => {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  const month = String(date.getMonth() + 1);
-  const day = String(date.getDate());
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${month}/${day} ${hours}:${minutes}`;
-};
+const timeShort = (value) => shortTime(value, '—');
 
 /** 只要到分钟：额度曲线上的刻度，精确到秒没有意义。 */
-const timeMinute = (value) => {  if (!value) return '—';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? '—'
-    : date.toLocaleString('zh-CN', {
-        hour12: false,
-        month: 'numeric',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-};
+const timeMinute = (value) => minuteTime(value, '—');
 
 /** 项目的任务范围：开工回执里的 taskIds ∪ 标题前缀「项目名 · 」。 */
 function projectScope() {

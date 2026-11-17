@@ -10,12 +10,12 @@ export function openingProjectName(name) {
   const value = String(name ?? '').trim();
   return value || '未命名项目';
 }
-export function openingProjectScope(projectId) {
+function openingProjectScope(projectId) {
   return projectId ? `平台项目 ${projectId}` : '';
 }
 
 // Mock-only host. Neither a selected instance nor a completed animation starts a Harness.
-export function validateOpeningConfig(request, catalog, { connected = false } = {}) {
+function validateOpeningConfig(request, catalog, { connected = false } = {}) {
   if (!request || !catalog || !['mock', 'formal'].includes(catalog.mode)) return '缺少任务配置';
   if (!connected) return '尚未连接 Harness';
   if (typeof request.request_id !== 'string' || !request.request_id) return '缺少请求编号';
