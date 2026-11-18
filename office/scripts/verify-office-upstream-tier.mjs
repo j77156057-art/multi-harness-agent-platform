@@ -21,11 +21,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
+import { pickMemberWindow, requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-upstream-tier.mjs');
 await requireProjectGroups(base, 'verify-office-upstream-tier.mjs');
-const harness = process.env.OFFICE_UTIER_HARNESS || 'codex';
+// 默认挑**本项目里真实存在的成员窗口**：左栏只列本项目的人（2026-11-18），
+// 写死的 id 很可能不是成员，于是必然找不到。留空 = 从界面上的成员行里挑一个。
+const harness = process.env.OFFICE_UTIER_HARNESS || '';
 const groupName = process.env.OFFICE_UTIER_GROUP || 'opencode';
 const shotDir = process.env.OFFICE_UTIER_SHOTS || path.join(process.env.TEMP || '.', 'office-upstream-tier');
 fs.mkdirSync(shotDir, {recursive: true});
@@ -141,31 +143,38 @@ const waitForMark = async (owner, modelId, predicate, what, timeoutMs = 90000) =
 
 try {
   await page.goto(base, {waitUntil: 'domcontentloaded'});
-  const rowSelector = `#aoWorkspace .flat-conv[data-harness="${harness}"]`;
   const openers = page.locator('.project-platform-open');
   await openers.first().waitFor({timeout: 30000});
   const total = await openers.count();
   let entered = false;
+  let memberTarget = harness;
   for (let index = 0; index < total; index += 1) {
     await page.locator('.project-platform-open').nth(index).click();
-    try {
-      await page.waitForSelector(rowSelector, {timeout: 6000});
-      entered = true;
-      break;
-    } catch {
-      await page.goto(base, {waitUntil: 'domcontentloaded'});
-      await page.waitForSelector('.project-platform-open', {timeout: 30000});
+    // 没指定窗口就在**这个项目里**挑一个成员 —— 左栏只有本项目的人。
+    memberTarget = harness || (await pickMemberWindow(page));
+    if (memberTarget) {
+      try {
+        await page.waitForSelector(`#aoWorkspace .flat-conv[data-harness="${memberTarget}"]`, {timeout: 6000});
+        entered = true;
+        break;
+      } catch {
+        // 这个项目里没有这个窗口，换下一个。
+      }
     }
+    await page.goto(base, {waitUntil: 'domcontentloaded'});
+    await page.waitForSelector('.project-platform-open', {timeout: 30000});
   }
   if (!entered) {
     skip(
       'verify-office-upstream-tier.mjs',
-      `没有哪个项目里能看到窗口「${harness}」，分组「${groupName}」也无从谈起。` +
-        '这条要一个有该窗口的真实项目：用 start-fresh.ps1 起的界面，' +
-        '或用 OFFICE_UTIER_HARNESS=<窗口 id> / OFFICE_UTIER_GROUP=<分组名> 指到已有的项目与分组',
+      harness
+        ? `没有哪个项目里能看到窗口「${harness}」，分组「${groupName}」也无从谈起。` +
+          '这条要一个有该窗口的真实项目：用 start-fresh.ps1 起的界面，' +
+          '或用 OFFICE_UTIER_HARNESS=<窗口 id> / OFFICE_UTIER_GROUP=<分组名> 指到已有的项目与分组'
+        : '平台上没有哪个项目能看见它的成员窗口。这条要一个已经开工、成员窗口起着的项目。',
     );
   }
-  await page.locator(rowSelector).click();
+  await page.locator(`#aoWorkspace .flat-conv[data-harness="${memberTarget}"]`).click();
   await page.waitForSelector('.flat-model', {timeout: 30000});
 
   // 等额度池清单真的到（冷启动要 spawn 几个 CLI 的名册）

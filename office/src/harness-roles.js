@@ -33,3 +33,17 @@ export function baseHarnessOf(id) {
   const match = /^(.+?)-(?:member|window)-[A-Za-z0-9][A-Za-z0-9_-]*$/.exec(value);
   return match ? match[1] : value;
 }
+
+// 这个窗口是不是**自己加的实例**（而不是 CLI 基座本身）。
+//
+// 基座是 CLI 本身（``claude-code``、``codebuddy``……）；实例是同一个 CLI 再开
+// 一个身份（``codebuddy-member-1``、``架构 · Arch``）—— 那是**人自己加的**，
+// 加错了就该能删。
+//
+// 形状与后端 ``app.adapter.formal_worker.base_harness_id`` 接受的一致：前后端
+// 对「这是不是一个实例」是同一个答案。
+export function isInstanceWindow(id) {
+  const value = String(id || '').trim();
+  if (!value) return false;
+  return /^(.+?)-(?:member|window)-[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/.test(value);
+}

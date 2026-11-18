@@ -1368,6 +1368,9 @@
 
 .flat-thread-msg.is-mine { border-left-color: #2f5d8c; }
 .flat-thread-msg.is-admin { border-left-color: #1f7a4d; }
+/* 平台代转达的话：它是**替人转的**，但既不是人说的，也不是管理员说的 ——
+   颜色不能与管理员那条一样，否则看的人会以为那是管理员回的。 */
+.flat-thread-msg.is-relayed { border-left-color: #8a6d1f; }
 .flat-thread-msg b { font-size: 11px; color: #5b6673; font-weight: 600; }
 .flat-thread-at { margin-left: 8px; font-size: 11px; color: #8a94a0; }
 .flat-thread-msg p { margin: 2px 0 0; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -3005,4 +3008,95 @@
 
 @media (max-width: 600px) {
   .flat-experience dl > div { grid-template-columns: minmax(0, 1fr); gap: 1px; }
+}
+/* ---- 正在工作：名字旁边转圈 ------------------------------------------- */
+.flat-spinner {
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.35em;
+  vertical-align: -0.08em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: flat-spin 0.9s linear infinite;
+  opacity: 0.75;
+}
+@keyframes flat-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .flat-spinner { animation-duration: 3s; }
+}
+
+/* ---- 助手此刻在干什么 + 本群名册 ---------------------------------- */
+.flat-assistant-live .flat-assistant-live-question,
+.flat-assistant-live .flat-assistant-live-answer,
+.flat-assistant-live .flat-assistant-live-error {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.08);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.flat-assistant-live .flat-assistant-live-question {
+  font-size: 0.92em;
+  opacity: 0.85;
+}
+.flat-assistant-live .flat-assistant-live-answer {
+  border-left: 2px solid currentColor;
+}
+.flat-assistant-live .flat-assistant-live-error {
+  border-left: 2px solid #c0504d;
+}
+.flat-roster-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.flat-roster-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.flat-roster-list b { font-weight: 600; }
+.flat-roster-tag {
+  font-style: normal;
+  font-size: 0.8em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.7;
+}
+.flat-roster-what {
+  font-size: 0.88em;
+  opacity: 0.75;
+}
+
+/* ---- 长对话：收起来，不是截断 ----------------------------------------- */
+.flat-assistant-text.is-collapsible .flat-assistant-body {
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.flat-assistant-text.is-collapsible.is-open .flat-assistant-body {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: none;
+}
+.flat-assistant-expand {
+  margin-top: 6px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ao-accent, #b4532a);
+  background: none;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  cursor: pointer;
 }

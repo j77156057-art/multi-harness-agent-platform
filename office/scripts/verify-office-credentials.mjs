@@ -20,11 +20,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
+import { pickMemberWindow, requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-credentials.mjs');
 await requireProjectGroups(base, 'verify-office-credentials.mjs');
-const harness = process.env.OFFICE_CRED_HARNESS || 'codex';
+// 默认挑**本项目里真实存在的成员窗口**。以前写死 'codex'：那时左栏列的是
+// 平台上登记的全部窗口，任何窗口都能找到；现在左栏只列本项目的人（2026-11-18），
+// 一个不是本项目成员的窗口根本不在那里 —— 写死的 id 于是必然找不到。
+// 留空 = 从界面上的成员行里挑第一个；用环境变量可以指定别的窗口。
+const harness = process.env.OFFICE_CRED_HARNESS || '';
 const shotDir = process.env.OFFICE_CRED_SHOTS || path.join(process.env.TEMP || '.', 'office-credentials');
 fs.mkdirSync(shotDir, {recursive: true});
 
@@ -70,32 +74,39 @@ try {
 
   // 进项目：首屏列的是"平台上已有的项目"，要进的是有这个窗口的那一个。
   // 不按名字猜（名字是人写的），点进去看有没有这个窗口。
-  const rowSelector = `#aoWorkspace .flat-conv[data-harness="${harness}"]`;
   const openers = page.locator('.project-platform-open');
   await openers.first().waitFor({timeout: 30000});
   const total = await openers.count();
   assert.ok(total > 0, '首屏要列出平台上的项目');
   let entered = false;
+  let target = harness;
   for (let index = 0; index < total; index += 1) {
     await page.locator('.project-platform-open').nth(index).click();
-    try {
-      await page.waitForSelector(rowSelector, {timeout: 6000});
-      entered = true;
-      break;
-    } catch {
-      await page.goto(base, {waitUntil: 'domcontentloaded'});
-      await page.waitForSelector('.project-platform-open', {timeout: 30000});
+    // 没指定窗口就在**这个项目里**挑一个成员 —— 左栏只有本项目的人。
+    target = harness || (await pickMemberWindow(page));
+    if (target) {
+      try {
+        await page.waitForSelector(`#aoWorkspace .flat-conv[data-harness="${target}"]`, {timeout: 6000});
+        entered = true;
+        break;
+      } catch {
+        // 这个项目里没有这个窗口，换下一个。
+      }
     }
+    await page.goto(base, {waitUntil: 'domcontentloaded'});
+    await page.waitForSelector('.project-platform-open', {timeout: 30000});
   }
   if (!entered) {
     skip(
       'verify-office-credentials.mjs',
-      `没有哪个项目里能看到窗口「${harness}」。这条要一个有该窗口的真实项目：` +
-        '用 start-fresh.ps1 起的界面（它会把本机 CLI 登记成窗口），' +
-        '或用 OFFICE_CRED_HARNESS=<窗口 id> 指到界面里已有的窗口',
+      harness
+        ? `没有哪个项目里能看到窗口「${harness}」。这条要一个有该窗口的真实项目：` +
+          '用 start-fresh.ps1 起的界面（它会把本机 CLI 登记成窗口），' +
+          '或用 OFFICE_CRED_HARNESS=<窗口 id> 指到界面里已有的窗口'
+        : '平台上没有哪个项目能看见它的成员窗口。这条要一个已经开工、成员窗口起着的项目。',
     );
   }
-  await page.locator(rowSelector).click();
+  await page.locator(`#aoWorkspace .flat-conv[data-harness="${target}"]`).click();
 
   // 1. 有多条，且只有一条在用，并且写着指纹
   const before = await waitForState((state) => state.rows.length > 0, '凭据列表有内容');

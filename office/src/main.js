@@ -22,7 +22,7 @@ import { mountOpeningHost, OPENING_GOAL_MAX, openingProjectName } from './openin
 import './flat-office.css';
 import { mountProjectWorkspace } from './project-workspace.js';
 import { mountRelayWorkspace } from './relay-workspace.js';
-import { isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { isAdministratorHarness, isInstanceWindow, isPlatformAssistantHarness } from './harness-roles.js';
 import { openingCandidateWindows } from './opening-candidates.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
@@ -43,14 +43,23 @@ const ADMIN_IDENTITY = status?.admin?.identity || null;
 // "已登记"不等于"能干活"：没有平台凭据的窗口既不能当管理员（细化会失败），
 // 也不能当成员（任务派给它就永远停在 ready 没人领）。
 const actionable = roster.filter((item) => Number(item.credential_count ?? 1) > 0);
+// 候选里**只有基座窗口**（Claude Code、CodeBuddy……这些 CLI 本身）与**管理员
+// 窗口实例**（``codex-window-admin``、``Qoder · 管理员``）。
+//
+// 为什么：同一个 CLI 再开一个身份（``codebuddy-member-1``、``架构 · Arch``）是
+// **自己加的**窗口 —— 注册表里多了一行，不等于它是谁的项目成员。全列出来，成员栏
+// 就是一堵墙（2026-11-18）。管理员实例是例外：它们本来就是给项目当管理员的
+// （见 opening-candidates.js 的说明：挡在候选之外会让人没法换管理员）。
 const adminCandidates = actionable
   .filter((item) => !isPlatformAssistantHarness(item))
+  .filter((item) => !isInstanceWindow(item.harness_id) || isAdministratorHarness(item, ADMIN_IDENTITY))
   .map((item) => ({ harness_id: item.harness_id, name: item.name || item.harness_id }));
 const administratorIds = roster
   .filter((item) => isAdministratorHarness(item, ADMIN_IDENTITY))
   .map((item) => item.harness_id);
 const memberCandidates = actionable
   .filter((item) => !isAdministratorHarness(item, ADMIN_IDENTITY) && !isPlatformAssistantHarness(item))
+  .filter((item) => !isInstanceWindow(item.harness_id))
   .map((item) => ({ harness_id: item.harness_id, name: item.name || item.harness_id }));
 
 // 开工向导的候选名单**不能**用上面这份模块级快照：页面打开之后才注册的窗口
@@ -258,7 +267,17 @@ openingHost = mountOpeningHost({
 // 向导候选：现读注册表 → 按规则重算实例表 → 再开。三个入口（顶栏、空项目里的
 // 「去写第一件事」、新建项目后自动打开）都必须走这里，否则又退回模块级快照。
 function applyWizardCandidates() {
-  const windows = wizardWindows();
+  // 只把**基座窗口**（Claude Code、CodeBuddy……这些 CLI 本身）当候选。
+  // 那个 CLI 再开一个身份（``codebuddy-member-1``、``架构 · Arch``）是**自己加的**
+  // 窗口：它不是这个项目天然有的人，只是注册表里多了一行。全列出来，管理员
+  // 窗口那一栏就变成一堵墙（2026-11-18）。
+  //
+  // 例外：**管理员窗口实例**（``codex-window-admin``、``Qoder · 管理员``）仍然留着 ——
+  // 它们本来就是给项目当管理员的（见 opening-candidates.js 的说明：挡在候选之外
+  // 会让人没法换管理员）。挡掉的是那些「成员身份」的实例。
+  const windows = wizardWindows().filter(
+    (item) => !isInstanceWindow(item.harness_id) || isAdministratorHarness(item),
+  );
   openingHost?.setProjectAdminCandidates?.(
     windows.map((item) => item.harness_id),
     Object.fromEntries(windows.map((item) => [item.harness_id, item.name])),

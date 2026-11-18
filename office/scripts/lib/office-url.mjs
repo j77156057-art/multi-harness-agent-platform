@@ -35,6 +35,32 @@ export async function officeReachable(url = officeUrl(), timeoutMs = 2500) {
  * `explicit` 是各脚本自己的覆盖变量（`OFFICE_UI_URL` 之类）—— 保留它们，
  * 免得把已经写好的用法作废。
  */
+
+/**
+ * 左栏里的**本项目成员窗口**。
+ *
+ * 左栏只列本项目的人（2026-11-18 起）：平台上登记但本群没活的窗口不再占
+ * 一行。所以「找一个能操作的窗口」不能写死 id —— 写死的那个很可能不是成员，
+ * 于是脚本必然找不到、只能跳过。这里从界面上实际有的成员行里挑一个。
+ *
+ * 返回 harness id；界面还没画出左栏时返回空串（调用方据此跳过）。
+ */
+export async function pickMemberWindow(page) {
+  try {
+    await page.waitForSelector("#aoWorkspace .flat-conv[data-harness]", { timeout: 8000 });
+  } catch {
+    return "";
+  }
+  const ids = await page.evaluate(() =>
+    [
+      ...document.querySelectorAll("#aoWorkspace .flat-conv[data-harness]")
+    ]
+      .map((el) => el.getAttribute("data-harness") || "")
+      .filter((id) => id && id !== "office-assistant"),
+  );
+  return ids[0] || "";
+}
+
 export async function requireOffice(scriptName, explicit) {
   const url = officeUrl(explicit);
   if (await officeReachable(url)) return url;

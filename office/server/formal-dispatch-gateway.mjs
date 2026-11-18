@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { createWindowProvisioner } from './window-provisioner.mjs';
+import { createAdminWorkerProvisioner } from './admin-worker-provisioner.mjs';
 import { createTerminalSessions } from './terminal-session.mjs';
 import { clearRelayProject, readRelayOverview, writeRelayProject } from './relay-overview.mjs';
 import { WebSocketServer } from 'ws';
@@ -11,6 +12,21 @@ import { parseTranscript } from '../src/cli-transcript.js';
 
 const PREFIX='/api/formal';
 const fail=(status,message)=>Object.assign(new Error(message),{status});
+// 一条**项目目标**指定的管理员窗口：目标带着机器可读的那一份（project-goal-json:<json>），
+// 里面的 "admin" 就是人挑的管理员。不是目标消息就返回空串。
+const goalAdministrator=refs=>{
+  if(!Array.isArray(refs))return '';
+  for(const ref of refs){
+    const text=String(ref||'');
+    if(!text.startsWith('project-goal-json:'))continue;
+    try{
+      const envelope=JSON.parse(text.slice('project-goal-json:'.length));
+      const admin=String(envelope?.admin||'').trim();
+      if(admin)return admin;
+    }catch{continue;}
+  }
+  return '';
+};
 const ident=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(s);
 // 分配：一条任务在轮次里被定给了谁。轮次读面的形状是
 // `{rounds:[{round_id,group_id,state,tasks[],applications[],assignments[]}]}`，
@@ -475,7 +491,8 @@ export function createFormalGateway(config={}){
       if(requestedGroup&&!ident(requestedGroup))throw fail(400,'invalid_group');
       const groupId=requestedGroup||config.group;
       if(!enabled){if(req.method==='GET'&&route==='/status'){json(res,200,{configured:false,connected:false});return true;}throw fail(503,'formal_gateway_not_configured');}
-      if(req.method==='POST'&&(req.headers['x-office-formal']!=='1'||req.headers.origin!==`http://${host}`))throw fail(403,'same_origin_write_required');
+      // 写操作（POST / DELETE）都要求同源 + 显式标记：DELETE 也会改注册表。
+      if(['POST','DELETE'].includes(req.method)&&(req.headers['x-office-formal']!=='1'||req.headers.origin!==`http://${host}`))throw fail(403,'same_origin_write_required');
       const operator=await scope();
       // 只有"用户点名要另一个群"时才去平台核一遍（默认那个启动时已经验过）。
       if(requestedGroup)await ensureGroup(groupId);
@@ -539,6 +556,9 @@ export function createFormalGateway(config={}){
           harnesses:listed.filter(h=>h.registration_version).map(h=>({harness_id:h.harness_id,
           name:h.name||h.harness_id,status:h.status,registration_version:h.registration_version,
           provider:h.provider,
+          // 平台承认的管理员（AP_ADMIN_SUBJECTS 白名单）：界面据此提醒
+          // 「这个窗口当管理员不生效」，而不是让人以为目标被受理了。
+          is_admin:!!h.is_admin,
           // `credential_count` 是平台那边"这个窗口能不能真的领活"的依据：
           // 登记在册但没有凭据的窗口领不了任务，派给它的活会永远停在 ready。
           credential_count:Number(h.credential_count||0),
@@ -548,6 +568,13 @@ export function createFormalGateway(config={}){
               adapter:t.adapter,adapter_version:t.adapter_version,capabilities:t.capabilities})),
             ...declaredBaseTemplates(members),
           ].filter(t=>!listed.some(h=>h.harness_id===t.harness_id&&h.registration_version))});return true;
+      }
+      if(req.method==='DELETE'&&/^\/harnesses\/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/.test(route)){
+        // 删掉**自己加的**窗口：只删实例窗口（`<base>-member-<slot>` /
+        // `<base>-window-<slot>`），基座是 CLI 本身，平台会拒绝并说清原因。
+        const id=route.slice('/harnesses/'.length);
+        const result=await call('/harnesses/'+encodeURIComponent(id),undefined,undefined,'DELETE');
+        json(res,200,result);return true;
       }
       if(req.method==='POST'&&route==='/harnesses'){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>12000)throw fail(413,'body_too_large');}
@@ -1223,6 +1250,18 @@ export function createFormalGateway(config={}){
         const result=await call('/assistant/runs');
         json(res,200,result);return true;
       }
+      if(req.method==='GET'&&route==='/assistant/live'){
+        // 助手**此刻**在干什么（收到没、在忙什么、答完没）。
+        // 没有它，办公室只知道"问完了"，不知道"它收到了没有"——
+        // 人只能对着一个不动的面板等（2026-11-18 真机走查实测）。
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/assistant/live');
+        json(res,200,result);return true;
+      }
+      if(req.method==='GET'&&route==='/roster'){
+        // 本群的名册：谁在线、在忙什么、谁是管理员。助手与办公室读的是同一份。
+        const result=await call('/groups/'+encodeURIComponent(groupId)+'/roster');
+        json(res,200,result);return true;
+      }
       if(req.method==='GET'&&route==='/messages'){
         const sinceRaw=url.searchParams.get('since_seq')||'0';
         const limitRaw=url.searchParams.get('limit')||'100';
@@ -1277,6 +1316,14 @@ export function createFormalGateway(config={}){
         if(!body||Array.isArray(body)||Object.keys(body).some(k=>!fields.includes(k))||typeof body.body!=='string'||!body.body.trim())throw fail(400,'invalid_message_fields');
         if(body.mentions!==undefined&&!Array.isArray(body.mentions))throw fail(400,'invalid_message_fields');
         if(body.refs!==undefined&&!Array.isArray(body.refs))throw fail(400,'invalid_message_fields');
+        // 一条**项目目标**交到哪个群，就得先让管理员在这个群里**就位**。顺序反了，目标
+        // 会被管理员 worker 当成历史目标跳过（它首轮只锚定、不重放）—— 群里没人管，
+        // 界面却显示"已开工"（2026-11-17 真机走查实测到的静默失败）。
+        const goalAdmin=goalAdministrator(body.refs);
+        if(goalAdmin){
+          const ready=await adminProvisioner.ensure({harnessId:goalAdmin,group:groupId});
+          if(!ready.ready)throw fail(503,'admin_worker_not_ready: '+String(ready.reason||''));
+        }
         const result=await call('/groups/'+encodeURIComponent(groupId)+'/messages',{author_kind:'human',author_id:operator,
           body:body.body,mentions:body.mentions||[],...(body.task_id?{task_id:body.task_id}:{}),refs:body.refs||[],
           ...(body.direct?{direct:true}:{})});
@@ -1463,6 +1510,15 @@ export function createFormalGateway(config={}){
     group:config.group,
     upstream:config.upstream,
     tokenFile:config.tokenFile,
+  });
+  // 管理员 worker：一个 worker 一次只服务一个群，所以**每个项目群**都得有自己的那一个。
+  // 目标交到哪个群，就得先让管理员在这个群里就位（见 admin-worker-provisioner.mjs
+  // 顶上那段为什么）。
+  const adminProvisioner=createAdminWorkerProvisioner({
+    repoRoot,
+    python:config.pythonPath,
+    dataDir:path.join(repoRoot,'data'),
+    upstream:config.upstream,
   });
   // 内置终端：只在人点开时起一个本机 shell（见 docs/notes/terminal-design.md）。
   // 它不给 harness 开，也不代跑任何清单里的命令 —— 命令要么人点按钮、要么人自己敲。

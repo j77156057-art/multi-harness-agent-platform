@@ -22,11 +22,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
+import { pickMemberWindow, requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-model-declare.mjs');
 await requireProjectGroups(base, 'verify-office-model-declare.mjs');
-const harness = process.env.OFFICE_DECLARE_HARNESS || 'codex';
+// 默认挑**本项目里真实存在的成员窗口**：左栏只列本项目的人（2026-11-18），
+// 写死的 id 很可能不是成员，于是必然找不到。留空 = 从界面上的成员行里挑一个。
+const harness = process.env.OFFICE_DECLARE_HARNESS || '';
 const shotDir = process.env.OFFICE_DECLARE_SHOTS || path.join(process.env.TEMP || '.', 'office-declare');
 fs.mkdirSync(shotDir, {recursive: true});
 
@@ -93,31 +95,38 @@ try {
   await page.goto(base, {waitUntil: 'domcontentloaded'});
 
   // 进有这个窗口的那个项目（不按名字猜）。
-  const rowSelector = `#aoWorkspace .flat-conv[data-harness="${harness}"]`;
   const openers = page.locator('.project-platform-open');
   await openers.first().waitFor({timeout: 30000});
   const total = await openers.count();
   let entered = false;
+  let memberTarget = harness;
   for (let index = 0; index < total; index += 1) {
     await page.locator('.project-platform-open').nth(index).click();
-    try {
-      await page.waitForSelector(rowSelector, {timeout: 6000});
-      entered = true;
-      break;
-    } catch {
-      await page.goto(base, {waitUntil: 'domcontentloaded'});
-      await page.waitForSelector('.project-platform-open', {timeout: 30000});
+    // 没指定窗口就在**这个项目里**挑一个成员 —— 左栏只有本项目的人。
+    memberTarget = harness || (await pickMemberWindow(page));
+    if (memberTarget) {
+      try {
+        await page.waitForSelector(`#aoWorkspace .flat-conv[data-harness="${memberTarget}"]`, {timeout: 6000});
+        entered = true;
+        break;
+      } catch {
+        // 这个项目里没有这个窗口，换下一个。
+      }
     }
+    await page.goto(base, {waitUntil: 'domcontentloaded'});
+    await page.waitForSelector('.project-platform-open', {timeout: 30000});
   }
   if (!entered) {
     skip(
       'verify-office-model-declare.mjs',
-      `没有哪个项目里能看到窗口「${harness}」。这条要一个有该窗口的真实项目：` +
-        '用 start-fresh.ps1 起的界面（它会把本机 CLI 登记成窗口），' +
-        '或用 OFFICE_DECLARE_HARNESS=<窗口 id> 指到界面里已有的窗口',
+      harness
+        ? `没有哪个项目里能看到窗口「${harness}」。这条要一个有该窗口的真实项目：` +
+          '用 start-fresh.ps1 起的界面（它会把本机 CLI 登记成窗口），' +
+          '或用 OFFICE_DECLARE_HARNESS=<窗口 id> 指到界面里已有的窗口'
+        : '平台上没有哪个项目能看见它的成员窗口。这条要一个已经开工、成员窗口起着的项目。',
     );
   }
-  await page.locator(rowSelector).click();
+  await page.locator(`#aoWorkspace .flat-conv[data-harness="${memberTarget}"]`).click();
   await page.waitForSelector('.flat-model', {timeout: 30000});
 
   // 展开额度池模型清单（长清单默认收起）。必须**点**开：折叠状态记在界面里，

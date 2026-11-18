@@ -36,7 +36,9 @@ const tasks = ['in_progress', 'awaiting_human', 'ready', 'approved'].map((status
 }));
 const project = { id: 'project-design', index: '01', name: '产品体验升级', createdAt: '2026/10/28 10:00:00', phase: 'scene', source: 'platform', members: [member], taskIds: tasks.map(task => task.task_id) };
 const fixtures = {
-  '/status': { configured: true, connected: true, project_id: 'design', group_id: 'design-group', operator: 'office-operator', admin: { configured: true, identity: admin }, project_members: [member], harnesses, base_adapters: [] },
+    // 左栏只列**本项目的人**（`project_members`）：平台上登记但本群没活的
+  // 窗口不是本项目的会话，不占一行（2026-11-18 的口径）。
+  '/status': { configured: true, connected: true, project_id: 'design', group_id: 'design-group', operator: 'office-operator', admin: { configured: true, identity: admin }, project_members: [member, 'claude-member-1'], harnesses, base_adapters: [] },
   '/tasks': { tasks },
   '/availability': { availability: harnesses.map(item => ({ ...item, adapter: 'cli', model: '模型由窗口提供', model_source: 'cfg', usable: true, warnings: [], reasons: [], last_task_id: null })) },
   '/events': { events: [], next_seq: 0, has_more: false },

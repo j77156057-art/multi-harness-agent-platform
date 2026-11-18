@@ -1,5 +1,5 @@
 import './project-workspace.css';
-import { baseHarnessOf, isAdministratorHarness, isPlatformAssistantHarness } from './harness-roles.js';
+import { baseHarnessOf, isAdministratorHarness, isInstanceWindow, isPlatformAssistantHarness } from './harness-roles.js';
 // 安装方式与状态的说法跟办公室那一屏共用一份（同一条 CLI 在两处不能有两种说法）。
 import { drivenLine, guidanceOnly, hostLine, installGroupsHtml, summaryLine } from './harness-install.js';
 import { probedAtLine, readInstallCache, writeInstallCache } from './install-cache.js';
@@ -60,6 +60,9 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   let platformError = '';
   let formalStatusError = '';
   let repoRelayError = '';
+  // 新项目建好后，哪些成员**没能在新项目的群里起起来**。起不起来的窗口领不到
+  // 这个群的活 —— 界面不说，人就只会看到「任务派出去没人领」。
+  let memberStartError = '';
   if (!projects.some(project => project.id === activeId)) activeId = null;
   const persistProjects = () => {
     try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch {}
@@ -109,7 +112,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   const instanceNote = root.querySelector('[data-instance-note]');
   const lobbyError = root.querySelector('[data-lobby-error]');
   function renderLobbyError() {
-    const errors = [platformError, formalStatusError, state_trashError, repoRelayError].filter(Boolean);
+    const errors = [platformError, formalStatusError, state_trashError, repoRelayError, memberStartError].filter(Boolean);
     lobbyError.hidden = errors.length === 0;
     lobbyError.textContent = errors.join('；');
   }
@@ -146,7 +149,10 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   createDialog.setAttribute('aria-labelledby', 'projectCreateTitle');
   createDialog.innerHTML = `
     <header class="project-create-head"><div><span class="eyebrow">PROJECT SETUP</span><h2 id="projectCreateTitle">项目配置</h2><p data-create-lead>填写后直接进入开工配置，无需再次点击。</p></div><button type="button" class="project-create-close" data-close-create aria-label="关闭">×</button></header>
-    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset class="project-create-modes"><legend>协作方式</legend><div data-project-modes><label class="project-create-mode"><input type="radio" name="project-mode" value="dispatch" checked><span><b>派单协作</b><small>平台拆解任务、分派、校验并合入。目标与成员在开工配置里指定。</small></span></label><label class="project-create-mode"><input type="radio" name="project-mode" value="relay"><span><b>转接</b><small>平台只当邮局：成员之间写信转达，不建任务、不开工作树、不判内容。</small></span></label></div></fieldset><fieldset data-dispatch-only><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
+    <div class="project-create-body"><label>项目名称<input data-project-name value="GAME-COLLAB" maxlength="80" autocomplete="off"></label><label>运行数据源<select data-project-source><option value="platform">正式平台</option><option value="mock">演示沙盘</option></select></label><fieldset class="project-create-modes"><legend>协作方式</legend><div data-project-modes><label class="project-create-mode"><input type="radio" name="project-mode" value="dispatch" checked><span><b>派单协作</b><small>平台拆解任务、分派、校验并合入。目标与成员在开工配置里指定。</small></span></label><label class="project-create-mode"><input type="radio" name="project-mode" value="relay"><span><b>转接</b><small>平台只当邮局：成员之间写信转达，不建任务、不开工作树、不判内容。</small></span></label></div></fieldset><fieldset data-dispatch-only><legend>执行成员（成员窗口）—— 不含管理员；管理员在开工向导中指定</legend><div data-project-members></div></fieldset>
+<fieldset class="project-added-windows" data-added-only><legend>自己加的窗口（可删除）</legend>
+<p class="project-create-hint">同一个 CLI 再开一个身份时登记在这里。它们不是某个项目天然有的人 —— 加错了可以删掉。</p>
+<div data-added-windows></div></fieldset><p class="project-create-scope" data-project-scope>正在读取正式项目范围…</p></div>
     <footer class="project-create-foot"><span data-create-hint>创建后将直接打开该项目的开工配置。</span><button type="button" class="project-new primary" data-confirm-create>创建并进入开工配置</button></footer>`;
   root.append(createDialog);
 
@@ -173,6 +179,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   const projectName = createDialog.querySelector('[data-project-name]');
   const projectSource = createDialog.querySelector('[data-project-source]');
   const projectMembers = createDialog.querySelector('[data-project-members]');
+  const addedWindows = createDialog.querySelector('[data-added-windows]');
   // 管理员与普通成员都由 Harness 担任：新建项目不再问「进入身份」，管理员在开工
   // 向导里从已注册窗口里挑。
   const projectScope = createDialog.querySelector('[data-project-scope]');
@@ -245,7 +252,14 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
   }
 
-  /** 平台上在线、且不是管理员/助手的窗口 —— 它们才是能干活的人。 */
+  /**
+   * 平台上在线、且不是管理员/助手的窗口 —— 它们才是能干活的人。
+   *
+   * 只在**没有别的口径**时用（新建项目时人自己勾）。打开平台已有项目时用
+   * 平台给的 ``project_members``：那是本群真正有活的窗口。登记表是全局的
+   * （每个项目共用同一批窗口），拿它当成员表，新项目一打开左栏就会冒出平台
+   * 上的每一个窗口（2026-11-18）。
+   */
   function onlineMemberIds() {
     const admin = actingAdministratorId(formalState);
     const online = (formalState?.harnesses || [])
@@ -253,6 +267,16 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
       .map(item => item.harness_id);
     return online.length ? online : members.map(member => member.id);
+  }
+
+  /** 本群真正有活的窗口（平台口径）：不是「平台上登记了什么」。 */
+  function projectMemberIds() {
+    const admin = actingAdministratorId(formalState);
+    const scope = Array.isArray(formalState?.project_members) ? formalState.project_members : [];
+    const members = scope
+      .map(id => String(id))
+      .filter(id => id && !isAdministratorHarness({ harness_id: id }, admin) && !isPlatformAssistantHarness({ harness_id: id }));
+    return members.length ? members : onlineMemberIds();
   }
 
   /**
@@ -276,7 +300,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       // 平台上已经在做的事，不是"待开工"。
       phase: 'scene',
       source: 'platform',
-      members: onlineMemberIds(),
+      // 打开平台上已有的项目时，成员是**这个项目自己的**成员（本群真有活的
+      // 窗口），不是平台上登记的全部窗口。登记表是全局的（每个项目共用同一
+      // 批窗口），拿它当成员表，新项目一打开左栏就会冒出平台上的每一个窗口
+      //（2026-11-18）。
+      members: projectMemberIds(),
       taskIds: project.taskIds,
     };
     projects.push(local);
@@ -442,6 +470,8 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     // 的一次异步请求触发；那次请求若还没回来（或失败走 catch），下拉会一直停在
     // 「读取正式注册表…」——本机明明有 10 个已注册窗口，"注册窗口"看起来像不可用。
     registerSources((state?.harnesses || []).map(item => ({id: item.harness_id, name: item.name, status: item.status})));
+    // 自己加的窗口：列出并给删除入口（注册表本来没有删除这一说）。
+    renderAddedWindows(state?.harnesses || []);
     if (baseSource) {
       baseSource.replaceChildren();
       const bases = state?.base_adapters || [];
@@ -556,18 +586,80 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     return rows.map(row => seen.get(row.name) > 1 ? {...row, name: `${row.name}（${row.id}）`} : row);
   }
   function renderMembers(availableMembers) {
+    // 成员名单每 20 秒随平台状态重画一次。重画会把列表整块换掉，滚动位置随之
+    // 归零 —— 于是人刚往下滚，名单又弹回顶部，看着就像「滚不动」。
+    // 换人时把滚动位置原样还回去（对话框本体才是滚动容器，见 .project-create-body）。
+    const scroller = createDialog.querySelector('.project-create-body');
+    const keepScroll = scroller ? scroller.scrollTop : 0;
     projectMembers.replaceChildren();
     for (const member of availableMembers) {
     // 防御：即使调用方传进来的是旧项目成员（历史里可能勾过管理员窗口），
     // 成员区也不再渲染管理员。管理员只由开工向导的管理员选择器提供。
     if (isAdministratorHarness({harness_id: member.id}) || isPlatformAssistantHarness({harness_id: member.id})) continue;
     const label = document.createElement('label'); label.className = 'project-member-option';
-    const input = document.createElement('input'); input.type = 'checkbox'; input.value = member.id; input.checked = member.checked !== false;
+    const input = document.createElement('input'); input.type = 'checkbox'; input.value = member.id;
+    // **默认不勾**。以前是 `member.checked !== false`（即默认勾上），
+    // 于是新建项目时平台上登记的每一个窗口都被算成了这个项目的成员 ——
+    // 人明明一个都没选，项目里却凭空多了十来个人（2026-11-18）。
+    // 成员是**这个项目要用的人**，得由人自己挑。
+    input.checked = member.checked === true;
     const text = document.createElement('span'); text.textContent = member.name;
     const role = document.createElement('small'); role.textContent = member.status ? `${member.role || '成员'} · ${member.status}` : (member.role || '成员');
     label.append(input, text, role); projectMembers.append(label);
     }
+    if (scroller && keepScroll) scroller.scrollTop = keepScroll;
   }
+  // **自己加的窗口**：同一个 CLI 再开一个身份时登记的那些。它们不是某个项目
+  // 天然有的人，但加错了要能删 —— 注册表里没有删除入口，加错了就永远摆在那。
+  function renderAddedWindows(harnesses) {
+    if (!addedWindows) return;
+    addedWindows.replaceChildren();
+    const added = (harnesses || []).filter(item => isInstanceWindow(item.harness_id));
+    if (!added.length) {
+      const note = document.createElement('p');
+      note.className = 'project-create-hint';
+      note.textContent = '没有自己加的窗口。';
+      addedWindows.append(note);
+      return;
+    }
+    for (const item of added) {
+      const row = document.createElement('div');
+      row.className = 'project-added-window';
+      const name = document.createElement('span');
+      name.textContent = `${item.name || item.harness_id} · ${item.harness_id}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'project-added-remove';
+      remove.textContent = '删除';
+      remove.title = '从正式注册表里删掉这个窗口';
+      remove.addEventListener('click', () => void removeWindow(item.harness_id, remove));
+      row.append(name, remove);
+      addedWindows.append(row);
+    }
+  }
+
+  // 删一个自己加的窗口：走网关的 DELETE（写操作要同源 + 显式标记）。
+  async function removeWindow(harnessId, button) {
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/formal/harnesses/${encodeURIComponent(harnessId)}`, {
+        method: 'DELETE',
+        headers: { 'X-Office-Formal': '1' },
+        cache: 'no-store',
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const message = data.error?.message || data.error || `删除失败（${response.status}）`;
+        throw new Error(message);
+      }
+      await loadFormalStatus();
+    } catch (error) {
+      button.disabled = false;
+      const hint = createDialog.querySelector('[data-project-scope]');
+      if (hint) hint.textContent = `删除失败：${error.message}`;
+    }
+  }
+
   renderMembers(members);
   formal('/api/formal/status', {cache: 'no-store'}).then(response => response.ok ? response.json() : null).then(state => {
     renderFormalRegistration(state);
@@ -578,7 +670,12 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     // 而它只在大厅打开时跑一次异步请求；这次请求若先于填充返回（或失败后走 catch），下拉就
     // 永远停在「读取正式注册表…/暂无正式注册 Harness」——本机明明有 10 个已注册窗口。
     registerSources(state.harnesses || []);
-    const online = (state.harnesses || []).filter(item => item.status === 'online').map(item => ({
+    // 只列**基座窗口**（CLI 本身）。同一个 CLI 再开一个身份（``codebuddy-member-1``、
+    // ``架构 · Arch``）是**自己加的**窗口 —— 它可以进项目，但它不该占满「选谁
+    // 当成员」这一栏（2026-11-18：那一栏列了 18 个窗口，全是加出来的）。
+    const online = (state.harnesses || [])
+      .filter(item => item.status === 'online' && !isInstanceWindow(item.harness_id))
+      .map(item => ({
       id: item.harness_id, name: item.name || item.harness_id, role: '成员窗口', status: item.status,
       // 没有平台凭据的窗口领不了任务：派给它的活会永远停在 ready。
       credential_count: Number(item.credential_count ?? 1),
@@ -1166,14 +1263,57 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     if (scope) scope.hidden = relay;
   }
 
+  /**
+   * 让新项目的成员在这个项目**自己的群**里真能干活。
+   *
+   * 为什么必须做这一步：项目建在平台上时有了自己的群，而每个窗口的 worker 是
+   * **按群**起的 —— 只在别的群里跑着的 worker 领不到这个群的活。
+   * 2026-11-17 真机走查实测到的就是这个：新建项目后一个成员都没被开通，任务
+   * 派出去一直没人领，而界面显示「成员已就位」。
+   *
+   * 起不来的逐个说出来：人要知道是哪几个窗口没起来、为什么，而不是看到一句
+   * 「项目建好了」。
+   */
+  async function provisionMembers(groupId, members) {
+    const failed = [];
+    for (const harnessId of members) {
+      try {
+        // 这一条**不能**走 formal()：formal 会把 X-Office-Group 换成**当前**项目
+        // 的群，而新项目此刻还不是当前项目 —— worker 会被起在别的群里，这个项目
+        // 照样没人领活（2026-11-17 真机走查实测到的静默失败）。这里自己发请求，
+        // 把群写死成这个新项目的群。
+        const response = await fetch('/api/formal/harnesses/provision', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Office-Formal': '1',
+            'X-Office-Group': groupId,
+          },
+          body: JSON.stringify({ harness_id: harnessId }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = data && data.error;
+          failed.push(`${harnessId}（${(detail && detail.message) || `HTTP ${response.status}`}）`);
+        }
+      } catch (error) {
+        failed.push(`${harnessId}（${String((error && error.message) || error)}）`);
+      }
+    }
+    return failed;
+  }
+
   async function createProject() {
     const mode = pickedMode();
     const name = projectName.value.trim() || `新项目 ${String(sequence + 1).padStart(2, '0')}`;
+    // 对话框里的两处提示（脚注与按钮）：两条分支都要用，所以取在**函数开头**。
+    // 以前它只声明在转接分支里，平台分支引用它就是 ReferenceError —— 项目在
+    // 平台上建好了，界面却停在原地（2026-11-17 真机走查实测到的半截流程）。
+    const hint = createDialog.querySelector('[data-create-hint]');
+    const confirm = createDialog.querySelector('[data-confirm-create]');
     // 转接项目先写进仓库再往下走：写不进去就当场说，别让"项目在仓库里"只是嘴上说说。
     if (mode === 'relay') {
-      const hint = createDialog.querySelector('[data-create-hint]');
-      const confirm = createDialog.querySelector('[data-confirm-create]');
-      if (confirm) confirm.disabled = true;
       try {
         await rememberRelayProject(name);
       } catch (error) {
@@ -1185,6 +1325,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
     }
     let platformId = '';
     let platformGroup = '';
+    // 成员在对话框里勾的就是这个项目要用的执行窗口；先记下来：对话框一关，
+    // 那些勾选就没了，而它们正是要在这个新群里被开通的那几个。
+    const selectedMembers = mode === 'relay'
+      ? []
+      : [...projectMembers.querySelectorAll('input:checked')].map(input => input.value);
     if (projectSource.value === 'platform' && mode !== 'relay') {
       // 现在没有云端：界面里的项目**就是**平台上那一个。所以建项目是真的建到平台上，
       // id 由服务端随机生成（名字只是标签，重名不冲突、改名不动 id）。
@@ -1197,6 +1342,20 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         if (hint) hint.textContent = `没能建到平台上：${error.message}`;
         if (confirm) confirm.disabled = false;
         return;
+      }
+      // 群有了，成员也得在这个群里**真的能干活**（worker 是按群起的）。
+      // 这一步失败不推翻项目 —— 项目确实建好了；但起不来的窗口要逐个说出来。
+      if (platformGroup && selectedMembers.length) {
+        if (confirm) confirm.disabled = true;
+        if (hint) hint.textContent = '正在为这个项目开通成员窗口…';
+        const failed = await provisionMembers(platformGroup, selectedMembers);
+        memberStartError = failed.length
+          ? `以下成员窗口没能在这个项目的群里起来：${failed.join('；')}。它们领不到本项目的活。`
+          : '';
+        if (confirm) confirm.disabled = false;
+        if (hint) hint.textContent = memberStartError
+          ? '项目已创建，但部分成员没能开通（见大厅提示）。'
+          : '创建后将直接打开该项目的开工配置。';
       }
     }
     sequence += 1;
@@ -1211,9 +1370,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       ...(platformId ? { platformProjectId: platformId, platformGroupId: platformGroup } : {}),
       // 走哪条路由这个字段决定（见 syncMode）：'dispatch' 是老路，'relay' 是转接。
       mode,
-      members: mode === 'relay'
-        ? []
-        : [...projectMembers.querySelectorAll('input:checked')].map(input => input.value),
+      members: selectedMembers,
     };
     projects.push(project);
     activeId = project.id;
@@ -1252,7 +1409,7 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       // 而不是"先配置一下"——点下去直接就是办公室，写错了会让人以为还得再配一次。
       phase: 'scene',
       source: 'platform',
-      members: onlineMemberIds(),
+      members: projectMemberIds(),
       taskIds: recoverable.taskIds,
     };
     projects.push(project);

@@ -85,6 +85,15 @@ const REJECTED_STATES = new Set(['draft_rejected']);
 // 平台没注册它时整行就消失 —— 名字与职责都串了：巡检面板是"巡检与上报"，
 // 能读日志、调记录、回答问题的是这个助手主体。
 const ASSISTANT_ID = 'office-assistant';
+  // 展开了哪几条（按消息 id 记）：办公室每 15 秒整块重画，展开状态得自己留着，
+  // 否则一点「展开全文」就被下一次重画收回去。
+  const expandedMessages = new Set();
+
+  // 「正在干活」的样子：这些状态说明这个窗口手上有活。
+  const WORKING_TASK_STATES = new Set([
+    'claimed', 'in_progress', 'working', 'executing', 'submitting', 'awaiting_review',
+  ]);
+
 
 /** 状态的"紧急度"：越靠前越该先被人看见。 */
 const STATUS_RANK = {
@@ -227,6 +236,61 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   // 「刚才看到哪一页」在重载之后接上：筛选、排序、每页条数、第几页、看的哪个
   // 会话、哪些折叠卡片开着。没存过就是 `{}`，下面每一项各自的默认值原样生效。
   const restoredView = readViewState();
+  /**
+   * 这个窗口现在**正在干活**吗。
+   *
+   * 平台给的事实：名下有未释放的活（running_tasks），或最近一轮的状态还在
+   * 「执行中」那一档。只认这些，不看注册表里的 status —— 那是注册那一刻的
+   * 声明，进程停了它也不变（拿它当"在忙"会一直亮着转圈）。
+   *
+   * 它住在 mountFlatOffice 里面：`state` 是这个函数的局部变量，外面的
+   * 函数看不到它（写在外面就是 ReferenceError —— 2026-11-18 真机走查实测）。
+   */
+  /**
+   * 这条消息是谁说的：用户 / 管理员 / 其他成员 / 平台助手。
+   *
+   * 它住在 mountFlatOffice 里面：`state` 是这个函数的局部变量，外面的
+   * 函数看不到它（写在外面就是 ReferenceError —— 2026-11-18 真机走查实测）。
+   */
+  /** 这个窗口正在工作吗（手上有活，或正在回一条私聊）。 */
+  function isWorkingSender(message) {
+    const senderId = String((message && message.sender_id) || '');
+    if (!senderId) return false;
+    if (senderId === ASSISTANT_ID || /assistant/i.test(senderId)) {
+      // 助手：看它的**此刻状态**（收到没、在忙没），不只是历史轮次。
+      const live = state.assistantLive;
+      if (live && !live.stale) {
+        return ['received', 'running', 'answering'].includes(String(live.state || ''));
+      }
+      const runs = state.assistantRuns || [];
+      const latest = runs[0];
+      return Boolean(latest && String(latest.status || '') === 'running');
+    }
+    const info = (state.availability || []).find((item) => item.harness_id === senderId);
+    if (!info) return false;
+    if (Number(info.running_tasks || 0) > 0) return true;
+    return WORKING_TASK_STATES.has(String(info.last_task_status || ''));
+  }
+
+  function senderRole(message) {
+    const mine = String((message && message.sender_type) || '') === 'human';
+    if (mine) return '你（用户）';
+    const senderId = String((message && message.sender_id) || '');
+    if (senderId === ASSISTANT_ID || /assistant/i.test(senderId)) return '平台助手';
+    const adminId = (state.status && state.status.admin && state.status.admin.identity) || '';
+    if (adminId && senderId === adminId) return '管理员';
+    return senderId ? '其他成员' : '平台助手';
+  }
+
+  function isWindowBusy(harnessId) {
+    const id = String(harnessId || '');
+    if (!id) return false;
+    const row = (state.availability || []).find((item) => item.harness_id === id);
+    if (!row) return false;
+    if (Number(row.running_tasks || 0) > 0) return true;
+    return WORKING_TASK_STATES.has(String(row.last_task_status || ''));
+  }
+
   const state = {
     tasks: [],
     selected: null,
@@ -348,6 +412,11 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     assistantError: '',
     // 助手这一轮做了什么（引擎 trace 的摘要，只读）。
     assistantRuns: [],
+    // 助手**此刻**的状态（收到没 / 在忙什么 / 答完没）。没有它，办公室只知道
+    // "问完了"，不知道"它收到了没有" —— 人只能对着一个不动的面板等。
+    assistantLive: null,
+    // 本群名册：谁在线、在忙什么、谁是管理员。
+    roster: null,
   };
 
   // 用户**正在输入**的东西。
@@ -600,6 +669,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const isMine = (message) =>
       !isAdmin(message) &&
       ((Array.isArray(message.refs) ? message.refs : []).some((ref) => ADMIN_THREAD_REFS.includes(ref)) ||
+        // 助手代转达的消息：direct 且收件人里有管理员 → 也是这条线上的。
         (isDirect(message) && toAdmin(message)));
     const mine = ordered.filter(isMine);
     const started = mine.length > 0;
@@ -690,13 +760,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       shown
         .map((message) => {
         const mine = message.sender_type === 'human';
+        // 「代转达」的消息作者是**助手**（平台的作者必须等于令牌主体，
+        // 助手不能冒用人的身份），但它替人转的话要看得出来。
+        const relayed = (Array.isArray(message.refs) ? message.refs : []).includes(
+          'assistant-relay',
+        );
         const who = mine
           ? '你'
           : message.sender_id === adminId
             ? adminName() || message.sender_id
-            : message.sender_id || '平台';
+            : relayed
+              ? `平台助手（代转达）`
+              : message.sender_id || '平台';
         const at = String(message.created_at || '').replace('T', ' ').slice(0, 16);
-        return `<article class="flat-thread-msg${mine ? ' is-mine' : ' is-admin'}">
+        // 三态：我发的 / 管理员发的 / 平台代转达的。三者挤成两态时，
+        // 代转达那条会被当成管理员的话 —— 那是**别人**的话，看错身份就找错人了。
+        const tone = mine ? ' is-mine' : relayed ? ' is-relayed' : ' is-admin';
+        return `<article class="flat-thread-msg${tone}">
           <b>${escape(who)}</b><span class="flat-thread-at">${escape(at)}</span>
           <p title="${escape(message.body || '')}">${escape(message.body || '')}</p></article>`;
       })
@@ -1734,7 +1814,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     head.textContent = '会话';
     list.append(head);
 
-    const addRow = (kind, id, name, status, onClick, dot = false) => {
+    const addRow = (kind, id, name, status, onClick, dot = false, busy = false) => {
       const button = document.createElement('button');
       button.type = 'button';
       const on = state.view.kind === kind && (state.view.id || null) === (id || null);
@@ -1745,6 +1825,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 红点 = **还有事没结论**：处理掉或说了「先不管」才消失（不是"看过了"就消失）。
       button.innerHTML = `<b>${escape(name)}${
         dot ? '<i class="flat-conv-dot" title="有待你处理的事"></i>' : ''
+      }${
+        busy
+          ? '<i class="flat-spinner" role="status" aria-label="正在工作" title="正在工作"></i>'
+          : ''
       }</b><span>${escape(status)}</span>`;
       // 右键这一行 = 「给这一家再开一个窗口」。只在窗口行上有（项目任务/群聊
       // 那两行不是 Harness，右键没意义）。
@@ -1806,18 +1890,47 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     // 平台助手**常驻**：工作区域里一直有它，不用在新建项目时勾选，也不依赖平台
     // 注册表里有没有某个窗口（以前这里要找得到 `office-admin` 才显示这一行）。
+    // 助手正在跑这一轮 → 名字旁边转圈（"它在算，别再发一遍"）。
+    const assistantBusy = Boolean(
+      state.assistantLive &&
+        !state.assistantLive.stale &&
+        ['received', 'running', 'answering'].includes(String(state.assistantLive.state || '')),
+    );
     addRow('assistant', ASSISTANT_ID, '平台助手', assistantStatusText(), () => {
       state.view = { kind: 'assistant', id: ASSISTANT_ID };
       state.assistantScrollBottom = true;
       render();
-    });
+    }, false, assistantBusy);
     if (adminId) {
       // 登记名里常常已经带了「管理员」（"Codex · 管理员"）—— 再前缀一次就成了
       // 「管理员 · Codex · 管理员」，同一个词说两遍。已经说了就不再前缀。
       const registered = harnessName(adminId);
       const label = registered.includes('管理员') ? registered : `管理员 · ${registered}`;
-      addRow('window', adminId, label, windowStatusText(adminId));
+      // 管理员也在干活：它替这个项目改派、审阅、回答，同样要转起来。
+      addRow('window', adminId, label, windowStatusText(adminId), null, false, isWindowBusy(adminId));
     }
+    // 左栏列的是**本项目的会话**，不是平台上登记的全部窗口。
+    //
+    // 以前这里遍历整个名册，于是平台上一共登记了几个窗口，新项目一打开左栏
+    // 就跟着冒出几行（管理员、Claude Code、CodeBuddy、Arch、Backend……）。
+    // 那些窗口是别的项目的人，或者是还没加入本项目的登记窗口 —— 把它们
+    // 摆进「本项目的会话」里，人看到的就是「这个项目凭空多了十个人」（2026-11-18）。
+    //
+    // 判定：**本项目的人**。
+    //
+    // 平台口径（`/status` 的 `project_members`）是权威：那是本群任务真正提到
+    // 过的窗口（网关那条规矩：全局登记但本群没活的窗口不算成员）。
+    // 前端自己记的成员只作**兜底**：平台还没建群、这个项目一个窗口都没起过
+    // 活时（刚建好的项目），平台那份是空的 —— 那时只有前端知道人勾了谁。
+    //
+    // 不用 `/roster`：它和左栏不在同一个请求里，渲染时可能还没到，
+    // 那时这个项目看起来就像「一个人都没有」。
+    const platformMembers = (state.status && state.status.project_members) || [];
+    const localMembers = (((projectOf && projectOf()) || {}).members || []);
+    const projectMembers = new Set(
+      (platformMembers.length ? platformMembers : localMembers).map((id) => String(id)),
+    );
+    const outsiders = [];
     for (const item of roster) {
       const id = String(item.harness_id || '');
       if (!id || id === adminId) continue;
@@ -1827,15 +1940,34 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // `office-admin` 是平台助手的**模型身份**，不是窗口：没有任何 CLI 响应这个
       // id，列出来只会让人以为项目里还有第三个管理员（见 harness-roles.js）。
       if (isPlatformAssistantHarness(item)) continue;
-      // 别的管理员的窗口（以前某轮配置留下的）确实在平台上，但它**不是本项目的**
-      // 管理员。不说明这一点，左栏就看起来像有三个管理员。
-      const otherAdmin = /-admin$/i.test(id);
+      // 不是本项目成员的登记窗口：不占一行 —— 它不是本项目的会话。
+      // （别的管理员窗口也在此列：它不是本项目的管理员，更不是本项目的成员。）
+      // 折成一行说明，放在「查看成员执行情况」那一页里能看全。
+      if (!projectMembers.has(id)) {
+        outsiders.push(id);
+        continue;
+      }
       const status = windowStatusText(id);
+      // 正在工作的窗口要**看得见在忙**：以前这一行只有一句静态状态，
+      // 分不出"它正在跑我的活"和"它闲着"。
+      const busy = isWindowBusy(id);
       addRow(
         'window',
         id,
         harnessName(id),
-        otherAdmin ? `不是本项目的管理员 · ${status}` : status,
+        status,
+        null,
+        busy,
+      );
+    }
+    // 没加入本项目的登记窗口只说一句，不一个个列出来：它们不是本项目的会话，
+    // 一个个列出来会让「本项目有十个人」这种错觉成立。
+    if (outsiders.length) {
+      addRow(
+        'window',
+        null,
+        `其它 ${outsiders.length} 个登记窗口未加入本项目`,
+        '在「查看成员执行情况」里能看全',
       );
     }
     return list;
@@ -1995,6 +2127,87 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     overview.append(facts);
     panel.append(overview);
 
+    // ---- 它此刻在干什么（送达 / 处理中 / 已答完） ----
+    // 这一块是为了回答"我那句话**送到了没有**"：以前面板上只有一条静态的
+    // 对话记录，人发完只能干等，分不清"它在算"和"它没收到"。
+    const live = state.assistantLive;
+    if (live) {
+      const section = document.createElement('section');
+      section.className = 'flat-spec flat-assistant-live';
+      const labels = {
+        received: '已经收到你的问题，正在准备',
+        running: '正在查证（这一步可能要一会儿）',
+        answering: '正在写回答',
+        done: '这一轮答完了',
+        failed: '这一轮没能答上来',
+      };
+      const title = document.createElement('h3');
+      title.textContent = '此刻';
+      section.append(title);
+      const line = document.createElement('p');
+      line.className = 'flat-note';
+      const stateText = live.stale
+        ? '（最后一条状态是旧的，助手可能已经不在跑这一轮）'
+        : labels[live.state] || '状态未知';
+      line.textContent = stateText;
+      section.append(line);
+      if (live.question) {
+        const asked = document.createElement('p');
+        asked.className = 'flat-assistant-live-question';
+        asked.textContent = `正在处理：${live.question}`;
+        section.append(asked);
+      }
+      if (live.state === 'done' && live.answer) {
+        const answered = document.createElement('p');
+        answered.className = 'flat-assistant-live-answer';
+        answered.textContent = live.answer;
+        section.append(answered);
+      }
+      if (live.state === 'failed' && live.error) {
+        const failed = document.createElement('p');
+        failed.className = 'flat-assistant-live-error';
+        failed.textContent = `没答上来：${live.error}`;
+        section.append(failed);
+      }
+      panel.append(section);
+    }
+
+    // ---- 本群名册（谁在线、在忙什么） ----
+    const roster = state.roster;
+    if (roster && (roster.members || []).length) {
+      const section = document.createElement('section');
+      section.className = 'flat-spec flat-assistant-roster';
+      const title = document.createElement('h3');
+      title.textContent = '本群窗口';
+      section.append(title);
+      const list = document.createElement('ul');
+      list.className = 'flat-roster-list';
+      for (const row of roster.members || []) {
+        const item = document.createElement('li');
+        const name = document.createElement('b');
+        name.textContent = row.name || row.harness_id;
+        item.append(name);
+        if (row.is_admin) {
+          const tag = document.createElement('em');
+          tag.className = 'flat-roster-tag';
+          tag.textContent = '管理员';
+          item.append(tag);
+        }
+        const what = document.createElement('span');
+        what.className = 'flat-roster-what';
+        const doing = row.current_task
+          ? `正在做：${row.current_task.title || row.current_task.task_id}`
+          : row.last_task_title
+            ? `最近：${row.last_task_title}`
+            : '没有在领活';
+        what.textContent = `${row.live ? '在跑' : '没在跑'} · ${doing}`;
+        item.append(what);
+        list.append(item);
+      }
+      section.append(list);
+      panel.append(section);
+    }
+
     // ---- 它这一轮做了什么（引擎 trace 的摘要） ----
     // 折起来：它默认不是要看的东西，但「它自己动了几步、看到了什么」该随时能翻。
     const trace = document.createElement('details');
@@ -2065,19 +2278,52 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     for (const message of turns) {
       const mine = String(message.sender_type || '') === 'human';
+      const senderId = String(message.sender_id || '');
       const item = document.createElement('article');
       item.className = 'flat-assistant-turn ' + (mine ? 'is-mine' : 'is-assistant');
       const who = document.createElement('p');
       who.className = 'flat-assistant-who';
       const label = document.createElement('b');
-      label.textContent = mine ? '我' : '平台助手';
+      label.textContent = senderRole(message);
+      // 正在工作的人：**名字旁边转圈**，一眼看出"它正在答、还没答完"，
+      // 而不是对着一个空面板猜它有没有收到（2026-11-18 真机走查：发过去的对话
+      // 既不知道送达没有，也不知道对方有没有开始答）。
+      if (isWorkingSender(message)) {
+        const busy = document.createElement('span');
+        busy.className = 'flat-spinner';
+        busy.setAttribute('role', 'status');
+        busy.setAttribute('aria-label', '正在工作');
+        label.append(' ', busy);
+      }
       const when = document.createElement('span');
       when.className = 'flat-note';
       when.textContent = timeAgo(message.created_at || message.created);
       who.append(label, when);
-      const body = document.createElement('p');
-      body.className = 'flat-assistant-text';
-      body.textContent = readableMessageBody(message) || String(message.body || '');
+      // 全文一直都在 DOM 里：长了只是**收起来**（看不清就点开），不是截断。
+      const full = String(message.body || '').trim();
+      const body = document.createElement('div');
+      body.className = 'flat-assistant-text is-collapsible';
+      const text = document.createElement('p');
+      text.className = 'flat-assistant-body';
+      text.textContent = full;
+      body.append(text);
+      const key = String(message.message_id || message.created_seq || '');
+      const long = full.length > 140 || full.indexOf('\n') >= 0;
+      if (long) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'flat-assistant-expand';
+        const open = expandedMessages.has(key);
+        toggle.textContent = open ? '收起' : '展开全文';
+        toggle.setAttribute('aria-expanded', String(open));
+        toggle.addEventListener('click', () => {
+          if (expandedMessages.has(key)) expandedMessages.delete(key);
+          else expandedMessages.add(key);
+          render();
+        });
+        body.classList.toggle('is-open', open);
+        body.append(toggle);
+      }
       item.append(who, body);
       thread.append(item);
     }
@@ -2785,6 +3031,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <p class="flat-model-actions">
         <button type="button" data-act="save-model-choice" data-harness="${escape(harnessId)}">保存</button>
         <button type="button" data-act="probe-pool">重新探一遍</button>
+        <button type="button" data-act="add-own-model">接入自己的模型</button>
         ${probe ? `<span class="flat-model-probe">${escape(probe)}</span>` : ''}
       </p>
       ${
@@ -2819,6 +3066,23 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     delete state.modelPicks[harnessId];
     state.error = null;
     render();
+  }
+
+  /**
+   * 「接入自己的模型」：把自己的 provider 地址与 key 填进去，登记后这个模型
+   * 就能**指给任何窗口**用 —— 平台替窗口转发，窗口自己的 CLI 不必连得到那个
+   * provider（这正是「塞给其他 harness 用」的意思）。
+   */
+  function openOwnModelForm() {
+    const form = document.querySelector('.flat-userkeys-form');
+    if (!form) {
+      state.error = '这一页没有「你自己的 key」表单，请到额度池那一片登记';
+      render();
+      return;
+    }
+    form.scrollIntoView({behavior: 'smooth', block: 'center'});
+    const first = form.querySelector('[data-userkey-label]');
+    if (first) first.focus();
   }
 
   async function saveModelChoice(button) {
@@ -6521,6 +6785,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
           <label>地址<input data-draft="userkey-base" data-userkey-base placeholder="https://api.openai.com/v1" /></label>
           <label>模型（可以留空，让平台去问）<input data-draft="userkey-models" data-userkey-models placeholder="gpt-4.1, o3" /></label>
           <label>key<input data-draft="userkey-key" data-userkey-key type="password" placeholder="sk-..." autocomplete="off" /></label>
+          <label>额外请求头（可选，JSON）<input data-draft="userkey-headers" data-userkey-headers placeholder='{"User-Agent":"Mozilla/5.0 ..."}' /></label>
           <button type="button" data-act="add-user-key">加进来</button>
           <p class="flat-note" data-userkey-error></p>
         </div>
@@ -7089,6 +7354,22 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const models = value('[data-userkey-models]')
       .split(/[,，\s]+/)
       .filter(Boolean);
+    // 额外请求头：有的网关先看 User-Agent / 会话头才肯答（Cloudflare error 1010
+    // 就是这一类）。按 JSON 写，填错就说填错，不让它悄悄生效。
+    let headers = {};
+    const rawHeaders = value('[data-userkey-headers]');
+    if (rawHeaders) {
+      try {
+        const parsed = JSON.parse(rawHeaders);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+        headers = Object.fromEntries(
+          Object.entries(parsed).map(([name, val]) => [String(name), String(val)]),
+        );
+      } catch (problem) {
+        if (error) error.textContent = '额外请求头要写成 JSON 对象，例如 {"User-Agent": "Mozilla/5.0 ..."}。';
+        return;
+      }
+    }
     try {
       await api('/user-keys', {
         label,
@@ -7096,6 +7377,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         base_url: value('[data-userkey-base]'),
         key,
         models,
+        ...(Object.keys(headers).length ? { headers } : {}),
       });
       if (error) error.textContent = '';
       form.querySelector('[data-userkey-key]').value = '';
@@ -7305,6 +7587,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
     if (button.dataset.act === 'save-model-choice') {
       void saveModelChoice(button);
+      return;
+    }
+    if (button.dataset.act === 'add-own-model') {
+      openOwnModelForm();
       return;
     }
     if (button.dataset.act === 'probe-pool') {
@@ -7999,10 +8285,14 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         offline: state.availability.length - online,
       });
       const failed = (error) => ({ __error: String((error && error.message) || error) });
-      const [pool, plan, messages, runs] = await Promise.all([
+      const [pool, plan, messages, runs, live, roster] = await Promise.all([
         probed ? Promise.resolve(probed) : api('/pool').catch(failed),
         api('/plan').catch(failed),
         api('/messages?since_seq=0&limit=500').catch(failed),
+        // 助手此刻的状态：收到没、在忙什么、答完没。读不到就留旧值。
+        api('/assistant/live').catch(failed),
+        // 本群名册：谁在线、在忙什么、谁是管理员。
+        api('/roster').catch(failed),
         // 助手这一轮做了什么（引擎写在服务器本地的 trace，这里读成摘要）。
         api('/assistant/runs').catch(() => ({ runs: [] })),
         loadUserKeys(),
@@ -8045,6 +8335,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.messagesLoaded = true;
       }
       state.assistantRuns = runs.runs || [];
+      // 助手此刻在干什么：读到就更新；读失败就**保留上一份**（不把失败说成
+      // "它没在动" —— 那会把一次网络抖动说成平台停摆）。
+      if (!live.__error) state.assistantLive = live.live || null;
+      if (!roster.__error) state.roster = roster || null;
       state.events = events.events || [];
       // 人话从平台来（问过的会缓存，不会每 15 秒问一次）。
       await loadWording();
@@ -8110,6 +8404,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const messages = state.messages || [];
     const lastMessage = messages.length ? `${messages.length}:${messages[messages.length - 1]?.created_seq ?? ''}` : '0';
     const runs = (state.assistantRuns || []).length;
+    // 助手的**此刻**状态与本群名册：面板要跟着它们变（收到没、在忙谁、答完没）。
+    const live = state.assistantLive;
+    const liveSignature = live
+      ? `${live.state || ''}:${live.run_id || ''}:${live.updated_at || ''}:${live.stale ? 1 : 0}`
+      : '-';
+    const roster = state.roster;
+    const rosterSignature = roster
+      ? (roster.members || [])
+          .map((row) => `${row.harness_id}:${row.live ? 1 : 0}:${row.running_tasks || 0}:${row.last_task_status || ''}`)
+          .join('|')
+      : '-';
     // 分配轮：只要有"还没定人"的活，这一屏就要重画（左侧红点与那一页都靠它）。
     const allocation = allocationPending()
       .map((item) => `${item.round.round_id}:${item.task.task_id}:${(item.applications || []).length}`)
@@ -8137,6 +8442,8 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       plan,
       lastMessage,
       runs,
+      liveSignature,
+      rosterSignature,
       allocation,
       installs,
       projectRequests,
@@ -8156,6 +8463,44 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    * 活的 —— 办公室以前只是**点开时取一次**，之后就冻住了。现在每 4 秒取一次，
    * 而且**只换那一块**（不整页重画，免得把人正在看的东西刷掉）。
    */
+  /**
+   * 助手这一条线的快刷：只换「此刻状态」与「本群名册」两块。
+   *
+   * 不整页重画：15 秒一轮的整块刷新会换掉人正在看的东西（展开的折叠块合上、
+   * 滚到的位置弹回去）。所以这里只在助手面板开着时重画那一块。
+   */
+  async function refreshAssistantLive() {
+    const [live, roster] = await Promise.all([
+      api('/assistant/live').catch(() => null),
+      api('/roster').catch(() => null),
+    ]);
+    let changed = false;
+    if (live && !live.error) {
+      const before = JSON.stringify(state.assistantLive || null);
+      state.assistantLive = live.live || null;
+      if (JSON.stringify(state.assistantLive || null) !== before) changed = true;
+    }
+    if (roster && !roster.error) {
+      const before = JSON.stringify(state.roster || null);
+      state.roster = roster;
+      if (JSON.stringify(state.roster || null) !== before) changed = true;
+    }
+    if (!changed) return;
+    // 面板开着就重画它（面板本来就是重画型的）。
+    if (state.view.kind === 'assistant') {
+      render();
+      return;
+    }
+    // 没开面板也要让**左栏**那一行跟上：助手在跑的时候它旁边该转圈。
+    // 只换那一行 —— 整页重画会把人正在看的东西刷掉。
+    const convs = root.querySelector('.flat-convs');
+    if (!convs) return;
+    const fresh = conversations();
+    if (fresh) {
+      convs.replaceWith(fresh);
+    }
+  }
+
   async function refreshLive() {
     const task = state.selected;
     if (!task || !isRunning(task)) return;
@@ -8176,6 +8521,10 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   }
 
   const timer = setInterval(() => void refresh(), 15000);
+  // 助手这一条线**单独**跑得更勤（3 秒）：整块刷新 15 秒一次，人发完一句
+  // 要等十几秒才看见"它收到了"——这个等待本身就是"不知道送达没有"。
+  // 这一轮只换助手相关的两块（现场状态与名册），不整页重画。
+  const assistantTimer = setInterval(() => void refreshAssistantLive(), 3000);
   // 正在跑的活 4 秒一轮（只有选中它的时候才有请求）。
   const liveTimer = setInterval(() => void refreshLive(), 4000);
   // 「测试模型」那一页：探测在跑的时候才去问一次（探完一家就长出来一格）。

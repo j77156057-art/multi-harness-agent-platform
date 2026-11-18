@@ -90,7 +90,9 @@ const responses = {
     group_id: 'g',
     operator: 'office-operator',
     admin: { configured: true, identity: ADMIN, error: null },
-    project_members: [MEMBER],
+    // 本群任务真正提到过的窗口 = 本项目成员（网关那条规矩）。这里把那个
+    // 没凭据的窗口也算进来：它是本项目的人，只是领不了活 —— 左栏要说清原因。
+    project_members: [MEMBER, 'no-credential'],
     harnesses: [
       { harness_id: ADMIN, name: 'Codex · 管理员', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 1, capabilities: ['coding'], running_tasks: 1 },
       { harness_id: MEMBER, name: 'Codex CLI', status: 'online', registration_version: 'reg-001', provider: 'openai', credential_count: 1, capabilities: ['coding'], running_tasks: 1 },
@@ -133,6 +135,19 @@ const responses = {
       { harness_id: 'other-window-admin', provider: 'qoder', adapter: 'qoderclicn-print', status: 'online', registration_version: 'reg-001', credential_count: 1, model: 'qwen', model_alias: null, model_source: 'cfg', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: true, reasons: [] },
       { harness_id: 'no-credential', provider: 'openai', adapter: 'codex', status: 'online', registration_version: 'reg-001', credential_count: 0, model: null, model_alias: null, model_source: 'not-readable', degraded: false, last_probe_at: null, warnings: [], last_task_id: null, last_attempt_status: null, recovered: false, usable: false, reasons: [{ code: 'no_credential', detail: 'no platform credential' }] },
     ],
+  },
+  // 本群窗口（按群过滤过的那一份）。左栏只列本项目的会话，判据就是它
+  // 加上项目成员 —— 平台上登记的其它窗口不是本项目的会话（2026-11-18）。
+  '/roster': {
+    group_id: 'g',
+    members: [
+      { harness_id: ADMIN, name: 'Codex CLI', provider: 'openai', is_admin: true, live: true, running_tasks: 0 },
+      { harness_id: MEMBER, name: 'Codex CLI', provider: 'openai', is_admin: false, live: true, running_tasks: 1 },
+      { harness_id: 'no-credential', name: '没有凭据的窗口', provider: 'openai', is_admin: false, live: true, running_tasks: 0 },
+    ],
+    member_count: 3,
+    live_count: 3,
+    admin_harness_ids: [ADMIN],
   },
   '/pool': {
     upstreams: [],
@@ -278,12 +293,26 @@ try {
     })));
   console.log('会话列表:', rows);
   const names = rows.map((r) => r.name);
+
   assert.ok(names.includes('项目任务'), '有「项目任务」这一会话');
   assert.ok(names.includes('项目群聊'), '有「项目群聊」这一会话');
   assert.ok(names.includes('平台助手'), '有「平台助手」这一会话');
   assert.ok(names.some((n) => n.includes('管理员')), '有管理员窗口这一会话');
   assert.ok(names.includes('Codex CLI'), '有成员窗口这一会话');
-  assert.ok(names.includes('没有凭据的窗口'), '连不能接活的窗口也在列（它同样是个对象）');
+  // 平台上登记的**别的**窗口不是本项目的会话，不占一行（2026-11-18：新建
+  // 项目时左栏凭空冒出十来个窗口，说的就是这个）。它们折成一行说明。
+  assert.ok(
+    !names.some((n) => n.includes('other-window-admin')),
+    '别的项目的登记窗口不占左栏的一行',
+  );
+  assert.ok(
+    names.includes('没有凭据的窗口'),
+    '本项目成员里接不了活的那个也在列（它是本项目的人，只是缺凭据）',
+  );
+  assert.ok(
+    names.some((n) => n.includes('登记窗口未加入本项目')),
+    '没加入本项目的登记窗口折成一行说明',
+  );
   for (const row of rows) {
     assert.ok(row.name, '每行都有名字');
     assert.ok(row.status, `「${row.name}」有一行状态`);
@@ -306,12 +335,11 @@ try {
   // `office-admin` 是平台助手的模型身份，不是窗口：列出来会像第三个管理员。
   assert.ok(!names.some((n) => n.includes('office-assistant')), '窗口名单里不该再出现平台助手');
   assert.ok(!names.includes('管理员 harness'), 'office-admin 不是窗口，不该占一行');
-  // 旧配置留下的管理员窗口确实在平台上，但它不是本项目的管理员 —— 要说明。
-  const otherAdmin = rows.find((r) => r.name === 'Qoder · 管理员');
-  assert.ok(otherAdmin, '平台上其他管理员窗口仍在列（它同样是个对象）');
+  // 别的管理员窗口确实在平台上，但它**不是本项目的人**（本项目只有一个管理员，
+  // 上面那行）。它不占左栏的一行 —— 摆进来会让人以为这个项目有三个管理员。
   assert.ok(
-    otherAdmin.status.includes('不是本项目的管理员'),
-    `别的管理员窗口要说清不是本项目的：${otherAdmin.status}`,
+    !names.some((n) => n.includes('Qoder · 管理员')),
+    '别的项目的管理员窗口不占左栏的一行',
   );
 
   // 2. 点一个窗口 → 中间那栏是它的状态页

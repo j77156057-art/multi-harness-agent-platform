@@ -96,7 +96,10 @@ dialog:not([open]) { display: none !important; }
 .project-create-head .eyebrow { margin: 0; color: var(--ao-text-faint); font-size: 11px; letter-spacing: .06em; }
 .project-create-close { display: grid; place-items: center; min-width: 36px; min-height: 36px; border: 0; border-radius: 6px; background: var(--ao-bg); color: var(--ao-text-soft); font-size: 24px; line-height: 1; cursor: pointer; }
 .project-create-close:hover { background: var(--ao-border); }
-.project-create-body { display: grid; gap: 20px; padding: 24px; overflow: auto; }
+/* ``min-height: 0`` 是必须的：flex item 默认 ``min-height: auto``，内容一高就把
+   这一格撑破，而对话框是 ``overflow: hidden`` —— 结果是成员列表被裁掉又滚不动
+   （2026-11-17 真机走查实测：20 个窗口只显示 5 行，滚轮/滚动条/缩放全无效）。 */
+.project-create-body { display: grid; gap: 20px; padding: 24px; overflow: auto; min-height: 0; overscroll-behavior: contain; }
 .project-create-body > label { display: grid; gap: 8px; color: var(--ao-text-soft); font-size: 13px; font-weight: 550; }
 .project-create-body input, .project-create-body select { box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--ao-border-strong); border-radius: var(--ao-radius); background: var(--ao-surface); color: var(--ao-text); font: inherit; font-size: 14px; }
 .project-create-body fieldset { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid var(--ao-border); border-radius: var(--ao-radius); }
@@ -105,6 +108,13 @@ dialog:not([open]) { display: none !important; }
 .project-member-option input { min-height: 0; width: 16px; height: 16px; accent-color: var(--ao-accent); }
 .project-member-option small { color: var(--ao-text-faint); font-size: 12px; }
 .project-member-option:has(input:checked) span { color: var(--ao-accent); font-weight: 600; }
+/* 「自己加的窗口（可删除）」：一行一个窗口，右边一个删除动作。
+   按钮不该长得像主操作（提交表单）—— 它是一个**收拾**动作：把加错的那个撤掉。 */
+.project-added-window { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 40px; color: var(--ao-text); font-size: 13px; }
+.project-added-window span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-added-remove { min-height: 32px; padding: 4px 12px; border: 1px solid var(--ao-border-strong); border-radius: var(--ao-radius); background: var(--ao-surface); color: var(--ao-text-soft); font: inherit; font-size: 12px; cursor: pointer; }
+.project-added-remove:hover { border-color: var(--ao-accent); color: var(--ao-text); }
+.project-added-remove:disabled { opacity: .55; cursor: progress; }
 /* 「协作方式」两个选项：单选钮不能再吃上面那条 100%/44px 的输入框样式，
    否则会画成一个巨大的圆圈，选项文字被挤到下面去。 */
 .project-create-modes > div { display: grid; gap: 2px; }

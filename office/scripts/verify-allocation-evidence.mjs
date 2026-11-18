@@ -139,7 +139,9 @@ try {
         group_id: 'g',
         operator: 'office-operator',
         admin: { configured: true, identity: ADMIN, error: null },
-        project_members: [],
+        // 本群任务真正提到过的窗口 = 本项目成员（网关那条规矩）。左栏只列
+    // 本项目的人，所以这个窗口得在名单里。
+    project_members: [MEMBER],
         harnesses: [
           { harness_id: ADMIN, name: 'Codex · 管理员', status: 'online' },
           { harness_id: MEMBER, name: 'Codex CLI', status: 'online' },
