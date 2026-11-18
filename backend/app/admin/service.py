@@ -554,7 +554,8 @@ class AdminService:
         own provider decides) or when the chosen model is a real provider.
         """
         rows = self.database.read(
-            "SELECT model_mode, model_id FROM harnesses WHERE harness_id = ?",
+            "SELECT model_mode, model_id FROM harnesses"
+            " WHERE harness_id = ? AND removed_at IS NULL",
             (str(harness_id),),
         )
         if not rows:
@@ -638,7 +639,8 @@ class AdminService:
         stall (or force someone to bypass the policy).
         """
         rows = self.database.read(
-            "SELECT provider FROM harnesses WHERE harness_id = ?", (harness_id,)
+            "SELECT provider FROM harnesses"
+            " WHERE harness_id = ? AND removed_at IS NULL", (harness_id,)
         )
         if not rows or not rows[0]["provider"]:
             return None

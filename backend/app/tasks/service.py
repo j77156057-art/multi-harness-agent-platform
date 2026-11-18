@@ -702,7 +702,8 @@ class SchedulerService:
                 raise InvalidInput("human assignment requires a target Harness")
             for target in targets:
                 member = conn.execute(
-                    "SELECT * FROM harnesses WHERE harness_id = ?", (target,)
+                    "SELECT * FROM harnesses"
+                    " WHERE harness_id = ? AND removed_at IS NULL", (target,)
                 ).fetchone()
                 if member is None or not member["registration_version"]:
                     raise InvalidInput("assigned Harness has no registration")
@@ -781,7 +782,8 @@ class SchedulerService:
                 targets = item.get("assigned_harness_ids", [])
                 for target in targets:
                     member = conn.execute(
-                        "SELECT * FROM harnesses WHERE harness_id = ?", (target,)
+                        "SELECT * FROM harnesses"
+                        " WHERE harness_id = ? AND removed_at IS NULL", (target,)
                     ).fetchone()
                     if member is None or not member["registration_version"]:
                         raise InvalidInput("assigned Harness has no registration")
