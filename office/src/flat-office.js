@@ -615,6 +615,24 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
 const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
   /** 平台配置的管理员窗口（事实，不是猜的）。 */
+  /**
+   * 本项目的人 —— **一份口径**，左栏与右栏都用它。
+   *
+   * 平台口径（`/status` 的 `project_members`）优先：那是本群任务真正提到过的
+   * 窗口。平台还没建群、一个窗口都没起过活时（刚建好的项目）那份是空的，
+   * 那时用前端自己记的成员（人勾的那些）。
+   *
+   * 绝不退到「平台上登记的全部窗口」：登记是**全局**的（每个项目共用同一批
+   * 窗口），拿它当成员表，新项目一打开就凭空多出十个人（2026-11-18）。
+   */
+  function projectMemberIdSet() {
+    const platformMembers = (state.status && state.status.project_members) || [];
+    const localMembers = (((projectOf && projectOf()) || {}).members || []);
+    return new Set(
+      (platformMembers.length ? platformMembers : localMembers).map((id) => String(id)),
+    );
+  }
+
   function adminIdentity() {
     return (state.status && state.status.admin && state.status.admin.identity) || null;
   }
@@ -1925,11 +1943,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     //
     // 不用 `/roster`：它和左栏不在同一个请求里，渲染时可能还没到，
     // 那时这个项目看起来就像「一个人都没有」。
-    const platformMembers = (state.status && state.status.project_members) || [];
-    const localMembers = (((projectOf && projectOf()) || {}).members || []);
-    const projectMembers = new Set(
-      (platformMembers.length ? platformMembers : localMembers).map((id) => String(id)),
-    );
+    const projectMembers = projectMemberIdSet();
     const outsiders = [];
     for (const item of roster) {
       const id = String(item.harness_id || '');
@@ -6952,12 +6966,16 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     wrap.className = 'flat-rail';
     // 管理员窗口与平台助手不是"能领活的成员"：它们审稿与协调，不干活。
     const adminId = (state.status && state.status.admin && state.status.admin.identity) || null;
-    const usable = state.availability.filter(
-      (item) =>
-        item.usable &&
-        !isAdministratorHarness(item, adminId) &&
-        !isPlatformAssistantHarness(item),
-    );
+    // 这一栏在**项目视图**里，旁边就是"本项目 N 条任务""待办事项" —— 所以它得是
+    // **本项目的人**。以前这里直接用全局的 availability，于是这一栏数的是
+    // "这台机器上所有能干活的人"，和同一屏里按项目算的其它数字两套口径（2026-11-19）。
+    const memberIds = projectMemberIdSet();
+    const notMember = (item) =>
+      !memberIds.has(String(item.harness_id)) ||
+      isAdministratorHarness(item, adminId) ||
+      isPlatformAssistantHarness(item);
+    const usable = state.availability.filter((item) => item.usable && !notMember(item));
+    const outsideCount = state.availability.filter((item) => item.usable && notMember(item)).length;
     // 这个项目里已经勾好的成员（新建项目时在表单里选的）。成员要等「开工配置」
     // 确认、目标提交之后才在平台上生效 —— 所以确认之前这里确实是 0 个。
     // 说成「请去指定成员」是冤枉人：人已经指定过了。
@@ -7056,6 +7074,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       <section class="flat-card flat-card-fold">
         <details data-fold="workers"${state.openFolds.has('workers') ? ' open' : ''}>
           <summary>可执行成员 · ${usable.length} 个</summary>
+          ${outsideCount ? `<p class="flat-note">另有 ${outsideCount} 个登记窗口未加入本项目。</p>` : ''}
           <ul class="flat-list">${usable
             .map((item) => `<li><b>${escape(harnessName(item.harness_id))}</b><span>${escape(item.model || '模型未登记')}</span></li>`)
             .join('') || `<li class="flat-empty">${

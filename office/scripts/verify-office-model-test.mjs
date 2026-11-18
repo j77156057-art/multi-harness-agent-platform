@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { chromium } from 'playwright';
-import { requireOffice, requireProjectGroups } from './lib/office-url.mjs';
+import { requireOffice, requireProjectGroups, skip } from './lib/office-url.mjs';
 
 const base = await requireOffice('verify-office-model-test.mjs');
 await requireProjectGroups(base, 'verify-office-model-test.mjs');
@@ -59,6 +59,12 @@ const pageState = () =>
       cli: block.dataset.cli || '',
       head: (block.querySelector('h3') || {}).textContent || '',
       models: block.querySelectorAll('.flat-probe-row').length,
+      // 每一行的模型与**档位**：界面上那一行右边的小标签（免费 / 付费 / 未定档）。
+      // 脚本靠它决定测哪一条 —— 见下面「只测免费档」。
+      rows: [...block.querySelectorAll('.flat-probe-row')].map((row) => ({
+        model: (row.querySelector('input') || {}).value || '',
+        tier: ((row.querySelector('em') || {}).textContent || '').trim(),
+      })),
       run: Boolean(block.querySelector('[data-act="test-model"]')),
       result: (block.querySelector('[data-test-result]') || {}).textContent || '',
       ok: Boolean(block.querySelector('.flat-probe-ok')),
@@ -155,16 +161,46 @@ try {
   assert.ok(probePosts.length >= 1, `要打 /pool/roster-probe，实际：${JSON.stringify(posts.map((p) => p.name))}`);
 
   // 选一个模型 → 点「测试」
-  const targetBlock = wanted
-    ? withModels.find((block) => wanted.startsWith(`${block.cli}/`))
-    : withModels.find((block) => block.cli === 'codebuddy') || withModels[0];
-  assert.ok(targetBlock, `要找到可测的一家`);
-  const modelId = wanted || `${targetBlock.cli}/${'__first__'}`;
+  //
+  // **只测免费档**。点「测试」是真的调一次模型（花一次额度）；脚本原来挑的是
+  // "codebuddy 家的第一个模型"，不看档位 —— 于是它可能自动调一条**未定档**的
+  // 模型（2026-11-19 实测：codebuddy/hy4std 调了两次，各 2.2 万输入 token；
+  // 那条模型谁都没声明过它免费还是收费）。
+  //
+  // 人手动点，是人的决定；脚本点，不是。所以：默认只在**免费档**里挑，
+  // 一个免费档都没有就跳过并说清楚为什么 —— 不拿按量的钱做验证。
+  // 显式指定 OFFICE_MT_MODEL 时照人的指定走（那是人点名的），但输出里要写清档位。
+  const freePick = [];
+  for (const block of done.blocks) {
+    const index = (block.rows || []).findIndex((row) => row.tier === '免费');
+    if (index >= 0) freePick.push({ cli: block.cli, index, model: block.rows[index].model });
+  }
+  let targetBlock = null;
+  let rowIndex = 0;
+  if (wanted) {
+    targetBlock = withModels.find((block) => wanted.startsWith(`${block.cli}/`));
+    if (targetBlock) {
+      const index = (targetBlock.rows || []).findIndex((row) => row.model === wanted);
+      rowIndex = index >= 0 ? index : 0;
+    }
+  } else if (freePick.length) {
+    targetBlock = done.blocks.find((block) => block.cli === freePick[0].cli);
+    rowIndex = freePick[0].index;
+  }
+  if (!wanted && !targetBlock) {
+    skip(
+      'verify-office-model-test.mjs',
+      '池子里没有免费档的模型 —— 「测试」会真花一次额度，脚本不替人花按量的钱',
+    );
+  }
+  assert.ok(targetBlock, '要找到可测的一家');
   const firstRow = page
     .locator(`.flat-probe[data-cli="${targetBlock.cli}"] .flat-probe-row input`)
-    .first();
+    .nth(rowIndex);
   const pickedValue = await firstRow.getAttribute('value');
   const toTest = wanted || pickedValue;
+  const testedTier =
+    (targetBlock.rows || []).find((row) => row.model === toTest)?.tier || '未定档';
   await firstRow.check();
   const readyState = await waitFor(
     (current) => current.blocks.some((block) => block.cli === targetBlock.cli && block.run),
@@ -207,6 +243,7 @@ try {
     firstArrival: {cli: firstCli, secondsFromFirstArrivalToAllDone: elapsed},
     probedClis: done.blocks.map((block) => `${block.cli}:${block.models}`),
     tested: toTest,
+    testedTier,
     ok: result.ok,
     result: result.result,
     note: '「测试」会真的花一次额度，所以脚本只测一个模型',

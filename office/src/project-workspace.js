@@ -16,11 +16,26 @@ const PROJECTS_KEY = 'agent-office.projects.v1';
 const TRASH_DAYS = 7;
 const ACTIVE_PROJECT_KEY = 'agent-office.active-project.v1';
 
+//: 项目历史读不出来时**不许**把它当成「本来就没有」。
+//:
+//: 以前这里 catch 掉解析错误就返回空数组，下一次写回就把整份历史覆盖成空的 ——
+//: 那份原串是唯一的记录，覆盖它等于把「读坏了」变成「从来没有过」
+//: （2026-11-19 真机复核，与后端 user_keys 那次事故同构）。
+let storedProjectsBroken = false;
+let storedProjectsRaw = '';
+
 function readStoredProjects() {
   try {
     const raw = localStorage.getItem(PROJECTS_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
+    if (!raw) {
+      storedProjectsBroken = false;
+      storedProjectsRaw = '';
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('not a list');
+    storedProjectsBroken = false;
+    storedProjectsRaw = '';
     return parsed
       .filter(project => project && typeof project.id === 'string' && typeof project.name === 'string')
       .map(project => ({
@@ -35,6 +50,9 @@ function readStoredProjects() {
         taskIds: Array.isArray(project.taskIds) ? project.taskIds : [],
       }));
   } catch {
+    // 读不动就是读不动：把原文留着，等人来看，不当成「没有项目」。
+    storedProjectsBroken = true;
+    try { storedProjectsRaw = String(localStorage.getItem(PROJECTS_KEY) || ''); } catch { storedProjectsRaw = ''; }
     return [];
   }
 }
@@ -65,7 +83,13 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   let memberStartError = '';
   if (!projects.some(project => project.id === activeId)) activeId = null;
   const persistProjects = () => {
-    try { localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects)); } catch {}
+    try {
+      // 原来那份读坏了：先把它挪到备份 key，再写新的 —— **不覆盖唯一的那份记录**。
+      if (storedProjectsBroken && storedProjectsRaw) {
+        try { localStorage.setItem(`${PROJECTS_KEY}.bak`, storedProjectsRaw); } catch {}
+      }
+      localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+    } catch {}
   };
   const persistActive = () => {
     try {
@@ -113,6 +137,11 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   const lobbyError = root.querySelector('[data-lobby-error]');
   function renderLobbyError() {
     const errors = [platformError, formalStatusError, state_trashError, repoRelayError, memberStartError].filter(Boolean);
+    // 项目历史读不出来要说出来：原来那份已经留在 ``agent-office.projects.v1.bak``，
+    // 没有被覆盖掉。默默显示「0 个项目」会让人以为平台把项目弄丢了。
+    if (storedProjectsBroken) {
+      errors.push('项目历史读不出来（原文已留在 agent-office.projects.v1.bak，没有被覆盖）');
+    }
     lobbyError.hidden = errors.length === 0;
     lobbyError.textContent = errors.join('；');
   }
@@ -253,30 +282,28 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
   }
 
   /**
-   * 平台上在线、且不是管理员/助手的窗口 —— 它们才是能干活的人。
+   * 本项目的人 —— **群口径优先，群口径没有就用人自己勾的**，绝不退到全机名册。
    *
-   * 只在**没有别的口径**时用（新建项目时人自己勾）。打开平台已有项目时用
-   * 平台给的 ``project_members``：那是本群真正有活的窗口。登记表是全局的
-   * （每个项目共用同一批窗口），拿它当成员表，新项目一打开左栏就会冒出平台
-   * 上的每一个窗口（2026-11-18）。
+   * 群口径：平台给的 ``project_members``（本群任务真正提到过的窗口）。
+   *
+   * 为什么不能退到「平台上在线的所有窗口」：登记表是**全局**的（每个项目共用
+   * 同一批窗口），拿它当成员表，新项目一打开左栏就凭空多出十个人（2026-11-18）。
+   * 以前这条兜底路径还在，于是「群还没派过活」的新项目照样会灌进全机名单。
+   *
+   * 群口径为空时的正解是**人自己勾的那些**（新建项目时选定的成员）；连那份
+   * 也没有，就是「这个项目还没有成员」—— 空着，并让界面说出来。
    */
-  function onlineMemberIds() {
-    const admin = actingAdministratorId(formalState);
-    const online = (formalState?.harnesses || [])
-      .filter(item => item.status === 'online' &&
-        !isAdministratorHarness(item, admin) && !isPlatformAssistantHarness(item))
-      .map(item => item.harness_id);
-    return online.length ? online : members.map(member => member.id);
-  }
-
-  /** 本群真正有活的窗口（平台口径）：不是「平台上登记了什么」。 */
   function projectMemberIds() {
     const admin = actingAdministratorId(formalState);
     const scope = Array.isArray(formalState?.project_members) ? formalState.project_members : [];
-    const members = scope
+    const fromPlatform = scope
       .map(id => String(id))
       .filter(id => id && !isAdministratorHarness({ harness_id: id }, admin) && !isPlatformAssistantHarness({ harness_id: id }));
-    return members.length ? members : onlineMemberIds();
+    if (fromPlatform.length) return fromPlatform;
+    const picked = members
+      .map(member => String(member.id || ''))
+      .filter(id => id && !isAdministratorHarness({ harness_id: id }, admin) && !isPlatformAssistantHarness({ harness_id: id }));
+    return picked;
   }
 
   /**

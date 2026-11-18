@@ -79,17 +79,40 @@ const reasonText = reason => {
 // 面板里拼进 innerHTML 的 harness 名称来自注册表（可被外部写入），必须转义。
 const personaFor = id => PERSONAS[baseOf(id)] || PERSONAS[id] || '按自己的节奏推进。';
 
+//: 记录读不出来时**不许**把它当成「本来就没有」。
+//:
+//: 以前这里 catch 掉解析错误就返回空库，下一次写回就把巡检样本、事件、待办、
+//: 提醒全盖掉 —— 那份原串是唯一的记录（2026-11-19 真机复核，与项目历史、
+//: 后端 user_keys 三处同构）。现在：读坏就先把原文挪到备份 key，再写新的。
+let storeBroken = false;
+let storeRaw = '';
+
 function loadStore({ fresh = false } = {}) {
   if (fresh) return { samples: {}, events: [], backlog: {}, reminders: {} };
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (parsed && typeof parsed === 'object') return { samples: parsed.samples || {},
-      events: parsed.events || [], backlog: parsed.backlog || {}, reminders: parsed.reminders || {} };
-  } catch { /* 记录损坏时从空开始，不中断巡检 */ }
+    const raw = localStorage.getItem(STORE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') {
+      storeBroken = false;
+      storeRaw = '';
+      return { samples: parsed.samples || {},
+        events: parsed.events || [], backlog: parsed.backlog || {}, reminders: parsed.reminders || {} };
+    }
+    if (raw) throw new Error('not an object');
+  } catch {
+    // 读不动就是读不动：原文留着，不当成「没有记录」。
+    storeBroken = true;
+    try { storeRaw = String(localStorage.getItem(STORE_KEY) || ''); } catch { storeRaw = ''; }
+  }
   return { samples: {}, events: [], backlog: {}, reminders: {} };
 }
 function saveStore(db) {
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch { /* 存储不可用时只保留内存记录 */ }
+  try {
+    if (storeBroken && storeRaw) {
+      try { localStorage.setItem(`${STORE_KEY}.bak`, storeRaw); } catch { /* 备份失败也不挡正文 */ }
+    }
+    localStorage.setItem(STORE_KEY, JSON.stringify(db));
+  } catch { /* 存储不可用时只保留内存记录 */ }
 }
 
 export function mountAdminAgent({ launchArea, phoneArea, members = [], bootstrap = true, adminHarness = null, project = null }) {
