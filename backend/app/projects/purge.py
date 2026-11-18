@@ -6,10 +6,11 @@
   分配与传阅、群消息与投递记录 —— 也就是"界面上还看得见的那些东西"。
 - **留**：`task_events` 与 `verification_receipts`。它们是 append-only 的
   **发生过什么**，删掉就再也追不回来了；而"这条活现在是什么状态"是投影，投影可以没有。
-  （`verification_receipts` 上还有 BEFORE DELETE 触发器
-  `receipt_no_delete`：删它会被 SQLite 直接 ABORT，整条清扫回滚 ——
-  2026-11-19 真机复核：活库里那张表 120 行，只要项目名下有过验证回执，
-  回收站**一次都没清成功过**，而清扫的异常被 scheduler 吞成报告字段，界面毫无异样。）
+  （`verification_receipts` 上有 BEFORE UPDATE / BEFORE DELETE 触发器，删改都不许；
+  迁移 030 又把它指向 `tasks` / `task_attempts` 的外键去掉了 —— 证据留底，
+  但不再绑住投影，回收站才真的清得掉。2026-11-19 真机复核：改之前，只要项目名下
+  有过验证回执，回收站**一次都没清成功过**，而清扫的异常被 scheduler 吞成报告字段，
+  界面毫无异样。）
 
 一条原则写在函数里：**只删得掉自己认得的东西**。归不到某个项目上的表（比如
 `command_idempotency`、`jsonl_exports`）一律不碰 —— 宁可留几行孤儿，也不能顺手清掉
@@ -176,19 +177,15 @@ def purge_project(conn: Any, project_id: str) -> dict[str, int]:
     return {name: value for name, value in counts.items() if value}
 
 
-def _append_only_evidence(conn: Any, project_id: str) -> str:
-    """这个项目名下有没有**删不掉**的证据？有的话给出原因，没有就空串。
+def _live_lease_reason(conn: Any, project_id: str) -> str:
+    """这个项目名下还有**没释放的租约**吗？有的话给出原因，没有就空串。
 
-    ``verification_receipts`` 是 append-only 的：表上有 BEFORE DELETE 触发器
-    （``receipt_no_delete``），删它会被 SQLite ABORT；而它的 task_id 又指着
-    ``tasks``，所以"留回执、删任务"也不成立 —— 两条路都堵着。
+    租约没释放 = 某个窗口**可能还在这个工作区里干活**。那不是"该清的垃圾"，
+    是还在进行中的活 —— 删了等于把人家脚底下的东西抽走。所以这时**不清**，
+    并把原因说出来。
 
-    那就不删这个项目，**并把原因说出来**。以前这里是直接撞 IntegrityError，
-    整个事务回滚，而清扫的异常被 scheduler 吞成报告字段 —— 界面毫无异样，
-    看着像"清过了"，其实一行没删（2026-11-19 真机复核：活库 120 行回执）。
-
-    要真能清干净，得让回执不再绑住任务（重建那张表、去掉指向 tasks 的外键，
-    像 ``task_events`` 那样留底但不挡路）—— 那是改 schema，要人点头。
+    以前没有这道闸：清扫失败（外键、触发器）被 scheduler 吞成报告字段，界面
+    毫无异样，看着像"清过了"，其实一行没删（2026-11-19 真机复核）。
     """
     groups = _column_values(conn, "SELECT group_id FROM groups WHERE project_id = ?", (project_id,))
     if not groups:
@@ -198,11 +195,11 @@ def _append_only_evidence(conn: Any, project_id: str) -> str:
         return ""
     marks = _placeholders(tasks)
     count = conn.execute(
-        "SELECT count(*) FROM verification_receipts WHERE task_id IN (" + marks + ")",
+        "SELECT count(*) FROM leases WHERE released_at IS NULL AND task_id IN (" + marks + ")",
         tuple(tasks),
     ).fetchone()[0]
     if count:
-        return f"这个项目名下有 {count} 条 append-only 的验证回执（证据不删），所以没清扫"
+        return f"这个项目名下还有 {count} 条没释放的租约（可能还有窗口在干活），所以没清扫"
     return ""
 
 
@@ -222,7 +219,7 @@ def purge_due_projects_detailed(
     for row in due:
         project_id = str(row["project_id"])
         with database.transaction() as conn:
-            reason = _append_only_evidence(conn, project_id)
+            reason = _live_lease_reason(conn, project_id)
             if reason:
                 skipped.append(
                     {

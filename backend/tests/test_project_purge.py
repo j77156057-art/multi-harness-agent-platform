@@ -298,12 +298,15 @@ def test_a_project_with_a_ready_unclaimed_reminder_is_still_purged(tmp_path, mon
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-rem'")
 
 
-def test_a_project_with_append_only_evidence_is_skipped_with_a_reason(tmp_path, monkeypatch):
-    """验证回执是 append-only 的证据：表上有 BEFORE DELETE 触发器，删它必炸；
-    它的 task_id 又指着 tasks，所以"留回执、删任务"也不成立 —— 两条路都堵着。
+def test_a_project_with_append_only_evidence_is_purged_and_the_evidence_stays(tmp_path, monkeypatch):
+    """验证回执是 append-only 的证据（表上有 BEFORE UPDATE / BEFORE DELETE 触发器）。
 
-    于是这个项目**不清**，但要把原因说出来。以前是直接撞 IntegrityError，
-    整个事务回滚，异常被 scheduler 吞掉，界面毫无异样（活库 120 行回执）。
+    证据**留着**，但它不再绑住投影（迁移 030 去掉了它指向 tasks / task_attempts
+    的外键）：所以项目可以被清掉，回执作为"发生过什么"留下 —— 与 task_events
+    同一条规矩。
+
+    以前两条路都堵着（删回执被触发器 ABORT，留回执又删不掉任务），回收站到期
+    清扫**一次都没成功过**，而异常被 scheduler 吞掉，界面毫无异样。
     """
     client, database, token = _env(tmp_path, monkeypatch)
     _seed(client, database, token, "proj-evi", "proj-evi-g1", "T-EVI")
@@ -326,9 +329,36 @@ def test_a_project_with_append_only_evidence_is_skipped_with_a_reason(tmp_path, 
 
     purged, skipped = purge_due_projects_detailed(database)
 
-    assert purged == []
-    assert [item["project_id"] for item in skipped] == ["proj-evi"]
-    assert "验证回执" in skipped[0]["reason"]
-    # 项目没被清掉，证据也还在。
-    assert database.read("SELECT 1 FROM projects WHERE project_id = 'proj-evi'")
+    assert [item["project_id"] for item in purged] == ["proj-evi"]
+    assert skipped == []
+    # 项目清了，证据留着。
+    assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-evi'")
     assert database.read("SELECT 1 FROM verification_receipts WHERE task_id = 'T-EVI'")
+
+
+def test_a_project_with_a_live_lease_is_skipped_with_a_reason(tmp_path, monkeypatch):
+    """租约没释放 = 可能还有窗口在那个工作区里干活 —— 这时候不清，并说清原因。
+
+    这是清扫里唯一剩下的"该跳过"的理由：清垃圾与打断正在干的活是两件事。
+    """
+    client, database, token = _env(tmp_path, monkeypatch)
+    _seed(client, database, token, "proj-busy", "proj-busy-g1", "T-BUSY")
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO leases(lease_id, task_id, kind, owner, token_hash, fencing_epoch,"
+            " lease_until, grant_wall, grant_mono, boot_id)"
+            " VALUES ('L-BUSY', 'T-BUSY', 'development', 'claude-code', 'h', 1,"
+            " '2099-01-01T00:00:00+00:00', '2026-11-01T00:00:00+00:00', 1.0, 'boot-1')"
+        )
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
+    with database.transaction() as conn:
+        conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-busy'", (old,))
+
+    purged, skipped = purge_due_projects_detailed(database)
+
+    assert purged == []
+    assert [item["project_id"] for item in skipped] == ["proj-busy"]
+    assert "租约" in skipped[0]["reason"]
+    # 没清：项目与租约都还在。
+    assert database.read("SELECT 1 FROM projects WHERE project_id = 'proj-busy'")
+    assert database.read("SELECT 1 FROM leases WHERE lease_id = 'L-BUSY'")
