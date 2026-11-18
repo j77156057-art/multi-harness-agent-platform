@@ -964,6 +964,60 @@ def test_refine_refuses_when_only_same_provider_members_remain(tmp_path):
         )
 
 
+def test_refine_never_offers_a_window_whose_model_cannot_take_tools(tmp_path, monkeypatch):
+    """池子里的 **CLI 档**模型接不了工具定义，所以细化不能挑它。
+
+    审批门（``routes._plan_assignment_blocks``）用的就是这一个条件。细化不用，
+    管理员就会挑出审批必然拒的窗口：方案一提交就是 409 ``plan.targets_unavailable``，
+    而人无法在界面上改那份名单（2026-11-17 真机走查实测到的死结）。
+
+    钉住的是**同一条规则**，不是某个模型的名字：档位是 CLI 还是 API，由池子说。
+    """
+    from app.pool import service as pool_service
+
+    monkeypatch.setattr(
+        pool_service.PoolService,
+        "models",
+        lambda self, refresh=False: [
+            {
+                "id": "codebuddy/hy3",
+                "upstream": "codebuddy:hy3",
+                "protocol": "cli",
+                "tier": "free",
+            },
+            {
+                "id": "MiniMax-M3.1-Flash-Preview",
+                "upstream": "minimax",
+                "protocol": "anthropic",
+                "tier": "reserve",
+            },
+        ],
+    )
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout=_envelope(SPEC))
+
+    def _use_model(model_id: str) -> None:
+        with chain.database.transaction() as conn:
+            conn.execute(
+                "UPDATE harnesses SET model_mode = 'pool', model_id = ? WHERE harness_id = ?",
+                (model_id, MEMBER),
+            )
+
+    # CLI 档：这个窗口接不了带工具定义的活，不能被派活。
+    _use_model("codebuddy/hy3")
+    with pytest.raises(AdminHarnessError) as error:
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    message = str(error.value)
+    assert "tool definitions" in message, message
+    # 拒绝要说得清**谁**不行、为什么 —— 群主据此去改，而不是只看到一句「没有成员」。
+    assert MEMBER in message, message
+
+    # API 档：同一个窗口就是候选了。
+    _use_model("MiniMax-M3.1-Flash-Preview")
+    result = _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    assert result["members"] == [MEMBER]
+
+
 def test_refine_excludes_the_platform_assistant_from_members(tmp_path, monkeypatch):
     chain = _admin_chain(tmp_path)
     register_harness(chain.database, "office-admin", provider="qoder")

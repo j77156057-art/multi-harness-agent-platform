@@ -1200,7 +1200,8 @@ def _claimable_windows(database: Database, now: datetime) -> list[str]:
         " FROM harnesses h LEFT JOIN harness_registrations r ON"
         "  r.harness_id = h.harness_id"
         "  AND r.registration_version = h.registration_version"
-        " WHERE h.status = 'online' AND h.registration_version IS NOT NULL",
+        " WHERE h.status = 'online' AND h.registration_version IS NOT NULL"
+                " AND h.removed_at IS NULL",
         (now.isoformat(),),
     )
     return [

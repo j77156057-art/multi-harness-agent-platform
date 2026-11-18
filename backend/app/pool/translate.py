@@ -25,6 +25,34 @@ from typing import Any
 # --------------------------------------------------------------------------- #
 
 
+def message_text(message: Any) -> str:
+    """The text a model actually said, whichever field it put it in.
+
+    Some models answer **entirely in the reasoning field** and leave
+    ``content`` empty -- the local ollama's thinking models do exactly that
+    (their answer arrives as ``message.reasoning``, ``content`` is "").
+
+    A caller that asked for text must get text: otherwise the agent loop sees
+    an empty turn, calls it "no output" and gives up, while the model had
+    answered perfectly well (2026-11-17 真机走查：五个成员 CLI 一起"没有回答"，
+    而模型其实答了 —— 原因就是这一段）。
+
+    The rule only fires when ``content`` is empty, so a model that answers in
+    both fields (thinking *and* answer) is untouched.
+    """
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    text = _text_of(content) if content is not None else ""
+    if text.strip():
+        return text
+    for key in ("reasoning", "reasoning_content"):
+        value = message.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return ""
+
+
 def _text_of(content: Any) -> str:
     """The plain text of a message content (string or block list)."""
     if isinstance(content, str):
@@ -279,10 +307,59 @@ def anthropic_to_openai(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
         if not isinstance(message, dict):
             continue
         role = str(message.get("role") or "user")
+        content = message.get("content")
+        # Anthropic carries the tool exchange **inside** the content blocks:
+        # the assistant turn has tool_use blocks, the user turn has
+        # tool_result blocks.  Both have to become OpenAI tool_calls / tool
+        # messages -- dropped, the model loses the thread after the first
+        # tool call and repeats itself (2026-11-18).
+        if isinstance(content, list):
+            calls = [
+                block
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "tool_use"
+            ]
+            results = [
+                block
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "tool_result"
+            ]
+            if role == "assistant" and calls:
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": _text_of(content) or None,
+                        "tool_calls": [
+                            {
+                                "id": str(block.get("id") or "call_relay_" + str(index)),
+                                "type": "function",
+                                "function": {
+                                    "name": str(block.get("name") or ""),
+                                    "arguments": json.dumps(
+                                        block.get("input") or {}, ensure_ascii=False
+                                    ),
+                                },
+                            }
+                            for index, block in enumerate(calls)
+                        ],
+                    }
+                )
+                continue
+            if results:
+                for block in results:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": str(block.get("tool_use_id") or ""),
+                            "content": _text_of(block.get("content"))
+                            or str(block.get("content") or "(tool result)"),
+                        }
+                    )
+                continue
         messages.append(
             {
                 "role": "assistant" if role == "assistant" else "user",
-                "content": _text_of(message.get("content")),
+                "content": _text_of(content),
             }
         )
     body: dict[str, Any] = {
@@ -296,31 +373,106 @@ def anthropic_to_openai(payload: dict[str, Any]) -> tuple[dict[str, Any], list[s
         body["top_p"] = payload["top_p"]
     if payload.get("stop_sequences"):
         body["stop"] = list(payload["stop_sequences"])
+    tools = _anthropic_tools_to_openai(payload.get("tools"))
+    if tools:
+        body["tools"] = tools
+        if payload.get("tool_choice"):
+            choice = payload["tool_choice"]
+            if isinstance(choice, dict):
+                kind = str(choice.get("type") or "")
+                if kind == "auto":
+                    body["tool_choice"] = "auto"
+                elif kind == "any":
+                    body["tool_choice"] = "required"
+                elif kind == "tool" and choice.get("name"):
+                    body["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": str(choice["name"])},
+                    }
     if payload.get("stream"):
         body["stream"] = True
     return body, _notes_for_unsupported(payload)
+
+
+def _anthropic_tools_to_openai(tools: Any) -> list[dict[str, Any]]:
+    """Anthropic tool definitions -> OpenAI tool definitions.
+
+    The tool definitions have to cross the protocol boundary **on the way in**
+    as well: the answer side was translated (OpenAI tool_calls -> Anthropic
+    tool_use), but the request side was not, so the model never learned that
+    it had tools.  It then answered "I don't have a Bash tool available" and
+    the window could do nothing at all (2026-11-18: the Claude Code window
+    produced text instead of files, every attempt).
+    """
+    result: list[dict[str, Any]] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("name") or "").strip()
+        if not name:
+            continue
+        schema = tool.get("input_schema")
+        if not isinstance(schema, dict):
+            schema = {"type": "object", "properties": {}}
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": str(tool.get("description") or ""),
+                    "parameters": schema,
+                },
+            }
+        )
+    return result
 
 
 def openai_response_to_anthropic(data: dict[str, Any], *, model: str) -> dict[str, Any]:
     """OpenAI chat response -> Anthropic messages response."""
     choices = data.get("choices") or []
     text = ""
+    tool_calls: list[dict[str, Any]] = []
     finish = "end_turn"
     if choices and isinstance(choices[0], dict):
         message = choices[0].get("message") or {}
-        text = _text_of(message.get("content"))
+        text = message_text(message)
+        raw_calls = message.get("tool_calls") or []
+        tool_calls = [call for call in raw_calls if isinstance(call, dict)]
         finish = {
             "stop": "end_turn",
             "length": "max_tokens",
             "tool_calls": "tool_use",
         }.get(str(choices[0].get("finish_reason") or "stop"), "end_turn")
     usage = data.get("usage") or {}
+    content: list[dict[str, Any]] = []
+    if text:
+        content.append({"type": "text", "text": text})
+    # 工具调用要**过协议边界**：OpenAI 的 tool_calls 在 Anthropic 那边是 tool_use
+    # 块。丢了它，Claude CLI 就只看见一段文字，于是"想写文件"变成"说想写文件"，
+    # 交付永远出不来（2026-11-17 真机走查实测）。
+    for call in tool_calls:
+        function = call.get("function") or {}
+        arguments = function.get("arguments")
+        try:
+            payload = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+        except (TypeError, ValueError):
+            payload = {}
+        content.append(
+            {
+                "type": "tool_use",
+                "id": str(call.get("id") or ""),
+                "name": str(function.get("name") or ""),
+                "input": payload if isinstance(payload, dict) else {},
+            }
+        )
+    if tool_calls:
+        finish = "tool_use"
     return {
         "id": str(data.get("id") or "msg_relay"),
         "type": "message",
         "role": "assistant",
         "model": str(data.get("model") or model),
-        "content": [{"type": "text", "text": text}],
+        "content": content,
         "stop_reason": finish,
         "stop_sequence": None,
         "usage": {
@@ -328,6 +480,122 @@ def openai_response_to_anthropic(data: dict[str, Any], *, model: str) -> dict[st
             "output_tokens": int(usage.get("completion_tokens") or 0),
         },
     }
+
+
+def anthropic_response_to_stream(data: dict[str, Any]) -> Iterator[str]:
+    """An Anthropic response -> the Anthropic **event stream** (SSE).
+
+    The Claude CLI always streams: it asks for ``stream: true`` and parses
+    ``message_start / content_block_delta / message_stop``.  A relay that
+    answers such a request with a plain JSON body leaves the CLI with nothing
+    it can parse ("API Error: 502" on its side, 2026-11-17 真机走查).
+
+    The whole answer goes out as one text delta: the upstream answered in one
+    go anyway, and the CLI only needs a well-formed event sequence.
+    """
+    content = data.get("content") or []
+    text_parts: list[str] = []
+    tool_blocks: list[dict[str, Any]] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        kind = str(block.get("type") or "")
+        if kind == "text":
+            text_parts.append(str(block.get("text") or ""))
+        elif kind == "tool_use":
+            tool_blocks.append(block)
+    text = "".join(text_parts)
+    message_id = str(data.get("id") or "msg_relay")
+    usage = data.get("usage") or {}
+    stop_reason = str(data.get("stop_reason") or "end_turn")
+
+    def event(name: str, payload: dict[str, Any]) -> str:
+        return (
+            f"event: {name}\n"
+            "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+        )
+
+    yield event(
+        "message_start",
+        {
+            "type": "message_start",
+            "message": {
+                "id": message_id,
+                "type": "message",
+                "role": "assistant",
+                "model": str(data.get("model") or ""),
+                "content": [],
+                "stop_reason": None,
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": int(usage.get("input_tokens") or 0),
+                    "output_tokens": 0,
+                },
+            },
+        },
+    )
+    yield event(
+        "content_block_start",
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    )
+    if text:
+        yield event(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": text},
+            },
+        )
+    yield event("content_block_stop", {"type": "content_block_stop", "index": 0})
+    # A tool call has to be **its own content block** in the Anthropic event
+    # stream: the CLI reads ``content_block_start`` with a ``tool_use`` block
+    # (it carries the id, the name and the input), then a delta with the
+    # partial JSON.  Dropping it -- while still announcing
+    # ``stop_reason: tool_use`` -- leaves the CLI with a tool call it never
+    # received, and it answers "the model's tool call could not be parsed"
+    # (2026-11-18: every Claude Code attempt, thousands of them).
+    index = 1
+    for block in tool_blocks:
+        tool_id = str(block.get("id") or f"toolu_relay_{index}")
+        tool_input = block.get("input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        yield event(
+            "content_block_start",
+            {
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": str(block.get("name") or ""),
+                    "input": {},
+                },
+            },
+        )
+        yield event(
+            "content_block_delta",
+            {
+                "type": "content_block_delta",
+                "index": index,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(tool_input, ensure_ascii=False),
+                },
+            },
+        )
+        yield event("content_block_stop", {"type": "content_block_stop", "index": index})
+        index += 1
+    yield event(
+        "message_delta",
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {"output_tokens": int(usage.get("output_tokens") or 0)},
+        },
+    )
+    yield event("message_stop", {"type": "message_stop"})
 
 
 # --------------------------------------------------------------------------- #

@@ -276,7 +276,10 @@ class ClaimService:
             return "wrong_target", None
         if (item.get("require_human_assign") or task["require_human_assign"]) and not targets:
             return "assignment_required", None
-        row = conn.execute("SELECT * FROM harnesses WHERE harness_id = ?", (harness_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM harnesses WHERE harness_id = ? AND removed_at IS NULL",
+            (harness_id,),
+        ).fetchone()
         # Legacy auth-off drills remain explicitly legacy. Targeted work is
         # always checked, and enforce mode never trusts an unregistered probe.
         strict = settings.auth_mode == "enforce" or bool(targets) or bool(item.get("capabilities"))

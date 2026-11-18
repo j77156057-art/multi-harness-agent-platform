@@ -25,6 +25,7 @@ from app.pool.routing import plan_attempt
 from app.pool.sources import ANTHROPIC, CLI, OPENAI_CHAT, discover_upstreams
 from app.pool.translate import (
     anthropic_response_to_openai,
+    anthropic_response_to_stream,
     anthropic_to_openai,
     chat_to_responses,
     openai_to_anthropic,
@@ -1185,3 +1186,124 @@ def test_a_tool_result_rides_back_as_the_protocol_expects():
         item for item in responses_body["input"] if item.get("type") == "function_call_output"
     ]
     assert output and output[0]["call_id"] == "call-1"
+
+
+def test_anthropic_tools_reach_the_model_as_openai_tools() -> None:
+    """The tool definitions must cross the protocol boundary on the way **in**.
+
+    The answer side was translated (OpenAI tool_calls -> Anthropic tool_use),
+    but the request side was not: the model never learned it had tools, so it
+    answered "I do not have a Bash tool available" and the window produced
+    text instead of files (2026-11-18: the Claude Code window, every attempt).
+    """
+    body, _notes = anthropic_to_openai(
+        {
+            "model": "m",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+                {
+                    "name": "Bash",
+                    "description": "Run a shell command",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                        "required": ["command"],
+                    },
+                }
+            ],
+        }
+    )
+    assert len(body["tools"]) == 1
+    tool = body["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["function"]["name"] == "Bash"
+    assert tool["function"]["parameters"]["properties"]["command"]["type"] == "string"
+
+
+def test_the_tool_exchange_survives_the_round_trip() -> None:
+    """After a tool call, the result must reach the model as a tool message.
+
+    Anthropic puts the tool call in the assistant turn and the result in the
+    user turn, both as content blocks.  Dropped, the model loses the thread
+    after the first call and repeats itself (2026-11-18).
+    """
+    body, _notes = anthropic_to_openai(
+        {
+            "model": "m",
+            "max_tokens": 100,
+            "messages": [
+                {"role": "user", "content": "write it"},
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "Write",
+                            "input": {"path": "a.md", "text": "hi"},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "written",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+    assistant_turn = [item for item in body["messages"] if item["role"] == "assistant"][-1]
+    assert assistant_turn["tool_calls"][0]["function"]["name"] == "Write"
+    assert "path" in assistant_turn["tool_calls"][0]["function"]["arguments"]
+    result_turn = [item for item in body["messages"] if item["role"] == "tool"][-1]
+    assert result_turn["tool_call_id"] == "toolu_1"
+    assert "written" in result_turn["content"]
+
+
+
+def test_a_streamed_tool_call_reaches_the_caller() -> None:
+    """The tool call has to be its own content block in the event stream.
+
+    The Anthropic stream carries a tool call as ``content_block_start`` with a
+    ``tool_use`` block (id, name, input) plus an ``input_json_delta``.  The
+    builder only emitted the text block, so the CLI received
+    ``stop_reason: tool_use`` **without** the call it announced, and answered
+    "the model's tool call could not be parsed" -- every attempt, thousands
+    of them (2026-11-18).
+    """
+    events = list(
+        anthropic_response_to_stream(
+            {
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "model": "m",
+                "content": [
+                    {"type": "text", "text": "Calling it."},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_1",
+                        "name": "Bash",
+                        "input": {"command": "ls -la"},
+                    },
+                ],
+                "stop_reason": "tool_use",
+                "usage": {"input_tokens": 5, "output_tokens": 7},
+            }
+        )
+    )
+    joined = "".join(events)
+    assert "tool_use" in joined
+    assert "toolu_1" in joined
+    assert "input_json_delta" in joined
+    assert "ls -la" in joined
+    # The text block and the tool block are separate blocks (two starts,
+    # each announced and carried in its own event).
+    assert joined.count("event: content_block_start") == 2
+

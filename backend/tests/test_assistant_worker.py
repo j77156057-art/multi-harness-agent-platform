@@ -83,6 +83,7 @@ def _worker(
         model=model,
         state=state,
         state_path=state_path,
+        data_dir=state_path.parent,
         trace_dir=state_path.parent / "trace",
         **kwargs,
     )
@@ -114,6 +115,49 @@ def _dm(model: ScriptedModel, client: FakeClient, to: str) -> tuple[str, dict[st
     assert body["mentions"] == [to]
     _ = model
     return path, body
+
+
+# ---------------------------------------------------------------- the live state
+
+
+def test_the_live_state_says_received_running_and_done(tmp_path):
+    """每一轮都要在外面的面板上留下"它收到了 / 它在忙 / 它答完了"。"""
+    from app.assistant.live import read_state
+
+    client = FakeClient({9: [_message(12, "查一下额度池现状", sender="human-owner")]})
+    model = ScriptedModel(
+        [
+            json.dumps({"thought": "查池子", "tool": "pool.status"}),
+            _final("免费档五家都在。", ["s1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    state = AssistantState(initialized=True, cursor_seq=9)
+    worker = _worker(client, model, tmp_path / "state.json", state=state)
+    worker.poll_once()
+    state = read_state(tmp_path, worker.group_id)
+    assert state is not None
+    assert state["state"] == "done"
+    assert state["asker"] == "human-owner"
+    assert "免费档五家都在。" in state["answer"]
+    assert state["run_id"]
+
+
+def test_a_failed_run_publishes_the_failure_instead_of_going_quiet(tmp_path):
+    from app.assistant.live import read_state
+
+    class DeadModel:
+        def step(self, prompt: str) -> str:
+            raise RuntimeError("model channel down")
+
+    client = FakeClient({9: [_message(12, "在吗")]})
+    state = AssistantState(initialized=True, cursor_seq=9)
+    worker = _worker(client, DeadModel(), tmp_path / "state.json", state=state)
+    worker.poll_once()
+    state = read_state(tmp_path, worker.group_id)
+    assert state is not None
+    assert state["state"] == "failed"
+    assert "model channel down" in state["error"]
 
 
 # ----------------------------------------------------------------- first run

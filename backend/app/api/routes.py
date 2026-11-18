@@ -282,6 +282,37 @@ def create_plan(
     }
 
 
+def _plan_administrator(database: Any, plan_id: str) -> str:
+    """Which administrator published this plan.
+
+    The approval gate asks "can these targets take work?", and that question is
+    **relative to the administrator of the plan**: a window is excluded when it
+    shares the administrator's provider, because then the administrator could
+    never review what it produced.
+
+    The gate used to ask it as the **platform assistant** (``office-admin``,
+    provider ``qoder``).  Any member from the qoder family was therefore
+    declared unassignable no matter what the real administrator had chosen --
+    the Qoder CLI CN window was refused for exactly this reason (2026-11-17
+    真机走查实测：方案 targets 明明是活的、有凭据、能接工具，审批却回
+    ``plan.targets_unavailable`` 且理由只有一句 ``not_assignable``).
+
+    So: ask as the administrator who published the plan (the circulation round
+    records it), and fall back to the platform assistant only when there is no
+    such round.
+    """
+    rows = database.read(
+        "SELECT opened_by FROM circulation_rounds WHERE plan_id = ?"
+        " ORDER BY rowid DESC LIMIT 1",
+        (plan_id,),
+    )
+    if rows:
+        opened_by = str(rows[0]["opened_by"] or "").strip()
+        if opened_by:
+            return opened_by
+    return PLATFORM_ASSISTANT_HARNESS_ID
+
+
 def _plan_assignment_blocks(database: Any, plan_id: str) -> list[dict[str, Any]]:
     """哪些目标窗口现在接不了活，以及为什么。
 
@@ -305,8 +336,9 @@ def _plan_assignment_blocks(database: Any, plan_id: str) -> list[dict[str, Any]]
     except (TypeError, ValueError):
         return []
     # 中立身份（平台助手）只用来回答「这个窗口自身可不可派」，不掺管理员的
-    # provider 交叉评审；那个限制是管理员自己的事。
-    admin = AdminService(database, harness_id=PLATFORM_ASSISTANT_HARNESS_ID)
+    # provider 交叉评审；那个限制是管理员自己的事。**判身份要按这份方案的管理员**
+    # （见 _plan_administrator），否则同厂商的合法执行者会被误判成不可派。
+    admin = AdminService(database, harness_id=_plan_administrator(database, plan_id))
     # 判据就是派单用的同一个集合：``assignable_harnesses()``。原因取
     # ``unavailability_reasons()`` 只为了让人看懂是哪一种（它覆盖不到的情况
     # 退回 ``not_assignable``，而不是当成可派）。
@@ -454,7 +486,10 @@ def approve_plan(
                 "summary": summary,
                 "next": (
                     "补齐目标窗口（上线 / 配置凭证 / 等待空闲）后再次 approve；"
-                    "方案仍是 draft，不需要重新提交"
+                    "方案仍是 draft，不需要重新提交。"
+                    "若原因是「CLI 档模型接不了工具定义」，把该窗口改成自带模型"
+                    "或一个能接受工具定义的池子模型，或者驳回方案让管理员重新细化"
+                    "（管理员只会挑当前接得了活的窗口）"
                 ),
             },
         )
@@ -635,6 +670,29 @@ def register_harness(
         result = HarnessRegistry(database).register(registration, registered_by=body.registered_by)
     except RegistrationConflict as exc:
         raise ApiError("registration.conflict", 409, str(exc)) from exc
+    return result
+
+
+@management.delete("/harnesses/{harness_id}")
+def unregister_harness(
+    harness_id: str,
+    database: DatabaseDep,
+    request: Request,
+    principal: _guard("harness:register"),
+):
+    """Remove a window the operator added themselves.
+
+    Only **instance** windows can be removed (``<base>-member-<slot>`` /
+    ``<base>-window-<slot>``).  A base harness *is* the CLI -- removing it
+    would take the CLI away, so that is refused with a reason instead of a
+    silent no-op.
+    """
+    try:
+        result = HarnessRegistry(database).unregister(harness_id)
+    except KeyError:
+        raise ApiError("harness.not_found", 404, f"unknown harness: {harness_id}") from None
+    except ValueError as exc:
+        raise ApiError("harness.not_removable", 400, str(exc)) from exc
     return result
 
 
@@ -1214,6 +1272,20 @@ def set_model_selection(
             )
         entry = next((item for item in models if str(item.get("id")) == body.model_id), None)
         tier = str((entry or {}).get("tier") or "")
+        if tier == "user":
+            # The human points **their own** model at this window: that IS the
+            # consent -- but only for this window.  The platform still does not
+            # spend that money on its own for any other window (2026-11-17:
+            # pointing your own key at a window used to be refused afterwards
+            # with "the user has not said yes yet", so the window never ran).
+            from app.pool import user_keys  # local import: keeps the cycle out
+
+            upstream_name = str((entry or {}).get("upstream") or "")
+            if upstream_name.startswith("user:"):
+                try:
+                    user_keys.assign(upstream_name.split(":", 1)[1], body.harness_id)
+                except user_keys.UserKeyError as error:
+                    raise ApiError("request.invalid", 400, str(error)) from error
         if tier == model_choice.PAID_TIER and not body.paid_consent:
             # 按量计费：每调用一次都花钱。人没点头就不许花 —— 这一条写在服务端，
             # 界面点不点得到都不算数。
@@ -3015,6 +3087,17 @@ def group_stats(group_id: str, service: SchedulerDep) -> dict[str, Any]:
     return service.group_stats(group_id)
 
 
+@read.get("/groups/{group_id}/roster")
+def group_roster(group_id: str, service: SchedulerDep) -> dict[str, Any]:
+    """The windows in this group and what each one is doing right now.
+
+    The assistant asks this ("who else is in here, and what are they
+    working on?") and the office asks the same thing about its member list.
+    Both read the same place, so the two never disagree about who is here.
+    Read-only: it grants nothing and decides nothing.
+    """
+    return service.group_roster(group_id)
+
 @read.get("/groups/{group_id}/plans")
 def list_group_plans(
     group_id: str,
@@ -3631,6 +3714,24 @@ def revoke_harness_credential(
     }
 
 
+@read.get("/groups/{group_id}/assistant/live")
+def group_assistant_live(group_id: str) -> dict[str, Any]:
+    """What the platform assistant is doing in this group right now.
+
+    The trace face ("/assistant/runs") answers "what did it think"; this one
+    answers "is it working on my question yet".  Without it the office could
+    not tell "it got your message" from "it never saw it" -- the person
+    waited in front of a panel that looked broken.
+
+    Read-only, and honest about its own limits: it is a cache of progress,
+    not the answer.  The answer is a message in the group ledger.
+    """
+    from app.assistant.live import read_state
+
+    state = read_state(settings.data_dir, group_id)
+    return {"group_id": group_id, "live": state}
+
+
 @read.get("/assistant/runs")
 def assistant_runs() -> dict[str, Any]:
     """助手最近几轮做了什么（只读）。
@@ -3755,6 +3856,62 @@ def _bind_message_author(
         )
 
 
+def _goal_envelope_admin(refs: Any) -> str:
+    """The administrator window a project goal names (``""`` when it names none).
+
+    The opening guide posts the goal as a readable message plus one machine
+    readable ref (``project-goal-json:<json>``); the administrator worker reads
+    that ref.  A malformed ref is not this function's business: the worker
+    reports it as it sees it.
+    """
+    for ref in refs or ():
+        text = str(ref or "")
+        if not text.startswith("project-goal-json:"):
+            continue
+        try:
+            envelope = json.loads(text[len("project-goal-json:") :])
+        except (TypeError, ValueError):
+            return ""
+        if isinstance(envelope, dict):
+            return str(envelope.get("admin") or "").strip()
+    return ""
+
+
+def _reject_unknown_administrator(body: Any) -> None:
+    """Refuse a goal that names a window the platform does not recognise.
+
+    Only windows in ``AP_ADMIN_SUBJECTS`` may refine a requirement at all, and
+    the administrator worker only acts on the goals addressed to **its own**
+    window.  A goal naming any other window is therefore accepted and then
+    **silently dropped** (``goal_skipped_for_other_admin``): the owner sees the
+    project start, and nothing else ever happens (2026-11-17 真机走查实测到的
+    静默失败).
+
+    So the refusal happens here, at the moment the goal is submitted, and it
+    says which window was named and which ones the platform accepts -- the
+    owner can then fix the setup and resubmit.
+    """
+    admin = _goal_envelope_admin(getattr(body, "refs", None))
+    if not admin:
+        return
+    administrators = set(getattr(settings, "admin_subjects", frozenset()))
+    if admin in administrators:
+        return
+    raise ApiError(
+        "goal.administrator_not_recognised",
+        409,
+        f"目标里指定的窗口 {admin} 不是平台认可的管理员，这条目标不会被处理",
+        details={
+            "admin": admin,
+            "administrators": sorted(administrators),
+            "next": (
+                "把该窗口加进平台的管理员白名单（AP_ADMIN_SUBJECTS），"
+                "或在开工向导里改选一个白名单里的窗口"
+            ),
+        },
+    )
+
+
 @read.post("/groups/{group_id}/messages")
 def post_message(
     group_id: str,
@@ -3764,6 +3921,7 @@ def post_message(
     request: Request,
 ) -> dict[str, Any]:
     _bind_message_author(request, database, body)
+    _reject_unknown_administrator(body)
     return service.post_message(
         group_id=group_id,
         author_kind=body.author_kind,

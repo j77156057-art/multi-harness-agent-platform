@@ -386,6 +386,10 @@ class AdminService:
         不是「有没有租约行」：一条过期但还没被清扫的租约不该永久占着窗口。
         ``ready_tasks`` 是已经指向它、但还没开工的活 —— 一个窗口手上压着三条
         ready 时，它在第一条被领走之前就已经不闲了。
+
+        这里只回答「它手上压着几份活、还接不接得住」：**在场**（进程在不在跑）
+        是另一回事，由 :meth:`_live_harnesses` 单独判断 —— 两件事混在一起就会
+        让「窗口没起」被说成「窗口忙」（2026-11-17 真机走查实测到的死结）。
         """
         now = datetime.now(UTC).isoformat()
         rows = self.database.read(
@@ -404,20 +408,57 @@ class AdminService:
             "    r.harness_id = h.harness_id"
             "    AND r.registration_version = h.registration_version"
             " WHERE h.status = 'online' AND h.registration_version IS NOT NULL"
+            "   AND h.removed_at IS NULL"
             " ORDER BY h.harness_id",
             (now, now),
         )
-        return [_capacity_row(row) for row in rows]
+        live = self._live_harnesses()
+        return [
+            _capacity_row(row)
+            for row in rows
+            if live is None or str(row["harness_id"]) in live
+        ]
+
+    def _live_harnesses(self) -> set[str] | None:
+        """Which windows have a worker actually running right now.
+
+        ``None`` means "the presence data cannot be read" -- either the table
+        has not been created yet, or **no worker has ever reported** since the
+        database was born.  In that case the registry stays the only word we
+        have, and the liveness question is left unanswered rather than answered
+        with "nobody is running".
+
+        A table that *has* rows is a different fact: those rows say which
+        processes reported, and the ones that stopped reporting are not live.
+        """
+        from app.adapter.presence import presence_snapshot  # local import: avoids a cycle
+
+        snapshot = presence_snapshot(self.database)
+        if not snapshot:
+            try:
+                self.database.read("SELECT harness_id FROM harness_presence LIMIT 1")
+            except Exception:  # pragma: no cover - table not created yet
+                return None
+            # The table exists but is empty: no worker has ever reported, so
+            # "nobody is running" would be a guess, not a fact.
+            return None
+        return {harness_id for harness_id, entry in snapshot.items() if entry.get("live")}
 
     def unavailability_reasons(self, harness_id: str) -> list[str]:
         """Why this window must not be handed work; ``[]`` when it can take some.
 
-        `offline / 无凭证 / 满载` 是三种**不同**的事，人需要看到是哪一种 —— 只报
-        「不可用」会让人去重启一个其实只是忙着的窗口。``earliest_available_at``
-        给满载窗口一个可行动的时间点。
+        `offline / 无凭证 / 满载 / 没在跑` 是四种**不同**的事，人需要看到是哪一种
+        —— 只报「不可用」会让人去重启一个其实只是忙着的窗口。
+        ``earliest_available_at`` 给满载窗口一个可行动的时间点。
+
+        「没在跑」单独说，是因为它是**注册表答不了**的那一条：窗口登记时写着
+        online，进程后来被关掉了，这一条永远不会自己改过来（2026-11-17 真机
+        走查：管理员把活派给了三个从没起过的窗口，方案一提交就被审批门拒了，
+        而人无法在界面上改那份名单）。
         """
         rows = self.database.read(
-            "SELECT status, registration_version FROM harnesses WHERE harness_id = ?",
+            "SELECT status, registration_version FROM harnesses"
+            " WHERE harness_id = ? AND removed_at IS NULL",
             (str(harness_id),),
         )
         if not rows or not rows[0]["registration_version"]:
@@ -430,6 +471,9 @@ class AdminService:
             reasons.append("administrator_window")
         if not self.harness_has_credential(harness_id):
             reasons.append("no_credential")
+        live = self._live_harnesses()
+        if live is not None and str(harness_id) not in live:
+            reasons.append("not_running (no worker heartbeat)")
         for item in self.harness_capacity():
             if item["harness_id"] != harness_id:
                 continue
@@ -544,6 +588,15 @@ class AdminService:
         platform credential (otherwise it could never claim the task), not be an
         administrator window, and not share the administrator's provider
         (cross-provider review would be impossible).
+
+        ``needs_tools=True`` adds one more condition: the window's model channel
+        must be able to accept **tool definitions**.  A pool slot served by a CLI
+        can only return text, so a task that makes the member read and write
+        files cannot go there (``relay_cli_cannot_use_tools``).  The approval
+        gate already applies exactly this condition -- the refinement must apply
+        it too, or the administrator drafts a plan the gate will refuse, and the
+        owner has no way to edit that plan (2026-11-17 真机走查实测到的死结：
+        细化按「能派」选人、审批按「能跑」判死，409 且无处可改）。
         """
         admin_ids = set(getattr(settings, "admin_subjects", frozenset())) | {self.harness_id}
         available = [
@@ -591,6 +644,56 @@ class AdminService:
             return None
         return str(rows[0]["provider"])
 
+    def _no_candidate_reason(self, requested_members: list[str] | None) -> str:
+        """Why no member can take this work -- in concrete, actionable words.
+
+        A refusal that says only "nobody is available" leaves the owner with
+        nothing to do: the goal stays in the queue, the administrator retries
+        forever, and the owner never learns which single thing to change.  So
+        every window that was considered is listed with **its own** reason and
+        the change that would fix it (2026-11-17 真机走查：细化只回一句
+        "no registered online member harness"，群主看不出该改哪一条).
+
+        The reason text is what the administrator worker posts into the group
+        conversation, so it has to be readable by the owner, not by the code.
+        """
+        if requested_members is not None:
+            candidates = [str(item).strip() for item in requested_members if str(item).strip()]
+        else:
+            candidates = [
+                str(row["harness_id"])
+                for row in self.database.read(
+                    "SELECT harness_id FROM harnesses WHERE status = 'online'"
+                    " AND removed_at IS NULL ORDER BY harness_id"
+                )
+            ]
+        admin_provider = self._provider(self.harness_id)
+        lines: list[str] = []
+        for harness_id in candidates:
+            reasons = list(self.unavailability_reasons(harness_id))
+            capability = self.tool_capability_problem(harness_id)
+            if capability is not None:
+                reasons.append(capability)
+            provider = self._provider(harness_id)
+            if admin_provider is not None and provider is not None and provider == admin_provider:
+                reasons.append(
+                    f"same provider as the administrator ({provider}): cross-provider "
+                    "review would be impossible"
+                )
+            if not reasons:
+                reasons = ["not available for an unknown reason"]
+            lines.append(f"- {harness_id}: " + "; ".join(reasons))
+        if not lines:
+            lines = ["- (no member window is registered at all)"]
+        return (
+            "no registered online member harness can take this work"
+            "（没有成员能接这份活），按窗口逐条说明：\n"
+            + "\n".join(lines)
+            + "\n怎么改：把该窗口的 worker 起起来（心跳恢复在场）、给它发平台凭据，"
+            "或把它指向一个能接受工具定义的模型（池子里由 CLI 提供的档位只能回文本），"
+            "然后让平台重试这条目标。"
+        )
+
     def refine(
         self,
         *,
@@ -624,25 +727,19 @@ class AdminService:
         # 候选只有一处定义（`assignable_harnesses`）：在线且已登记、**有平台
         # 凭据**（否则它永远领不了任务）、不是管理员窗口、provider 与管理员不同
         # （否则交叉审核不可能成立）。细化与改派用同一条规则，不会各说各话。
-        actionable = self.assignable_harnesses()
+        #
+        # `needs_tools=True`：执行类活一定要带 read/edit/write 工具定义，池子
+        # 里的 **CLI 档**模型只回得了文本。审批门（`routes._plan_assignment_blocks`）
+        # 用的就是这个条件 —— 细化不用，就会挑出审批必然拒的窗口，方案一提交
+        # 就是 409，而人无法在界面上改那份名单（2026-11-17 真机走查的死结）。
+        actionable = self.assignable_harnesses(needs_tools=True)
         requested_members = members
         if requested_members is not None:
             selected = [str(item).strip() for item in requested_members if str(item).strip()]
             actionable = [item for item in actionable if item in selected]
         members = actionable
         if not members:
-            raise AdminHarnessError(
-                "no registered online member harness to assign work to"
-                + (
-                    " (the requested project members are offline, administrators,"
-                    " share the administrator's provider (cross-provider review"
-                    " would be impossible), or hold no platform credential, so"
-                    " they could never claim the task)"
-                    if requested_members is not None
-                    else " (no online member with a credential has a provider"
-                    " different from the administrator)"
-                )
-            )
+            raise AdminHarnessError(self._no_candidate_reason(requested_members))
 
         # 只有总开关开启、用户逐条确认、且本次派单确实缺项的经验才进入提示词。
         experience_text, experience_selections, experience_trace = build_confirmed_prompt(

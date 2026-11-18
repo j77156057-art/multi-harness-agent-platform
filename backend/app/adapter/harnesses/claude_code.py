@@ -109,6 +109,14 @@ class ClaudeCodeAdapter(CliHarness):
         # 会让这次交付被判成"留了脏东西"；令牌更不该出现在命令行上。
         if self.mcp_binding() is not None:
             command += ["--mcp-config", str(self._write_mcp_config())]
+        # ``--add-dir <directories...>`` is a **variadic** option: everything
+        # after it belongs to it until the next flag.  Without the separator
+        # below, the work order was swallowed by ``--add-dir`` and the CLI
+        # then complained that the *prompt* was a missing MCP config file
+        # (2026-11-18: every Claude Code attempt died that way, in seconds,
+        # and the platform read it as "the CLI failed" rather than "the argv
+        # was wrong").
+        command.append("--")
         command.append(work_order)
         return command
 

@@ -661,6 +661,69 @@ def test_only_the_owner_reply_is_fed_back_as_an_answer(tmp_path, monkeypatch):
     assert admin.refine_calls[0]["answers"] == ["用中文写"]
 
 
+def test_an_assistant_relay_is_answered_to_the_asker_not_to_the_assistant(
+    tmp_path, monkeypatch
+):
+    """助手代转达的请求，回话要送给**提问人**。
+
+    助手不能冒用人的身份发消息（平台的作者必须等于令牌主体），所以转达
+    的那条消息作者是助手。管理员若按"作者是谁就回给谁"处理，这句话就
+    掉进助手的私聊里 —— 在办公室等回话的人永远等不到。
+    """
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 9,
+                "sender_type": "harness",
+                "sender_id": "office-assistant",
+                "body": "替用户问：这条目标还要不要调整？",
+                "refs": [
+                    "assistant-relay",
+                    'assistant-relay-json:{"asker": "office-operator"}',
+                    "direct",
+                ],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert len(admin.answer_calls) == 1
+    call = admin.answer_calls[0]
+    assert call["asker"] == "office-operator", "回话要送给提问人，不是送给助手"
+    assert call["question"] == "替用户问：这条目标还要不要调整？"
+    # 同一条转达不许被回两遍。
+    worker.poll_messages()
+    assert len(admin.answer_calls) == 1
+
+
+def test_a_relay_without_an_asker_on_record_is_not_answered(tmp_path, monkeypatch):
+    """没有记录提问人的转达，回给谁都是回给空气 —— 如实跳过。"""
+    admin = FakeAdmin()
+    client = FakeClient(
+        inbox=[
+            {
+                "created_seq": 9,
+                "sender_type": "harness",
+                "sender_id": "office-assistant",
+                "body": "有人问了一件事",
+                "refs": ["assistant-relay", "direct"],
+            }
+        ],
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert admin.answer_calls == []
+
+
 def test_poll_messages_reads_the_apis_sender_type_column(tmp_path, monkeypatch):
     """The read API exposes ``sender_type``, not the write field ``author_kind``.
 

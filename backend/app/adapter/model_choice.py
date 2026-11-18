@@ -74,7 +74,7 @@ def read_choice(database: Database, harness_id: str) -> ModelChoice | None:
     """这个窗口当前的选择；窗口没在册就是 ``None``。"""
     rows = database.read(
         "SELECT harness_id, model_mode, model_id, model_tier, model_updated_at"
-        " FROM harnesses WHERE harness_id = ?",
+        " FROM harnesses WHERE harness_id = ? AND removed_at IS NULL",
         (harness_id,),
     )
     if not rows:
@@ -145,7 +145,8 @@ def save_choice(
     now = datetime.now(UTC).isoformat()
     with database.transaction() as conn:
         row = conn.execute(
-            "SELECT harness_id FROM harnesses WHERE harness_id = ?", (harness_id,)
+            "SELECT harness_id FROM harnesses"
+            " WHERE harness_id = ? AND removed_at IS NULL", (harness_id,)
         ).fetchone()
         if row is None:
             raise ModelChoiceError(f"harness {harness_id} is not registered")

@@ -47,11 +47,13 @@ from app.pool.sources import (
 )
 from app.pool.translate import (
     anthropic_response_to_openai,
+    anthropic_response_to_stream,
     anthropic_stream_to_openai_stream,
     anthropic_stream_to_responses_stream,
     anthropic_to_openai,
     chat_stream_to_responses_stream,
     chat_to_responses,
+    message_text,
     openai_response_to_anthropic,
     openai_to_anthropic,
     responses_stream_to_openai_stream,
@@ -62,6 +64,118 @@ from app.usage.cli_reported import read_reported_records
 
 #: How long a discovered upstream list / model list is reused.
 DISCOVERY_TTL_SECONDS = 30.0
+def _upstream_headers(upstream: Any, credential: str | None, *, accept: str = "") -> dict[str, str]:
+    """The headers a request to this upstream carries.
+
+    A key the user gave the platform may need extra headers (some gateways
+    check the User-Agent or a session header before they answer -- Cloudflare
+    error 1010 is the usual one).  Those headers belong to the key, so they
+    are stored with it and sent with every request to that upstream.
+    """
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if accept:
+        headers["Accept"] = accept
+    if credential:
+        headers["Authorization"] = f"Bearer {credential}"
+    extra = getattr(upstream, "extra", None) or {}
+    for name, value in (extra.get("headers") or {}).items():
+        headers[str(name)] = str(value)
+    return headers
+
+
+def harness_of(consumer: str) -> str:
+    """Which harness is spending this quota ("harness/pi" -> "pi")."""
+    text = str(consumer or "")
+    if text.startswith("harness/"):
+        return text[len("harness/") :]
+    return ""
+
+
+
+
+
+def _normalize_chat_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Put the text a model said back where the protocol says it belongs.
+
+    Some models answer **entirely in the reasoning field** and leave
+    ``content`` empty (the local ollama's thinking models do exactly that).
+    A caller that asked for text then sees nothing: the agent loop calls it
+    "no output" and the CLI gives up, while the model had answered perfectly
+    well (2026-11-17 真机走查：五个成员 CLI 一起"没有回答")。
+
+    Only fires when ``content`` is empty, so a model that answers in both
+    fields (thinking *and* answer) is untouched.
+    """
+    for choice in data.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            continue
+        text = message_text(message)
+        if text and not str(message.get("content") or "").strip():
+            message["content"] = text
+            message.pop("reasoning", None)
+            message.pop("reasoning_content", None)
+    return data
+
+
+def _normalize_chunk_payload(payload: str) -> str:
+    """One SSE data payload -> the same payload with the text where it belongs."""
+    try:
+        chunk = json.loads(payload)
+    except (TypeError, ValueError):
+        return payload
+    if not isinstance(chunk, dict):
+        return payload
+    for choice in chunk.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        text = message_text(delta)
+        if text and not str(delta.get("content") or "").strip():
+            delta["content"] = text
+            delta.pop("reasoning", None)
+            delta.pop("reasoning_content", None)
+    return json.dumps(chunk, ensure_ascii=False)
+
+
+def _sse_events(lines: Iterator[str]) -> Iterator[str]:
+    """Re-emit an upstream's SSE events in the shape SSE requires.
+
+    Every event must be followed by a blank line.  ``iter_lines()`` eats those
+    blanks, so passing the lines through verbatim **glues the events together**
+    ("}{") and a strict client fails to parse them -- the Pi CLI said exactly
+    that: "malformed server-sent event JSON"（2026-11-17 真机走查）。
+
+    While we are here: the text is put back where the protocol says it
+    belongs (see :func:`_normalize_chunk_payload`).
+    """
+    for raw in lines:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text.startswith("data:"):
+            payload = text[len("data:") :].strip()
+            if payload and payload != "[DONE]":
+                payload = _normalize_chunk_payload(payload)
+            yield "data: " + payload + "\n\n"
+        else:
+            yield text + "\n\n"
+
+
+#: 同一模型 id 被几家上游同时提供时，**按这个顺序**挑一家：越靠前越不花钱。
+#: 与路由自己的档位顺序一致（free → reserve → metered → user）：先用免费的，
+#: 再用订阅兜底，用到按量已经是最后的选择，而"用户自己的 key"排在最后 ——
+#: 那笔钱的门是"用户点头"，平台不自己动。
+_TIER_RANK = {"free": 0, "reserve": 1, "metered": 2, "user": 3}
+
+
+def _tier_rank(entry: dict[str, Any]) -> int:
+    tier = str(entry.get("tier") or "").strip().lower()
+    return _TIER_RANK.get(tier, len(_TIER_RANK))
 
 
 class PoolError(RuntimeError):
@@ -297,27 +411,34 @@ class PoolService:
             self._models_at = cached[0]
             return self._models
         entries: list[dict[str, Any]] = []
-        seen: set[str] = set()
+        # 同一个模型 id 可能被**几家上游**同时提供：用户的 MiniMax 订阅
+        # （``minimax``，兜底档）与 opencode 自己配的那个中转（``opencode:minimax``，
+        # 按量档）都叫 ``MiniMax-M3.1-Flash-Preview``。以前"先发现的那家赢"，于是
+        # 按量的那条把订阅那条**遮住了** —— 界面按量要点头，池子也按量花钱，而用户
+        # 明明有一份订阅额度在那里（2026-11-17 真机走查实测）。
+        #
+        # 现在按**档位**选：便宜的那家赢（free → reserve → metered → user）。
+        # 同档位仍然先发现的那家赢（顺序不变，行为可预期）。
+        by_id: dict[str, dict[str, Any]] = {}
         for upstream in self.upstreams(refresh=refresh):
             names = list(upstream.models)
             if not names and upstream.protocol in (OPENAI_CHAT, OPENAI_RESPONSES):
                 names = self._probe_models(upstream)
             for name in names:
-                if name in seen:
-                    continue
-                seen.add(name)
-                entries.append(
-                    {
-                        "id": name,
-                        "object": "model",
-                        "owned_by": upstream.name,
-                        "upstream": upstream.name,
-                        "protocol": upstream.protocol,
-                        "tier": upstream.tier,
-                        "source": upstream.origin,
-                        "note": upstream.note,
-                    }
-                )
+                entry = {
+                    "id": name,
+                    "object": "model",
+                    "owned_by": upstream.name,
+                    "upstream": upstream.name,
+                    "protocol": upstream.protocol,
+                    "tier": upstream.tier,
+                    "source": upstream.origin,
+                    "note": upstream.note,
+                }
+                current = by_id.get(name)
+                if current is None or _tier_rank(entry) < _tier_rank(current):
+                    by_id[name] = entry
+        entries = list(by_id.values())
         self._models = entries
         self._models_at = time.monotonic()
         _MODELS[key] = (self._models_at, entries)
@@ -358,7 +479,9 @@ class PoolService:
 
     # -------------------------------------------------------------- routing
 
-    def _guard_user_upstream(self, upstream: Upstream, *, model: str = "") -> None:
+    def _guard_user_upstream(
+        self, upstream: Upstream, *, model: str = "", harness_id: str = ""
+    ) -> None:
         """A user's own key is only spent when the user said yes.
 
         Without this the pool would happily spend somebody's own money the
@@ -372,7 +495,7 @@ class PoolService:
         key_id = str(upstream.extra.get("key_id") or "")
         if not key_id:
             return
-        if user_keys.approved(key_id):
+        if user_keys.approved(key_id, harness_id):
             return
         user_keys.raise_request(
             key_id=key_id,
@@ -389,7 +512,7 @@ class PoolService:
             code="pool_user_key_pending",
         )
 
-    def route(self, model: str) -> Route:
+    def route(self, model: str, *, harness_id: str = "") -> Route:
         """Find the upstream that serves ``model``.
 
         The name may be plain (``gpt-6.1-sol``) or prefixed with the relay's
@@ -407,14 +530,14 @@ class PoolService:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is None:
                     break
-                self._guard_user_upstream(upstream, model=wanted)
+                self._guard_user_upstream(upstream, model=wanted, harness_id=harness_id)
                 return Route(upstream=upstream, model=wanted, upstream_model=wanted)
         lowered = wanted.lower()
         for entry in entries:
             if str(entry["id"]).lower() == lowered:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is not None:
-                    self._guard_user_upstream(upstream, model=str(entry["id"]))
+                    self._guard_user_upstream(upstream, model=str(entry["id"]), harness_id=harness_id)
                     return Route(upstream=upstream, model=wanted, upstream_model=str(entry["id"]))
         known = ", ".join(str(entry["id"]) for entry in entries[:12]) or "(none discovered)"
         raise PoolError(
@@ -433,14 +556,12 @@ class PoolService:
 
     def chat_completions(self, payload: dict[str, Any], *, consumer: str = "") -> dict[str, Any]:
         """Serve an OpenAI chat completion from whichever upstream has the model."""
-        route = self.route(str(payload.get("model") or ""))
+        route = self.route(str(payload.get("model") or ""), harness_id=harness_of(consumer))
         upstream = route.upstream
         if upstream.protocol == CLI:
             return self._cli_chat(route, payload, consumer=consumer)
         credential = upstream.credential_value()
-        headers = {"Content-Type": "application/json"}
-        if credential:
-            headers["Authorization"] = f"Bearer {credential}"
+        headers = _upstream_headers(upstream, credential)
         body = dict(payload)
         body["model"] = route.upstream_model
         notes: list[str] = []
@@ -474,6 +595,9 @@ class PoolService:
             data = anthropic_response_to_openai(data, model=route.model)
         elif upstream.protocol == OPENAI_RESPONSES:
             data = responses_to_chat(data, model=route.model)
+        else:
+            # 文本归位：只回 reasoning 的模型，正文得回到 content 里（见助手函数）。
+            data = _normalize_chat_data(data)
         self._account(
             Usage(
                 at=_now(),
@@ -490,16 +614,25 @@ class PoolService:
         )
         return data
 
+    def messages_stream(self, payload: dict[str, Any], *, consumer: str = "") -> Iterator[str]:
+        # Anthropic stream: the Claude CLI always asks for one.
+        # The upstream is asked WITHOUT streaming (a chat upstream would
+        # answer with an SSE body, which the relay could not read as JSON),
+        # so take one complete answer and hand it over as the event
+        # sequence the Claude CLI parses.
+        body = dict(payload)
+        body.pop("stream", None)
+        data = self.messages(body, consumer=consumer)
+        yield from anthropic_response_to_stream(data)
+
     def messages(self, payload: dict[str, Any], *, consumer: str = "") -> dict[str, Any]:
         """Serve an Anthropic messages request (the Claude CLI's protocol)."""
-        route = self.route(str(payload.get("model") or ""))
+        route = self.route(str(payload.get("model") or ""), harness_id=harness_of(consumer))
         upstream = route.upstream
         if upstream.protocol == CLI:
             return self._cli_chat(route, payload, consumer=consumer, protocol="anthropic")
         credential = upstream.credential_value()
-        headers = {"Content-Type": "application/json"}
-        if credential:
-            headers["Authorization"] = f"Bearer {credential}"
+        headers = _upstream_headers(upstream, credential)
         body = dict(payload)
         body["model"] = route.upstream_model
         notes: list[str] = []
@@ -556,12 +689,10 @@ class PoolService:
         for a chat-only upstream the request is translated down and the answer
         translated back, so one model list can serve both CLI families.
         """
-        route = self.route(str(payload.get("model") or ""))
+        route = self.route(str(payload.get("model") or ""), harness_id=harness_of(consumer))
         upstream = route.upstream
         credential = upstream.credential_value()
-        headers = {"Content-Type": "application/json"}
-        if credential:
-            headers["Authorization"] = f"Bearer {credential}"
+        headers = _upstream_headers(upstream, credential)
         body = dict(payload)
         body["model"] = route.upstream_model
         started = time.monotonic()
@@ -619,9 +750,7 @@ class PoolService:
         """
         upstream = route.upstream
         credential = upstream.credential_value()
-        headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
-        if credential:
-            headers["Authorization"] = f"Bearer {credential}"
+        headers = _upstream_headers(upstream, credential, accept="text/event-stream")
         body = dict(payload)
         body["model"] = route.upstream_model
         body["stream"] = True
@@ -663,7 +792,7 @@ class PoolService:
         self, payload: dict[str, Any], *, consumer: str = ""
     ) -> Iterator[str]:
         """Streamed chat completions from whichever upstream has the model."""
-        route = self.route(str(payload.get("model") or ""))
+        route = self.route(str(payload.get("model") or ""), harness_id=harness_of(consumer))
         upstream = route.upstream
         if upstream.protocol == CLI:
             # A CLI slot answers in one go; the caller still gets a stream.
@@ -716,7 +845,8 @@ class PoolService:
             stream = responses_stream_to_openai_stream(lines, model=route.model)
         else:
             stream = lines
-        yield from stream
+        # SSE 的事件分隔由池子补齐（上游的空行在 iter_lines 里被吃掉了）。
+        yield from _sse_events(stream)
         self._account(
             Usage(
                 at=_now(),
@@ -741,7 +871,7 @@ class PoolService:
         *produce* that shape -- from a chat upstream, from an Anthropic
         upstream, or by passing the chain's own stream through.
         """
-        route = self.route(str(payload.get("model") or ""))
+        route = self.route(str(payload.get("model") or ""), harness_id=harness_of(consumer))
         upstream = route.upstream
         if upstream.protocol == CLI:
             answer = self._cli_chat(route, payload, consumer=consumer)
@@ -803,6 +933,15 @@ class PoolService:
         upstream = route.upstream
         tools = payload.get("tools")
         if not tools:
+            return
+        if getattr(upstream, "protocol", "") != CLI and getattr(upstream, "cli", None) is None:
+            # This channel is a REAL API model (the local ollama, a provider
+            # endpoint): the tool definitions have to go to it as they are.
+            # The check used to refuse EVERY streaming request that carried
+            # tools, whatever the upstream was -- and the reason said "served by
+            # a CLI slot" while the upstream was the local ollama (2026-11-17
+            # real-machine walkthrough: all five member CLIs hit this and the
+            # reason was the opposite of the truth).
             return
         tool_names = [
             str((item.get("function") or {}).get("name") or "")

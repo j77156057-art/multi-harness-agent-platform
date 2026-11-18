@@ -55,14 +55,19 @@ class ScriptedModel:
         return self.answers.pop(0) if self.answers else "{}"
 
 
-def _registry(client: FakeClient) -> dict:
-    return build_registry(client, group_id=GROUP, author_id="office-assistant")
+def _registry(client: FakeClient, *, asker_id: str = "operator") -> dict:
+    return build_registry(
+        client,
+        group_id=GROUP,
+        author_id="office-assistant",
+        asker_id=asker_id,
+    )
 
 
 def _loop(tmp_path: Path, model: ScriptedModel, client: FakeClient, **kwargs) -> AssistantLoop:
     return AssistantLoop(
         model,
-        _registry(client),
+        _registry(client, asker_id=kwargs.pop("asker_id", "operator")),
         trace_dir=tmp_path / "trace",
         **kwargs,
     )
@@ -97,7 +102,7 @@ def test_the_loop_gathers_then_answers_with_resolvable_citations(tmp_path):
     assert "self_check" in result and "calls_used" in result
 
 
-def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
+def test_the_write_tools_post_exactly_once_each(tmp_path):
     client = FakeClient()
     model = ScriptedModel(
         [
@@ -123,6 +128,7 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
     assert set(_registry(FakeClient())) == {
         "pool.status",
         "harness.bases",
+        "harness.peers",
         "task.get",
         "task.diff",
         "task.verification",
@@ -132,7 +138,119 @@ def test_the_say_tool_is_the_only_write_and_it_posts_exactly_once(tmp_path):
         "task.forensics",
         "group.tasks",
         "say",
+        "ask.admin",
     }
+
+
+# ------------------------------------------------- the two new tools
+
+
+def test_the_peers_tool_reads_the_group_roster(tmp_path):
+    client = FakeClient(
+        {
+            "/groups/": {
+                "group_id": GROUP,
+                "member_count": 2,
+                "live_count": 1,
+                "admin_harness_ids": ["codebuddy"],
+                "members": [
+                    {
+                        "harness_id": "codebuddy",
+                        "name": "Administrator window",
+                        "provider": "codebuddy",
+                        "is_admin": True,
+                        "live": True,
+                        "running_tasks": 1,
+                        "current_task": {
+                            "task_id": "T-1",
+                            "title": "写说明",
+                            "status": "in_progress",
+                        },
+                    },
+                    {
+                        "harness_id": "qoder-member-1",
+                        "name": "Qoder",
+                        "provider": "qoder",
+                        "is_admin": False,
+                        "live": False,
+                        "running_tasks": 0,
+                        "current_task": None,
+                    },
+                ],
+            }
+        }
+    )
+    model = ScriptedModel(
+        [
+            json.dumps({"thought": "看看还有谁在忙", "tool": "harness.peers", "args": {}}),
+            _final("codebuddy 在忙写说明，qoder 没在跑。", ["s1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run("还有谁在忙？", [])
+    assert result["status"] == "done"
+    assert client.reads == [(f"/groups/{GROUP}/roster", {})]
+
+
+def test_the_ask_admin_tool_relays_the_askers_own_words(tmp_path):
+    client = FakeClient(
+        {
+            "/groups/": {
+                "group_id": GROUP,
+                "admin_harness_ids": ["codebuddy"],
+                "members": [],
+            }
+        }
+    )
+    model = ScriptedModel(
+        [
+            json.dumps(
+                {
+                    "thought": "替他把话转给管理员",
+                    "tool": "ask.admin",
+                    "args": {"text": "请确认这条目标还要不要做。"},
+                }
+            ),
+            _final("已转达给管理员。", ["s1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run("替我问一下管理员", [])
+    assert result["status"] == "done"
+    posts = [row for row in client.posts if row[0].endswith("/messages")]
+    assert len(posts) == 1
+    path, body = posts[0]
+    assert path == f"/groups/{GROUP}/messages"
+    # 原话照传：不加助手自己的话。
+    assert body["body"] == "请确认这条目标还要不要做。"
+    # 收件人两个：管理员要收到，提问人也要看得见自己托出去的话。
+    assert body["mentions"] == ["codebuddy", "operator"]
+    assert body["author_id"] == "office-assistant"
+    # 转达的机器可读一半：记着替谁转的。
+    assert "assistant-relay" in body["refs"]
+    relay = [ref for ref in body["refs"] if ref.startswith("assistant-relay-json:")]
+    assert relay and "operator" in relay[0]
+
+
+def test_the_ask_admin_tool_refuses_when_there_is_no_administrator(tmp_path):
+    client = FakeClient({"/groups/": {"group_id": GROUP, "admin_harness_ids": [], "members": []}})
+    model = ScriptedModel(
+        [
+            json.dumps(
+                {
+                    "thought": "转给管理员",
+                    "tool": "ask.admin",
+                    "args": {"text": "在吗？"},
+                }
+            ),
+            _final("转不出去。", ["s1"]),
+            json.dumps({"verdict": "pass"}),
+        ]
+    )
+    result = _loop(tmp_path, model, client).run("替我问管理员", [])
+    # 没有管理员 → 工具拒绝，模型如实说出来，而不是把话发给空气。
+    assert result["status"] == "done"
+    assert client.posts == []
 
 
 # ----------------------------------------------------------------- the gate
@@ -511,7 +629,9 @@ def test_the_prompt_enumerates_the_whitelist_verbatim():
     registry = build_registry(_EmptyClient(), group_id="g", author_id="me")
     reads = {name for name, tool in registry.items() if tool.kind == "read"}
     writes = {name for name, tool in registry.items() if tool.kind != "read"}
-    assert writes == {"say"}, "say 是唯一写，白名单里有别的写就是越权"
+    # 写工具只有两个，且各有边界：`say` 给一个人发私聊，`ask.admin`
+    # 替提问人把原话转给管理员。多出第三个写就是越权。
+    assert writes == {"say", "ask.admin"}, "写工具只有 say 与 ask.admin，多一个就是越权"
 
     # 每个 read 工具名都在 prompt 里被逐字引用（带反引号），且写明逐字使用。
     for name in reads:
@@ -522,8 +642,13 @@ def test_the_prompt_enumerates_the_whitelist_verbatim():
     # prompt 里出现过的 `task.x` 样式清单名不许超出白名单（防 prompt 幻觉）。
     import re
 
-    mentioned = set(re.findall(r"`(task\.[a-z_]+|pool\.[a-z_]+|group\.[a-z_]+)`", SYSTEM_PROMPT))
+    mentioned = set(
+        re.findall(r"`(task\.[a-z_]+|pool\.[a-z_]+|group\.[a-z_]+|harness\.[a-z_]+|ask\.[a-z_]+)`", SYSTEM_PROMPT)
+    )
     assert mentioned <= set(registry), f"prompt 引用了不存在的工具名: {mentioned - set(registry)}"
+    # 两个写工具也必须在 prompt 里逐字列出（模型要按字面调用它们）。
+    for name in writes:
+        assert f"`{name}`" in SYSTEM_PROMPT, f"写工具 {name} 未列进 system prompt"
 
 
 # --------------------------------------------------- the diagnose pack

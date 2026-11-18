@@ -90,8 +90,13 @@ def _failure(tmp_path: Path, **overrides: object) -> Path:
 # -------------------------------------------------- 选窗口时按能力过滤
 
 
-def test_a_tool_request_with_only_cli_slots_makes_no_upstream_call(tmp_path):
-    """只有 CLI 档 → ``unavailable`` + ``protocol_unsupported``，一次上游都没打。"""
+def test_a_tool_request_with_only_cli_slots_runs_the_tools_itself(tmp_path):
+    """只有 CLI 档 → ``text_only`` 计划：平台自己跑工具，一次上游都没打。
+
+    2026-11-17 真机走查：只有 CLI 档时整条活**做不成**（"不可用"等于把活
+    丢回窗口自己的 provider，而那个 provider 当时是死的）。CLI 档能写文本，
+    平台也能自己执行工具 —— 于是这条路走得通，只是"谁按按钮"换了人。
+    """
     data_dir = _failure(tmp_path)
     pool = _Pool([CLI_SLOT])
 
@@ -104,14 +109,16 @@ def test_a_tool_request_with_only_cli_slots_makes_no_upstream_call(tmp_path):
         required_tools=TOOLS,
     )
 
-    assert plan["mode"] == "unavailable"
-    assert plan["reason_code"] == "protocol_unsupported"
+    assert plan["mode"] == "pool"
+    assert plan["text_only"] is True
+    assert plan["reason_code"] == "text_only_channel"
     assert plan["required_tools"] == list(TOOLS)
+    assert plan["upstream_protocol"] == "cli"
     assert pool.model_reads == 1, "only the model list is read; no relay call was made"
 
 
-def test_a_chosen_cli_slot_is_excluded_for_tool_requests(tmp_path):
-    """人选了 CLI 档、池里也没有别的档 → 开流前拒绝，不烧 attempt。"""
+def test_a_chosen_cli_slot_falls_back_to_a_text_only_channel(tmp_path):
+    """人选了 CLI 档、池里也没有别的档 → 走 text-only 通道，不烧 attempt。"""
     data_dir = _failure(tmp_path)
     pool = _Pool([CLI_SLOT])
 
@@ -125,8 +132,9 @@ def test_a_chosen_cli_slot_is_excluded_for_tool_requests(tmp_path):
         required_tools=TOOLS,
     )
 
-    assert plan["mode"] == "unavailable"
-    assert plan["reason_code"] == "protocol_unsupported"
+    assert plan["mode"] == "pool"
+    assert plan["text_only"] is True
+    assert plan["reason_code"] == "text_only_channel"
     assert plan["selected_model"] == "codebuddy/hy3"
     assert plan["selected_protocol"] == "cli"
 

@@ -141,7 +141,8 @@ def dispatch(
         # 唯一决定，同一个 request_id 重放仍然算同一条派单。
         project_name = str(group["project_name"] or "").strip()
         member = conn.execute(
-            "SELECT * FROM harnesses WHERE harness_id = ?", (harness_id,)
+            "SELECT * FROM harnesses WHERE harness_id = ? AND removed_at IS NULL",
+            (harness_id,),
         ).fetchone()
         if not member or not member["registration_version"] or member["status"] != "online":
             raise InvalidInput("target Harness is not registered online")

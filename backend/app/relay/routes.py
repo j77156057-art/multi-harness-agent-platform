@@ -40,7 +40,9 @@ def _known(database: Any) -> tuple[set[str], dict[str, str]]:
     优先级。读不到就是空 —— 由调用方按"名册不可用"说清楚，不把每个名字都当成错的。
     """
     kinds: dict[str, str] = {}
-    for row in database.read("SELECT harness_id FROM harnesses ORDER BY harness_id"):
+    for row in database.read(
+        "SELECT harness_id FROM harnesses WHERE removed_at IS NULL ORDER BY harness_id"
+    ):
         name = str(row["harness_id"] or "")
         if name:
             kinds[name] = "harness"

@@ -45,6 +45,8 @@ from app.relay.supervisor import ensure_relay_worker, relay_enabled
 from app.tasks.service import (
     ADD_MEMBER_JSON_REF,
     ADD_MEMBER_REF,
+    ASSISTANT_RELAY_JSON_REF,
+    ASSISTANT_RELAY_REF,
     DIRECT_REF,
     GOAL_CHANGE_REF,
 )
@@ -512,6 +514,11 @@ class AdminWorker:
                 # 任何人（逐条回应是要花钱的）。
                 if GOAL_CHANGE_REF in refs:
                     self.handle_member_goal_change(message, seq=seq)
+                elif ASSISTANT_RELAY_REF in refs:
+                    # 平台助手**替提问人**转达的一条请求。回话要送给**提问人**，
+                    # 不是送给助手 —— 送回助手的话，这句话就掉在助手的私聊里，
+                    # 提问的人在办公室看不见（2026-11-18 真机走查要的就是这个）。
+                    self.handle_assistant_relay(message, seq=seq)
                 else:
                     print(
                         json.dumps(
@@ -676,6 +683,60 @@ class AdminWorker:
             ),
             flush=True,
         )
+
+    def handle_assistant_relay(self, message: dict[str, Any], *, seq: int) -> None:
+        """Answer a request the platform assistant relayed on someone's behalf.
+
+        The assistant cannot post as a human (the platform binds a message's
+        author to the token that sent it), so a relayed request arrives
+        authored by the assistant and carries the asker in a machine-readable
+        ref.  The answer therefore goes to **that asker**: replying to the
+        assistant would drop the answer into the assistant's own private
+        thread, where the person who asked cannot see it.
+        """
+        if seq in self.state.handled_request_seqs:
+            return
+        body = str(message.get("body") or "").strip()
+        asker = ""
+        for ref in message.get("refs") or []:
+            text = str(ref or "")
+            if not text.startswith(ASSISTANT_RELAY_JSON_REF):
+                continue
+            try:
+                payload = json.loads(text[len(ASSISTANT_RELAY_JSON_REF) :])
+            except ValueError:
+                continue
+            if isinstance(payload, dict):
+                asker = str(payload.get("asker") or "").strip()
+        if not body or not asker or asker == self.admin_harness_id:
+            # No asker on record: answering would be answering nobody.
+            print(
+                json.dumps(
+                    {"relay_without_asker": str(message.get("sender_id") or ""), "seq": seq},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+        self.state.handled_request_seqs.append(seq)
+        self.state.handled_request_seqs = self.state.handled_request_seqs[-200:]
+        self.state.save(self.state_path)
+        if self.dry_run:
+            return
+        try:
+            self.admin.answer(
+                question=body,
+                group_id=self.group_id,
+                asker=asker,
+                route=self.pool_route("answer"),
+            )
+        except Exception as exc:  # noqa: BLE001 - the asker must hear the failure
+            self._post_direct_message(
+                asker,
+                "这一条没有答上来。\n"
+                f"原因：{type(exc).__name__}: {exc}\n"
+                "（不是你的问题；可以稍后重发，或者直接找管理员。）",
+            )
 
     def handle_direct_message(self, message: dict[str, Any], *, seq: int) -> None:
         """Answer a private question from the owner, in the same private channel.

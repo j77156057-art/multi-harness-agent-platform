@@ -1,19 +1,23 @@
 """The assistant's tool table: a closed whitelist, fail-closed.
 
 The assistant has exactly two kinds of ammunition -- read-only evidence
-gathering and one ``say`` (a private message, the only write).  Anything not
-in this table is refused, loudly, as an observation the model can course-
-correct on; the loop never guesses what a missing tool "probably meant".
+gathering and the writes.  The writes are ``say`` (a private message to one
+person) and ``ask.admin`` (relaying the asker's own words to the administrator
+on the asker's behalf).  Anything not in this table is refused, loudly, as an
+observation the model can course-correct on; the loop never guesses what a
+missing tool "probably meant".
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.tasks.progress import next_action
+from app.tasks.service import ASSISTANT_RELAY_JSON_REF, ASSISTANT_RELAY_REF
 
 #: Identifiers handed to tools are validated: a task id or recipient is a
 #: short token, never a path, never a shell word.
@@ -56,7 +60,7 @@ class Client(Protocol):
 @dataclass(frozen=True)
 class Tool:
     name: str
-    kind: str  # "read" | "say"; "say" is the only write the engine allows
+    kind: str  # "read" | "say"; the "say" kinds are the only writes
     description: str
     handler: Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -88,12 +92,14 @@ def build_registry(
     group_id: str,
     author_id: str,
     author_kind: str = "harness",
+    asker_id: str = "",
 ) -> dict[str, Tool]:
     """The whitelist, closed at construction time.
 
-    ``group_id``/``author_id`` are the *worker's* facts, not tool arguments:
-    the assistant cannot read another group's threads and cannot speak in
-    someone else's name.
+    ``group_id``/``author_id``/``asker_id`` are the *worker's* facts, not tool
+    arguments: the assistant cannot read another group's threads and cannot
+    speak in someone else's name.  ``asker_id`` is who asked the question
+    this turn -- the relay to the administrator is addressed *to* that person.
     """
 
     def pool_status(_args: dict[str, Any]) -> dict[str, Any]:
@@ -374,7 +380,119 @@ def build_registry(
             },
         )
 
+    def harness_peers(args: dict[str, Any]) -> dict[str, Any]:
+        """Who else is in this group, and what are they doing right now.
+
+        The office can show this list; the assistant could not, because it
+        only ever saw its own group's task table.  "Is claude-code still
+        working on something?" was unanswerable without it.
+
+        The roster comes from the platform's own records (the task ledger,
+        the registry, the presence table), so "who is here" has one answer
+        instead of one per reader.  Read-only.
+        """
+        data = client.get(f"/groups/{group_id}/roster")
+        members = data.get("members") if isinstance(data, dict) else []
+        rows = [row for row in (members or []) if isinstance(row, dict)]
+        wanted = str(args.get("harness_id") or "").strip()
+        if wanted:
+            rows = [row for row in rows if str(row.get("harness_id") or "") == wanted]
+            if not rows:
+                raise ToolRefused(
+                    f"no window {wanted!r} appears in this group's ledger"
+                )
+        return {
+            "group_id": group_id,
+            "member_count": data.get("member_count") if isinstance(data, dict) else len(rows),
+            "live_count": data.get("live_count") if isinstance(data, dict) else None,
+            "admin_harness_ids": (
+                data.get("admin_harness_ids") if isinstance(data, dict) else []
+            ),
+            "members": [
+                {
+                    "harness_id": row.get("harness_id"),
+                    "name": row.get("name"),
+                    "provider": row.get("provider"),
+                    "is_admin": row.get("is_admin"),
+                    "live": row.get("live"),
+                    "last_seen_at": row.get("last_seen_at"),
+                    "running_tasks": row.get("running_tasks"),
+                    "current_task": row.get("current_task"),
+                    "last_task_status": row.get("last_task_status"),
+                    "last_task_title": row.get("last_task_title"),
+                }
+                for row in rows
+            ],
+            "note": (
+                "这是平台账本算出来的名册：只有在本群账本里出现过（领了活、"
+                "被派了活、做过一轮）的窗口才算本群成员。live=false 表示那个"
+                "进程现在不在跑（它没在领活），不等于这个窗口坏了。"
+            ),
+        }
+
+    def ask_admin(args: dict[str, Any]) -> dict[str, Any]:
+        """Relay a request to the administrator, on behalf of the asker.
+
+        The assistant cannot speak in the asker's name -- the platform binds
+        a message's author to the token that sent it, so "posted as the user"
+        is not available to anybody.  What *is* available is a relay: the
+        message is authored by the assistant and carries the asker in a
+        machine-readable ref, and the administrator answers the asker.
+
+        The request text is the asker's own words.  The assistant must not
+        invent the ask for them.
+        """
+        text = _one_text(args, "text", limit=_MAX_SAY_CHARS)
+        roster = client.get(f"/groups/{group_id}/roster")
+        admins = roster.get("admin_harness_ids") if isinstance(roster, dict) else []
+        admins = [str(item) for item in (admins or []) if item]
+        if not admins:
+            raise ToolRefused(
+                "this group has no administrator window on record; the relay has "
+                "nowhere to go"
+            )
+        if len(admins) > 1:
+            raise ToolRefused(
+                "this group has more than one administrator window on record; "
+                f"pick one of {admins}"
+            )
+        admin_id = admins[0]
+        payload = json.dumps({"asker": asker_id}, ensure_ascii=False)
+        # 收件人有**两个**：管理员要收到，提问人也要能看到自己托出去的话 ——
+        # 定向消息只有发送方与收件人看得见，提问人不在收件人里就等于这条
+        # 请求从没发生过（他在办公室等一个不会来的回话）。
+        recipients = [admin_id]
+        if asker_id and asker_id != author_id:
+            recipients.append(asker_id)
+        return client.post(
+            f"/groups/{group_id}/messages",
+            {
+                "author_kind": author_kind,
+                "author_id": author_id,
+                "body": text,
+                "mentions": recipients,
+                "refs": [
+                    ASSISTANT_RELAY_REF,
+                    f"{ASSISTANT_RELAY_JSON_REF}{payload}",
+                ],
+                "direct": True,
+            },
+        )
+
     tools = [
+        Tool(
+            "harness.peers",
+            "read",
+            "本群的其他窗口：谁在线、在忙什么、手上有几单、谁是管理员",
+            harness_peers,
+        ),
+        Tool(
+            "ask.admin",
+            "say",
+            "替提问人把一条请求转达给管理员（原话照传；管理员会回给提问人，"
+            "不是回给你）",
+            ask_admin,
+        ),
         Tool("pool.status", "read", "额度池现状：各档逐家可用与否、余量", pool_status),
         Tool(
             "harness.bases",

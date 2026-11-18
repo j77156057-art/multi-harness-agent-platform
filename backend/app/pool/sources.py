@@ -1208,6 +1208,7 @@ def user_key_upstreams() -> list[Upstream]:
                     "key_id": key.id,
                     "label": key.label,
                     "approval": key.approval,
+                    "headers": dict(key.headers),
                 },
             )
         )

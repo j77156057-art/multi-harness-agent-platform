@@ -310,3 +310,31 @@ def test_the_direct_argv_path_carries_the_model(tmp_path: Path) -> None:
     argv = adapter.command("干活", _worktree(tmp_path))
     assert "--model" in argv
     assert argv[argv.index("--model") + 1] == "opencode/flint-40b-free"
+
+
+def test_claude_separates_the_work_order_from_the_flags(tmp_path: Path) -> None:
+    """The work order must not be swallowed by a variadic option.
+
+    ``--add-dir <directories...>`` takes every following non-flag token as
+    another directory.  Without the ``--`` separator the work order landed
+    inside it, and the CLI answered "MCP config file not found: <the
+    prompt>" -- so every attempt died in seconds and the platform read it
+    as "the CLI failed" instead of "the argv was wrong" (2026-11-18).
+    """
+    worktree = _worktree(tmp_path)
+    # A worktree with a git pointer is what makes ``--add-dir`` appear.
+    (worktree / ".git").write_text("gitdir: D:/tmp/fake.git\n", encoding="utf-8")
+    adapter = ClaudeCodeAdapter(FakeClient())
+    order = "line one\nline two"
+    argv = adapter.command(order, worktree)
+    try:
+        assert "--add-dir" in argv
+        assert "--" in argv, "a variadic option needs an explicit separator"
+        separator = argv.index("--")
+        assert argv[-1] == order, "the work order is the last argument"
+        assert separator == len(argv) - 2, (
+            "nothing may sit between the separator and the work order"
+        )
+    finally:
+        adapter.cleanup_work_order()
+

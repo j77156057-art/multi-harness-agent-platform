@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
+
 import pytest
 
 from app.api.app import create_app
@@ -23,7 +25,23 @@ from app.pool import user_keys
 def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """The user's own key store, on a temporary data dir."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path), raising=False)
-    monkeypatch.setattr("app.pool.sources.discover_upstreams", lambda *a, **k: [], raising=False)
+    # Only the **CLI slots** are hidden: the user's own keys are appended
+    # inside ``discover_upstreams``, so replacing that function wholesale
+    # would take the key upstream with it and the pool would have nothing
+    # to route to (the request then failed as "no upstream serves that
+    # model" -- or, worse, as "waiting for the user to approve").
+    from app.pool import sources
+
+    real_discover = sources.discover_upstreams
+
+    def _only_user_keys(*args: object, **kwargs: object) -> list[object]:
+        return list(sources.user_key_upstreams())
+
+    monkeypatch.setattr(sources, "discover_upstreams", _only_user_keys, raising=False)
+    monkeypatch.setattr(
+        "app.pool.service.discover_upstreams", _only_user_keys, raising=False
+    )
+    assert callable(real_discover)
     return tmp_path / "user-keys"
 
 
@@ -339,3 +357,130 @@ def test_a_streaming_refusal_is_a_status_too(store: Path) -> None:
     )
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "pool_user_key_pending"
+
+
+def test_an_unreadable_index_is_not_an_empty_store(store: Path) -> None:
+    """A broken index must not read as "the user has no keys" (2026-11-18).
+
+    The failure this pins down: the index could not be read, the reader
+    returned an empty list as if nothing had ever been registered, and the
+    next write saved that empty list back -- so every key and every
+    per-window authorization was gone, while the secret files stayed on disk.
+    The pool then stopped serving those models with no trace of why.
+    """
+    user_keys.register(
+        label="\u6211\u7684",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["my-model"],
+    )
+    index = user_keys.index_path()
+    index.write_text("{ this is not json", encoding="utf-8")
+
+    # Reading it now says "broken", not "empty".
+    with pytest.raises(user_keys.UserKeyError):
+        user_keys.entries()
+
+    # And recording one more question does not wipe what was there.
+    with pytest.raises(user_keys.UserKeyError):
+        user_keys.raise_request(key_id="k-1", reason="why not", model="my-model")
+    assert index.read_text(encoding="utf-8") == "{ this is not json"
+
+
+def test_a_missing_index_is_an_empty_store(store: Path) -> None:
+    """A store nobody has written yet is empty -- that is not a failure."""
+    assert user_keys.entries() == []
+    assert user_keys.pending() is None
+
+
+def test_writing_the_index_keeps_the_previous_copy(store: Path) -> None:
+    """The old copy stays, so a botched write can be put back by hand."""
+    key = user_keys.register(
+        label="\u6211\u7684",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["my-model"],
+    )
+    user_keys.set_approval(key.id, user_keys.APPROVAL_ALWAYS)
+    backup = user_keys.index_path().with_suffix(".json.bak")
+    assert backup.exists()
+    # The backup is the copy from *before* this write: it still has the key
+    # with its previous approval.
+    rows = json.loads(backup.read_text(encoding="utf-8"))["keys"]
+    assert [row["id"] for row in rows] == [key.id]
+
+
+def test_two_writers_do_not_lose_a_row(store: Path) -> None:
+    """Two processes each change one row; neither change may disappear."""
+    first = user_keys.register(
+        label="\u4e00",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["my-model"],
+    )
+    second = user_keys.register(
+        label="\u4e8c",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-2",
+        models=["my-model"],
+    )
+    user_keys.assign(first.id, "h-A")
+    user_keys.assign(second.id, "h-B")
+    assert user_keys.assigned_to(first.id, "h-A")
+    assert user_keys.assigned_to(second.id, "h-B")
+    assert {key.id for key in user_keys.entries()} == {first.id, second.id}
+
+
+def test_a_streaming_request_is_judged_like_a_non_streaming_one(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The window that may use the key must be able to use it **streaming** too.
+
+    The streaming path decided the route *before* the stream started (so a
+    refusal is a status, not a broken stream).  That pre-check did not carry
+    the window, so it could not tell "this window may use the key" from
+    "nobody may" -- and refused with 409 while the non-streaming path
+    served the very same window happily (2026-11-18: every streaming CLI
+    hit it, and the CLIs all stream).
+    """
+    from tests.api_support import make_client
+
+    key = user_keys.register(
+        label="\u6211\u7684",
+        protocol="openai_chat",
+        base_url="https://api.example.com/v1",
+        key="k-1",
+        models=["my-model"],
+    )
+    user_keys.assign(key.id, "h-A")
+    # The window is only known to the pool when the API resolves a real
+    # principal -- that is the enforce mode the real harness workers run in.
+    monkeypatch.setattr(settings, "auth_mode", "enforce", raising=False)
+    client, database = make_client(store.parent)
+    harness = _harness_token(database)
+    for payload in (
+        {"model": "my-model", "messages": [{"role": "user", "content": "hi"}]},
+        {
+            "model": "my-model",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ):
+        try:
+            response = client.post(
+                "/api/v1/pool/v1/chat/completions",
+                json=payload,
+                headers={"Authorization": f"Bearer {harness}"},
+            )
+        except httpx.HTTPError:
+            # The request got as far as the upstream (api.example.com does
+            # not exist) -- which is the point: the pool did not refuse it.
+            continue
+        assert response.status_code != 409, (
+            f"the window may use this key, streaming or not: {response.text}"
+        )
+

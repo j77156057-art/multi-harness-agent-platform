@@ -129,6 +129,7 @@ def plan_attempt(
     upstream = None
     protocol = ""
     cli_only = False
+    text_entries: list[dict[str, Any]] = []
     if pool is not None:
         try:
             entries = pool.models()
@@ -138,6 +139,7 @@ def plan_attempt(
             # A CLI slot can only return text.  This attempt sends tool
             # definitions, so the slot is not a candidate at all -- it is
             # excluded **before** the request, not refused after it.
+            text_entries = [item for item in entries if str(item.get("protocol") or "") == "cli"]
             capable = [item for item in entries if str(item.get("protocol") or "") != "cli"]
             cli_only = bool(entries) and not capable
             entries = capable
@@ -160,7 +162,9 @@ def plan_attempt(
                     continue
                 if str(entry.get("tier") or "metered") != tier:
                     continue
-                if tier == "user" and not _user_key_approved(str(entry.get("upstream") or "")):
+                if tier == "user" and not _user_key_approved(
+                    str(entry.get("upstream") or ""), harness_id
+                ):
                     # Not approved yet: the question is asked below, and this
                     # attempt does not spend the user's own money.
                     continue
@@ -170,6 +174,40 @@ def plan_attempt(
                 break
             if model:
                 break
+    if not model and cli_only and text_entries:
+        # Everything the pool has is a CLI slot.  A CLI slot cannot accept tool
+        # definitions -- but it can write text, and the platform can run the
+        # tools itself (the loop in app/agenttools/cli.py asks the model what to
+        # do next and executes the tool itself).  So the task is still doable:
+        # only "who presses the buttons" changes.
+        text_only_model = None
+        for tier in ("free", "reserve", "metered", "user"):
+            for entry in text_entries:
+                if str(entry.get("tier") or "metered") == tier:
+                    text_only_model = entry
+                    break
+            if text_only_model is not None:
+                break
+        if text_only_model is not None:
+            return {
+                "mode": "pool",
+                "text_only": True,
+                "reason_code": "text_only_channel",
+                "reason": (
+                    "every model this window can reach is served by a CLI slot;"
+                    " the platform will run the tools itself on this text-only"
+                    " channel"
+                ),
+                "model": str(text_only_model.get("id") or ""),
+                "upstream": str(text_only_model.get("upstream") or ""),
+                "upstream_protocol": str(text_only_model.get("protocol") or ""),
+                "base_path": POOL_BASE_PATH,
+                "anthropic_path": POOL_ANTHROPIC_PATH,
+                "required_tools": list(required_tools),
+                "task_id": task_id,
+                "harness_id": harness_id,
+                "attempt_no": attempt_no,
+            }
     if not model and cli_only:
         # Everything the pool has is a CLI slot, and this request carries tools.
         # Saying "the pool is empty, retry on your own provider" would hide the
@@ -311,14 +349,29 @@ def _plan_for_chosen_model(
                 "harness_id": harness_id,
                 "attempt_no": attempt_no,
             }
+        # The chosen model is a CLI slot: it cannot accept tool definitions.  But
+        # it CAN write text -- and the platform can run the tools itself (the
+        # loop in app/agenttools/cli.py asks the model what to do next and
+        # executes the tool itself).  So this is not "cannot be done", it is
+        # "somebody else presses the buttons" (2026-11-17 real-machine walkthrough:
+        # a text-only pool could not finish a tool-using task at all).
         return {
-            "mode": "unavailable",
-            "reason_code": "protocol_unsupported",
+            "mode": "pool",
+            "text_only": True,
+            "reason_code": "text_only_channel",
             "reason": (
-                f"protocol_unsupported: the chosen model {model_id} is a CLI slot"
-                " and cannot accept tool definitions; no other pool model can"
-                " accept them either, so no upstream call was made"
+                f"the chosen model {model_id} is a CLI slot and cannot accept"
+                " tool definitions; the platform will run the tools itself on"
+                " this text-only channel"
             ),
+            "model": model_id,
+            "upstream": str(entry.get("upstream") or ""),
+            "upstream_protocol": protocol,
+            "base_path": POOL_BASE_PATH,
+            "anthropic_path": POOL_ANTHROPIC_PATH,
+            "task_id": task_id,
+            "harness_id": harness_id,
+            "attempt_no": attempt_no,
             "selected_model": model_id,
             "selected_protocol": protocol,
             "required_tools": list(required_tools),
@@ -341,7 +394,7 @@ def _plan_for_chosen_model(
             "task_id": task_id,
             "harness_id": harness_id,
         }
-    if current_tier == "user" and not _user_key_approved(upstream):
+    if current_tier == "user" and not _user_key_approved(upstream, harness_id):
         # The user's own key: the platform never spends it on its own.  Ask
         # once; this attempt stays on the window's own provider.
         asked = _ask_for_user_key(
@@ -402,13 +455,13 @@ def _capable_fallback(
     return None
 
 
-def _user_key_approved(upstream_name: str) -> bool:
+def _user_key_approved(upstream_name: str, harness_id: str = "") -> bool:
     """Has the user said yes to spending this key?"""
     if not upstream_name.startswith("user:"):
         return False
     from app.pool import user_keys  # local import: keeps the module cycle out
 
-    return user_keys.approved(upstream_name.split(":", 1)[1])
+    return user_keys.approved(upstream_name.split(":", 1)[1], harness_id)
 
 
 def _ask_for_user_key(

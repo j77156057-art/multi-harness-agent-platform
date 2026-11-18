@@ -31,7 +31,7 @@ from app.api.errors import ApiError
 from app.pool import user_keys
 from app.pool.request_log import log_pool_request
 from app.pool.routing import plan_attempt
-from app.pool.service import PoolError, PoolService, invalidate_discovery
+from app.pool.service import PoolError, PoolService, harness_of, invalidate_discovery
 from app.pool.sources import (
     PoolDeclarationError,
     declare_cli_model,
@@ -68,7 +68,11 @@ _POOL_MESSAGES = {
 
 def _as_api_error(exc: PoolError) -> ApiError:
     """A pool refusal, in the envelope the rest of the platform uses."""
-    message = _POOL_MESSAGES.get(exc.code, "the pool could not serve this request")
+    # 没有专门措辞的拒绝（上游自己拒的：429 配额/限流、402 余额不足、401 令牌过期…）
+    # **原话要带出去**：池子知道上游说了什么，藏起来就只剩一句"the pool could not
+    # serve this request"—— 查问题的人分不清是配额没了、令牌过期了还是模型名写错了
+    # （2026-11-17 真机走查：429 被包装成通用句，排查绕了很久）。
+    message = _POOL_MESSAGES.get(exc.code) or str(exc) or "the pool could not serve this request"
     details = dict(exc.details or {})
     # 保留原文，再补上"哪个窗口、要求哪些工具"：042e/pi 那次事后只能看到
     # 一句 code，不知道是哪个窗口把活带进了 CLI 档。
@@ -325,7 +329,14 @@ def pool_chat_completions(
         # Where it would go is decided **before** the stream starts: a refusal
         # has to be a status the caller can read, not a stream that breaks
         # halfway through.
-        route = service.route(str(payload.get("model") or ""))
+        # The same window that is allowed to spend this key is the one that
+        # asks for it: without the harness id the pre-check could not tell
+        # "this window may use the key" from "nobody may" and refused a
+        # request the non-streaming path happily served (2026-11-18).
+        route = service.route(
+            str(payload.get("model") or ""),
+            harness_id=harness_of(_consumer(principal)),
+        )
         # 同一句话也要在**开流之前**说完：CLI 槽位服务不了带工具定义的请求，而
         # 生成器里抛错时响应头已经发出去了，调用方只会看到「连接被关闭」。
         service.refuse_tools_for_cli(route, payload, window=_consumer(principal))
@@ -344,7 +355,17 @@ def pool_messages(
 ) -> Any:
     """Serve an Anthropic messages request from the pool (the Claude CLI's protocol)."""
     log_pool_request("/pool/v1/messages", payload)
-    return _service().messages(payload, consumer=_consumer(principal))
+    service = _service()
+    if payload.get("stream"):
+        # The Claude CLI always streams: it needs the Anthropic *event*
+        # sequence, not a JSON body (2026-11-17 real-machine walkthrough:
+        # 502 on the CLI side because the relay could not read the SSE body).
+        return StreamingResponse(
+            service.messages_stream(payload, consumer=_consumer(principal)),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+    return service.messages(payload, consumer=_consumer(principal))
 
 
 @router.post("/pool/v1/responses")

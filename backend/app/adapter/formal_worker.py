@@ -1449,8 +1449,6 @@ def run_one(
         # 也不该让整次交付因为"多了个文件"被拒。
         transient=adapter.transient_paths,
     )
-    worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
-    # 额度池：平台说这条活该换额度，就走池子；没说，就用这个窗口自己的 provider。
     route_env: dict[str, str] = {}
     plan = ask_pool_plan(
         client,
@@ -1469,6 +1467,15 @@ def run_one(
             reason_code=str(plan.get("reason_code") or ""),
             required_tools=tuple(str(item) for item in plan.get("required_tools") or ()),
         )
+    if plan.get("mode") == "pool" and plan.get("text_only"):
+        # This channel can only write text: the TOOLS are run by the platform
+        # itself (the loop in app/agenttools/cli.py asks the model what to do
+        # next and executes the tool itself).  The window is still this window:
+        # the lease, the worktree, the commit and the acceptance stay its own.
+        adapter = PlatformToolsAdapter(client, harness_id=harness_id)
+
+    worker = CliHarnessWorker(adapter, runner=scoped_runner, heartbeat_seconds=20)
+    # 额度池：平台说这条活该换额度，就走池子；没说，就用这个窗口自己的 provider。
     if plan.get("mode") == "pool":
         protocol = getattr(adapter, "pool_protocol", "openai")
         base_path = str(

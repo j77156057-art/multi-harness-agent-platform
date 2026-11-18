@@ -223,6 +223,17 @@ ADD_MEMBER_REF = "add-member"
 #: 机器可读的那一半："add-member-json:{harness_id}".
 ADD_MEMBER_JSON_REF = "add-member-json:"
 
+# 「这条是平台助手替某人转达给管理员的」的签名（R10 §19 的延伸）。
+#
+# 助手**不能**冒用人的身份发消息：消息的作者必须等于令牌主体（API 层的
+# bind_declared）。所以「代用户转达」诚实的做法是：**这条消息的作者是助手**，
+# 另外用这个签名记着它替谁转的。管理员据此把回话送给**那个人**，而不是送给
+# 助手自己（否则这句话就掉在助手的私聊里了，人看不见）。
+ASSISTANT_RELAY_REF = "assistant-relay"
+#: The machine-readable half: "assistant-relay-json:{asker_id}".
+ASSISTANT_RELAY_JSON_REF = "assistant-relay-json:"
+
+
 
 def _normalise_refs(refs: list[str] | None) -> list[str]:
     """Validate the message refs array (openapi post_message / Message schema).
@@ -295,7 +306,8 @@ def _reviewer_provider(
     if reviewer_kind == "human":
         return "human"
     row = conn.execute(
-        "SELECT provider FROM harnesses WHERE harness_id = ?", (reviewer_harness_id,)
+        "SELECT provider FROM harnesses"
+        " WHERE harness_id = ? AND removed_at IS NULL", (reviewer_harness_id,)
     ).fetchone()
     if row is None or not row["provider"]:
         return "unknown"
@@ -2858,6 +2870,129 @@ class SchedulerService:
             out.append(entry)
         out.sort(key=lambda item: (-item["submissions"], item["harness_id"]))
         return {"group_id": group_id, "harnesses": out, "totals": totals}
+
+    def group_roster(self, group_id: str) -> dict:
+        """The windows in this group, with what each one is doing right now.
+
+        One place answers "who else is in this group, are they alive, and
+        what are they working on".  The facts come from where they already
+        live: the task ledger (who holds what), the harness registry (the
+        registered name), and the presence table (is the process still up).
+
+        The roster is a **read**: it grants nothing and decides nothing.
+        Members are the windows that actually appear in this group's ledger
+        (an owner, an assignee, an executor) -- a registry entry that never
+        touched this group is not a member of it.
+        """
+        from app.adapter.presence import presence_snapshot
+
+        tasks = self.list_tasks(group_id)
+        registry = {
+            str(row.get("harness_id") or ""): dict(row)
+            # 连删掉的窗口一起取：它在本群干过活，名字还得叫得出来
+            # （它只是不再在名册里 —— 那是另一件事）。
+            for row in HarnessRegistry(self.database).listing(include_removed=True)
+        }
+        presence = presence_snapshot(self.database)
+
+        members: dict[str, dict] = {}
+        for task in tasks:
+            owners = [str(task.get("owner") or ""), str(task.get("executor") or "")]
+            try:
+                assigned = json.loads(str(task.get("assigned_harness_ids_json") or "[]"))
+            except ValueError:
+                assigned = []
+            owners.extend(str(item) for item in assigned if item)
+            for harness_id in owners:
+                if not harness_id:
+                    continue
+                entry = members.setdefault(
+                    harness_id,
+                    {
+                        "harness_id": harness_id,
+                        "name": harness_id,
+                        "provider": None,
+                        "is_admin": False,
+                        "removed": False,
+                        "live": False,
+                        "last_seen_at": None,
+                        "running_tasks": 0,
+                        "current_task": None,
+                        "last_task_status": None,
+                        "last_task_title": None,
+                    },
+                )
+                if str(task.get("owner") or "") == harness_id:
+                    entry["current_task"] = {
+                        "task_id": str(task.get("task_id") or ""),
+                        "title": str(task.get("title") or ""),
+                        "status": str(task.get("status") or ""),
+                    }
+
+        for harness_id, entry in members.items():
+            registered = registry.get(harness_id)
+            if registered:
+                entry["name"] = str(registered.get("name") or harness_id)
+                entry["removed"] = bool(registered.get("removed"))
+                entry["provider"] = registered.get("provider")
+                entry["is_admin"] = bool(registered.get("is_admin"))
+                entry["running_tasks"] = int(registered.get("running_tasks") or 0)
+            here = presence.get(harness_id) or {}
+            entry["live"] = bool(here.get("live"))
+            entry["last_seen_at"] = here.get("seen_at")
+            if entry.get("current_task"):
+                entry["last_task_status"] = entry["current_task"]["status"]
+                entry["last_task_title"] = entry["current_task"]["title"]
+
+        # A window that released its last task still has a history worth
+        # showing ("it finished X"), so the newest task it touched is kept.
+        for harness_id, entry in members.items():
+            if entry.get("current_task"):
+                continue
+            recent = [
+                task
+                for task in tasks
+                if str(task.get("executor") or "") == harness_id
+                or str(task.get("owner") or "") == harness_id
+            ]
+            if recent:
+                newest = max(recent, key=lambda task: str(task.get("updated_at") or ""))
+                entry["last_task_status"] = str(newest.get("status") or "")
+                entry["last_task_title"] = str(newest.get("title") or "")
+
+        # 管理员是**角色**，不是"干过活的窗口"：它可能一条活都没领过
+        # （刚上线、或这一轮还没派活给它），但群里问它的话就是发给它。所以
+        # 名册里必须带上它 —— 否则"本群的管理员是谁"永远答不出来。
+        admin_subjects = sorted(getattr(settings, "admin_subjects", ()) or ())
+        for harness_id in admin_subjects:
+            entry = members.get(harness_id)
+            if entry is None:
+                registered = registry.get(harness_id) or {}
+                members[harness_id] = {
+                    "harness_id": harness_id,
+                    "name": str(registered.get("name") or harness_id),
+                    "provider": registered.get("provider"),
+                    "is_admin": True,
+                    "live": bool((presence.get(harness_id) or {}).get("live")),
+                    "last_seen_at": (presence.get(harness_id) or {}).get("seen_at"),
+                    "running_tasks": int(registered.get("running_tasks") or 0),
+                    "current_task": None,
+                    "last_task_status": None,
+                    "last_task_title": None,
+                }
+                continue
+            entry["is_admin"] = True
+
+        rows = [members[key] for key in sorted(members)]
+        return {
+            "group_id": group_id,
+            "members": rows,
+            "member_count": len(rows),
+            "live_count": sum(1 for row in rows if row["live"]),
+            "admin_harness_ids": sorted(
+                row["harness_id"] for row in rows if row["is_admin"]
+            ),
+        }
 
     def _last_failures(self, tasks: list[dict]) -> dict[str, dict]:
         """The newest failure/abandon reason per task, in one query."""

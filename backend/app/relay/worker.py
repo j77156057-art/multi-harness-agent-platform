@@ -48,7 +48,9 @@ def _roster_from_db(path: Path) -> set[str]:
 
         connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            rows = connection.execute("SELECT harness_id FROM harnesses").fetchall()
+            rows = connection.execute(
+                "SELECT harness_id FROM harnesses WHERE removed_at IS NULL"
+            ).fetchall()
         finally:
             connection.close()
         return {str(row[0]) for row in rows if row and row[0]}

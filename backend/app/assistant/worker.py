@@ -24,6 +24,15 @@ import httpx
 
 from app.adapter import presence
 from app.admin.worker import PlatformClient
+from app.assistant.live import (
+    STATE_ANSWERING,
+    STATE_DONE,
+    STATE_FAILED,
+    STATE_RECEIVED,
+    STATE_RUNNING,
+    read_state,
+    write_state,
+)
 from app.assistant.loop import AssistantLoop
 from app.assistant.memory import memory_context, thread_turns
 from app.assistant.model import FREE_MODELS, PoolModelChannel
@@ -89,6 +98,7 @@ class AssistantWorker:
     model: PoolModelChannel
     state: AssistantState
     state_path: Path
+    data_dir: Path = Path(".")
     budget: Any = None  # assistant.loop.Budget | None
     trace_dir: Path | None = None
     dry_run: bool = False
@@ -149,14 +159,44 @@ class AssistantWorker:
             return False
         return str(message.get("sender_id") or "") != self.harness_id
 
+    # ------------------------------------------------------------- live
+
+    def _publish(self, payload: dict[str, Any]) -> None:
+        """Say what this assistant is doing right now, for the office to read.
+
+        A failure here must never stop the answer: the live file is a cache
+        of progress, not the answer itself.  Losing it means the office shows
+        an older state, which is a worse view, not a wrong one.
+        """
+        try:
+            write_state(self.data_dir, self.group_id, payload)
+        except OSError:
+            return
+
     # -------------------------------------------------------------- answer
 
     def answer(self, message: dict[str, Any], *, seq: int) -> _TurnReceipt:
         sender = str(message.get("sender_id") or "")
         body = str(message.get("body") or "").strip()
+        # "收到了"要先说出去：这一轮可能要走几分钟（取证、调模型），
+        # 提问的人在办公室看不到任何动静，只能干等 —— 先把"收到了"落到
+        # 现场文件里，界面才能显示它在干活。
+        self._publish(
+            {
+                "state": STATE_RECEIVED,
+                "asker": sender,
+                "question": body[:400],
+                "message_seq": seq,
+            }
+        )
         loop = AssistantLoop(
             self.model,
-            build_registry(self.client, group_id=self.group_id, author_id=self.harness_id),
+            build_registry(
+                self.client,
+                group_id=self.group_id,
+                author_id=self.harness_id,
+                asker_id=sender,
+            ),
             budget=self.budget,
             trace_dir=self.trace_dir,
             self_check=self.self_check,
@@ -175,6 +215,15 @@ class AssistantWorker:
         # 记忆：这条私聊线程里此前几轮的人机问答。走引擎**既有的引用机制**
         # （context 就是 [c1]、[c2]……），机械门照旧校验每一个引用解析得到。
         context.extend(self._memory_context(seq, asker_id=sender))
+        self._publish(
+            {
+                "state": STATE_RUNNING,
+                "asker": sender,
+                "question": body[:400],
+                "message_seq": seq,
+                "run_id": loop.run_id,
+            }
+        )
         try:
             result = loop.run(question, context)
         except Exception as exc:  # noqa: BLE001 - the asker must hear the truth
@@ -183,6 +232,14 @@ class AssistantWorker:
                 "这一条没有答上来。\n"
                 f"原因：{type(exc).__name__}: {exc}\n"
                 "（不是你的问题；可以稍后重发，或者直接找管理员。）",
+            )
+            self._publish(
+                {
+                    "state": STATE_FAILED,
+                    "asker": sender,
+                    "run_id": loop.run_id,
+                    "error": f"{type(exc).__name__}: {exc}"[:400],
+                }
             )
             return _TurnReceipt(seq=seq, sender=sender, run_id=loop.run_id, status="error")
         if result.get("status") == "done":
@@ -195,6 +252,16 @@ class AssistantWorker:
             # 塞进这句话。**依据**要留：它说明这段话是拿哪几条事实说的。
             provenance = f"（依据：{' '.join(str(c) for c in cites)}）" if cites else ""
             self._deliver(sender, f"{text}\n{provenance}".strip() if provenance else text)
+            self._publish(
+                {
+                    "state": STATE_DONE,
+                    "asker": sender,
+                    "run_id": loop.run_id,
+                    "answer": text[:2000],
+                    "cites": [str(c) for c in cites],
+                    "steps": int(result.get("steps") or 0),
+                }
+            )
             status = "done"
         else:
             reason = str(result.get("reason") or "unknown")
@@ -333,6 +400,7 @@ def build_worker(args: argparse.Namespace, client: PlatformClient) -> AssistantW
         ),
         state=AssistantState.load(state_path),
         state_path=state_path,
+        data_dir=Path(settings.data_dir),
         budget=Budget(max_calls=args.max_calls, max_seconds=args.max_seconds),
         trace_dir=Path(settings.data_dir) / "assistant" / "trace",
         dry_run=args.dry_run,
