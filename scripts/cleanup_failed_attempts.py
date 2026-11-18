@@ -151,12 +151,15 @@ def apply(conn: sqlite3.Connection, task_ids: tuple[str, ...]) -> dict[str, int]
         # claim), so deleting the attempt rows alone would leave the office
         # showing "attempt 360 of 3" -- the number the cleanup was meant to
         # remove.  It now says how many attempts this task really had.
-        if keep_id:
-            cur = conn.execute(
-                "UPDATE tasks SET attempt_no = 1 WHERE task_id = ?",
-                (task_id,),
-            )
-            removed["attempt_no_reset"] += cur.rowcount
+        #
+        # 没留下任何 attempt 的任务（取消掉的那种）：计数器归 **0**，不是留在
+        # 229 —— 否则一条一条 attempt 都没有的任务，界面上还写着"第 229 次"。
+        target_no = 1 if keep_id else 0
+        cur = conn.execute(
+            "UPDATE tasks SET attempt_no = ? WHERE task_id = ?",
+            (target_no, task_id),
+        )
+        removed["attempt_no_reset"] += cur.rowcount
     return removed
 
 
