@@ -43,7 +43,16 @@ async function fetchJson(url) {
 const fetchOverview = () => fetchJson(OVERVIEW);
 const fetchRoster = () => fetchJson(ROSTER);
 
-function stateLine(overview) {
+function stateLine(overview, enabled) {
+  // 平台侧没开转接模式（AP_RELAY_MODE）时，信**根本写不进去**：平台的
+  // POST /relay/letters 直接回 409（"这个平台没有开转接模式"）。所以这时候
+  // 不能说"信还会写进发件箱" —— 那是在说一件根本不会发生的事。
+  if (enabled === false) {
+    return {
+      tone: 'stopped',
+      text: '平台侧没有开转接模式（AP_RELAY_MODE）：信写不进去，也没有邮局来投递。',
+    };
+  }
   if (!overview || !overview.heartbeat_at) {
     return {
       tone: 'stopped',
@@ -154,12 +163,17 @@ export function mountRelayWorkspace({ root, project }) {
 
   function render() {
     const overview = state.overview;
-    const status = stateLine(overview);
+    // 名册读得到才有"开没开转接"这个事实（roster 带着 enabled）。读不到就不知道，
+    // 那就不乱说 —— 按原来的口径显示心跳。
+    const relayEnabled = state.roster ? state.roster.enabled !== false : undefined;
+    const status = stateLine(overview, relayEnabled);
     const threads = (overview && overview.threads) || [];
     const returned = (overview && overview.returned) || [];
     const pending = (overview && overview.pending) || 0;
     const author = (state.roster && state.roster.author) || '';
-    const canSend = !state.sending && state.draft.recipients.size > 0 && Boolean(state.draft.body.trim());
+    // 平台侧没开转接模式时，按钮点了也是 409 —— 直接不让点，并把原因写在旁边。
+    const relayOn = relayEnabled !== false;
+    const canSend = relayOn && !state.sending && state.draft.recipients.size > 0 && Boolean(state.draft.body.trim());
 
     wrap.innerHTML = `
       <header class="relay-head">
@@ -188,7 +202,11 @@ export function mountRelayWorkspace({ root, project }) {
         ${threadOptions()}
         <div class="relay-actions relay-send-row">
           <button type="button" data-relay-send${canSend ? '' : ' disabled'}>${state.sending ? '正在写…' : '写进发件箱'}</button>
-          <span class="relay-async">投递是异步的：邮局下一轮扫到，对方<b>下次读信箱</b>才会看到。</span>
+          ${
+            relayOn
+              ? '<span class="relay-async">投递是异步的：邮局下一轮扫到，对方<b>下次读信箱</b>才会看到。</span>'
+              : '<span class="relay-async">平台侧没有开转接模式（AP_RELAY_MODE），信写不进去 —— 先让管理员把转接模式打开。</span>'
+          }
         </div>
         ${feedbackBlock()}
       </section>

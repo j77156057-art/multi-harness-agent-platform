@@ -33,6 +33,15 @@ from app.relay.threads import (
 )
 
 
+class RosterUnavailable(RuntimeError):
+    """名册**读不出来** —— 与「名册是空的」是两件事。
+
+    以前读失败返回空集合，于是"读不到"被当成"没有任何窗口"：每一封信都因为
+    「作者不在名册」被退回。读不出来就抛出去，让投递停下并把原因报出来 ——
+    信留在发件箱里等下一轮。
+    """
+
+
 def _roster_from_db(path: Path) -> set[str]:
     """从本机库只读地取名册。
 
@@ -54,8 +63,11 @@ def _roster_from_db(path: Path) -> set[str]:
         finally:
             connection.close()
         return {str(row[0]) for row in rows if row and row[0]}
-    except Exception:  # noqa: BLE001 - 名册读失败不该让邮局崩
-        return set()
+    except Exception as error:  # noqa: BLE001 - 名册读失败不该让邮局崩，但要说出来
+        # 读不出来**不是**"没有窗口"。抛出去，让这一轮投递停下并报原因；
+        # 当成空名册的话，每一封信都会因为"作者不在名册"被退回
+        # （2026-11-19 真机复核这条路）。
+        raise RosterUnavailable(f"读不了窗口名册（{path}）：{error}") from error
 
 
 def _humans_from_db(path: Path) -> set[str]:
@@ -137,11 +149,15 @@ class RelayWorker:
 
     # ------------------------------------------------------------ roster
     def known_recipients(self) -> set[str]:
-        """能收信的窗口 = 平台上登记过的窗口。读一次就记住，不每封信都问。"""
+        """能收信的窗口 = 平台上登记过的窗口。读一次就记住，不每封信都问。
+
+        读**失败**不算「没有窗口」：失败时抛出去，而且**不缓存** —— 缓存住一个
+        空名册，整轮（乃至整个进程）都会把每一封信当成「作者不在名册」退回去。
+        """
         if self._known_loaded:
             return self._known
         if self._roster is not None:
-            self._known = set(self._roster())
+            self._known = set(self._roster())  # 失败会抛出去（不缓存）
         else:
             self._known = set()
         self._known_loaded = True
@@ -189,7 +205,17 @@ class RelayWorker:
             reason = "第一行缺少「来自 <窗口 id>」，看不出是谁写的"
             self.mailbox.return_letter(letter, reason)
             return {"letter": letter.name, "status": "returned", "reason": reason}
-        windows = self.known_recipients()
+        try:
+            windows = self.known_recipients()
+        except RosterUnavailable as problem:
+            # 名册读不出来：这封信**留在发件箱里**等下一轮，不退回。
+            # 退回去等于把「平台暂时读不到名册」说成「这封信不合法」—— 信被白白
+            # 退回，人还得重写一遍。
+            return {
+                "letter": letter.name,
+                "status": "deferred",
+                "reason": str(problem)[:200],
+            }
         # 作者可以是**窗口**，也可以是**人**（`docs/notes/relay-mode.md` §16：界面上
         # 人以自己的身份写一封信）。两种都必须在名册里 —— 不在就退回，不猜是谁。
         if sender not in windows and sender not in self.owners:
