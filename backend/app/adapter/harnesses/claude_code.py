@@ -109,13 +109,17 @@ class ClaudeCodeAdapter(CliHarness):
         # 会让这次交付被判成"留了脏东西"；令牌更不该出现在命令行上。
         if self.mcp_binding() is not None:
             command += ["--mcp-config", str(self._write_mcp_config())]
-        # ``--add-dir <directories...>`` is a **variadic** option: everything
-        # after it belongs to it until the next flag.  Without the separator
-        # below, the work order was swallowed by ``--add-dir`` and the CLI
-        # then complained that the *prompt* was a missing MCP config file
-        # (2026-11-18: every Claude Code attempt died that way, in seconds,
+        # The work order is a **positional**, and the options in front of it
+        # are variadic: ``--mcp-config <configs...>`` takes "JSON files or
+        # strings (space-separated)" (claude --help).  So without a separator
+        # the whole work order was swallowed as *another MCP config* and the
+        # CLI died with "MCP config file not found: <the entire work order>"
+        # (2026-11-18: every Claude Code attempt failed that way, in seconds,
         # and the platform read it as "the CLI failed" rather than "the argv
-        # was wrong").
+        # was wrong").  ``--add-dir <directories...>`` is variadic too; it sits
+        # before the flags, so it stops at the next flag -- but the rule is
+        # the same: a variadic option must never be the one right before a
+        # positional.
         command.append("--")
         command.append(work_order)
         return command

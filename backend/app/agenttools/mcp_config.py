@@ -64,12 +64,28 @@ class Binding:
     def headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.token}"}
 
-    def server_entry(self) -> dict[str, Any]:
-        return {"type": "remote", "url": self.url(), "headers": self.headers()}
+    def server_entry(self, transport: str = "remote") -> dict[str, Any]:
+        """One server entry, in a given CLI's own vocabulary for the transport.
+
+        The **word** for "a remote HTTP server" is not the same everywhere:
+        opencode says ``remote``, the claude CLI (2.1.274, probed on this
+        machine 2026-11-19) says ``http`` / ``sse`` / ``streamable-http``
+        and **skips** anything it does not know.  So the type is a parameter,
+        not a constant -- and a wrong word does not fail loudly: the CLI just
+        drops the server, and the window ends up with no platform tools at all.
+        """
+        return {"type": transport, "url": self.url(), "headers": self.headers()}
 
     def claude_document(self) -> dict[str, Any]:
-        """claude's ``--mcp-config`` file: ``{"mcpServers": {...}}``."""
-        return {CLAUDE_CONFIG_SHAPE: {SERVER_NAME: self.server_entry()}}
+        """claude's ``--mcp-config`` file: ``{"mcpServers": {...}}``.
+
+        The transport word is **``http``**, not ``remote``: the claude CLI on
+        this machine (2.1.274) answers ``unknown MCP server type "remote"``
+        and **skips** the server -- the window then has no platform tools, and
+        the model says it cannot use them.  Probed 2026-11-19: ``http``,
+        ``sse`` and ``streamable-http`` are all accepted; ``remote`` is not.
+        """
+        return {CLAUDE_CONFIG_SHAPE: {SERVER_NAME: self.server_entry(transport="http")}}
 
     def opencode_document(self) -> dict[str, Any]:
         """opencode's project config fragment: ``{"mcp": {"servers": {...}}}``."""
@@ -78,10 +94,10 @@ class Binding:
     def http_document(self) -> dict[str, Any]:
         """codebuddy / qoder 的 ``--mcp-config`` 文件：``{"mcpServers": {...}}``。
 
-        与 :meth:`claude_document` 的差别只在 ``type``：claude 收 ``"remote"``，而这两家
-        的 schema 里是 ``stdio/sse/http/ws/streamable-http`` 这几个值（codebuddy 会把
-        ``remote`` 归一成 ``http``，qoder 的枚举里压根没有 ``remote``）。所以这里写
-        ``"http"`` —— 同一个端点，写它们各自认的那个词。
+        与 :meth:`claude_document` 用的是同一个词：``"http"``。claude CLI（2.1.274）
+        认 ``http`` / ``sse`` / ``streamable-http``，不认 ``remote``；codebuddy 会把
+        ``remote`` 归一成 ``http``，qoder 的枚举里压根没有 ``remote``。所以三家
+        都写 ``"http"`` —— 同一个端点，写它们各自认的那个词。
 
         令牌是**字面值**（跟 claude 一样）：两家都支持 ``${VAR}``，但 codebuddy 在
         ``--mcp-config`` 这条路上会不会展开没有验过，赌错的后果是 401 被读成"模型不会用

@@ -417,6 +417,13 @@ def test_each_cli_contract_is_pinned(case, tmp_path):
             # prompt (with the whole diff) does not fit in an argument.
             assert command[1:] == [*case.flags, "-"]
             assert adapter.prompt_via_stdin is True
+    elif case.name == "claude-code":
+        # The work order is a positional, and the CLI has variadic options in
+        # front of it (``--mcp-config <configs...>``).  Without the "--"
+        # separator the prompt was swallowed as another MCP config file and
+        # the CLI died with "MCP config file not found: <the work order>"
+        # (2026-11-18).  The separator is part of the pinned contract.
+        assert command == [adapter.binary, *case.flags, "--", order]
     else:
         assert command == [adapter.binary, *case.flags, order]
     parsed = adapter.parse_output(case.stdout)
