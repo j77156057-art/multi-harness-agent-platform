@@ -109,8 +109,13 @@ SPECS: tuple[MarketCli, ...] = (
         #   "-p, --prompt  Run in non-interactive (headless) mode"
         #   "--approval-mode ... [choices: default, auto_edit, yolo, plan]"
         #   "--skip-trust  Trust the current workspace for this session"
-        headless=("--approval-mode", "yolo", "--skip-trust", "-p", PROMPT),
-        review=("--approval-mode", "plan", "--skip-trust", "-p", PROMPT),
+        # `-o json`` 要有：没有它，CLI 只吐纯文本，解析器落到兜底分支
+        # （只留最后 4000 字符、拿不到 session id）。本机 `gemini --help` 的
+        # `--output-format`` choices 是 text / json / stream-json —— json 可用。
+        # `-p`` 后面紧跟工作令（它取的就是紧跟的那个值），所以顺序是
+        # 「开关在前、工作令贴着 -p」。
+        headless=("--approval-mode", "yolo", "--skip-trust", "-o", "json", "-p", PROMPT),
+        review=("--approval-mode", "plan", "--skip-trust", "-o", "json", "-p", PROMPT),
         model_flag="--model",
         # ``-o json`` 是一个对象，字段是 ``response``（官方 headless 文档）。
         limits=(
@@ -152,8 +157,10 @@ SPECS: tuple[MarketCli, ...] = (
         env_binary="AP_CURSOR_BIN",
         # 文档（cursor.com/docs/cli）：``agent -p --output-format json`` 只**提议**改动，
         # 要真的写文件必须加 ``--force``（= --yolo）。
-        headless=("-p", "--force", "--output-format", "json", PROMPT),
-        review=("-p", "--mode=ask", "--output-format", "json", PROMPT),
+        # 工作令**贴着 -p**：`-p`` 是带值的选项（`agent -p "prompt"`），
+        # 中间夹别的旗标的话工作令绑不上 -p，就只剩一个没人认的位置参数。
+        headless=("-p", PROMPT, "--force", "--output-format", "json"),
+        review=("-p", PROMPT, "--mode=ask", "--output-format", "json"),
         model_flag="--model",
         limits=(
             "不加 --force 时它只提议、不落盘 —— 一次「成功」的尝试会交出空活。",
@@ -169,8 +176,9 @@ SPECS: tuple[MarketCli, ...] = (
         binary="cn",
         env_binary="AP_CONTINUE_BIN",
         # 实测（@continuedev/cli 1.5.47 --help）：-p/--print、--auto、--readonly、--format json
-        headless=("-p", "--auto", "--format", "json", PROMPT),
-        review=("-p", "--readonly", "--format", "json", PROMPT),
+        # 同 cursor：工作令紧跟 `-p``，别被别的旗标隔开。
+        headless=("-p", PROMPT, "--auto", "--format", "json"),
+        review=("-p", PROMPT, "--readonly", "--format", "json"),
         limits=(
             "它的 --format json 不是包装层：CLI 往提示词里塞一句「必须回 JSON」，"
             "输出是模型自己写的 JSON，没有固定字段 —— 所以这里按纯文本处理。",
@@ -249,9 +257,11 @@ SPECS: tuple[MarketCli, ...] = (
         binary="amp",
         env_binary="AP_AMP_BIN",
         # 实测（amp --help）：
-        #   "-x, --execute [message]  In execute mode, agent will execute provided prompt"
-        #   "amp.dangerouslyAllowAll  Disable all command confirmation prompts"
-        headless=("-x", PROMPT, "--stream-json"),
+        # -x, --execute [message] 的 message 是**可选值**：可选值的短选项
+        # 只从同一个 token 里取（-xmessage），分开写的下一个 token 不会被
+        # 吃掉 —— 工作令就丢了。附着写法 --execute=PROMPT 在两种解析器
+        # （commander / clap）下都绑定，所以用它。
+        headless=("--execute=" + PROMPT, "--stream-json"),
         review=None,
         # 没有自动批准 flag，只有设置项；缺 key 会转设备登录（实测挂起 >75 秒）。
         requires=("AMP_API_KEY",),
@@ -361,7 +371,9 @@ class MarketCliAdapter(CliHarness):
     def _argv(self, template: tuple[str, ...], prompt: str) -> list[str]:
         argv = [self._binary()]
         for part in template:
-            argv.append(prompt if part == PROMPT else part)
+            # 占位符可以**嵌在**一个选项里（amp 的 --execute=PROMPT：它的
+            # message 是可选值，分开写不会被吃掉），所以是"替换"而不是"整段相等"。
+            argv.append(part.replace(PROMPT, prompt))
         route = self.provider_route
         if route is not None and self.spec.model_flag:
             model = str(route.model or "").strip()

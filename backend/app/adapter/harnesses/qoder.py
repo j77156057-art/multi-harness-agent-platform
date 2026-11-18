@@ -69,6 +69,11 @@ def qoder_command(work_order: str, worktree: Path, extra: list[str] | None = Non
     ]
     if extra:
         argv += list(extra)
+    # 分隔符：工作令是**位置参数**，而这家 CLI 有变参选项（`--tools <tools...>`）。
+    # 它的 help 自己写着「use -p or -- to separate from query」。
+    # 今天不写也对（`--mcp-config <config>` 是单值，吃不掉工作令）—— 但那是**侥幸**：
+    # 谁往 argv 里加一个变参选项，工作令立刻被吞（同 claude 那次事故）。
+    argv.append("--")
     argv.append(work_order)
     return argv
 

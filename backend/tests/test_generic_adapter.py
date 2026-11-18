@@ -140,6 +140,9 @@ def test_a_work_order_and_workdir_land_in_the_declared_argv(tmp_path):
         str(tmp_path),
         "--model",
         "newcli-default",
+        # 分隔符：声明里的 args 若以**变参选项**结尾，工作令会被当成那个选项
+        # 的又一个值（同 claude 那次事故）。位置参数前统一加 "--"。
+        "--",
         "do the thing",
     ]
 

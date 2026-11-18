@@ -89,12 +89,20 @@ def test_the_work_order_lands_where_the_cli_documents_it(base, tmp_path, monkeyp
     argv = adapter.command(order, tmp_path)
 
     assert argv[0] == market_cli.MARKET_ADAPTERS[base].spec.binary
-    assert argv.count(order) == 1, argv
+    # 工作令**恰好出现一次**。按子串数：有些模板把工作令**附着**在选项上
+    # （amp 的 --execute=PROMPT —— 它的 message 是可选值，分开写不会被吃掉）。
+    assert " ".join(argv).count(order) == 1, argv
     assert market_cli.PROMPT not in " ".join(argv)
-    # 模板里的每个字面 flag 都在，且顺序不变。
-    template = [part for part in adapter.spec.headless if part != market_cli.PROMPT]
-    literal = [part for part in argv[1:] if part != order]
-    assert literal[: len(template)] == template, argv
+    # 模板里的每个字面 flag 都在，且顺序不变。工作令那一位有两种形状：
+    # **分离**（独立的一个参数）或**附着**（选项的一部分，如 amp 的
+    # --execute=PROMPT —— 它的 message 是可选值，分开写不会被吃掉）。
+    expected = [part.replace(market_cli.PROMPT, order) for part in adapter.spec.headless]
+    assert len(argv) == 1 + len(expected), argv
+    for want, got in zip(expected, argv[1:]):
+        if want == order:
+            assert got == order or got.endswith(order), argv
+        else:
+            assert got == want, argv
 
 
 @pytest.mark.parametrize("base", sorted(market_cli.MARKET_ADAPTERS))

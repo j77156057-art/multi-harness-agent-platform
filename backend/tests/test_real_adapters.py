@@ -401,8 +401,13 @@ def test_each_cli_contract_is_pinned(case, tmp_path):
             "codex",
         }
         if case.name == "qoder":
-            assert command[1:-2] == case.flags
-            assert command[-2:] == [str(tmp_path), order]
+            assert command[1:-3] == case.flags
+            # 位置参数前有 `"--"` 分隔符：这家 CLI 有变参选项
+            # （`--tools <tools...>`），它自己的 help 写着
+            # 「use -p or -- to separate from query」。没有分隔符时，
+            # 谁往 argv 里加一个变参选项，工作令就会被吞掉
+            # （2026-11-19：同 claude 那次事故）。
+            assert command[-3:] == [str(tmp_path), "--", order]
         elif case.name == "codebuddy":
             # CodeBuddy takes the order on stdin, so its argv is flags plus the
             # worktree path -- no positional at all (a positional multi-line

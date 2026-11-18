@@ -283,6 +283,12 @@ class GenericCliAdapter(CliHarness):
         for part in template:
             argv.append(str(part).replace("{workdir}", str(workdir)).replace("{model}", model))
         if not self.prompt_via_stdin:
+            # 位置参数前加分隔符：声明里的 `args` 若以**变参选项**结尾，工作令会被
+            # 当成那个选项的又一个值（同 claude 那次事故：`--mcp-config <configs...>`
+            # 把整段工作令当成了第二个 MCP 配置文件）。
+            # 声明里自己写了 `"--"` 的，就不重复加。
+            if not argv or argv[-1] != "--":
+                argv.append("--")
             argv.append(order)
         return argv
 
