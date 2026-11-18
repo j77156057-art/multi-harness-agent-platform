@@ -39,7 +39,7 @@ from app.git.repo import CanonicalRepo, run_git
 from app.git.worktree import WorktreeError, WorktreeManager, _force_rmtree
 from app.lease.service import expire_stale_leases, parse_iso
 from app.merge.outputs import dependency_output_satisfied
-from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
+from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects_detailed
 from app.scheduler.report import SweepReport
 from app.spec import EventKind, TaskStatus
 from app.tasks.service import close_attempt
@@ -1749,11 +1749,18 @@ def sweep_project_trash(
     只删自己认得的东西：归不到某个项目上的表（`command_idempotency`、`jsonl_exports`）
     一律不碰 —— 宁可留几行孤儿，也不能顺手清掉别的项目还在用的记账。
     """
-    purged = purge_due_projects(database, now=now)
+    purged, skipped = purge_due_projects_detailed(database, now=now)
     return SweepReport(
         sweep="project_trash",
         actions=len(purged),
-        detail={"retain_days": TRASH_RETAIN_DAYS, "purged": purged},
+        # `skipped`` 是**给人看的**：这些项目没被清掉，原因是名下的 append-only
+        # 证据不能删。以前这里是直接撞 IntegrityError，被 scheduler 吞成一行
+        # ``{"error": ...}``，界面毫无异样 —— 看着像清过了，其实一行没删。
+        detail={
+            "retain_days": TRASH_RETAIN_DAYS,
+            "purged": purged,
+            "skipped": skipped,
+        },
     )
 
 

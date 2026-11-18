@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from app.auth.tokens import TokenService
 from app.config import settings
 from app.events.store import EventStore
-from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects
+from app.projects.purge import TRASH_RETAIN_DAYS, purge_due_projects, purge_due_projects_detailed
 from app.scheduler.runner import SWEEPS, run_all_sweeps
 from app.scheduler.sweeps import sweep_project_trash
 from app.spec import EventKind
@@ -270,3 +270,65 @@ def test_running_the_whole_family_does_not_resurrect_or_crash(tmp_path, monkeypa
     names = [item.sweep for item in reports]
     assert "project_trash" in names
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-full'")
+
+
+def test_a_project_with_a_ready_unclaimed_reminder_is_still_purged(tmp_path, monkeypatch):
+    """提醒行挂在 task_id 上（外键指着 tasks）—— 漏删它，整条清扫会被挡下来。
+
+    以前这里是直接撞 FOREIGN KEY constraint failed（活库有 36 行这样的提醒），
+    而清扫的异常被 scheduler 吞成报告字段：界面毫无异样，看着像清过了，
+    其实一行没删。
+    """
+    client, database, token = _env(tmp_path, monkeypatch)
+    _seed(client, database, token, "proj-rem", "proj-rem-g1", "T-REM")
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO ready_unclaimed_reminders(task_id, reason, fingerprint, notified_at)"
+            " VALUES (?, '没人领', 'fp-1', '2026-11-01T00:00:00+00:00')",
+            ("T-REM",),
+        )
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
+    with database.transaction() as conn:
+        conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-rem'", (old,))
+
+    purged = purge_due_projects(database)
+
+    assert [item["project_id"] for item in purged] == ["proj-rem"]
+    assert not database.read("SELECT 1 FROM ready_unclaimed_reminders WHERE task_id = 'T-REM'")
+    assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-rem'")
+
+
+def test_a_project_with_append_only_evidence_is_skipped_with_a_reason(tmp_path, monkeypatch):
+    """验证回执是 append-only 的证据：表上有 BEFORE DELETE 触发器，删它必炸；
+    它的 task_id 又指着 tasks，所以"留回执、删任务"也不成立 —— 两条路都堵着。
+
+    于是这个项目**不清**，但要把原因说出来。以前是直接撞 IntegrityError，
+    整个事务回滚，异常被 scheduler 吞掉，界面毫无异样（活库 120 行回执）。
+    """
+    client, database, token = _env(tmp_path, monkeypatch)
+    _seed(client, database, token, "proj-evi", "proj-evi-g1", "T-EVI")
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO task_attempts(attempt_id, task_id, attempt_no, owner, fencing_epoch,"
+            " head_commit, status, created_at)"
+            " VALUES ('T-EVI.a1', 'T-EVI', 1, 'claude-code', 1, 'abc1234', 'verified',"
+            " '2026-11-01T00:00:00+00:00')"
+        )
+        conn.execute(
+            'INSERT INTO verification_receipts(receipt_id, task_id, attempt_id, "commit",'
+            " fencing_epoch, receipt_hash, differential_mode, verify_profile, receipt_json)"
+            " VALUES ('rc-1', 'T-EVI', 'T-EVI.a1', 'abc1234', 1, 'sha256:x', 'required',"
+            " 'formal-artifact', '{}')"
+        )
+    old = (datetime.now(UTC) - timedelta(days=TRASH_RETAIN_DAYS + 1)).isoformat()
+    with database.transaction() as conn:
+        conn.execute("UPDATE projects SET trashed_at = ? WHERE project_id = 'proj-evi'", (old,))
+
+    purged, skipped = purge_due_projects_detailed(database)
+
+    assert purged == []
+    assert [item["project_id"] for item in skipped] == ["proj-evi"]
+    assert "验证回执" in skipped[0]["reason"]
+    # 项目没被清掉，证据也还在。
+    assert database.read("SELECT 1 FROM projects WHERE project_id = 'proj-evi'")
+    assert database.read("SELECT 1 FROM verification_receipts WHERE task_id = 'T-EVI'")

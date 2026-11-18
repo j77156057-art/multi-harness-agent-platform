@@ -11,9 +11,13 @@ own state: the relay is a switchboard, not a key vault.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import re
+import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -56,9 +60,17 @@ KNOWN_CLI_STORES = ("opencode",)
 #: 额度"，就只能去改代码。这里给一份可写的覆盖：按上游名记一条档位，撤掉就回到
 #: 代码默认。档位仍然只有三档，平台不猜"这条到底花不花钱"。
 def declared_upstream_tiers(config_path: Path | None = None) -> list[dict[str, Any]]:
-    """人给非 CLI 上游写下的档位（只有人写过的，不含代码默认）。"""
+    """人给非 CLI 上游写下的档位（只有人写过的，不含代码默认）。
+
+    声明文件读不动时**什么都不给**：档位是"哪条额度花钱"的事实，读不出来就当
+    没有覆盖，让上游回到代码默认（``metered`` —— 按量计费，最贵的那档，
+    但绝不会把收费的额度当免费用）。宁可少一条额度，也不能把钱的门开着。
+    """
     path = config_path or pool_config_path()
-    document = _read_json(path) if path.exists() else None
+    try:
+        document = _read_declarations(path)
+    except PoolDeclarationError:
+        return []
     if not isinstance(document, dict):
         return []
     entries = document.get("upstream_tiers")
@@ -85,19 +97,18 @@ def declare_upstream_tier(
             "guess whether spending this quota costs money"
         )
     path = config_path or pool_config_write_path()
-    document = _read_json(path) if path.exists() else {}
-    payload = dict(document) if isinstance(document, dict) else {}
-    raw = payload.get("upstream_tiers")
-    kept = [
-        {"name": str(entry.get("name")), "tier": str(entry.get("tier") or "")}
-        for entry in (raw if isinstance(raw, list) else [])
-        if isinstance(entry, dict) and str(entry.get("name") or "").strip()
-    ]
-    kept = [entry for entry in kept if entry["name"] != upstream_name]
-    kept.append({"name": upstream_name, "tier": tier_name})
-    payload["upstream_tiers"] = kept
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with _CONFIG_LOCK:
+        payload = dict(_read_declarations(path))
+        raw = payload.get("upstream_tiers")
+        kept = [
+            {"name": str(entry.get("name")), "tier": str(entry.get("tier") or "")}
+            for entry in (raw if isinstance(raw, list) else [])
+            if isinstance(entry, dict) and str(entry.get("name") or "").strip()
+        ]
+        kept = [entry for entry in kept if entry["name"] != upstream_name]
+        kept.append({"name": upstream_name, "tier": tier_name})
+        payload["upstream_tiers"] = kept
+        _write_declarations(path, payload)
     return {"name": upstream_name, "tier": tier_name}
 
 
@@ -107,24 +118,23 @@ def withdraw_upstream_tier(name: str, *, config_path: Path | None = None) -> boo
     if not upstream_name:
         raise PoolDeclarationError("which upstream must be named")
     path = config_path or pool_config_write_path()
-    document = _read_json(path) if path.exists() else None
-    if not isinstance(document, dict):
-        return False
-    raw = document.get("upstream_tiers")
-    if not isinstance(raw, list):
-        return False
-    kept = [
-        entry
-        for entry in raw
-        if isinstance(entry, dict)
-        and str(entry.get("name") or "").strip()
-        and str(entry.get("name")) != upstream_name
-    ]
-    if len(kept) == len([entry for entry in raw if isinstance(entry, dict)]):
-        return False
-    payload = dict(document)
-    payload["upstream_tiers"] = kept
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with _CONFIG_LOCK:
+        document = _read_declarations(path)
+        raw = document.get("upstream_tiers")
+        if not isinstance(raw, list):
+            return False
+        kept = [
+            entry
+            for entry in raw
+            if isinstance(entry, dict)
+            and str(entry.get("name") or "").strip()
+            and str(entry.get("name")) != upstream_name
+        ]
+        if len(kept) == len([entry for entry in raw if isinstance(entry, dict)]):
+            return False
+        payload = dict(document)
+        payload["upstream_tiers"] = kept
+        _write_declarations(path, payload)
     return True
 
 
@@ -399,6 +409,56 @@ def _read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+#: Guard for read-modify-write on the pool's own declaration file.
+#:
+#: 几个进程都写这一份（后端 API、池子自己的 helper），每个都是「读一遍、改一处、
+#: 写回去」。没有锁的时候，后写的那份用的是**改之前**读到的副本 —— 前一个进程的
+#: 改动就这么没了（2026-11-18 那次 user_keys 事故的同款形状）。
+_CONFIG_LOCK = threading.RLock()
+
+
+def _read_declarations(path: Path) -> dict[str, Any]:
+    """读**池子的声明文件**（人亲手写的档位）：读不动就是读不动，不许当成「没有声明」。
+
+    以前这里把读失败当成空文档，紧接着的写回就把整份文件覆盖成只剩自己那一段
+    —— 丢掉的正是「哪条额度花钱、哪条不花钱」（2026-11-19 真机复核：那份文件里
+    同时有 cli_slots 与 upstream_tiers 两段，读失败一次就整份归零，而且不留痕）。
+
+    口径与 app.pool.user_keys._read 一样：**文件不在**是「还没写过」，
+    其它任何读不动/坏掉都是**错误**，不许悄悄当成空。
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except OSError as error:
+        raise PoolDeclarationError(f"读不了池子声明文件（{path}）：{error}") from error
+    try:
+        document = json.loads(raw)
+    except ValueError as error:
+        raise PoolDeclarationError(f"池子声明文件坏了（{path}），没有动它：{error}") from error
+    if not isinstance(document, dict):
+        raise PoolDeclarationError(f"池子声明文件的格式不对（{path}），没有动它")
+    return document
+
+
+def _write_declarations(path: Path, payload: dict[str, Any]) -> None:
+    """写声明文件：先留一份备份，再原子替换。
+
+    备份不是装饰：这份文件是「人给哪条上游定了什么档」的**唯一**记录，写丢了的
+    那一次看起来和写成功的一模一样。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    if path.exists():
+        with contextlib.suppress(OSError):
+            shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+    os.replace(temporary, path)
 
 
 def _codex_upstreams(home: Path, relay_ports: tuple[int, ...]) -> list[Upstream]:
@@ -789,11 +849,15 @@ def discover_cli_rosters(
     """
     path = config_path or pool_config_path()
     declared: list[dict[str, Any]] = []
-    document = _read_json(path) if path.exists() else {}
-    if isinstance(document, dict):
-        slots = document.get("cli_slots")
-        if isinstance(slots, list):
-            declared = [slot for slot in slots if isinstance(slot, dict)]
+    try:
+        document = _read_declarations(path)
+    except PoolDeclarationError:
+        # 读不动声明文件 = 没有声明（fail-closed）：宁可少几条额度，也不把
+        # 收费的额度当成免费的摆上去。
+        document = {}
+    slots = document.get("cli_slots")
+    if isinstance(slots, list):
+        declared = [slot for slot in slots if isinstance(slot, dict)]
     rosters: dict[str, list[str]] = {}
     for slot in _merge_slots(declared):
         spec = slot.get("roster")
@@ -878,11 +942,10 @@ def declare_cli_model(
         )
     path = config_path or pool_config_write_path()
     declared: list[dict[str, Any]] = []
-    document = _read_json(path) if path.exists() else {}
-    if isinstance(document, dict):
-        slots = document.get("cli_slots")
-        if isinstance(slots, list):
-            declared = [slot for slot in slots if isinstance(slot, dict)]
+    document = _read_declarations(path)
+    slots = document.get("cli_slots")
+    if isinstance(slots, list):
+        declared = [slot for slot in slots if isinstance(slot, dict)]
     siblings = [slot for slot in _merge_slots(declared) if str(slot.get("name") or "") == name]
     if not siblings:
         raise PoolDeclarationError(f"the pool has no slot for {name}")
@@ -911,11 +974,27 @@ def declare_cli_model(
             and str(entry.get("model") or "").strip() == model_name
         )
     ]
-    kept.append(slot)
-    payload = dict(document) if isinstance(document, dict) else {}
-    payload["cli_slots"] = kept
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with _CONFIG_LOCK:
+        # 在锁里**重读一遍**再改：外面读到的那份可能已经旧了（另一个进程刚改过），
+        # 拿旧副本写回去就是在抹掉别人的改动。
+        fresh = _read_declarations(path)
+        fresh_slots = fresh.get("cli_slots")
+        current = [
+            slot for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
+            if isinstance(slot, dict)
+        ]
+        kept = [
+            entry
+            for entry in current
+            if not (
+                str(entry.get("name") or "") == name
+                and str(entry.get("model") or "").strip() == model_name
+            )
+        ]
+        kept.append(slot)
+        payload = dict(fresh)
+        payload["cli_slots"] = kept
+        _write_declarations(path, payload)
     return slot
 
 
@@ -932,9 +1011,7 @@ def withdraw_cli_model(cli: str, model: str, *, config_path: Path | None = None)
     if not name or not bare:
         raise PoolDeclarationError("which CLI and which model must be named")
     path = config_path or pool_config_write_path()
-    document = _read_json(path) if path.exists() else None
-    if not isinstance(document, dict):
-        return False
+    document = _read_declarations(path)
     slots = document.get("cli_slots")
     if not isinstance(slots, list):
         return False
@@ -949,9 +1026,26 @@ def withdraw_cli_model(cli: str, model: str, *, config_path: Path | None = None)
     ]
     if len(kept) == len(declared):
         return False
-    payload = dict(document)
-    payload["cli_slots"] = kept
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with _CONFIG_LOCK:
+        fresh = _read_declarations(path)
+        fresh_slots = fresh.get("cli_slots")
+        current = [
+            slot for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
+            if isinstance(slot, dict)
+        ]
+        kept = [
+            entry
+            for entry in current
+            if not (
+                str(entry.get("name") or "") == name
+                and str(entry.get("model") or "").strip().split("/")[-1] == bare
+            )
+        ]
+        if len(kept) == len(current):
+            return False
+        payload = dict(fresh)
+        payload["cli_slots"] = kept
+        _write_declarations(path, payload)
     return True
 
 
@@ -1000,11 +1094,15 @@ def discover_cli_slots(
     """
     path = config_path or pool_config_path()
     declared: list[dict[str, Any]] = []
-    document = _read_json(path) if path.exists() else {}
-    if isinstance(document, dict):
-        slots = document.get("cli_slots")
-        if isinstance(slots, list):
-            declared = [slot for slot in slots if isinstance(slot, dict)]
+    try:
+        document = _read_declarations(path)
+    except PoolDeclarationError:
+        # 读不动声明文件 = 没有声明（fail-closed）：宁可少几条额度，也不把
+        # 收费的额度当成免费的摆上去。
+        document = {}
+    slots = document.get("cli_slots")
+    if isinstance(slots, list):
+        declared = [slot for slot in slots if isinstance(slot, dict)]
     upstreams: list[Upstream] = []
     home = home if home is not None else Path.home()
     # 人写下来的每一条（name, model）：展开家族时让路给它们（见下面的循环）。

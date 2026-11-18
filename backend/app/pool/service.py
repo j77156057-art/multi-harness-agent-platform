@@ -231,6 +231,12 @@ class Usage:
     #: Which harness spent the quota (the pool's caller).
     consumer: str = ""
     note: str = ""
+    #: 这次请求走的是**哪一档**额度（free / reserve / metered / user）。
+    #:
+    #: 为什么记它：用量日志原来只记"谁、花了多少 token"，不记"那笔是免费的还是
+    #: 收费的" —— 于是事后没人能自证"这次验证没花按量的钱"。2026-10-29 那次
+    #: （98 次请求 / 1010 万输入 token 全走了一条收费模型）就是靠人肉发现的。
+    tier: str = ""
 
 
 #: The discovery caches live in the module, not on the service.
@@ -604,6 +610,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=response.status_code,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=int((data.get("usage") or {}).get("prompt_tokens") or 0),
@@ -672,6 +679,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=response.status_code,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=int((data.get("usage") or {}).get("input_tokens") or 0),
@@ -730,6 +738,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=response.status_code,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=int((data.get("usage") or {}).get("input_tokens") or 0),
@@ -853,6 +862,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=200,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
@@ -898,6 +908,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=200,
                 duration_ms=int((time.monotonic() - started) * 1000),
                 prompt_tokens=sniffer.prompt,
@@ -1006,6 +1017,7 @@ class PoolService:
                 model=route.model,
                 upstream=upstream.name,
                 protocol=upstream.protocol,
+                tier=upstream.tier,
                 status=200,
                 duration_ms=duration,
                 prompt_tokens=int((usage or {}).get("prompt_tokens") or 0),
@@ -1066,6 +1078,7 @@ class PoolService:
                             "model": usage.model,
                             "upstream": usage.upstream,
                             "protocol": usage.protocol,
+                            "tier": usage.tier,
                             "status": usage.status,
                             "duration_ms": usage.duration_ms,
                             "prompt_tokens": usage.prompt_tokens,
@@ -1305,6 +1318,9 @@ class PoolService:
         corrections = self._corrections()
         requests = 0
         unknown = 0
+        # **按档位分的那本账**：这一条能回答"这次验证有没有花按量的钱"。
+        # 老记录没有档位（那时还不记），归到"未记录" —— 不猜，也不当成免费。
+        by_tier: dict[str, dict[str, int]] = {}
         # 「成员自报」那本账（成员用自带模型跑的活，平台不在那条链路上）。
         # 单独一栏：**额度池的数不掺它** —— 否则「额度池用了多少」就说不清了。
         reported = self._reported_by_consumer()
@@ -1358,6 +1374,28 @@ class PoolService:
                     bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 bucket["models"][model] = bucket["models"].get(model, 0) + 1
                 bucket["consumers"][consumer] = bucket["consumers"].get(consumer, 0) + 1
+                tier = str(record.get("tier") or "未记录")
+                tier_bucket = by_tier.setdefault(
+                    tier,
+                    {
+                        "requests": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "tokens_unknown": 0,
+                    },
+                )
+                tier_bucket["requests"] += 1
+                if (
+                    corrected is not None
+                    or record.get("usage_reported") is False
+                    or not (prompt_tokens or completion_tokens)
+                ):
+                    tier_bucket["tokens_unknown"] += 1
+                else:
+                    tier_bucket["prompt_tokens"] += prompt_tokens
+                    tier_bucket["completion_tokens"] += completion_tokens
+                    tier_bucket["cached_tokens"] += int(record.get("cached_tokens") or 0)
                 spent = consumers.setdefault(
                     consumer,
                     {
@@ -1415,6 +1453,7 @@ class PoolService:
         return {
             "upstreams": summary,
             "consumers": consumers,
+            "by_tier": by_tier,
             "requests": requests,
             "tokens_unknown": unknown,
             "reported_requests": sum(

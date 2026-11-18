@@ -3,9 +3,13 @@
 口径（2026-11-02 由人拍板）：
 
 - **删**：项目、它的群、方案与快照、任务与尝试、领取与租约、输出与工作树记录、审核与决策、
-  验证回执、分配与传阅、群消息与投递记录 —— 也就是"界面上还看得见的那些东西"。
-- **留**：`task_events`。它是 append-only 的**发生过什么**，删掉就再也追不回来了；
-  而"这条活现在是什么状态"是投影，投影可以没有。
+  分配与传阅、群消息与投递记录 —— 也就是"界面上还看得见的那些东西"。
+- **留**：`task_events` 与 `verification_receipts`。它们是 append-only 的
+  **发生过什么**，删掉就再也追不回来了；而"这条活现在是什么状态"是投影，投影可以没有。
+  （`verification_receipts` 上还有 BEFORE DELETE 触发器
+  `receipt_no_delete`：删它会被 SQLite 直接 ABORT，整条清扫回滚 ——
+  2026-11-19 真机复核：活库里那张表 120 行，只要项目名下有过验证回执，
+  回收站**一次都没清成功过**，而清扫的异常被 scheduler 吞成报告字段，界面毫无异样。）
 
 一条原则写在函数里：**只删得掉自己认得的东西**。归不到某个项目上的表（比如
 `command_idempotency`、`jsonl_exports`）一律不碰 —— 宁可留几行孤儿，也不能顺手清掉
@@ -133,7 +137,14 @@ def purge_project(conn: Any, project_id: str) -> dict[str, int]:
         "task_outputs",
         "task_decisions",
         "verify_jobs",
-        "verification_receipts",
+        # `verification_receipts` **不在这里**：它是 append-only 的证据（表上有
+        # BEFORE DELETE 触发器），删它会被 SQLite ABORT，整条清扫回滚。
+        # 与 `task_events` 同性质 —— 留着。
+        #
+        # `ready_unclaimed_reminders` **要在这里**：它的 task_id 是
+        # `PRIMARY KEY REFERENCES tasks(task_id)`，漏删就会在删 tasks 时撞
+        # FOREIGN KEY constraint failed（2026-11-19 真机复核：活库 36 行）。
+        "ready_unclaimed_reminders",
         "reviews",
         "workspaces",
         "artifacts",
@@ -165,8 +176,40 @@ def purge_project(conn: Any, project_id: str) -> dict[str, int]:
     return {name: value for name, value in counts.items() if value}
 
 
-def purge_due_projects(database: Database, now: datetime | None = None) -> list[dict[str, Any]]:
-    """把满了保留期的项目一个个删掉，返回每个删了什么。"""
+def _append_only_evidence(conn: Any, project_id: str) -> str:
+    """这个项目名下有没有**删不掉**的证据？有的话给出原因，没有就空串。
+
+    ``verification_receipts`` 是 append-only 的：表上有 BEFORE DELETE 触发器
+    （``receipt_no_delete``），删它会被 SQLite ABORT；而它的 task_id 又指着
+    ``tasks``，所以"留回执、删任务"也不成立 —— 两条路都堵着。
+
+    那就不删这个项目，**并把原因说出来**。以前这里是直接撞 IntegrityError，
+    整个事务回滚，而清扫的异常被 scheduler 吞成报告字段 —— 界面毫无异样，
+    看着像"清过了"，其实一行没删（2026-11-19 真机复核：活库 120 行回执）。
+
+    要真能清干净，得让回执不再绑住任务（重建那张表、去掉指向 tasks 的外键，
+    像 ``task_events`` 那样留底但不挡路）—— 那是改 schema，要人点头。
+    """
+    groups = _column_values(conn, "SELECT group_id FROM groups WHERE project_id = ?", (project_id,))
+    if not groups:
+        return ""
+    tasks = _ids_in_groups(conn, "SELECT task_id FROM tasks WHERE group_id IN ({marks})", groups)
+    if not tasks:
+        return ""
+    marks = _placeholders(tasks)
+    count = conn.execute(
+        "SELECT count(*) FROM verification_receipts WHERE task_id IN (" + marks + ")",
+        tuple(tasks),
+    ).fetchone()[0]
+    if count:
+        return f"这个项目名下有 {count} 条 append-only 的验证回执（证据不删），所以没清扫"
+    return ""
+
+
+def purge_due_projects_detailed(
+    database: Database, now: datetime | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """把满了保留期的项目一个个删掉，返回（删了什么，跳过了什么）。"""
     cutoff = _cutoff(now)
     due = database.read(
         "SELECT project_id, name, trashed_at FROM projects"
@@ -175,9 +218,21 @@ def purge_due_projects(database: Database, now: datetime | None = None) -> list[
         (cutoff,),
     )
     purged: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
     for row in due:
         project_id = str(row["project_id"])
         with database.transaction() as conn:
+            reason = _append_only_evidence(conn, project_id)
+            if reason:
+                skipped.append(
+                    {
+                        "project_id": project_id,
+                        "name": str(row["name"] or ""),
+                        "trashed_at": str(row["trashed_at"] or ""),
+                        "reason": reason,
+                    }
+                )
+                continue
             counts = purge_project(conn, project_id)
         purged.append(
             {
@@ -187,4 +242,14 @@ def purge_due_projects(database: Database, now: datetime | None = None) -> list[
                 "deleted": counts,
             }
         )
+    return purged, skipped
+
+
+def purge_due_projects(database: Database, now: datetime | None = None) -> list[dict[str, Any]]:
+    """把满了保留期的项目一个个删掉，返回每个删了什么。
+
+    跳过的项目不在这里 —— 想看"为什么没删"，用
+    ``purge_due_projects_detailed``。
+    """
+    purged, _skipped = purge_due_projects_detailed(database, now)
     return purged

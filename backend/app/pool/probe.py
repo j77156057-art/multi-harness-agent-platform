@@ -22,8 +22,9 @@ from typing import Any
 from app.pool.cli_model import CliModelSource
 from app.pool.service import PoolError
 from app.pool.sources import (
+    PoolDeclarationError,
     _merge_slots,
-    _read_json,
+    _read_declarations,
     cli_roster,
     declared_cli_slots,
     invalidate_rosters,
@@ -42,12 +43,15 @@ def _slots_with_roster() -> list[dict[str, Any]]:
     归并 —— 探测的单位是"这一家"，不是"这一条"。
     """
     path = pool_config_path()
-    document = _read_json(path) if path.exists() else {}
     declared: list[dict[str, Any]] = []
-    if isinstance(document, dict):
-        slots = document.get("cli_slots")
-        if isinstance(slots, list):
-            declared = [slot for slot in slots if isinstance(slot, dict)]
+    try:
+        document = _read_declarations(path)
+    except PoolDeclarationError:
+        # 声明文件读不动 = 没有声明（fail-closed）。
+        document = {}
+    slots = document.get("cli_slots")
+    if isinstance(slots, list):
+        declared = [slot for slot in slots if isinstance(slot, dict)]
     elif declared_cli_slots():
         declared = declared_cli_slots()
     seen: dict[str, dict[str, Any]] = {}
