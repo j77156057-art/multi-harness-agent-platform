@@ -830,6 +830,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const rows = new Map();
     const roster = (state.status && state.status.harnesses) || [];
     const adminId = (state.status && state.status.admin && state.status.admin.identity) || null;
+    // **在这个群里干过活的窗口**，哪怕它已经不在名册里了。
+    //
+    // 以前"算不算成员"只问注册表，于是被删掉的窗口（它不在名册里了，但它做过
+    // 的事还在账上）从成员动态里彻底消失 —— 后端群名册特意把它留着并标
+    // `removed`，前端这一侧把那个区分抹掉了。判据改成**账本**：
+    // 事件里的 actor（不是人）与任务的持有者，都是窗口。
+    const windowActors = new Set();
+    for (const event of events) {
+      const id = String(event.actor_id || '');
+      if (id && String(event.actor_type || '') !== 'human') windowActors.add(id);
+    }
+    for (const task of tasks) {
+      const owner = String(task.owner || '');
+      if (owner) windowActors.add(owner);
+    }
     // 只算**在簿的窗口**：平台自己的执行者（sweeper / merge-worker 之类）、
     // 群主、管理员与平台助手都不是“成员”。
     const isMember = (id) => {
@@ -837,6 +852,7 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       if (id === adminId) return false;
       if (isAdministratorHarness({ harness_id: id }, adminId)) return false;
       if (isPlatformAssistantHarness({ harness_id: id })) return false;
+      if (windowActors.has(id)) return true;
       return roster.some((item) => item.harness_id === id);
     };
     const ensure = (id) => {
@@ -6970,12 +6986,18 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // **本项目的人**。以前这里直接用全局的 availability，于是这一栏数的是
     // "这台机器上所有能干活的人"，和同一屏里按项目算的其它数字两套口径（2026-11-19）。
     const memberIds = projectMemberIdSet();
-    const notMember = (item) =>
-      !memberIds.has(String(item.harness_id)) ||
-      isAdministratorHarness(item, adminId) ||
-      isPlatformAssistantHarness(item);
-    const usable = state.availability.filter((item) => item.usable && !notMember(item));
-    const outsideCount = state.availability.filter((item) => item.usable && notMember(item)).length;
+    const notMember = (item) => !memberIds.has(String(item.harness_id));
+    const notWorker = (item) =>
+      isAdministratorHarness(item, adminId) || isPlatformAssistantHarness(item);
+    const usable = state.availability.filter(
+      (item) => item.usable && !notMember(item) && !notWorker(item),
+    );
+    // 「范围外」只数**别的窗口**：管理员与平台助手不是成员，但它们确实在这个
+    // 项目里（管理员管这个项目，助手协调这个项目），算进去会让人以为项目里
+    // 多了一个没登记的人。
+    const outsideCount = state.availability.filter(
+      (item) => item.usable && notMember(item) && !notWorker(item),
+    ).length;
     // 这个项目里已经勾好的成员（新建项目时在表单里选的）。成员要等「开工配置」
     // 确认、目标提交之后才在平台上生效 —— 所以确认之前这里确实是 0 个。
     // 说成「请去指定成员」是冤枉人：人已经指定过了。
