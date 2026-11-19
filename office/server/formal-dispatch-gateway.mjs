@@ -1154,7 +1154,15 @@ export function createFormalGateway(config={}){
         let raw='';for await(const chunk of req){raw+=chunk;if(Buffer.byteLength(raw)>20000)throw fail(413,'body_too_large');}
         let body;try{body=JSON.parse(raw);}catch{throw fail(400,'invalid_json');}
         if(!body||Array.isArray(body)||typeof body.plan_id!=='string'||!ident(body.plan_id))throw fail(400,'invalid_plan_fields');
-        const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/approve',{decided_by:operator});
+        // 平台的批准接口有一条**逃生口**：goal 里提到的路径不在 exclusive_paths 里时，
+        // 人可以显式放行（allow_out_of_contract_paths=true）。放行清单会写进
+        // plan.approve 事件的 scope_override，事后查得到 —— 平台那头一直在，
+        // 这里以前把它丢了，于是人只剩两条路：把只读引用也塞进契约（等于授权
+        // 执行者去改别人的文件），或者直接绕过办公室调平台（不留这层痕迹）。
+        // 原样转发，不做解释性改写：开关只认人显式给的那一个。
+        const approveBody={decided_by:operator};
+        if(body.allow_out_of_contract_paths===true)approveBody.allow_out_of_contract_paths=true;
+        const result=await call('/plans/'+encodeURIComponent(body.plan_id)+'/approve',approveBody);
         json(res,200,result);return true;
       }
       if(req.method==='POST'&&route==='/plan/reject'){
