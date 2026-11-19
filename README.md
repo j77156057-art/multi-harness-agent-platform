@@ -92,6 +92,7 @@ python -m app.tools.rebuild --source data/state.db --snapshot \
 | 多 Harness 适配 | 注册表、统一 adapter protocol、CLI 输出解析 | 将不同 CLI 的差异限制在适配器边界 |
 | 运行期巡检 | runtime driver、sweeper、liveness/budget 检查 | 持续推进状态并发现卡住的执行 |
 | 可观察界面 | Agent Office + 本地预览网关 | 查看任务、成员、事件、输出和额度，不暴露内部凭据 |
+| 自建产品 | 目标 → 细化 → 传阅 → 派单 → 评审 → 合入 | 把一句话目标变成能运行、可验证的产品（见下节） |
 
 ## 一条完整的端到端路径
 
@@ -106,6 +107,51 @@ python -m app.tools.rebuild --source data/state.db --snapshot \
 7. 管理员获取 review lease，针对指定 commit 提交 approve 或 findings。
 8. 只有验证通过、审核通过且 commit 仍匹配时，Merge worker 才执行合并。
 9. 每个关键动作写入事件流，Agent Office 可读取当前投影和操作轨迹。
+
+## 平台给自己造了一个产品
+
+2026-11-19 在本机实测：把一个真实目标交给平台，让平台用**自己的链路**造出一个能跑的产品——
+`tools/doctor/`（平台体检 CLI）。走的就是上面那条链路，人只做了三类动作：批准方案、
+在基线错位时撤下重派、给交付失败的窗口改派。
+
+```text
+交目标（完整规格）
+  → 管理员 Harness 细化出 3 个任务（主程序 / 单元测试 / 使用说明）
+  → 两轮传阅：3 个窗口各出一份意见，管理员并入方案
+  → 人审批准
+  → 派单 → 成员窗口各自领活 → 校验 → 跨 provider 评审 → 合入 integration
+```
+
+三件交付由窗口产出、由平台合入（不是人手写的）：
+
+| 文件 | 行数 | 内容 |
+|---|---|---|
+| `tools/doctor/doctor.py` | 957 | 只读体检 CLI：窗口面 / 额度面 / 账本面 |
+| `backend/tests/test_doctor.py` | 948 | 20 项单元测试，假数据注入，不打真平台 |
+| `docs/notes/doctor.md` | 281 | 使用说明与口径，字段名以实现里的常量表为准 |
+
+产品回答一个问题：这个平台现在健康吗、哪里不健康。只读、不花任何额度。
+
+```bash
+python tools/doctor/doctor.py          # 人读报告
+python tools/doctor/doctor.py --json   # 单个 JSON 文档
+```
+
+退出码只有三种：`0` 没发现问题、`1` 发现问题、`2` 体检自己跑不起来（读不到平台数据）。
+逐面口径见 [`docs/notes/doctor.md`](docs/notes/doctor.md)。
+
+真机真数据的实测结果：人读报告三面齐全、退出码 1（它指出一条按量计费的通道）；
+`--json` 的 stdout 是可被 `json.loads` 解析的单个文档；指向空数据目录时退出码 2，每面报「读不到 X」；
+**运行前后平台数据目录没有任何新增或修改文件**（连 `-wal`/`-shm` 边车文件都没有）——它是体检，不是干预。
+
+这一轮同时暴露了两条平台自身的边界，值得单独说清：
+
+- **目标仓库必须先有「要改的那棵子树」**：窗口的工作树基线来自 canonical 仓库的 integration 分支。
+  第一次派单时那个分支指向的是一个不含平台源码的种子仓库，成员在这样的树上只能凭空捏造接口——
+  文件确实写了、在契约路径内、提交也确实存在，审阅与合并都看不出破绽。开工前先核对基线里有没有目标代码。
+- **平台的合并闸门只跑仓库声明的那一个 profile**（这里是文档契约，不跑 lint 也不跑 pytest），
+  所以「平台合进来了」不等于「仓库门禁会绿」：交付的测试文件带着一处 ruff 导入顺序违规被顺利合入。
+  交付物合进来之后，仓库自己的门禁必须再跑一遍。
 
 ## 架构
 
@@ -146,6 +192,8 @@ README 不把“有代码”当成“已验证”。仓库中已有针对关键�
 - `backend/tests/test_agenttools_mcp.py`：MCP 协议本身，以及"别人的尝试借不走、过期尝试自动关闭、工作树指到工位目录外就拒"。
 - `backend/tests/test_agenttools_wiring.py`：把工具交给 CLI 的那一层——令牌不进 argv、写进工作树的配置算临时文件、**声明不许覆盖授权落点**（否则交付物能被藏进临时文件删掉）。
 - `backend/tests/test_runtime_driver.py`：用真实 Git 和隔离 worktree 驱动任务从 claim 到 publish/submit，而不是只手工拼数据库状态。
+- `backend/tests/test_doctor.py`：平台自建产品的 20 项单元测试——三个检查面在假数据下的结论行、退出码 0/1/2 三态、`--json` 是单个文档、读失败不降级成空数据、运行不落库也不产生 WAL 边车文件。
+- `tools/docstate/docstate.py`：98 项机械断言，逐条核对本文件与 `docs/spec/0.3-R10.md` 的口径是否一致。
 - `cd office && npm run build`：验证前端生产构建。
 - `git diff --check`：检查提交中的空白和补丁格式问题。
 
@@ -518,7 +566,7 @@ backend/app/          FastAPI 服务、领域服务、数据库、worker、适�
 backend/tests/        单元、并发、集成和真实 Git 流程测试
 backend/migrations/   SQLite schema migrations
 office/               Agent Office 前端和本地预览网关
-tools/                本地开发检查和合并辅助工具
+tools/                本地开发检查与合并辅助工具，以及平台自建产品 tools/doctor/
 ```
 
 ## 真实集成边界
