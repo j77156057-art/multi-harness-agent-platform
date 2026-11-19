@@ -39,9 +39,10 @@ import pytest
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 sys.dont_write_bytecode = True
 
+from doctor.doctor import main  # noqa: E402
+
 from app.adapter.presence import PRESENCE_FRESH_SECONDS  # noqa: E402
 from app.config import settings  # noqa: E402
-from doctor.doctor import main  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 任务 1 冻结的最小 schema（抄写，不 import 实现里的表来“自证”）
@@ -397,9 +398,9 @@ def assert_fields(
     if order:
         assert list(document) == list(expected), f"{label} 字段顺序不符：{list(document)}"
     for field, type_name in expected.items():
-        assert _type_ok(document[field], type_name), (
-            f"{label}.{field} 类型应为 {type_name}，实际 {type(document[field]).__name__}"
-        )
+        assert _type_ok(
+            document[field], type_name
+        ), f"{label}.{field} 类型应为 {type_name}，实际 {type(document[field]).__name__}"
 
 
 def assert_full_schema(payload: dict[str, Any]) -> None:
@@ -475,9 +476,7 @@ def test_presence_threshold_is_the_platform_constant() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_clean_fake_data_exits_zero(
-    data_dir: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_clean_fake_data_exits_zero(data_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_clean_pool(data_dir)
     write_user_keys(data_dir)
     make_db(settings.db_path, fill=insert_clean_harness)
@@ -499,9 +498,7 @@ def test_clean_fake_data_exits_zero(
     assert_full_schema(payload)
 
 
-def test_a_single_finding_exits_one(
-    data_dir: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_single_finding_exits_one(data_dir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_clean_pool(data_dir)
     write_user_keys(data_dir)
 
@@ -623,6 +620,7 @@ def test_controlled_fake_data_covers_all_exit_codes(
         if scenario == "clean":
             make_db(settings.db_path, fill=insert_clean_harness)
         else:
+
             def fill(connection: sqlite3.Connection) -> None:
                 insert_clean_harness(connection)
                 add_task(connection, "t-abandoned", "abandoned")
