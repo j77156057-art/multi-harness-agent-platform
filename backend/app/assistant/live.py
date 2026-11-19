@@ -21,6 +21,7 @@ this file is missing or stale, the office simply shows the older state.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
@@ -77,10 +78,8 @@ def write_state(data_dir: Path | str, group_id: str, payload: dict[str, Any]) ->
     except OSError:
         # A lost live marker is not a lost answer: the message ledger still
         # has the reply.  Leave the previous file alone.
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp_name)
-        except OSError:
-            pass
         raise
     return record
 

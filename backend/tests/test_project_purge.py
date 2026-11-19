@@ -298,7 +298,9 @@ def test_a_project_with_a_ready_unclaimed_reminder_is_still_purged(tmp_path, mon
     assert not database.read("SELECT 1 FROM projects WHERE project_id = 'proj-rem'")
 
 
-def test_a_project_with_append_only_evidence_is_purged_and_the_evidence_stays(tmp_path, monkeypatch):
+def test_a_project_with_append_only_evidence_is_purged_and_the_evidence_stays(
+    tmp_path, monkeypatch
+):
     """验证回执是 append-only 的证据（表上有 BEFORE UPDATE / BEFORE DELETE 触发器）。
 
     证据**留着**，但它不再绑住投影（迁移 030 去掉了它指向 tasks / task_attempts

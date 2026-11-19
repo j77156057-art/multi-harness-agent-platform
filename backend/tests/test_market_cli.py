@@ -98,7 +98,7 @@ def test_the_work_order_lands_where_the_cli_documents_it(base, tmp_path, monkeyp
     # --execute=PROMPT —— 它的 message 是可选值，分开写不会被吃掉）。
     expected = [part.replace(market_cli.PROMPT, order) for part in adapter.spec.headless]
     assert len(argv) == 1 + len(expected), argv
-    for want, got in zip(expected, argv[1:]):
+    for want, got in zip(expected, argv[1:], strict=True):
         if want == order:
             assert got == order or got.endswith(order), argv
         else:

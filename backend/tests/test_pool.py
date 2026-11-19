@@ -1266,7 +1266,6 @@ def test_the_tool_exchange_survives_the_round_trip() -> None:
     assert "written" in result_turn["content"]
 
 
-
 def test_a_streamed_tool_call_reaches_the_caller() -> None:
     """The tool call has to be its own content block in the event stream.
 
@@ -1306,4 +1305,3 @@ def test_a_streamed_tool_call_reaches_the_caller() -> None:
     # The text block and the tool block are separate blocks (two starts,
     # each announced and carried in its own event).
     assert joined.count("event: content_block_start") == 2
-

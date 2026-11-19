@@ -64,6 +64,8 @@ from app.usage.cli_reported import read_reported_records
 
 #: How long a discovered upstream list / model list is reused.
 DISCOVERY_TTL_SECONDS = 30.0
+
+
 def _upstream_headers(upstream: Any, credential: str | None, *, accept: str = "") -> dict[str, str]:
     """The headers a request to this upstream carries.
 
@@ -89,9 +91,6 @@ def harness_of(consumer: str) -> str:
     if text.startswith("harness/"):
         return text[len("harness/") :]
     return ""
-
-
-
 
 
 def _normalize_chat_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -543,7 +542,9 @@ class PoolService:
             if str(entry["id"]).lower() == lowered:
                 upstream = self._upstream_by_name(str(entry["upstream"]))
                 if upstream is not None:
-                    self._guard_user_upstream(upstream, model=str(entry["id"]), harness_id=harness_id)
+                    self._guard_user_upstream(
+                        upstream, model=str(entry["id"]), harness_id=harness_id
+                    )
                     return Route(upstream=upstream, model=wanted, upstream_model=str(entry["id"]))
         known = ", ".join(str(entry["id"]) for entry in entries[:12]) or "(none discovered)"
         raise PoolError(

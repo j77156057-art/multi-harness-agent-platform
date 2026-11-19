@@ -661,9 +661,7 @@ def test_only_the_owner_reply_is_fed_back_as_an_answer(tmp_path, monkeypatch):
     assert admin.refine_calls[0]["answers"] == ["用中文写"]
 
 
-def test_an_assistant_relay_is_answered_to_the_asker_not_to_the_assistant(
-    tmp_path, monkeypatch
-):
+def test_an_assistant_relay_is_answered_to_the_asker_not_to_the_assistant(tmp_path, monkeypatch):
     """助手代转达的请求，回话要送给**提问人**。
 
     助手不能冒用人的身份发消息（平台的作者必须等于令牌主体），所以转达

@@ -269,8 +269,7 @@ class HarnessRegistry:
                 (f"removed:{now}", harness_id, version),
             )
             conn.execute(
-                "UPDATE harnesses SET removed_at = ?, status = 'offline'"
-                " WHERE harness_id = ?",
+                "UPDATE harnesses SET removed_at = ?, status = 'offline'" " WHERE harness_id = ?",
                 (now, harness_id),
             )
             # 凭据也收回来：窗口都删了，它不该还能拿着令牌来调平台。

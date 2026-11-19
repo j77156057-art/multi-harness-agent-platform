@@ -13,8 +13,8 @@ from pathlib import Path
 
 from app.adapter.presence import record_presence
 from app.adapter.protocol import HarnessRegistration
-from app.config import settings
 from app.adapter.registry import HarnessRegistry
+from app.config import settings
 from app.tasks.service import SchedulerService
 from tests.api_support import bootstrap, make_client, publish_plan
 

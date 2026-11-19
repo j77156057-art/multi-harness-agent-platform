@@ -375,9 +375,6 @@ def _plan_for_chosen_model(
             "selected_model": model_id,
             "selected_protocol": protocol,
             "required_tools": list(required_tools),
-            "task_id": task_id,
-            "harness_id": harness_id,
-            "attempt_no": attempt_no,
         }
     current_tier = str(entry.get("tier") or "")
     if current_tier == "metered" and consented_tier != "metered":

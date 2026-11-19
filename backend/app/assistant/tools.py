@@ -398,16 +398,12 @@ def build_registry(
         if wanted:
             rows = [row for row in rows if str(row.get("harness_id") or "") == wanted]
             if not rows:
-                raise ToolRefused(
-                    f"no window {wanted!r} appears in this group's ledger"
-                )
+                raise ToolRefused(f"no window {wanted!r} appears in this group's ledger")
         return {
             "group_id": group_id,
             "member_count": data.get("member_count") if isinstance(data, dict) else len(rows),
             "live_count": data.get("live_count") if isinstance(data, dict) else None,
-            "admin_harness_ids": (
-                data.get("admin_harness_ids") if isinstance(data, dict) else []
-            ),
+            "admin_harness_ids": (data.get("admin_harness_ids") if isinstance(data, dict) else []),
             "members": [
                 {
                     "harness_id": row.get("harness_id"),
@@ -448,8 +444,7 @@ def build_registry(
         admins = [str(item) for item in (admins or []) if item]
         if not admins:
             raise ToolRefused(
-                "this group has no administrator window on record; the relay has "
-                "nowhere to go"
+                "this group has no administrator window on record; the relay has " "nowhere to go"
             )
         if len(admins) > 1:
             raise ToolRefused(
@@ -489,8 +484,7 @@ def build_registry(
         Tool(
             "ask.admin",
             "say",
-            "替提问人把一条请求转达给管理员（原话照传；管理员会回给提问人，"
-            "不是回给你）",
+            "替提问人把一条请求转达给管理员（原话照传；管理员会回给提问人，" "不是回给你）",
             ask_admin,
         ),
         Tool("pool.status", "read", "额度池现状：各档逐家可用与否、余量", pool_status),

@@ -452,9 +452,7 @@ def _write_declarations(path: Path, payload: dict[str, Any]) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if path.exists():
         with contextlib.suppress(OSError):
             shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
@@ -980,7 +978,8 @@ def declare_cli_model(
         fresh = _read_declarations(path)
         fresh_slots = fresh.get("cli_slots")
         current = [
-            slot for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
+            slot
+            for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
             if isinstance(slot, dict)
         ]
         kept = [
@@ -1030,7 +1029,8 @@ def withdraw_cli_model(cli: str, model: str, *, config_path: Path | None = None)
         fresh = _read_declarations(path)
         fresh_slots = fresh.get("cli_slots")
         current = [
-            slot for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
+            slot
+            for slot in (fresh_slots if isinstance(fresh_slots, list) else [])
             if isinstance(slot, dict)
         ]
         kept = [

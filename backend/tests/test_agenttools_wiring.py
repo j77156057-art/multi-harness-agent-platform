@@ -332,9 +332,8 @@ def test_claude_separates_the_work_order_from_the_flags(tmp_path: Path) -> None:
         assert "--" in argv, "a variadic option needs an explicit separator"
         separator = argv.index("--")
         assert argv[-1] == order, "the work order is the last argument"
-        assert separator == len(argv) - 2, (
-            "nothing may sit between the separator and the work order"
-        )
+        assert (
+            separator == len(argv) - 2
+        ), "nothing may sit between the separator and the work order"
     finally:
         adapter.cleanup_work_order()
-

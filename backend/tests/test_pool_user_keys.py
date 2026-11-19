@@ -13,7 +13,6 @@ import json
 from pathlib import Path
 
 import httpx
-
 import pytest
 
 from app.api.app import create_app
@@ -38,9 +37,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return list(sources.user_key_upstreams())
 
     monkeypatch.setattr(sources, "discover_upstreams", _only_user_keys, raising=False)
-    monkeypatch.setattr(
-        "app.pool.service.discover_upstreams", _only_user_keys, raising=False
-    )
+    monkeypatch.setattr("app.pool.service.discover_upstreams", _only_user_keys, raising=False)
     assert callable(real_discover)
     return tmp_path / "user-keys"
 
@@ -480,7 +477,6 @@ def test_a_streaming_request_is_judged_like_a_non_streaming_one(
             # The request got as far as the upstream (api.example.com does
             # not exist) -- which is the point: the pool did not refuse it.
             continue
-        assert response.status_code != 409, (
-            f"the window may use this key, streaming or not: {response.text}"
-        )
-
+        assert (
+            response.status_code != 409
+        ), f"the window may use this key, streaming or not: {response.text}"

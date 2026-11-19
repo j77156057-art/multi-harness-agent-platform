@@ -643,7 +643,10 @@ def test_the_prompt_enumerates_the_whitelist_verbatim():
     import re
 
     mentioned = set(
-        re.findall(r"`(task\.[a-z_]+|pool\.[a-z_]+|group\.[a-z_]+|harness\.[a-z_]+|ask\.[a-z_]+)`", SYSTEM_PROMPT)
+        re.findall(
+            r"`(task\.[a-z_]+|pool\.[a-z_]+|group\.[a-z_]+|harness\.[a-z_]+|ask\.[a-z_]+)`",
+            SYSTEM_PROMPT,
+        )
     )
     assert mentioned <= set(registry), f"prompt 引用了不存在的工具名: {mentioned - set(registry)}"
     # 两个写工具也必须在 prompt 里逐字列出（模型要按字面调用它们）。

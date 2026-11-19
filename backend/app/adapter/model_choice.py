@@ -145,8 +145,8 @@ def save_choice(
     now = datetime.now(UTC).isoformat()
     with database.transaction() as conn:
         row = conn.execute(
-            "SELECT harness_id FROM harnesses"
-            " WHERE harness_id = ? AND removed_at IS NULL", (harness_id,)
+            "SELECT harness_id FROM harnesses" " WHERE harness_id = ? AND removed_at IS NULL",
+            (harness_id,),
         ).fetchone()
         if row is None:
             raise ModelChoiceError(f"harness {harness_id} is not registered")

@@ -510,10 +510,7 @@ def anthropic_response_to_stream(data: dict[str, Any]) -> Iterator[str]:
     stop_reason = str(data.get("stop_reason") or "end_turn")
 
     def event(name: str, payload: dict[str, Any]) -> str:
-        return (
-            f"event: {name}\n"
-            "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
-        )
+        return f"event: {name}\n" "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
 
     yield event(
         "message_start",

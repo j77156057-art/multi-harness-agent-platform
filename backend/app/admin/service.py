@@ -414,9 +414,7 @@ class AdminService:
         )
         live = self._live_harnesses()
         return [
-            _capacity_row(row)
-            for row in rows
-            if live is None or str(row["harness_id"]) in live
+            _capacity_row(row) for row in rows if live is None or str(row["harness_id"]) in live
         ]
 
     def _live_harnesses(self) -> set[str] | None:
@@ -639,8 +637,8 @@ class AdminService:
         stall (or force someone to bypass the policy).
         """
         rows = self.database.read(
-            "SELECT provider FROM harnesses"
-            " WHERE harness_id = ? AND removed_at IS NULL", (harness_id,)
+            "SELECT provider FROM harnesses" " WHERE harness_id = ? AND removed_at IS NULL",
+            (harness_id,),
         )
         if not rows or not rows[0]["provider"]:
             return None

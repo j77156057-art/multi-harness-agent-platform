@@ -234,7 +234,6 @@ ASSISTANT_RELAY_REF = "assistant-relay"
 ASSISTANT_RELAY_JSON_REF = "assistant-relay-json:"
 
 
-
 def _normalise_refs(refs: list[str] | None) -> list[str]:
     """Validate the message refs array (openapi post_message / Message schema).
 
@@ -306,8 +305,8 @@ def _reviewer_provider(
     if reviewer_kind == "human":
         return "human"
     row = conn.execute(
-        "SELECT provider FROM harnesses"
-        " WHERE harness_id = ? AND removed_at IS NULL", (reviewer_harness_id,)
+        "SELECT provider FROM harnesses" " WHERE harness_id = ? AND removed_at IS NULL",
+        (reviewer_harness_id,),
     ).fetchone()
     if row is None or not row["provider"]:
         return "unknown"
@@ -702,8 +701,8 @@ class SchedulerService:
                 raise InvalidInput("human assignment requires a target Harness")
             for target in targets:
                 member = conn.execute(
-                    "SELECT * FROM harnesses"
-                    " WHERE harness_id = ? AND removed_at IS NULL", (target,)
+                    "SELECT * FROM harnesses" " WHERE harness_id = ? AND removed_at IS NULL",
+                    (target,),
                 ).fetchone()
                 if member is None or not member["registration_version"]:
                     raise InvalidInput("assigned Harness has no registration")
@@ -782,8 +781,8 @@ class SchedulerService:
                 targets = item.get("assigned_harness_ids", [])
                 for target in targets:
                     member = conn.execute(
-                        "SELECT * FROM harnesses"
-                        " WHERE harness_id = ? AND removed_at IS NULL", (target,)
+                        "SELECT * FROM harnesses" " WHERE harness_id = ? AND removed_at IS NULL",
+                        (target,),
                     ).fetchone()
                     if member is None or not member["registration_version"]:
                         raise InvalidInput("assigned Harness has no registration")
@@ -2991,9 +2990,7 @@ class SchedulerService:
             "members": rows,
             "member_count": len(rows),
             "live_count": sum(1 for row in rows if row["live"]),
-            "admin_harness_ids": sorted(
-                row["harness_id"] for row in rows if row["is_admin"]
-            ),
+            "admin_harness_ids": sorted(row["harness_id"] for row in rows if row["is_admin"]),
         }
 
     def _last_failures(self, tasks: list[dict]) -> dict[str, dict]:

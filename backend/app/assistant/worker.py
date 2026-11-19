@@ -25,12 +25,10 @@ import httpx
 from app.adapter import presence
 from app.admin.worker import PlatformClient
 from app.assistant.live import (
-    STATE_ANSWERING,
     STATE_DONE,
     STATE_FAILED,
     STATE_RECEIVED,
     STATE_RUNNING,
-    read_state,
     write_state,
 )
 from app.assistant.loop import AssistantLoop

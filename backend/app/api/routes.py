@@ -302,8 +302,7 @@ def _plan_administrator(database: Any, plan_id: str) -> str:
     such round.
     """
     rows = database.read(
-        "SELECT opened_by FROM circulation_rounds WHERE plan_id = ?"
-        " ORDER BY rowid DESC LIMIT 1",
+        "SELECT opened_by FROM circulation_rounds WHERE plan_id = ?" " ORDER BY rowid DESC LIMIT 1",
         (plan_id,),
     )
     if rows:
@@ -3097,6 +3096,7 @@ def group_roster(group_id: str, service: SchedulerDep) -> dict[str, Any]:
     Read-only: it grants nothing and decides nothing.
     """
     return service.group_roster(group_id)
+
 
 @read.get("/groups/{group_id}/plans")
 def list_group_plans(
