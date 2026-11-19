@@ -140,6 +140,10 @@ python tools/doctor/doctor.py --json
 
 第一条给人读报告，第二条给机器读一个 JSON 文档。
 
+两条命令按顺序敲即可，**不要用 `&&` 串成一行**：体检发现问题时退出码是 `1`，`&&` 会把第二条短路掉（不报错，只是不跑）。
+要指向别的数据目录时，cmd.exe 里请用带引号的写法 `set "AP_DATA_DIR=D:\path"`——
+`set AP_DATA_DIR=D:\path` 会把路径末尾的空格一起设进变量，于是体检报「读不到」。
+
 退出码只有三种：`0` 没发现问题、`1` 发现问题、`2` 体检自己跑不起来（读不到平台数据）。
 逐面口径见 [`docs/notes/doctor.md`](docs/notes/doctor.md)。
 
