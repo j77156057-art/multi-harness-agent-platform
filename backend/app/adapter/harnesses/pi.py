@@ -145,6 +145,14 @@ class PiAdapter(CliHarness):
             "providers": {
                 provider_name: {
                     "baseUrl": base_url,
+                    # api 决定**用哪种协议**（实测 2026-11-19，pi 已装在本机）：
+                    #   "openai-completions" → POST /v1/chat/completions
+                    #   "openai-responses"   → POST /v1/responses
+                    #   写错的值             → "No API provider registered for api: xxx"
+                    # （`pi auth check` **不**查这个字段 —— 两种值它都报 ready；
+                    # 真正校验它的是运行期，所以这里是靠抓包实测钉下来的。）
+                    # 平台用 openai-completions：池子对外那条路与本地 Ollama 都是
+                    # 这一个协议。
                     "api": "openai-completions",
                     "apiKey": api_key,
                     "models": [

@@ -157,6 +157,12 @@ SPECS: tuple[MarketCli, ...] = (
         env_binary="AP_CURSOR_BIN",
         # 文档（cursor.com/docs/cli）：``agent -p --output-format json`` 只**提议**改动，
         # 要真的写文件必须加 ``--force``（= --yolo）。
+        # 实测（agent --help，2026.11.19-f005e9d，2026-11-19 装上后读的）：
+        #   "Usage: agent [options] [command] [prompt...]" —— prompt 是**位置参数**
+        #   （"Initial prompt for the agent"），-p/--print 是**布尔开关**
+        #   （"Print responses to console"），--mode 的取值只有 plan / ask。
+        # 所以工作令就是那个位置参数：紧跟在 -p 后面（它是 -p 后的第一个操作数），
+        # 不会被任何选项吃掉。
         # 工作令**贴着 -p**：`-p`` 是带值的选项（`agent -p "prompt"`），
         # 中间夹别的旗标的话工作令绑不上 -p，就只剩一个没人认的位置参数。
         headless=("-p", PROMPT, "--force", "--output-format", "json"),
@@ -175,7 +181,12 @@ SPECS: tuple[MarketCli, ...] = (
         adapter="continue-cli",
         binary="cn",
         env_binary="AP_CONTINUE_BIN",
-        # 实测（@continuedev/cli 1.5.47 --help）：-p/--print、--auto、--readonly、--format json
+        # 实测（@continuedev/cli 1.5.47 --help）：
+        #   "Usage: cn [options] [command] [prompt]" —— prompt 是**位置参数**，
+        #   -p/--print 是布尔开关（"Print response and exit"），--format 只在 -p 下
+        #   生效（"Only works with -p/--print flag"）。
+        # 零额度 dry-run 实测（2026-11-19）：提示词进了请求体
+        # （"messages":[{"role":"user","content":"<提示词>"}]），端点指到死端口 401。
         # 同 cursor：工作令紧跟 `-p``，别被别的旗标隔开。
         headless=("-p", PROMPT, "--auto", "--format", "json"),
         review=("-p", PROMPT, "--readonly", "--format", "json"),
@@ -256,11 +267,16 @@ SPECS: tuple[MarketCli, ...] = (
         adapter="amp-code",
         binary="amp",
         env_binary="AP_AMP_BIN",
-        # 实测（amp --help）：
-        # -x, --execute [message] 的 message 是**可选值**：可选值的短选项
-        # 只从同一个 token 里取（-xmessage），分开写的下一个 token 不会被
-        # 吃掉 —— 工作令就丢了。附着写法 --execute=PROMPT 在两种解析器
-        # （commander / clap）下都绑定，所以用它。
+        # 实测（amp --help，amp 0.0.1795075234，2026-11-19 —— 这一版
+        # 当天刚更新过，仓库里原来记的 0.0.1793363705 是旧的）：
+        #   "-x, --execute [message]" —— message 标的是**可选值**，但**可选值照样
+        #   吃下一个 token**（这一版是 commander 风格的解析器）：带提示词跑时报的是
+        #   另一个错（API key 那道），不带提示词才报 "User message must be provided
+        #   through stdin or as argument when using execute mode" —— 两句不一样，
+        #   说明提示词确实被收下了（2026-11-19 实测，零额度）。
+        #   "--stream-json" 存在。
+        # 用附着写法 --execute=PROMPT：在 commander 与 clap 两种解析器下都绑定，
+        # 不依赖"可选值吃不吃下一个 token"这种各家不同的脾气。
         headless=("--execute=" + PROMPT, "--stream-json"),
         review=None,
         # 没有自动批准 flag，只有设置项；缺 key 会转设备登录（实测挂起 >75 秒）。

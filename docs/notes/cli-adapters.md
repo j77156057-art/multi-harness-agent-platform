@@ -152,3 +152,61 @@ pip download --no-deps -d <tmp>\whl aider-chat    # 注意解释器版本，见�
 ```
 
 `<tmp>\probe-*` 是临时目录，随时可删；没有做过任何全局安装。
+## 七、2026-11-19：装上 amp / cursor / continue 之后复核的结论
+
+三家都装到本机了（amp 走 npm，cursor 走官方 PowerShell 安装器，continue 走 npm），
+下面每条都是**本机实测**，不是从文档抄的：
+
+| CLI | 版本 | 提示词怎么传（--help 原文） |
+|---|---|---|
+| Amp | 0.0.1795075234（2026-11-19 当天刚更新） | -x, --execute [message]（**可选值**），提示词 either as argument, or via stdin |
+| Cursor | 2026.11.19-f005e9d | Usage: agent [options] [command] [prompt...] —— prompt 是**位置参数**；-p, --print 是布尔开关 |
+| Continue | 1.5.47 | Usage: cn [options] [command] [prompt] —— prompt 是**位置参数**；-p/--print 是布尔开关 |
+
+**Amp 的可选值照样吃下一个 token**（原来那条「分开写不会绑定」的猜测是错的）。
+判据是两条错误信息不一样：
+
+- amp -x 提示词 --stream-json → 报的是 **API key** 那道错（说明它已经过了
+  「有没有提示词」这一关）；
+- amp -x --stream-json → 报 User message must be provided through stdin or as
+  argument when using execute mode（这一关没过）。
+
+适配器仍然用**附着写法** --execute=PROMPT：它在 commander 与 clap 两种解析器下
+都绑定，不依赖「可选值吃不吃下一个 token」这种各家不同的脾气。
+
+**Continue 的提示词确实进了请求体**（零额度 dry-run，端点指到死端口）：
+抓到 POST /v1/chat/completions，body 里 messages 里那条 user 消息的 content 就是
+提示词原文 —— 提示词落在 user 消息上，--format json 也确实生效（错误是 401，
+不是格式错）。
+
+**Cursor 的提示词绑定由语法确证**（请求体没抓到）：它的 key 校验在发请求之前，
+试了四种 key 形态都是 The provided API key is invalid，连请求都没发出去。
+--help 里 prompt 是位置参数、-p 是布尔开关，所以位置参数就是提示词。
+
+**Pi 的 models.json 里 api 决定用哪种协议**（抓包实测）：
+
+| api 的值 | Pi 实际发到哪儿 |
+|---|---|
+| openai-completions | POST /v1/chat/completions |
+| openai-responses | POST /v1/responses |
+| 写错的值 | 直接报 No API provider registered for api: xxx |
+
+注意 pi auth check **不**查这个字段（两种值它都报 status: ready），真正校验它
+的是运行期 —— 所以光看 auth check 的回读**证明不了**配置对不对，要看它往哪个
+路径发请求。适配器写的是 openai-completions：池子对外那条路与本地 Ollama 都是
+这一个协议。
+
+**复核这些结论的命令**（全部零额度：端点指到死端口，不会调模型）：
+
+    # amp：两种写法各跑一次，比对错误信息
+    $env:AMP_API_KEY='probe'; $env:AMP_URL='http://127.0.0.1:9'
+    amp -x 提示词 --stream-json      # 报 API key 那道错
+    amp -x --stream-json               # 报「必须提供提示词」
+
+    # cursor / continue：看位置参数
+    agent --help | Select-String 'prompt|--print'
+    cn --help | Select-String 'prompt|--print|--format'
+
+    # pi：看 api 值把请求发到哪个路径（抓包口指到 127.0.0.1:8899）
+    $env:PI_CODING_AGENT_DIR=<临时目录>; $env:PI_OFFLINE='1'
+    pi --provider probe --model probe-model --print 提示词
