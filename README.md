@@ -131,11 +131,14 @@ python -m app.tools.rebuild --source data/state.db --snapshot \
 | `docs/notes/doctor.md` | 281 | 使用说明与口径，字段名以实现里的常量表为准 |
 
 产品回答一个问题：这个平台现在健康吗、哪里不健康。只读、不花任何额度。
+两条命令如下——**代码块里只有命令本身**，整块复制就能跑（行内注释会让某些 shell 连注释一起粘过去）：
 
 ```bash
-python tools/doctor/doctor.py          # 人读报告
-python tools/doctor/doctor.py --json   # 单个 JSON 文档
+python tools/doctor/doctor.py
+python tools/doctor/doctor.py --json
 ```
+
+第一条给人读报告，第二条给机器读一个 JSON 文档。
 
 退出码只有三种：`0` 没发现问题、`1` 发现问题、`2` 体检自己跑不起来（读不到平台数据）。
 逐面口径见 [`docs/notes/doctor.md`](docs/notes/doctor.md)。
@@ -193,6 +196,7 @@ README 不把“有代码”当成“已验证”。仓库中已有针对关键�
 - `backend/tests/test_agenttools_wiring.py`：把工具交给 CLI 的那一层——令牌不进 argv、写进工作树的配置算临时文件、**声明不许覆盖授权落点**（否则交付物能被藏进临时文件删掉）。
 - `backend/tests/test_runtime_driver.py`：用真实 Git 和隔离 worktree 驱动任务从 claim 到 publish/submit，而不是只手工拼数据库状态。
 - `backend/tests/test_doctor.py`：平台自建产品的 20 项单元测试——三个检查面在假数据下的结论行、退出码 0/1/2 三态、`--json` 是单个文档、读失败不降级成空数据、运行不落库也不产生 WAL 边车文件。
+- `backend/tests/test_readme_examples.py`：把上面那两条体检命令从 README 原文里抠出来**真的跑一遍**（子进程 + 临时数据目录），断言人读报告的三面结构、`--json` 的单文档约定、退出码三态，以及「体检不往数据目录里写东西」。README 的命令因此是**可执行文档**，不是抄在纸上的样子。
 - `tools/docstate/docstate.py`：98 项机械断言，逐条核对本文件与 `docs/spec/0.3-R10.md` 的口径是否一致。
 - `cd office && npm run build`：验证前端生产构建。
 - `git diff --check`：检查提交中的空白和补丁格式问题。
