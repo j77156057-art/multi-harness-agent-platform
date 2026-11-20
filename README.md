@@ -4,6 +4,14 @@
 
 项目将 AI 编程协作中容易失控的部分实现为有状态、有约束、可恢复的后端流程，并配套一个可观察的 Agent Office 界面。
 
+## 在线演示页
+
+**https://37kr9qqtq9t5bmu2v4z.traesite.cn**
+
+对外展示的单页站点：问题清单、可交互的九步交付链路、Agent Office 真实界面录屏（24 秒）、六条核心机制的测试证据、架构与数据流图、真实任务的事件流重放，以及三步启动命令。
+
+源码在 `site/index.html`，录屏与封面在 `site/assets/`，纯静态、无外部请求；改完重新部署即可，不需要构建。录屏取自 `data/state.db` 中项目「平台体检工具」的真实任务（方案批准 → 领取 → 执行 → 校验 → 人工批准 → 合入主分支），未做剪辑拼接，页面里能看到该任务的正文与失败原因，公开分享前先确认内容范围。
+
 ## 先看它解决什么问题
 
 当 Codex、Claude Code、OpenCode 等多个编程窗口同时为同一个项目工作时，常见问题不是“模型能不能写代码”，而是协作边界不清：
@@ -575,6 +583,7 @@ backend/tests/        单元、并发、集成和真实 Git 流程测试
 backend/migrations/   SQLite schema migrations
 office/               Agent Office 前端和本地预览网关
 tools/                本地开发检查与合并辅助工具，以及平台自建产品 tools/doctor/
+site/                 对外展示的静态单页站点（index.html + 录屏资源）
 ```
 
 ## 真实集成边界
