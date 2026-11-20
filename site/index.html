@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0f14">
+<title>Multi-Harness 协作平台 · 多个 AI 编程窗口可控协作</title>
+<meta name="description" content="让多个 Harness 并行工作时，任务领取、崩溃恢复、验证、人工审核和合并都可控、可追溯。">
+<style>
+  :root {
+    --bg: #080b10;
+    --bg-soft: #0e131b;
+    --panel: #111823;
+    --panel-2: #151d29;
+    --line: rgba(255, 255, 255, 0.075);
+    --line-strong: rgba(255, 255, 255, 0.14);
+    --text: #e8eef5;
+    --muted: #8d9aab;
+    --dim: #63707f;
+    --cyan: #48d3e8;
+    --violet: #8b6cff;
+    --amber: #ffb454;
+    --green: #57d99b;
+    --red: #ff6b5e;
+    --mono: "JetBrains Mono", "Cascadia Mono", Consolas, "SFMono-Regular", "Courier New", monospace;
+    --sans: "Inter", "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    --radius: 14px;
+    --maxw: 1140px;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  .bg-grid, .bg-glow { position: fixed; inset: 0; pointer-events: none; z-index: 0; }
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.028) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 72%);
+    -webkit-mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 72%);
+  }
+  .bg-glow {
+    background:
+      radial-gradient(720px 420px at 18% -6%, rgba(72, 211, 232, 0.14), transparent 70%),
+      radial-gradient(680px 460px at 84% 4%, rgba(139, 108, 255, 0.13), transparent 72%),
+      radial-gradient(900px 600px at 50% 108%, rgba(87, 217, 155, 0.07), transparent 70%);
+  }
+
+  .shell { position: relative; z-index: 1; width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 28px; }
+
+  header.nav {
+    position: sticky; top: 0; z-index: 40;
+    backdrop-filter: blur(14px);
+    background: rgba(8, 11, 16, 0.72);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner { max-width: var(--maxw); margin: 0 auto; padding: 14px 28px; display: flex; align-items: center; gap: 24px; }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.08em;
+    color: var(--text); text-decoration: none; white-space: nowrap;
+  }
+  .brand-mark {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: conic-gradient(from 140deg, var(--cyan), var(--violet), var(--amber), var(--cyan));
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.14) inset, 0 0 18px rgba(72,211,232,0.35);
+  }
+  .nav-links { display: flex; gap: 20px; margin-left: auto; font-size: 13.5px; }
+  .nav-links a { color: var(--muted); text-decoration: none; transition: color .2s; }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em;
+    padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: 999px;
+    color: var(--text); text-decoration: none; transition: border-color .2s, background .2s;
+  }
+  .nav-cta:hover { border-color: rgba(72,211,232,0.5); background: rgba(72,211,232,0.08); }
+
+  .hero { padding: 84px 0 52px; display: grid; grid-template-columns: 1.06fr 0.94fr; gap: 56px; align-items: center; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--cyan); padding: 6px 12px;
+    border: 1px solid rgba(72,211,232,0.28); border-radius: 999px; background: rgba(72,211,232,0.07);
+  }
+  .eyebrow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.8); } }
+
+  h1 { font-size: clamp(34px, 4.1vw, 54px); line-height: 1.2; letter-spacing: -0.02em; margin: 22px 0 0; font-weight: 700; }
+  h1 .grad {
+    background: linear-gradient(100deg, var(--cyan), var(--violet) 62%, var(--amber));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lede { color: var(--muted); font-size: 16.5px; max-width: 46ch; margin: 20px 0 0; }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 12px 22px; border-radius: 10px; font-size: 14.5px; font-weight: 600;
+    text-decoration: none; transition: transform .18s, box-shadow .18s, background .18s, border-color .18s;
+  }
+  .btn-primary { background: linear-gradient(120deg, var(--cyan), #5aa8ff); color: #04121a; box-shadow: 0 8px 26px rgba(72,211,232,0.24); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(72,211,232,0.32); }
+  .btn-ghost { border: 1px solid var(--line-strong); color: var(--text); background: rgba(255,255,255,0.02); }
+  .btn-ghost:hover { border-color: rgba(139,108,255,0.55); background: rgba(139,108,255,0.1); }
+  .btn-play::before {
+    content: "";
+    width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px;
+    border-color: transparent transparent transparent currentColor;
+  }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 40px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .stat { background: var(--bg-soft); padding: 14px 16px; }
+  .stat b { display: block; font-family: var(--mono); font-size: 21px; color: var(--text); line-height: 1.3; }
+  .stat span { font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; }
+
+  .terminal {
+    background: linear-gradient(180deg, #0d141d, #0a0f16);
+    border: 1px solid var(--line-strong); border-radius: var(--radius); overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 0 1px rgba(72,211,232,0.06);
+  }
+  .terminal-bar { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.022); }
+  .tdot { width: 10px; height: 10px; border-radius: 50%; background: #2b3542; }
+  .tdot.r { background: #ff5f57; }
+  .tdot.y { background: #febc2e; }
+  .tdot.g { background: #28c840; }
+  .terminal-title { margin-left: 8px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); letter-spacing: 0.05em; }
+  .terminal-body { padding: 20px 20px 24px; font-family: var(--mono); font-size: 12.6px; line-height: 2.02; overflow-x: auto; }
+  .terminal-body .ln { white-space: pre; }
+  .c-muted { color: #63707f; }
+  .c-cyan { color: var(--cyan); }
+  .c-violet { color: #a98cff; }
+  .c-amber { color: var(--amber); }
+  .c-green { color: var(--green); }
+  .c-text { color: #cfdae6; }
+  .cursor { display: inline-block; width: 7px; height: 14px; background: var(--cyan); vertical-align: -2px; animation: blink 1.1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  section { padding: 74px 0; position: relative; }
+  .sec-head { max-width: 64ch; margin-bottom: 36px; }
+  .sec-tag {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--dim); display: flex; align-items: center; gap: 12px;
+  }
+  .sec-tag::after { content: ""; flex: 0 0 42px; height: 1px; background: linear-gradient(90deg, var(--line-strong), transparent); }
+  h2 { font-size: clamp(24px, 2.5vw, 33px); line-height: 1.3; letter-spacing: -0.015em; margin: 12px 0 0; font-weight: 700; }
+  .sec-head p { color: var(--muted); margin: 12px 0 0; font-size: 15.5px; }
+
+  .pain-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .pain { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px; transition: border-color .2s, transform .2s; }
+  .pain:hover { border-color: rgba(255,180,84,0.32); transform: translateY(-2px); }
+  .pain .idx { font-family: var(--mono); font-size: 11px; color: var(--amber); letter-spacing: 0.1em; }
+  .pain p { margin: 8px 0 0; font-size: 14.4px; color: #c2ccd8; }
+
+  /* ---------- interactive pipeline ---------- */
+  .flow { display: grid; grid-template-columns: 300px 1fr; gap: 18px; align-items: start; }
+  .flow-list { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--bg-soft); }
+  .flow-item {
+    display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: center;
+    width: 100%; text-align: left; padding: 11px 14px;
+    background: transparent; border: 0; border-bottom: 1px solid var(--line);
+    color: var(--muted); font-family: inherit; font-size: 13.6px; cursor: pointer;
+    transition: background .18s, color .18s;
+  }
+  .flow-item:last-child { border-bottom: 0; }
+  .flow-item .no { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .flow-item:hover { background: rgba(255,255,255,0.03); color: var(--text); }
+  .flow-item.active { background: linear-gradient(90deg, rgba(72,211,232,0.14), rgba(72,211,232,0.02)); color: var(--text); }
+  .flow-item.active .no { color: var(--cyan); }
+  .flow-item .bar { grid-column: 1 / -1; height: 2px; background: transparent; }
+  .flow-item.active .bar { background: linear-gradient(90deg, var(--cyan), transparent); }
+
+  .flow-panel {
+    position: relative; min-height: 376px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: linear-gradient(165deg, var(--panel-2), var(--panel) 60%);
+    padding: 26px 28px 24px; overflow: hidden;
+  }
+  .flow-panel::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 2px;
+    background: linear-gradient(90deg, var(--cyan), var(--violet), transparent);
+  }
+  .flow-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .flow-kicker { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; color: var(--cyan); }
+  .flow-title { font-size: 21px; font-weight: 700; margin: 6px 0 0; }
+  .flow-desc { color: #c3cedb; font-size: 14.6px; margin: 10px 0 0; min-height: 52px; }
+  .flow-rows { display: grid; grid-template-columns: 78px 1fr; gap: 10px 14px; margin-top: 18px; font-size: 13.8px; }
+  .flow-rows dt { font-family: var(--mono); font-size: 11.5px; color: var(--dim); letter-spacing: 0.08em; padding-top: 3px; }
+  .flow-rows dd { margin: 0; color: #c9d5e2; }
+  .flow-rows dd.fail { color: #ffb1a8; }
+  .flow-ev {
+    margin-top: 18px; padding: 10px 12px; border-radius: 8px;
+    background: rgba(0,0,0,0.34); border: 1px solid var(--line);
+    font-family: var(--mono); font-size: 11.5px; color: #9fb0c2; word-break: break-all;
+  }
+  .flow-ev em { color: var(--green); font-style: normal; }
+  .flow-controls { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+  .flow-play {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.08em;
+    background: rgba(72,211,232,0.1); border: 1px solid rgba(72,211,232,0.35);
+    color: var(--cyan); border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .flow-play:hover { background: rgba(72,211,232,0.18); }
+  .flow-hint { font-size: 12px; color: var(--dim); }
+
+  /* ---------- demo video ---------- */
+  .demo-wrap {
+    display: grid; grid-template-columns: 1.35fr 0.65fr; gap: 20px; align-items: start;
+  }
+  .player {
+    position: relative; border: 1px solid var(--line-strong); border-radius: var(--radius);
+    overflow: hidden; background: #05080c; box-shadow: 0 22px 60px rgba(0,0,0,0.5);
+  }
+  .player video { display: block; width: 100%; height: auto; }
+  .video-shell { position: relative; }
+  .video-cta {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 22px; border-radius: 999px;
+    background: rgba(8, 11, 16, 0.74); border: 1px solid rgba(72, 211, 232, 0.45);
+    color: #eaf6fa; font-size: 14px; font-weight: 600; cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: background .2s, transform .2s, opacity .3s;
+  }
+  .video-cta:hover { background: rgba(72, 211, 232, 0.2); transform: translate(-50%, -50%) scale(1.03); }
+  .video-cta .tri { width: 0; height: 0; border-style: solid; border-width: 6px 0 6px 10px; border-color: transparent transparent transparent currentColor; }
+  .video-shell.playing .video-cta { opacity: 0; pointer-events: none; }
+  .player-bar {
+    display: flex; align-items: center; gap: 8px; padding: 9px 13px;
+    border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.025);
+  }
+  .player-title { margin-left: 6px; font-family: var(--mono); font-size: 11px; color: var(--dim); letter-spacing: 0.05em; }
+  .demo-side { display: grid; gap: 12px; }
+  .demo-point { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .demo-point h4 { margin: 0 0 6px; font-size: 14.4px; display: flex; gap: 8px; align-items: center; }
+  .demo-point h4 span { font-family: var(--mono); font-size: 10.5px; color: var(--cyan); border: 1px solid rgba(72,211,232,0.28); border-radius: 5px; padding: 1px 6px; }
+  .demo-point p { margin: 0; color: var(--muted); font-size: 13.4px; }
+  .demo-note { font-size: 12.5px; color: var(--dim); margin-top: 14px; }
+  .demo-note code { font-family: var(--mono); color: #a9b8c7; }
+
+  /* ---------- mechanisms ---------- */
+  .mech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .mech {
+    position: relative; padding: 24px 24px 20px;
+    background: linear-gradient(170deg, var(--panel-2), var(--panel) 55%);
+    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    transition: transform .22s, border-color .22s, box-shadow .22s;
+  }
+  .mech::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: linear-gradient(90deg, var(--cyan), var(--violet), transparent); opacity: .55; }
+  .mech:hover { transform: translateY(-3px); border-color: rgba(139,108,255,0.32); box-shadow: 0 18px 44px rgba(0,0,0,0.4); }
+  .mech h3 { margin: 0; font-size: 17px; letter-spacing: -0.01em; }
+  .mech p { color: var(--muted); font-size: 14.2px; margin: 10px 0 0; }
+  .mech .ev {
+    margin-top: 16px; padding: 10px 12px; background: rgba(0,0,0,0.32);
+    border: 1px solid var(--line); border-radius: 8px;
+    font-family: var(--mono); font-size: 11.2px; line-height: 1.85; color: #9fb0c2; word-break: break-all;
+  }
+  .mech .ev em { color: var(--green); font-style: normal; }
+
+  /* ---------- architecture ---------- */
+  .arch {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: radial-gradient(900px 400px at 50% 0%, rgba(72,211,232,0.06), transparent 70%), var(--bg-soft);
+    padding: 22px;
+  }
+  .arch svg { display: block; width: 100%; height: auto; }
+  .arch-legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; font-size: 12.5px; color: var(--dim); }
+  .arch-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 7px; vertical-align: -1px; }
+  .arch-note { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 18px; }
+  .arch-note div { border-left: 2px solid rgba(139,108,255,0.4); padding-left: 12px; font-size: 13.2px; color: var(--muted); }
+  .arch-note strong { color: #c9d5e2; font-weight: 600; }
+
+  /* ---------- event stream ---------- */
+  .ev-wrap { display: grid; grid-template-columns: 1fr 320px; gap: 20px; align-items: start; }
+  .ev-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft); overflow: hidden; }
+  .ev-row {
+    display: grid; grid-template-columns: 48px 118px 1fr auto; gap: 12px; align-items: center;
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    opacity: .28; transform: translateX(-6px);
+    transition: opacity .45s ease, transform .45s ease, background .45s;
+  }
+  .ev-row:last-child { border-bottom: 0; }
+  .ev-row.on { opacity: 1; transform: none; }
+  .ev-row.on:hover { background: rgba(255,255,255,0.025); }
+  .ev-seq { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .ev-name { font-family: var(--mono); font-size: 12px; color: var(--cyan); }
+  .ev-desc { font-size: 13.4px; color: #c3cedb; }
+  .ev-actor { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .ev-time { font-family: var(--mono); font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .ev-side { display: grid; gap: 12px; }
+  .ev-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .ev-card h4 { margin: 0 0 8px; font-size: 14px; }
+  .ev-card p { margin: 0; font-size: 13.2px; color: var(--muted); }
+  .ev-card code { font-family: var(--mono); font-size: 11.8px; color: #9fb0c2; }
+  .ev-actions { display: flex; gap: 10px; margin-top: 16px; }
+
+  /* ---------- capabilities ---------- */
+  .cap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .cap { background: var(--bg-soft); padding: 22px; transition: background .2s; }
+  .cap:hover { background: #121a25; }
+  .cap h4 { margin: 0 0 8px; font-size: 14.6px; display: flex; align-items: center; gap: 8px; }
+  .cap h4::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--violet); box-shadow: 0 0 8px var(--violet); flex: 0 0 auto; }
+  .cap p { margin: 0; color: var(--muted); font-size: 13.6px; }
+
+  /* ---------- quick start ---------- */
+  .start-grid { display: grid; gap: 14px; }
+  .cmd { display: grid; grid-template-columns: 34px 1fr auto; gap: 14px; align-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; transition: border-color .2s; }
+  .cmd:hover { border-color: rgba(87,217,155,0.3); }
+  .cmd .order { font-family: var(--mono); font-size: 12px; color: var(--green); }
+  .cmd code { font-family: var(--mono); font-size: 13.4px; color: #d8e4ef; word-break: break-all; }
+  .copy {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: transparent; border: 1px solid var(--line-strong); border-radius: 7px;
+    padding: 6px 11px; cursor: pointer; transition: color .2s, border-color .2s, background .2s;
+  }
+  .copy:hover { color: var(--text); border-color: rgba(87,217,155,0.5); background: rgba(87,217,155,0.08); }
+  .copy.done { color: var(--green); border-color: rgba(87,217,155,0.55); }
+
+  footer { border-top: 1px solid var(--line); padding: 34px 0 54px; color: var(--dim); font-size: 13px; }
+  .foot-inner { display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; }
+  .foot-inner .mono { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.05em; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  @media (max-width: 1020px) {
+    .hero { grid-template-columns: 1fr; gap: 40px; padding-top: 62px; }
+    .nav-links { display: none; }
+    .flow { grid-template-columns: 1fr; }
+    .demo-wrap { grid-template-columns: 1fr; }
+    .ev-wrap { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .shell, .nav-inner { padding-left: 18px; padding-right: 18px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    section { padding: 54px 0; }
+    .terminal-body { font-size: 11.4px; }
+    .flow-rows { grid-template-columns: 66px 1fr; }
+    .ev-row { grid-template-columns: 38px 1fr; }
+    .ev-name, .ev-time { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .eyebrow .dot, .cursor { animation: none; }
+    .ev-row { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="bg-glow" aria-hidden="true"></div>
+
+<header class="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <span class="brand-mark" aria-hidden="true"></span>
+      MULTI-HARNESS PLATFORM
+    </a>
+    <nav class="nav-links" aria-label="页面导航">
+      <a href="#pipeline">交付链路</a>
+      <a href="#demo">真实界面</a>
+      <a href="#mechanisms">核心机制</a>
+      <a href="#architecture">架构</a>
+      <a href="#events">事件流</a>
+      <a href="#start">快速开始</a>
+    </nav>
+    <a class="nav-cta" href="#demo">看演示</a>
+  </div>
+</header>
+
+<main id="top">
+  <div class="shell">
+    <!-- HERO -->
+    <section class="hero" style="padding-bottom:0">
+      <div>
+        <span class="eyebrow"><span class="dot"></span>Agent Collaboration Runtime</span>
+        <h1>多个 AI 编程窗口<br><span class="grad">并行协作，也可控、可追溯</span></h1>
+        <p class="lede">
+          当 Codex、Claude Code、OpenCode 同时为同一个项目工作时，真正的难点不是“模型能不能写代码”，而是“不重复干、不互相踩、不把旧结果当成新结果”。本平台把领取、租约、验证、审核与合并变成有状态、有约束、可恢复的后端流程。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-play" href="#demo">看一段真实界面演示</a>
+          <a class="btn btn-ghost" href="#pipeline">逐步走一遍交付链路</a>
+        </div>
+        <div class="stats">
+          <div class="stat"><b>6</b><span>核心机制</span></div>
+          <div class="stat"><b>15</b><span>可重建任务表</span></div>
+          <div class="stat"><b>3</b><span>启动步骤</span></div>
+          <div class="stat"><b>1</b><span>只追加事件流</span></div>
+        </div>
+      </div>
+
+      <div class="terminal" aria-hidden="true">
+        <div class="terminal-bar">
+          <span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span>
+          <span class="terminal-title">harness · task-lifecycle</span>
+        </div>
+        <div class="terminal-body">
+<div class="ln"><span class="c-muted"># 一条真实任务的 8 个动作</span></div>
+<div class="ln"><span class="c-cyan">plan.approve</span>  <span class="c-text">codebuddy</span></div>
+<div class="ln"><span class="c-cyan">claim</span>         <span class="c-text">claude-code</span> <span class="c-muted">→ attempt+lease+epoch</span></div>
+<div class="ln"><span class="c-cyan">start</span>         <span class="c-text">claude-code</span> <span class="c-muted">→ 隔离 worktree</span></div>
+<div class="ln"><span class="c-cyan">submit_result</span> <span class="c-text">claude-code</span> <span class="c-muted">→ commit + receipt</span></div>
+<div class="ln"><span class="c-violet">verify_passed</span> <span class="c-text">verify-worker-1</span></div>
+<div class="ln"><span class="c-violet">approve</span>      <span class="c-text">codebuddy</span> <span class="c-muted">→ review lease</span></div>
+<div class="ln"><span class="c-green">merge_success</span> <span class="c-text">merge-worker-1</span></div>
+<div class="ln"> </div>
+<div class="ln"><span class="c-muted">$</span> python -m app.tools.rebuild <span class="c-muted">--verify</span></div>
+<div class="ln"><span class="c-green">✓ 15 tables diffed, 0 gaps</span> <span class="cursor"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 01 PROBLEMS -->
+    <section id="problems">
+      <div class="sec-head reveal">
+        <div class="sec-tag">01 / 问题</div>
+        <h2>协作失控，往往发生在边界不清的地方</h2>
+        <p>多个编程窗口同时工作时，失败模式高度相似：没人说得清谁拥有写入权、旧结果会不会复活、测试通过是否等于可以合并。</p>
+      </div>
+      <div class="pain-grid">
+        <div class="pain reveal"><div class="idx">ISSUE 01</div><p>两个窗口同时领取同一任务，最后谁的结果有效说不清。</p></div>
+        <div class="pain reveal"><div class="idx">ISSUE 02</div><p>窗口崩溃或网络中断后，任务卡在“有人负责”的状态，其他人无法接手。</p></div>
+        <div class="pain reveal"><div class="idx">ISSUE 03</div><p>旧窗口恢复后继续写入，覆盖已经接管任务的新窗口结果。</p></div>
+        <div class="pain reveal"><div class="idx">ISSUE 04</div><p>测试通过与允许合并之间，缺少一条可核对的证据链。</p></div>
+        <div class="pain reveal"><div class="idx">ISSUE 05</div><p>不同 Harness 的 CLI、输出格式和工作区各不相同，接入一个就要写一套特殊逻辑。</p></div>
+        <div class="pain reveal"><div class="idx">ISSUE 06</div><p>只看最终状态无法解释“谁在什么时候做了什么”，排障只能靠猜。</p></div>
+      </div>
+    </section>
+
+    <!-- 02 PIPELINE (interactive) -->
+    <section id="pipeline">
+      <div class="sec-head reveal">
+        <div class="sec-tag">02 / 交付链路</div>
+        <h2>一条任务从创建到合并，逐步可查</h2>
+        <p>执行者完成 ≠ 验证通过 ≠ 人工批准 ≠ 已合并。点开任意一步，看它的输入、产出和失败时会发生什么。</p>
+      </div>
+      <div class="flow reveal">
+        <div class="flow-list" id="flowList" role="tablist" aria-label="交付链路步骤"></div>
+        <div class="flow-panel" role="tabpanel" aria-live="polite">
+          <div class="flow-head">
+            <div>
+              <div class="flow-kicker" id="flowKicker">STEP 1 / 9</div>
+              <div class="flow-title" id="flowTitle">发布并批准任务计划</div>
+            </div>
+          </div>
+          <p class="flow-desc" id="flowDesc"></p>
+          <dl class="flow-rows">
+            <dt>输入</dt><dd id="flowInput"></dd>
+            <dt>产出</dt><dd id="flowOutput"></dd>
+            <dt>失败时</dt><dd class="fail" id="flowFail"></dd>
+          </dl>
+          <div class="flow-ev" id="flowEv"></div>
+          <div class="flow-controls">
+            <button class="flow-play" id="flowPlay" type="button">暂停自动演示</button>
+            <span class="flow-hint">点击左侧任意一步可手动查看</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 DEMO -->
+    <section id="demo">
+      <div class="sec-head reveal">
+        <div class="sec-tag">03 / 真实界面</div>
+        <h2>这不是示意图，是跑起来的 Agent Office</h2>
+        <p>下面的录屏来自本机真实平台：项目「平台体检工具」，一条任务从方案批准、领取、执行、校验、人工批准到合入主分支的完整轨迹。</p>
+      </div>
+      <div class="demo-wrap reveal">
+        <div class="player">
+          <div class="player-bar">
+            <span class="tdot r"></span><span class="tdot y"></span><span class="tdot g"></span>
+            <span class="player-title">agent-office · 平台体检工具 · 真实录屏</span>
+          </div>
+          <div class="video-shell" id="videoShell">
+            <video
+              id="demoVideo"
+              src="assets/office-demo.mp4"
+              poster="assets/office-demo-poster.jpg"
+              controls muted loop playsinline preload="metadata"
+              aria-label="Agent Office 真实操作录屏"></video>
+            <button class="video-cta" id="videoCta" type="button">
+              <span class="tri" aria-hidden="true"></span>播放 24 秒真实录屏
+            </button>
+          </div>
+        </div>
+        <div class="demo-side">
+          <div class="demo-point">
+            <h4><span>台账</span>一眼看清谁在干什么</h4>
+            <p>待领取、执行中、待处理、待协助、未完成、完成了六个口径，按人、按时间随意切换。</p>
+          </div>
+          <div class="demo-point">
+            <h4><span>任务书</span>目标与验收标准同屏</h4>
+            <p>任务目标、验收标准、允许修改的路径都来自方案快照，评审可以逐条对照。</p>
+          </div>
+          <div class="demo-point">
+            <h4><span>动作记录</span>八个动作一条不落</h4>
+            <p>方案已批准 → 已领取 → 开始执行 → 已提交 → 校验通过 → 已批准 → 开始合并 → 已合入主分支，每一步带执行者与时间。</p>
+          </div>
+        </div>
+      </div>
+      <p class="demo-note reveal">录屏为真实平台操作，未做剪辑拼接；任务与事件来自本机 <code>data/state.db</code> 中的实际记录。</p>
+    </section>
+
+    <!-- 04 MECHANISMS -->
+    <section id="mechanisms">
+      <div class="sec-head reveal">
+        <div class="sec-tag">04 / 核心机制</div>
+        <h2>每条机制都有对应的测试证据</h2>
+        <p>机制不是文档里的承诺，而是可以被机械核对的约束。下方每张卡片都附上验证它的测试文件与用例名。</p>
+      </div>
+      <div class="mech-grid">
+        <article class="mech reveal">
+          <h3>并发领取去重</h3>
+          <p>一次领取请求带唯一请求标识，重复或竞态的领取被收敛到同一个结果上：同一份工作只允许一个赢家。</p>
+          <div class="ev">backend/tests/test_claim_concurrency.py<br><em>test_only_one_of_two_racing_claims_wins</em></div>
+        </article>
+        <article class="mech reveal">
+          <h3>租约与接管</h3>
+          <p>持有权变成带有效期的租约。租约过期后原持有者状态失效并释放全部资源，其他成员可安全接管，避免单点失联造成死锁。</p>
+          <div class="ev">backend/tests/test_lease.py<br><em>test_expiry_moves_an_owner_state_to_stale_and_frees_everything</em></div>
+        </article>
+        <article class="mech reveal">
+          <h3>fencing 防旧写入</h3>
+          <p>每次写入携带 fencing 世代。旧持有者的迟到写入——无论续租还是绕过租约路径的受保护写入——都会被直接拒绝。</p>
+          <div class="ev">backend/tests/test_lease.py<br><em>test_renew_with_a_stale_fencing_epoch_is_refused</em></div>
+        </article>
+        <article class="mech reveal">
+          <h3>验证与人工审核分离</h3>
+          <p>验证只产出“能否进入审核”的结论，审核只由人在验证通过之后进行。两者职责互不替代，谁也不能越过谁。</p>
+          <div class="ev">backend/tests/test_verify.py<br><em>test_failing_head_cannot_reach_review</em></div>
+        </article>
+        <article class="mech reveal">
+          <h3>事件流可重放</h3>
+          <p>事件序号单调递增、只追加写入，任何投影都可由事件重新推导。投影损坏时，一条命令即可从事件日志重建。</p>
+          <div class="ev">backend/tests/test_database_events.py<br><em>test_event_store_is_append_only_and_replayable</em></div>
+        </article>
+        <article class="mech reveal">
+          <h3>分配治理与合并互斥</h3>
+          <p>领取必须建立在已接受的分配之上；并发争抢合并权时恰好只有一个赢家，绝不允许两份互不兼容的状态被揉在一起。</p>
+          <div class="ev">backend/tests/test_claim_allocation_gate.py<br><em>test_a_gated_group_refuses_a_claim_without_any_allocation</em><br>backend/tests/test_merge_guard.py<br><em>test_concurrent_acquire_has_exactly_one_winner</em></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- 05 ARCHITECTURE -->
+    <section id="architecture">
+      <div class="sec-head reveal">
+        <div class="sec-tag">05 / 架构与数据流</div>
+        <h2>差异止步于适配器，约束集中在平台</h2>
+        <p>每个 Harness 只需说同一种协议；领取、租约、校验、审核、合并与事件写入都在平台侧完成，工作区与主分支物理隔离。</p>
+      </div>
+      <div class="arch reveal">
+        <svg viewBox="0 0 1000 470" role="img" aria-label="多 Harness 协作平台架构图">
+          <defs>
+            <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b6a7c"/>
+            </marker>
+            <marker id="arwC" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#48d3e8"/>
+            </marker>
+            <linearGradient id="coreBg" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#151d29"/>
+              <stop offset="100%" stop-color="#101722"/>
+            </linearGradient>
+          </defs>
+
+          <text x="24" y="26" fill="#63707f" font-family="monospace" font-size="11" letter-spacing="2">窗口层</text>
+          <text x="392" y="26" fill="#63707f" font-family="monospace" font-size="11" letter-spacing="2">适配层</text>
+          <text x="556" y="26" fill="#63707f" font-family="monospace" font-size="11" letter-spacing="2">平台核（有状态、可恢复）</text>
+          <text x="886" y="26" fill="#63707f" font-family="monospace" font-size="11" letter-spacing="2">产出</text>
+
+          <!-- windows -->
+          <g font-family="monospace" font-size="11.5">
+            <rect x="24" y="44" width="176" height="34" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="40" y="66" fill="#cfdae6">Claude Code</text>
+            <rect x="24" y="88" width="176" height="34" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="40" y="110" fill="#cfdae6">CodeBuddy</text>
+            <rect x="24" y="132" width="176" height="34" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="40" y="154" fill="#cfdae6">OpenCode</text>
+            <rect x="24" y="176" width="176" height="34" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="40" y="198" fill="#cfdae6">Qoder / Codex</text>
+            <rect x="24" y="220" width="176" height="34" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="40" y="242" fill="#cfdae6">Pi / Qwen Code</text>
+            <text x="24" y="278" fill="#63707f" font-size="10.5">9 家 / 18+ 个窗口可接入</text>
+          </g>
+
+          <!-- adapter -->
+          <rect x="248" y="80" width="108" height="176" rx="9" fill="#0f1620" stroke="#33405a"/>
+          <text x="302" y="128" fill="#a98cff" font-family="monospace" font-size="11.5" text-anchor="middle">adapter</text>
+          <text x="302" y="148" fill="#a98cff" font-family="monospace" font-size="11.5" text-anchor="middle">protocol</text>
+          <text x="302" y="176" fill="#7d8a9b" font-family="monospace" font-size="10" text-anchor="middle">CLI 输出解析</text>
+          <text x="302" y="194" fill="#7d8a9b" font-family="monospace" font-size="10" text-anchor="middle">工作区隔离</text>
+          <text x="302" y="212" fill="#7d8a9b" font-family="monospace" font-size="10" text-anchor="middle">幂等重试</text>
+
+          <!-- arrows windows -> adapter -->
+          <g stroke="#5b6a7c" stroke-width="1.2" fill="none">
+            <path d="M200 61 H244" marker-end="url(#arw)"/>
+            <path d="M200 105 H244" marker-end="url(#arw)"/>
+            <path d="M200 149 H244" marker-end="url(#arw)"/>
+            <path d="M200 193 H244" marker-end="url(#arw)"/>
+            <path d="M200 237 H244" marker-end="url(#arw)"/>
+          </g>
+
+          <!-- core -->
+          <rect x="392" y="44" width="470" height="300" rx="12" fill="url(#coreBg)" stroke="#2b3a4d"/>
+          <g font-family="monospace" font-size="11">
+            <rect x="410" y="66" width="200" height="54" rx="7" fill="#0c1622" stroke="#1f4f5c"/>
+            <text x="424" y="88" fill="#48d3e8">claim / lease</text>
+            <text x="424" y="106" fill="#7d8a9b" font-size="10">幂等键 · 请求去重 · 分配门禁</text>
+
+            <rect x="624" y="66" width="220" height="54" rx="7" fill="#0c1622" stroke="#1f4f5c"/>
+            <text x="638" y="88" fill="#48d3e8">fencing epoch</text>
+            <text x="638" y="106" fill="#7d8a9b" font-size="10">过期世代写入一律拒绝</text>
+
+            <rect x="410" y="134" width="200" height="54" rx="7" fill="#0c1622" stroke="#3a2f6a"/>
+            <text x="424" y="156" fill="#a98cff">verify worker</text>
+            <text x="424" y="174" fill="#7d8a9b" font-size="10">profile · 命令白名单 · 回执</text>
+
+            <rect x="624" y="134" width="220" height="54" rx="7" fill="#0c1622" stroke="#3a2f6a"/>
+            <text x="638" y="156" fill="#a98cff">human review</text>
+            <text x="638" y="174" fill="#7d8a9b" font-size="10">review lease · commit 一致</text>
+
+            <rect x="410" y="202" width="200" height="54" rx="7" fill="#0c1622" stroke="#1f5c3a"/>
+            <text x="424" y="224" fill="#57d99b">merge worker</text>
+            <text x="424" y="242" fill="#7d8a9b" font-size="10">唯一赢家 · 受控合入</text>
+
+            <rect x="624" y="202" width="220" height="54" rx="7" fill="#0c1622" stroke="#5c4a1f"/>
+            <text x="638" y="224" fill="#ffb454">event store</text>
+            <text x="638" y="242" fill="#7d8a9b" font-size="10">append-only · seq · replay</text>
+
+            <rect x="410" y="270" width="434" height="52" rx="7" fill="#0a1119" stroke="#243040"/>
+            <text x="424" y="292" fill="#cfdae6">Agent Office · 只读投影</text>
+            <text x="424" y="309" fill="#7d8a9b" font-size="10">任务 · 方案 · 额度 · 事件 · 群聊 · 输出（不暴露凭据）</text>
+          </g>
+
+          <!-- arrows adapter -> core -->
+          <g stroke="#48d3e8" stroke-width="1.3" fill="none" opacity="0.85">
+            <path d="M356 122 H406" marker-end="url(#arwC)"/>
+            <path d="M356 206 H406" marker-end="url(#arwC)"/>
+          </g>
+
+          <!-- outputs -->
+          <g font-family="monospace" font-size="11.5">
+            <rect x="886" y="66" width="92" height="54" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="932" y="88" fill="#cfdae6" text-anchor="middle">worktree</text>
+            <text x="932" y="106" fill="#63707f" font-size="9.5" text-anchor="middle">隔离执行</text>
+
+            <rect x="886" y="134" width="92" height="54" rx="7" fill="#111823" stroke="#243040"/>
+            <text x="932" y="156" fill="#cfdae6" text-anchor="middle">receipt</text>
+            <text x="932" y="174" fill="#63707f" font-size="9.5" text-anchor="middle">校验回执</text>
+
+            <rect x="886" y="202" width="92" height="54" rx="7" fill="#111823" stroke="#2f5c3a"/>
+            <text x="932" y="224" fill="#57d99b" text-anchor="middle">canonical</text>
+            <text x="932" y="242" fill="#63707f" font-size="9.5" text-anchor="middle">主分支 HEAD</text>
+          </g>
+
+          <g stroke="#5b6a7c" stroke-width="1.2" fill="none">
+            <path d="M862 93 H880" marker-end="url(#arw)"/>
+            <path d="M862 161 H880" marker-end="url(#arw)"/>
+            <path d="M862 229 H880" marker-end="url(#arw)"/>
+          </g>
+
+          <!-- flow between core boxes -->
+          <g stroke="#3c4a5c" stroke-width="1.1" fill="none" stroke-dasharray="4 4">
+            <path d="M510 120 V132" marker-end="url(#arw)"/>
+            <path d="M610 88 H622" marker-end="url(#arw)"/>
+            <path d="M734 120 V132" marker-end="url(#arw)"/>
+            <path d="M510 188 V200" marker-end="url(#arw)"/>
+            <path d="M734 188 V200" marker-end="url(#arw)"/>
+          </g>
+
+          <g font-family="monospace" font-size="10.5">
+            <rect x="392" y="366" width="470" height="70" rx="9" fill="#0b1119" stroke="#243040"/>
+            <text x="408" y="388" fill="#63707f">重建路径</text>
+            <text x="408" y="410" fill="#9fb0c2">checkpoint → reducer → 新库 → 15 张聚合表逐列 diff</text>
+            <text x="408" y="428" fill="#57d99b">python -m app.tools.rebuild --snapshot --verify</text>
+          </g>
+        </svg>
+        <div class="arch-legend">
+          <span><i style="background:#48d3e8"></i>领取与写入资格</span>
+          <span><i style="background:#a98cff"></i>验证与审核门禁</span>
+          <span><i style="background:#57d99b"></i>合入与产出</span>
+          <span><i style="background:#ffb454"></i>事件与回溯</span>
+        </div>
+        <div class="arch-note">
+          <div><strong>物理隔离</strong>每个 attempt 在独立 worktree 中实现，主分支只接受通过验证与审核的 commit。</div>
+          <div><strong>状态在服务端</strong>窗口失联不影响任务归属；租约由平台时钟判定，过期即可接管。</div>
+          <div><strong>证据可复现</strong>合并边界、review lease 与被审 commit 一一对应，事后可完整复核。</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 EVENTS -->
+    <section id="events">
+      <div class="sec-head reveal">
+        <div class="sec-tag">06 / 事件流</div>
+        <h2>不只回答“现在是什么状态”，还回答“为什么”</h2>
+        <p>下面这条事件流取自真实任务：同一件事从方案批准到合入主分支，八个动作、四个执行者，序号单调递增。</p>
+      </div>
+      <div class="ev-wrap reveal">
+        <div class="ev-list" id="evList">
+          <div class="ev-row">
+            <span class="ev-seq">#6285</span><span class="ev-name">plan.approve</span>
+            <span class="ev-desc">方案被批准，任务快照冻结</span><span class="ev-actor">codebuddy · 20:12:05</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6286</span><span class="ev-name">claim</span>
+            <span class="ev-desc">领取成功，创建 attempt / lease / epoch</span><span class="ev-actor">claude-code · 20:12:07</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6287</span><span class="ev-name">start</span>
+            <span class="ev-desc">在隔离 worktree 中开始执行</span><span class="ev-actor">claude-code · 20:12:09</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6288</span><span class="ev-name">submit_result</span>
+            <span class="ev-desc">提交结果与 commit，生成回执</span><span class="ev-actor">claude-code · 20:19:01</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6289</span><span class="ev-name">verify_passed</span>
+            <span class="ev-desc">按 profile 校验通过，允许进入审核</span><span class="ev-actor">verify-worker-1 · 20:19:17</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6290</span><span class="ev-name">approve</span>
+            <span class="ev-desc">人工审核通过，review lease 与被审 commit 一致</span><span class="ev-actor">codebuddy · 20:20:13</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6291</span><span class="ev-name">merge_start</span>
+            <span class="ev-desc">merge worker 取得合并权</span><span class="ev-actor">merge-worker-1 · 20:20:14</span>
+          </div>
+          <div class="ev-row">
+            <span class="ev-seq">#6292</span><span class="ev-name">merge_success</span>
+            <span class="ev-desc">已合入主分支，任务完成</span><span class="ev-actor">merge-worker-1 · 20:20:22</span>
+          </div>
+        </div>
+        <div class="ev-side">
+          <div class="ev-card">
+            <h4>只追加，可重放</h4>
+            <p>事件表只写不改，序号全局单调。任何投影都能由事件重新推导出来。</p>
+          </div>
+          <div class="ev-card">
+            <h4>投影可重建</h4>
+            <p>用最新 checkpoint 加上后续事件重放，写出一个完整新库，并对 15 张聚合表逐列 diff：</p>
+            <p style="margin-top:8px"><code>python -m app.tools.rebuild --snapshot --verify</code></p>
+          </div>
+          <div class="ev-card">
+            <h4>失败也留痕</h4>
+            <p>退回、拒收、接管、续租失败都写进同一条流，排障不用靠猜。</p>
+          </div>
+          <div class="ev-actions">
+            <button class="flow-play" id="evReplay" type="button">重放这条事件流</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 CAPABILITIES -->
+    <section id="capabilities">
+      <div class="sec-head reveal">
+        <div class="sec-tag">07 / 工程能力</div>
+        <h2>把“谁能写入”变成可检查的状态，而不是约定</h2>
+        <p>每一项能力都对应项目中的具体实现与明确的设计关注点。</p>
+      </div>
+      <div class="cap-grid reveal">
+        <div class="cap"><h4>并发领取</h4><p>SQLite 事务、条件更新与请求幂等记录，两个真实连接抢同一任务时只创建一个 attempt。</p></div>
+        <div class="cap"><h4>租约与接管</h4><p>lease token、平台时钟、过期扫描与 epoch 递增，租约过期后旧窗口不再拥有写入权。</p></div>
+        <div class="cap"><h4>防止旧写入</h4><p>guarded write + fencing epoch + attempt 校验，接管发生在请求途中也不会丢失隔离。</p></div>
+        <div class="cap"><h4>结果验证</h4><p>verify profile、命令白名单与 verification receipt，未验证的提交不能直接进入 review 或 merge。</p></div>
+        <div class="cap"><h4>人工审核</h4><p>review lease、commit 一致性与权限矩阵，审核身份和被审核 commit 都必须可确认。</p></div>
+        <div class="cap"><h4>受控合并</h4><p>canonical repo、隔离 worktree 与 merge worker，合并边界和证据都可以复现。</p></div>
+        <div class="cap"><h4>事件追踪</h4><p>append-only event store、全局 seq、checkpoint + reducer，15 张任务聚合表可重建并逐列 diff。</p></div>
+        <div class="cap"><h4>多 Harness 适配</h4><p>注册表、统一 adapter protocol 与 CLI 输出解析，把不同 CLI 的差异限制在适配器边界内。</p></div>
+        <div class="cap"><h4>运行期巡检</h4><p>runtime driver、sweeper 与 liveness / budget 检查，持续推进状态并发现卡住的执行。</p></div>
+        <div class="cap"><h4>可观察界面</h4><p>Agent Office + 本地预览网关，查看任务、成员、事件、输出与额度，不暴露内部凭据。</p></div>
+        <div class="cap"><h4>自建产品</h4><p>目标 → 细化 → 传阅 → 派单 → 评审 → 合入，把一句话目标变成可运行、可验证的产品。</p></div>
+        <div class="cap"><h4>幂等重试</h4><p>请求级与任务项级两层记录，同一请求重放返回原结果，内容不一致则拒绝。</p></div>
+      </div>
+    </section>
+
+    <!-- 08 START -->
+    <section id="start">
+      <div class="sec-head reveal">
+        <div class="sec-tag">08 / 快速开始</div>
+        <h2>三步进入可协作状态</h2>
+        <p>按固定顺序启动：先装依赖，再以正式认证拉起后端与成员 worker，最后打开办公界面。</p>
+      </div>
+      <div class="start-grid reveal">
+        <div class="cmd">
+          <span class="order">01</span>
+          <code>.\setup.ps1</code>
+          <button class="copy" type="button" data-copy=".\setup.ps1">复制</button>
+        </div>
+        <div class="cmd">
+          <span class="order">02</span>
+          <code>.\start-formal.ps1</code>
+          <button class="copy" type="button" data-copy=".\start-formal.ps1">复制</button>
+        </div>
+        <div class="cmd">
+          <span class="order">03</span>
+          <code>.\start-office.bat</code>
+          <button class="copy" type="button" data-copy=".\start-office.bat">复制</button>
+        </div>
+      </div>
+      <div class="sec-head reveal" style="margin-top:32px;margin-bottom:0">
+        <p><code>start-formal.ps1</code> 以 enforce 认证拉起后端，并同时拉起 6 个成员 worker 与 1 个管理员 worker；<code>start-office.bat</code> 启动面向办公场景的交互界面，人工审核在该界面完成。</p>
+      </div>
+    </section>
+  </div>
+
+  <footer>
+    <div class="shell foot-inner">
+      <span>Multi-Harness Agent Platform · 多 AI 编程窗口的任务协作与交付平台</span>
+      <span class="mono">SELF-CONTAINED · STATIC</span>
+    </div>
+  </footer>
+</main>
+
+<script>
+(function () {
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- scroll reveal ---------- */
+  var items = document.querySelectorAll('.reveal');
+  if (!reduce && 'IntersectionObserver' in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('in');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    items.forEach(function (el) { io.observe(el); });
+  } else {
+    items.forEach(function (el) { el.classList.add('in'); });
+  }
+
+  /* ---------- interactive pipeline ---------- */
+  var STEPS = [
+    {
+      title: '发布并批准任务计划',
+      desc: '管理员把目标细化成任务，写成方案并交由人批准。批准后的快照不可随意修改，后续每个动作都以它为准。',
+      input: '项目目标、成员名单、任务拆分与验收口径',
+      output: '不可变 plan snapshot，任务据此生成',
+      fail: '方案被驳回 → 回到细化；未批准的任务不会被放出来领取',
+      ev: 'plan.approve  ·  codebuddy'
+    },
+    {
+      title: '统一 adapter 领取任务',
+      desc: '不同 Harness 通过同一种协议领取任务。同一请求重放会返回原结果，内容不一致则拒绝，而不是悄悄创建第二个 attempt。',
+      input: '幂等键 + 已接受的分配',
+      output: 'attempt、development lease 与 fencing epoch',
+      fail: '已有人领取 / 没有分配 → 拒绝；重放请求收敛到同一结果',
+      ev: 'claim  ·  claude-code'
+    },
+    {
+      title: '在隔离工作区开始执行',
+      desc: 'runtime driver 为 attempt 准备独立的 Git worktree，Harness 在其中实现任务。主分支不会被直接写入。',
+      input: 'attempt 与其冻结的基线 commit',
+      output: '隔离 worktree、心跳与执行输出',
+      fail: '租约到期未续 → 任务进入可接管状态，epoch 递增',
+      ev: 'start  ·  claude-code'
+    },
+    {
+      title: '发布分支与 commit，提交结果',
+      desc: '执行者交付的是分支与 commit，不是直接改主分支。平台记录回执，并核对改动是否落在允许修改的路径内。',
+      input: '分支、commit、改动路径',
+      output: 'submission receipt',
+      fail: '没有真正提交改动 / 越界修改 → 拒收，任务退回队列',
+      ev: 'submit_result  ·  claude-code'
+    },
+    {
+      title: '按 profile 校验',
+      desc: 'verify worker 依据方案快照里冻结的 profile 执行检查，产出可复核的回执。没通过验证的结果不能进入审核。',
+      input: 'profile、命令白名单、提交的 commit',
+      output: 'verification receipt',
+      fail: '校验失败 → 停在验证侧，不产生审核任务',
+      ev: 'verify_passed  ·  verify-worker-1'
+    },
+    {
+      title: '人工审核',
+      desc: '人取得 review lease，对被审 commit 提交批准或发现。审核身份与被审 commit 都必须能对上。',
+      input: 'review lease + 指定 commit',
+      output: 'approve / findings 决策',
+      fail: 'commit 已变化或 lease 不匹配 → 审核无效，必须重来',
+      ev: 'approve  ·  codebuddy'
+    },
+    {
+      title: '受控合并',
+      desc: '只有验证通过、审核通过且 commit 仍匹配时，merge worker 才会合入 canonical 主分支；并发争抢合并权时只有一个赢家。',
+      input: '已批准 commit + 合并权',
+      output: '主分支新 HEAD、合并记录',
+      fail: '基线漂移 / 竞争失败 → 中止合并，保留证据待人工处置',
+      ev: 'merge_start / merge_success  ·  merge-worker-1'
+    },
+    {
+      title: '任务收口',
+      desc: '任务状态落定为已完成，移交记录与来源一并保留：这条活接替了谁、由谁执行、经过几轮，都可回看。',
+      input: '合并结果与验收口径',
+      output: '任务终态、交接链与验收记录',
+      fail: '验收不通过 → 退回重做，退回次数照实记录',
+      ev: 'task.merged  ·  merge-worker-1'
+    },
+    {
+      title: '事件流贯穿全程',
+      desc: '上述每个动作都写入只追加的事件流，序号单调递增。任何投影都能由事件重建，失败与退回同样留痕。',
+      input: '所有状态变化的动作',
+      output: 'append-only 事件流 + 可重建投影',
+      fail: '投影损坏 → 从 checkpoint 重放重建，逐表逐列 diff',
+      ev: 'task_events  ·  seq++'
+    }
+  ];
+
+  var list = document.getElementById('flowList');
+  var elKicker = document.getElementById('flowKicker');
+  var elTitle = document.getElementById('flowTitle');
+  var elDesc = document.getElementById('flowDesc');
+  var elInput = document.getElementById('flowInput');
+  var elOutput = document.getElementById('flowOutput');
+  var elFail = document.getElementById('flowFail');
+  var elEv = document.getElementById('flowEv');
+  var playBtn = document.getElementById('flowPlay');
+  var index = 0;
+  var timer = null;
+  var playing = !reduce;
+
+  STEPS.forEach(function (step, i) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'flow-item';
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-selected', 'false');
+    btn.innerHTML = '<span class="no">' + String(i + 1).padStart(2, '0') + '</span><span>' +
+      step.title + '</span><span class="bar"></span>';
+    btn.addEventListener('click', function () {
+      select(i);
+      pause();
+    });
+    list.appendChild(btn);
+  });
+
+  function select(i) {
+    index = i;
+    var step = STEPS[i];
+    elKicker.textContent = 'STEP ' + (i + 1) + ' / ' + STEPS.length;
+    elTitle.textContent = step.title;
+    elDesc.textContent = step.desc;
+    elInput.textContent = step.input;
+    elOutput.textContent = step.output;
+    elFail.textContent = step.fail;
+    elEv.innerHTML = step.ev + '<br><em>已写入事件流 · 可重放</em>';
+    var nodes = list.querySelectorAll('.flow-item');
+    for (var k = 0; k < nodes.length; k += 1) {
+      var on = k === i;
+      nodes[k].classList.toggle('active', on);
+      nodes[k].setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+  }
+
+  function play() {
+    playing = true;
+    playBtn.textContent = '暂停自动演示';
+    timer = setInterval(function () { select((index + 1) % STEPS.length); }, 4200);
+  }
+  function pause() {
+    playing = false;
+    playBtn.textContent = '继续自动演示';
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  playBtn.addEventListener('click', function () { if (playing) { pause(); } else { play(); } });
+
+  select(0);
+  pause();
+
+  var flowTouched = false;
+  list.addEventListener('click', function () { flowTouched = true; });
+
+  if ('IntersectionObserver' in window && !reduce) {
+    var flowEl = document.querySelector('.flow');
+    var flowSeen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting && !flowTouched) { play(); }
+        else if (!entry.isIntersecting && playing) { pause(); }
+      });
+    }, { threshold: 0.28 });
+    flowSeen.observe(flowEl);
+  }
+
+  /* ---------- event stream replay ---------- */
+  var rows = document.querySelectorAll('#evList .ev-row');
+  var replayBtn = document.getElementById('evReplay');
+  var timers = [];
+  function clearTimers() {
+    timers.forEach(clearTimeout);
+    timers = [];
+  }
+  function replay() {
+    clearTimers();
+    rows.forEach(function (row) { row.classList.remove('on'); });
+    if (reduce) {
+      rows.forEach(function (row) { row.classList.add('on'); });
+      return;
+    }
+    rows.forEach(function (row, i) {
+      timers.push(setTimeout(function () { row.classList.add('on'); }, 220 + i * 320));
+    });
+  }
+  replayBtn.addEventListener('click', replay);
+
+  if ('IntersectionObserver' in window) {
+    var evSeen = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { replay(); evSeen.disconnect(); }
+      });
+    }, { threshold: 0.3 });
+    evSeen.observe(document.getElementById('evList'));
+  } else {
+    replay();
+  }
+
+  /* ---------- demo video ---------- */
+  var demoVideo = document.getElementById('demoVideo');
+  var videoShell = document.getElementById('videoShell');
+  var videoCta = document.getElementById('videoCta');
+  if (demoVideo && videoCta) {
+    videoCta.addEventListener('click', function () {
+      videoShell.classList.add('playing');
+      var started = demoVideo.play();
+      if (started && started.catch) { started.catch(function () {}); }
+    });
+    demoVideo.addEventListener('play', function () { videoShell.classList.add('playing'); });
+  }
+
+  /* ---------- copy buttons ---------- */
+  document.querySelectorAll('.copy').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-copy') || '';
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = '已复制';
+        btn.classList.add('done');
+        setTimeout(function () {
+          btn.textContent = old;
+          btn.classList.remove('done');
+        }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, done);
+      } else {
+        done();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
