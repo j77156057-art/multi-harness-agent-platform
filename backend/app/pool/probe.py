@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Any
 
+from app.pool import reconcile
 from app.pool.cli_model import CliModelSource
 from app.pool.service import PoolError
 from app.pool.sources import (
@@ -143,7 +144,11 @@ def start_roster_probe() -> dict[str, Any]:
                     entries[index] = result
                     break
             if all(entry.get("status") not in ("pending", "running") for entry in entries):
+                # 整轮**完结**（探查中断不会走到这里：running 一直挂着，对账
+                # 不跑、缺席不计 —— 失败的那轮本来就不该有证据力）。对账放进
+                # 同一把锁的收尾路径；它自己的并发与幂等由 reconcile 管。
                 _STATE["running"] = False
+                _STATE["reconcile"] = _reconcile_after(entries)
 
     # 先把每个都标成 running：人要看到"这几家正在探"，而不是一直 pending。
     with _LOCK:
@@ -153,6 +158,18 @@ def start_roster_probe() -> dict[str, Any]:
     for slot in slots:
         threading.Thread(target=work, args=(slot,), daemon=True).start()
     return snapshot()
+
+
+def _reconcile_after(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    """整轮探查完结后的**名册对账**（见 ``app.pool.reconcile``）。
+
+    对账出的任何异常都只进报告，不往外抛：探测轮本身已经成功，对账坏了不该
+    把这轮的成果（各家名册）一起埋掉，更不能在坏状态下撤声明。
+    """
+    try:
+        return reconcile.reconcile_round(entries, round_id=_STATE.get("started_at"))
+    except Exception as error:  # noqa: BLE001 - 对账失败只报告
+        return {"error": f"{type(error).__name__}: {error}", "retracted": []}
 
 
 def _undeclared_route(service: Any, model_id: str) -> tuple[Any, dict[str, Any]] | None:
@@ -295,8 +312,9 @@ def snapshot() -> dict[str, Any]:
         entries = [dict(entry) for entry in (_STATE.get("entries") or [])]
         running = bool(_STATE.get("running"))
         started = float(_STATE.get("started_at") or 0.0)
+        reconcile_report = _STATE.get("reconcile")
     done = [entry for entry in entries if entry.get("status") in ("done", "empty", "failed")]
-    return {
+    report = {
         "started_at": started,
         "running": running,
         "entries": entries,
@@ -308,3 +326,7 @@ def snapshot() -> dict[str, Any]:
         },
         "note": "" if entries else "还没有开始探测（点「刷新」）。",
     }
+    if isinstance(reconcile_report, dict):
+        # 整轮探查完结后的对账结论：缺席计数、自动撤档（审计）都在这里。
+        report["reconcile"] = reconcile_report
+    return report
