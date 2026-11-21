@@ -126,8 +126,27 @@ def pool_models(principal: _guard("harness:pool")) -> dict[str, Any]:
     return {"object": "list", "data": _service().models()}
 
 
-def _pool_status(service: PoolService) -> dict[str, Any]:
+def _declaration_view(slot: dict[str, Any], stale: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """一条声明在状态面上的样子：陈旧的带上缺席标注，人和 UI 都看得见。
+
+    「陈旧」（名册里缺席了一轮，还没到撤的线）的模型**仍然可用** —— 标注只是
+    说「这家 CLI 最新自报的名册里没有它了，连续两轮缺席才会自动撤」。
+    """
+    cli = str(slot.get("name") or "")
+    model = str(slot.get("model") or "")
+    view = {"cli": cli, "model": model, "tier": str(slot.get("tier") or "")}
+    info = stale.get(f"{cli}/{model.split('/')[-1]}")
+    if info:
+        view["missing_from_roster"] = True
+        view["absent_rounds"] = info.get("absent_rounds")
+    return view
+
+
+def _pool_status(service: PoolService, database: Any = None) -> dict[str, Any]:
     """The pool's state: the sources, the models, and who spent what."""
+    from app.pool import reconcile
+
+    stale = reconcile.stale_declarations()
     return {
         "upstreams": [
             {
@@ -154,25 +173,26 @@ def _pool_status(service: PoolService) -> dict[str, Any]:
         "rosters": service.rosters(),
         # 哪些定档是**人写下来的**（写在这台机器的池子配置里）。界面据此决定
         # 某一行能不能「改档 / 撤档」：内置档位没有可撤的声明，撤了它也不会消失。
+        # 名册里已经缺席的带上标注（missing_from_roster / absent_rounds）。
         "declarations": [
-            {
-                "cli": str(slot.get("name") or ""),
-                "model": str(slot.get("model") or ""),
-                "tier": str(slot.get("tier") or ""),
-            }
-            for slot in declared_cli_slots()
-            if slot.get("model")
+            _declaration_view(slot, stale) for slot in declared_cli_slots() if slot.get("model")
         ],
         # 人给**非 CLI 上游**（写在各家 CLI 自己配置里那几条）写的档位。它们的默认
         # 档位在代码里，所以界面上只有这份清单能说明"这一行可以改、也可以撤"。
         "upstream_tiers": declared_upstream_tiers(),
+        # 名册对账的**自动撤档审计**：撤了什么、何时、依据哪两轮探查。撤是
+        # 平台做的（连续缺席两轮的保守规则），所以事后必须能对回依据。
+        "retracted": reconcile.retracted_log(),
+        # 哪些窗口的 model_selection 还指向已撤/陈旧的模型 —— **只报告，不改**：
+        # 路由失败会走既有的 evidence/弹窗链路，平台不替人改选择。
+        "stale_selections": reconcile.stale_selections(database),
     }
 
 
 @router.get("/pool/status")
-def pool_status(principal: _guard("harness:pool")) -> dict[str, Any]:
+def pool_status(principal: _guard("harness:pool"), database: DatabaseDep) -> dict[str, Any]:
     """The pool's state: the sources, the models, and who spent what."""
-    return _pool_status(_service())
+    return _pool_status(_service(), database)
 
 
 @router.post("/pool/declaration")

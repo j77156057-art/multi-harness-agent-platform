@@ -9,17 +9,21 @@ failure must never produce a submitted review verdict.
 from __future__ import annotations
 
 import json
+import time
+from pathlib import Path
 
 import httpx
 
 from app.admin.experience import ExperienceStore
 from app.admin.service import AdminHarnessError
 from app.admin.worker import (
+    ANSWER_RETRY_MAX_ATTEMPTS,
     AdminWorker,
     WorkerState,
     _goal_payload,
     run_once,
 )
+from app.git.repo import run_git
 
 
 class FakeAdmin:
@@ -232,12 +236,12 @@ class FakeClient:
         raise AssertionError(path)
 
 
-def _worker(tmp_path, monkeypatch, *, admin, client, dry_run=False):
+def _worker(tmp_path, monkeypatch, *, admin, client, dry_run=False, database=None):
     monkeypatch.setattr("app.admin.worker.AdminService", lambda *a, **k: admin)
     state_path = tmp_path / "admin-worker.json"
     return AdminWorker(
         client=client,
-        database=None,
+        database=database,
         group_id="G-1",
         admin_harness_id="admin-window",
         state=WorkerState(),
@@ -416,6 +420,100 @@ def test_goal_for_another_admin_is_not_dispatched(tmp_path, monkeypatch):
     )
     assert admin.refine_calls == []
     assert client.dispatches == []
+
+
+class PoolClient(FakeClient):
+    """管理员窗口走额度池：/pool/plan 返回一个池模型，让 refine 的 route 落地。"""
+
+    base_url = "http://127.0.0.1:8848/api/v1"
+    token = "fake-token"
+
+    def get(self, path, **params):
+        if path == "/pool/plan":
+            return {
+                "mode": "pool",
+                "model": "qoder/Qwen3.8-Flash",
+                "base_path": "/pool/v1",
+                "anthropic_path": "/pool",
+                "upstream": "qoder",
+            }
+        return super().get(path, **params)
+
+
+class FakeMessageDatabase:
+    """只实现 worker 用到的那一件事：按 created_seq 倒序返回本群消息正文。"""
+
+    def __init__(self, rows):
+        self._rows = sorted(rows, key=lambda row: int(row["created_seq"]), reverse=True)
+
+    def read(self, sql, parameters=()):
+        return [dict(row) for row in self._rows]
+
+
+def test_a_first_refine_failure_names_the_pool_model(tmp_path, monkeypatch):
+    """细化第一次失败：报模型是谁，但还说不上「连着失败」。"""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = PoolClient()
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+
+    worker.handle_goal(
+        {
+            "goal_id": "g-1",
+            "goal": "补一条说明",
+            "project_name": "DEMO",
+            "members": ["member-1"],
+            "max_tasks": 1,
+            "answers": [],
+            "admin": "admin-window",
+            "seq": 8,
+        },
+        force=True,
+    )
+
+    assert len(client.messages) == 1
+    body = client.messages[0]["body"]
+    assert "管理员 Harness 细化失败" in body
+    assert "（池模型 qoder/Qwen3.8-Flash）" in body
+    assert "已连续失败" not in body
+
+
+def test_repeated_refine_failures_tell_the_owner_to_switch_models(tmp_path, monkeypatch):
+    """连续失败不再怪「通道」：管理员窗口的池模型没有自动换道，得换模型。
+
+    平台只会给成员任务做失败换道（pool/routing.py 按 task_id 找证据）；管理员
+    窗口的 route 是人配的固定池模型。所以连着失败时，真话是「换个池模型」，
+    不是「等通道恢复」。
+    """
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = PoolClient()
+    database = FakeMessageDatabase(
+        [
+            {"created_seq": 1, "body": "有人说话，不是失败报告"},
+            {"created_seq": 2, "body": "管理员 Harness 细化失败：旧的一次；未分派任何任务。"},
+            {"created_seq": 3, "body": "管理员 Harness 细化失败：更新的一次；未分派任何任务。"},
+        ]
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client, database=database)
+
+    worker.handle_goal(
+        {
+            "goal_id": "g-1",
+            "goal": "补一条说明",
+            "project_name": "DEMO",
+            "members": ["member-1"],
+            "max_tasks": 1,
+            "answers": [],
+            "admin": "admin-window",
+            "seq": 8,
+        },
+        force=True,
+    )
+
+    assert len(client.messages) == 1
+    body = client.messages[0]["body"]
+    assert "已连续失败 3 次" in body
+    assert "（池模型 qoder/Qwen3.8-Flash）" in body
+    assert "请给管理员窗口换一个池模型" in body
 
 
 def test_every_member_reads_every_round(tmp_path, monkeypatch):
@@ -1618,3 +1716,833 @@ def test_a_window_joining_midway_is_heard(tmp_path, monkeypatch):
     assert client.cancels, "还没人领的活要改派给新来的窗口"
     # 已经在跑的活不换人：这里只有一条等人领的活。
     assert len(client.cancels) == 1
+
+
+# ------------------------------------------------------------- 回答失败重试队列
+# 旧行为是 mark-before-call + 失败就完事：模型通道一坏，问题试一次就被永久
+# 标记、静默丢失（2026-11-21 collab-big-g1：35 秒内 3 个积压问题全丢，外加
+# 1 条 goal 附带）。修复后与 goal_retry 同一个哲学：失败要让人听见，但问题
+# 本身要留在 answer_retry 里带退避自动重试，而不是把重发担子甩给人。
+
+
+def _direct_question_inbox(seq: int = 5, body: str = "在吗", sender: str = "office-operator"):
+    return [
+        {
+            "created_seq": seq,
+            "sender_type": "human",
+            "sender_id": sender,
+            "body": body,
+            "refs": ["direct"],
+        }
+    ]
+
+
+def test_a_first_answer_failure_queues_a_backoff_retry(tmp_path, monkeypatch):
+    """第 1 次失败：恰好 1 条失败消息（说明会自动重试）+ 队列条目 attempts=1。"""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = FakeClient(inbox=_direct_question_inbox(seq=5))
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    # 第 1 次失败必须让人听见，且要说明会自动重试（人不用盯着重发）。
+    assert len(client.messages) == 1
+    sent = client.messages[0]
+    assert sent["direct"] is True
+    assert sent["mentions"] == ["office-operator"]
+    assert "没有答上来" in sent["body"]
+    assert "自动重试" in sent["body"]
+    assert "boom" in sent["body"]
+    # 问题进了重试队列，等退避到期，而不是就此消失。
+    entry = worker.state.answer_retry.get("5")
+    assert entry is not None, "失败的问题要留在 answer_retry 里等重试"
+    assert entry["attempts"] == 1
+    assert entry["question"] == "在吗"
+    assert entry["asker"] == "office-operator"
+    assert entry["harness"] == "admin-window"
+    assert entry["retry_after"] > 0
+    assert "boom" in entry["last_error"]
+
+
+def test_an_answer_retry_that_is_not_yet_due_waits(tmp_path, monkeypatch):
+    """退避未到期：不调模型、不发消息、条目原样。"""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = FakeClient(inbox=_direct_question_inbox(seq=5))
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+    before = dict(worker.state.answer_retry["5"])
+    assert len(admin.answer_calls) == 1, "只有首次失败那一次调用"
+
+    worker.retry_failed_answers(now=float(before["retry_after"]) - 1.0)
+
+    assert len(admin.answer_calls) == 1, "未到期不许提前重试"
+    assert worker.state.answer_retry["5"] == before, "未到期不许改动条目"
+    assert len(client.messages) == 1, "未到期不发消息"
+
+
+def test_a_due_answer_retry_answers_and_clears_the_queue(tmp_path, monkeypatch):
+    """到期重试成功：回答发出、条目移除、无新失败消息。"""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = FakeClient(inbox=_direct_question_inbox(seq=5))
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+    assert len(admin.answer_calls) == 1
+
+    # 通道恢复了：到期的那次重试要把问题真正答上。
+    admin.error = None
+    retry_after = float(worker.state.answer_retry["5"]["retry_after"])
+    worker.retry_failed_answers(now=retry_after + 0.1)
+
+    assert len(admin.answer_calls) == 2
+    assert admin.answer_calls[1]["question"] == "在吗"
+    assert admin.answer_calls[1]["asker"] == "office-operator"
+    assert "5" not in worker.state.answer_retry, "成功后条目要移除"
+    assert len(client.messages) == 1, "成功重试不发失败消息"
+
+
+def test_an_answer_that_keeps_failing_gives_up_after_five_attempts(tmp_path, monkeypatch):
+    """连续失败到上限：中途静默，第 5 次发一条放弃收尾，之后不再重试。"""
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: still down"))
+    client = FakeClient(inbox=_direct_question_inbox(seq=5))
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+    assert len(client.messages) == 1, "首条失败消息"
+
+    # 第 2..N-1 次失败：静默重试（防刷屏），条目留在队列里。
+    for attempt in range(2, ANSWER_RETRY_MAX_ATTEMPTS):
+        retry_after = float(worker.state.answer_retry["5"]["retry_after"])
+        worker.retry_failed_answers(now=retry_after + 0.1)
+        assert worker.state.answer_retry["5"]["attempts"] == attempt
+        assert len(client.messages) == 1, "后续失败不刷屏"
+
+    # 第 5 次失败：发一条最终放弃消息，条目移除。
+    retry_after = float(worker.state.answer_retry["5"]["retry_after"])
+    worker.retry_failed_answers(now=retry_after + 0.1)
+    assert "5" not in worker.state.answer_retry, "放弃后条目要移除"
+    assert len(client.messages) == 2, "总计两条：首条 + 放弃条"
+    final = client.messages[-1]
+    assert "停止自动重试" in final["body"]
+    assert "still down" in final["body"], "放弃条要带上最后原因"
+
+    # 条目没了：再跑也不会有新的模型调用或消息。
+    worker.retry_failed_answers(now=time.time() + 1000.0)
+    assert len(client.messages) == 2
+    assert len(admin.answer_calls) == ANSWER_RETRY_MAX_ATTEMPTS
+
+
+def test_a_retried_answer_keeps_its_seq_marked(tmp_path, monkeypatch):
+    """重试成功后 seq 仍在 handled_request_seqs：poll 循环不许重复处理。
+
+    mark-before-call 防的是 poll 对重放消息的重复处理；重试由队列驱动、
+    不走 poll 解析 —— 所以 seq 留在原地，两条防线各管各的。
+    """
+    admin = FakeAdmin(error=AdminHarnessError("admin harness call exited 1: boom"))
+    client = FakeClient(inbox=_direct_question_inbox(seq=5))
+    worker = _worker(tmp_path, monkeypatch, admin=admin, client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+    assert 5 in worker.state.handled_request_seqs
+
+    admin.error = None
+    retry_after = float(worker.state.answer_retry["5"]["retry_after"])
+    worker.retry_failed_answers(now=retry_after + 0.1)
+    assert len(admin.answer_calls) == 2
+
+    # 消息每轮重放，但 seq 已标记：同一条问题不许答两遍。
+    assert 5 in worker.state.handled_request_seqs, "重试成功不清 seq 标记"
+    worker.poll_messages()
+    assert len(admin.answer_calls) == 2
+
+
+def test_state_round_trip_keeps_answer_retry(tmp_path):
+    """WorkerState save/load 往返后 answer_retry 不丢。"""
+    path = tmp_path / "state.json"
+    state = WorkerState(
+        answer_retry={
+            "5": {
+                "question": "在吗",
+                "asker": "office-operator",
+                "harness": "admin-window",
+                "attempts": 2,
+                "retry_after": 1234.5,
+                "last_error": "AdminHarnessError: boom",
+            }
+        }
+    )
+    state.save(path)
+    loaded = WorkerState.load(path)
+    assert loaded.answer_retry["5"]["question"] == "在吗"
+    assert loaded.answer_retry["5"]["asker"] == "office-operator"
+    assert loaded.answer_retry["5"]["harness"] == "admin-window"
+    assert loaded.answer_retry["5"]["attempts"] == 2
+    assert loaded.answer_retry["5"]["retry_after"] == 1234.5
+    assert loaded.answer_retry["5"]["last_error"] == "AdminHarnessError: boom"
+
+
+# ------------------------------------------------- 人类下发、管理员确定性执行
+# 「让管理员提交这几个文件」是真实痛点：admin worker 只认白名单 ref，人类发的
+# 普通 to-admin 消息被静默忽略；而成员派单是 worktree 隔离的，看不到主工作区
+# 的未提交改动 —— 提交只能由能在主工作区跑的东西做。
+#
+# 设计决定：**不让模型碰 git**。人发一条结构化 JSON（repo + branch + 显式
+# paths），worker 用确定性代码校验并执行（分支校验 → git add 指定路径 →
+# git commit），全程没有模型调用。下面是这条路径的八个边界。
+
+
+def _temp_git_repo(tmp_path: Path, *, branch: str = "main") -> Path:
+    """A real repository in tmp: these tests must never touch the platform repo."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_git("init", "--initial-branch", branch, str(repo))
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    run_git("add", "seed.txt", cwd=repo)
+    run_git("commit", "-m", "seed", cwd=repo)
+    return repo
+
+
+def _head(repo: Path) -> str:
+    return run_git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+
+
+def _commit_count(repo: Path) -> int:
+    return len(
+        [line for line in run_git("rev-list", "--all", cwd=repo).stdout.splitlines() if line]
+    )
+
+
+def _current_branch(repo: Path) -> str:
+    return run_git("branch", "--show-current", cwd=repo).stdout.strip()
+
+
+def _commit_command(repo: Path, commits, *, branch="office-ui-and-admin-fixes", command_id=None):
+    payload = {"action": "commit", "repo": str(repo), "branch": branch, "commits": commits}
+    if command_id:
+        payload["command_id"] = command_id
+    return payload
+
+
+def _command_message(body, *, seq: int) -> dict:
+    text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
+    return {
+        "created_seq": seq,
+        "sender_type": "human",
+        "sender_id": "office-operator",
+        "body": text,
+        "refs": ["admin-command"],
+    }
+
+
+def _run_admin_command(tmp_path, monkeypatch, payload, *, seq: int = 31):
+    client = FakeClient(inbox=[_command_message(payload, seq=seq)])
+    worker = _worker(tmp_path, monkeypatch, admin=FakeAdmin(), client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+    worker.poll_messages()
+    return worker, client
+
+
+def _said(client) -> str:
+    return "\n".join(str(item.get("body") or "") for item in client.messages)
+
+
+def test_a_human_commit_command_lands_every_commit(tmp_path, monkeypatch):
+    """正常两条：分支创建、两个 hash 回报、文件真的进了库。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    (repo / "two.txt").write_text("two\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    worker, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(
+            repo,
+            [
+                {"message": "第一个提交：普通改动", "paths": ["one.txt"]},
+                {"message": "第二个提交：另一个文件", "paths": ["two.txt"]},
+            ],
+        ),
+    )
+
+    assert worker.state.handled_request_seqs == [31], "指令消息要标成已处理（消息每轮重放）"
+    assert _current_branch(repo) == "office-ui-and-admin-fixes", "分支要建出来并切过去"
+    assert _commit_count(repo) == before + 2, "两条提交都要落地"
+    hashes = run_git("rev-list", "-2", "HEAD", cwd=repo).stdout.split()
+    said = _said(client)
+    for commit_hash in hashes:
+        assert commit_hash[:8] in said, "报告里要能看到每条提交的 hash"
+    assert "office-ui-and-admin-fixes" in said, "报告里要写清分支"
+    for name in ("one.txt", "two.txt"):
+        assert (
+            run_git("cat-file", "-e", f"HEAD:{name}", cwd=repo).returncode == 0
+        ), f"{name} 必须真的进库（不是只 add 没提交）"
+
+
+def test_a_branch_that_is_empty_or_main_is_refused(tmp_path, monkeypatch):
+    """空分支名、main、master：硬拒绝，仓库里不许出现新提交。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+    head_before = _head(repo)
+
+    for branch in ("", "main", "master"):
+        _worker_used, client = _run_admin_command(
+            tmp_path,
+            monkeypatch,
+            _commit_command(
+                repo,
+                [{"message": "不该落地的提交", "paths": ["one.txt"]}],
+                branch=branch,
+            ),
+        )
+        said = _said(client)
+        assert _commit_count(repo) == before, f"branch={branch!r} 不许产生新提交"
+        assert _head(repo) == head_before, "HEAD 一动没动"
+        assert _current_branch(repo) == "main", "被拒的指令连分支都不许切"
+        assert "失败" in said, "要明确回报失败"
+        if branch.lower() in {"main", "master"}:
+            assert "rule #6" in said, "拒绝理由要说清 rule #6"
+
+
+def test_a_path_that_escapes_the_repository_is_refused(tmp_path, monkeypatch):
+    """`../outside.txt` 是逃逸：拒绝、没有提交，**也不能把工作区切走**。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (tmp_path / "outside.txt").write_text("outside\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "偷渡", "paths": ["../outside.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "仓库外的东西不许被提交"
+    assert _current_branch(repo) == "main", "被拒的指令不许先 git switch 再校验（QA P2-1）"
+    assert "跳出仓库根" in said or "跑出仓库根" in said, "要说清是路径逃逸"
+    assert "分支也没有切换" in said, "报告要如实说工作区没被移动"
+
+
+def test_a_repo_outside_the_allowed_roots_is_refused(tmp_path, monkeypatch):
+    """repo 不在允许根内：拒绝（允许根可被 AP_ADMIN_COMMAND_ROOTS 追加）。"""
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(elsewhere))
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "越界", "paths": ["one.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before
+    assert "不在允许根内" in said
+    assert "AP_ADMIN_COMMAND_ROOTS" in said, "拒绝时要告诉人怎么加允许根"
+
+
+def test_a_commit_with_no_staged_change_is_skipped_not_emptied(tmp_path, monkeypatch):
+    """paths 没有变化：跳过这一条（不造空提交），其余照常，报告写明跳过。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(
+            repo,
+            [
+                {"message": "真改动", "paths": ["one.txt"]},
+                # seed.txt 已提交且没再改：add 之后暂存区还是空的。
+                {"message": "没变化的提交", "paths": ["seed.txt"]},
+            ],
+        ),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before + 1, "无变化的那条不许变成空提交"
+    assert "无变化跳过" in said
+    assert "没变化的提交" in said, "跳过的那条要点名"
+    assert run_git("log", "-1", "--pretty=%s", cwd=repo).stdout.strip() == "真改动"
+
+
+def test_a_body_that_is_not_json_is_reported_not_raised(tmp_path, monkeypatch):
+    """人发了一句中文而不是 JSON：友好报错、不抛异常、不每轮刷屏。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    client = FakeClient(inbox=[_command_message("请帮我把这几个文件提交了", seq=32)])
+    worker = _worker(tmp_path, monkeypatch, admin=FakeAdmin(), client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()  # 不许抛
+
+    said = _said(client)
+    assert "指令格式不对" in said
+    assert "期望的字段" in said, "报错要贴出期望的字段"
+    assert 32 in worker.state.handled_request_seqs, "不合法指令也要标记，否则每轮都刷一遍"
+
+
+def test_a_repeated_command_id_is_ignored(tmp_path, monkeypatch):
+    """同一个 command_id 第二次到达：直接忽略（幂等），seq 拦不住这种情况。"""
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+    payload = _commit_command(
+        repo, [{"message": "只该落一次", "paths": ["one.txt"]}], command_id="cmd-1"
+    )
+    # 两条消息、不同 seq、同一 command_id：办公室重发就是这个形状。
+    client = FakeClient(
+        inbox=[_command_message(payload, seq=31), _command_message(payload, seq=32)]
+    )
+    worker = _worker(tmp_path, monkeypatch, admin=FakeAdmin(), client=client)
+    worker.state.initialized = True
+    worker.state.last_message_seq = 0
+
+    worker.poll_messages()
+
+    assert _commit_count(repo) == before + 1, "同一个 command_id 只许提交一次"
+    assert worker.state.handled_command_ids == ["cmd-1"]
+    # 重发不许闷掉：中途失败后人的第一反应就是原样重发，沉默等于「平台坏了」。
+    assert len(client.messages) == 2, "第一次的报告 + 重复那条的一句说明"
+    assert "已经执行过" in _said(client)
+
+
+def test_a_failure_halfway_stops_and_names_the_commit_that_landed(tmp_path, monkeypatch):
+    """中途失败：停止后续提交，失败消息里带上已完成那条的 hash。
+
+    失败点在**执行期**（第二条的路径被 .gitignore 挡住，git add 退出非 0），
+    因为静态错误（逃逸/目录/通配符）现在在任何副作用之前就被拦下了 —— 那条
+    路径要求零副作用，见 test_a_path_that_escapes_the_repository_is_refused。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    (repo / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (repo / "debug.log").write_text("noise\n", encoding="utf-8")
+    run_git("add", ".gitignore", cwd=repo)
+    run_git("commit", "-m", "chore: ignore logs", cwd=repo)
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(
+            repo,
+            [
+                {"message": "先落地的这条", "paths": ["one.txt"]},
+                {"message": "第二条被忽略规则挡住", "paths": ["debug.log"]},
+            ],
+        ),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before + 1, "第一条已经落地，不许回滚"
+    landed = _head(repo)
+    assert run_git("log", "-1", "--pretty=%s", cwd=repo).stdout.strip() == "先落地的这条"
+    assert "失败" in said
+    assert landed[:8] in said, "失败报告里必须能看到已完成那条的 hash"
+    assert "已完成的提交" in said
+
+
+def test_a_leftover_staged_file_is_never_committed(tmp_path, monkeypatch):
+    """P1（QA）：`git add` 只追加进 index，`git commit` 提交整个 index。
+
+    主工作区里残留一条别人 `git add` 过的文件是常态。指令只声明 one.txt，
+    那条残留就会搭车进提交 —— 不写 `-A` 也能把我的防线绕过去。所以暂存区
+    里只要有没声明的条目就**拒绝**，并且一个字节都不许动它。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    (repo / "PRESTAGED.txt").write_text("someone else's work\n", encoding="utf-8")
+    run_git("add", "PRESTAGED.txt", cwd=repo)  # 上一次操作遗留的暂存
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "只声明了 one.txt", "paths": ["one.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "残留暂存不许被一起提交"
+    assert _current_branch(repo) == "main", "拒绝要发生在切分支之前"
+    assert "PRESTAGED.txt" in said, "要指名是哪个文件挡住了"
+    assert "git restore --staged" in said, "要告诉人怎么清"
+    # 别人的暂存还在原地（不许替人 unstage）。
+    staged = run_git("diff", "--cached", "--name-only", cwd=repo).stdout.split()
+    assert staged == ["PRESTAGED.txt"], "我们没有动别人的暂存区"
+
+
+def test_a_leftover_staged_file_cannot_masquerade_as_a_change(tmp_path, monkeypatch):
+    """P1 变体二：「无变化跳过」只看整个 index 时，会把别人的暂存造成一条提交。
+
+    指令声明 seed.txt（没改过），暂存区里有 P2.txt。修复前 skipped=False 且
+    凭空多出一条内容为 P2.txt 的提交；现在必须在任何副作用之前拒绝。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "P2.txt").write_text("staged by someone\n", encoding="utf-8")
+    run_git("add", "P2.txt", cwd=repo)
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "seed.txt 没变化，应该跳过", "paths": ["seed.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "不许把他人的暂存内容造成一条提交"
+    assert run_git("log", "-1", "--pretty=%s", cwd=repo).stdout.strip() == "seed"
+    assert "P2.txt" in said
+    assert "无变化跳过" not in said, "这不是「无变化」，是暂存区脏了，必须说清"
+
+
+def test_a_branch_name_with_a_refs_prefix_is_refused(tmp_path, monkeypatch):
+    """P2-2：`check-ref-format --branch refs/heads/main` 会说 OK。
+
+    照抄下去 `git switch -c` 会建出 `refs/heads/refs/heads/main` —— main 本体
+    没动，但人的本意就是「在 main 上提交」，必须拒。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    for branch in ("refs/heads/main", "refs/heads/feature"):
+        _worker_used, client = _run_admin_command(
+            tmp_path,
+            monkeypatch,
+            _commit_command(repo, [{"message": "不该落地", "paths": ["one.txt"]}], branch=branch),
+        )
+        said = _said(client)
+        assert _commit_count(repo) == before, f"branch={branch!r} 不许产生提交"
+        assert _current_branch(repo) == "main"
+        assert "refs/" in said, "要说明不要带 refs/ 前缀"
+
+
+def test_a_dry_run_does_not_burn_the_command_id(tmp_path, monkeypatch):
+    """P2-3：先 --dry-run 看计划、再去掉 flag 真跑，是最自然的操作序列。
+
+    修复前 dry_run 把 command_id 烧了，真跑那条被当成重复、静默 +0 提交。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+    command = _commit_command(
+        repo, [{"message": "预览过的这条", "paths": ["one.txt"]}], command_id="dry-cmd-1"
+    )
+    command["dry_run"] = True
+
+    worker, client = _run_admin_command(tmp_path, monkeypatch, command)
+    assert _commit_count(repo) == before, "dry_run 不许落地"
+    assert worker.state.handled_command_ids == [], "dry_run 不许记下 command_id"
+
+    # 同一条指令去掉 dry_run、同一个 id：必须真的执行。
+    command["dry_run"] = False
+    worker, client = _run_admin_command(tmp_path, monkeypatch, command, seq=32)
+
+    said = _said(client)
+    assert _commit_count(repo) == before + 1, "预览之后真跑不许被当成重复"
+    assert "提交完成" in said
+    assert worker.state.handled_command_ids == ["dry-cmd-1"]
+
+
+def test_a_directory_path_is_refused(tmp_path, monkeypatch):
+    """P3-2：`paths:["office"]` 等价 `git add office`，连**未跟踪的新文件**一起带走。
+
+    指令的语义是「这几个文件」，目录是笔误而不是简写：实测 `paths:["office"]`
+    会把 `office/untracked-new.js`（人从没看过的）也提交进去。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "office").mkdir()
+    (repo / "office" / "a.css").write_text("a\n", encoding="utf-8")
+    (repo / "office" / "untracked-new.js").write_text("b\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "不该落地", "paths": ["office"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "目录不许被展开成一堆文件提交"
+    assert "是一个目录" in said, "要说明目录会被整体带走"
+    assert run_git("log", "-1", "--pretty=%s", cwd=repo).stdout.strip() == "seed"
+    # 未跟踪的新文件还在工作区，没被提交。
+    assert (
+        run_git("cat-file", "-e", "HEAD:office/untracked-new.js", cwd=repo, check=False).returncode
+        != 0
+    )
+
+
+def test_a_non_string_path_is_refused(tmp_path, monkeypatch):
+    """P3-3：`paths:[123]` 不许被 `str()` coerce 成真实路径 "123"。
+
+    把 `null` 变成 "None"、把 `123` 变成 "123"，等于让笔误静默生效；解析阶段
+    就拒绝，比让 git 报 "pathspec did not match" 更容易让人修对。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    for raw in (123, None, {"path": "one.txt"}):
+        _worker_used, client = _run_admin_command(
+            tmp_path,
+            monkeypatch,
+            _commit_command(repo, [{"message": "不该落地", "paths": [raw]}]),
+        )
+        said = _said(client)
+        assert _commit_count(repo) == before, f"paths={[raw]!r} 不许产生提交"
+        assert "不是字符串" in said, f"paths={[raw]!r} 的拒绝理由要说清"
+
+
+def test_a_repository_in_the_middle_of_a_merge_is_refused(tmp_path, monkeypatch):
+    """进行中的 merge：拒绝，且不新建分支、不产生提交（QA 回归用例）。
+
+    在别人半截的 merge 上提交，等于把别人的中间状态写成一条「这次要做的
+    改动」。这里造一次**真冲突**而不是手写 `.git/MERGE_HEAD`：手写 marker
+    只能证明「文件存在性判断」，证明不了真实 merge 现场（QA 第 1 轮就是用
+    真冲突验的，没进自动化用例，现在补上）。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "conflict.txt").write_text("base\n", encoding="utf-8")
+    run_git("add", "conflict.txt", cwd=repo)
+    run_git("commit", "-m", "base", cwd=repo)
+    run_git("switch", "-c", "side", cwd=repo)
+    (repo / "conflict.txt").write_text("side\n", encoding="utf-8")
+    run_git("commit", "-am", "side", cwd=repo)
+    run_git("switch", "main", cwd=repo)
+    (repo / "conflict.txt").write_text("main\n", encoding="utf-8")
+    run_git("commit", "-am", "main", cwd=repo)
+    merged = run_git("merge", "side", cwd=repo, check=False)
+
+    assert merged.returncode != 0, "环境前提：这次 merge 必须真的冲突"
+    assert (repo / ".git" / "MERGE_HEAD").exists(), "环境前提：MERGE_HEAD 真的在"
+
+    before = _commit_count(repo)
+    head_before = _head(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "在半截 merge 上提交", "paths": ["conflict.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "进行中的 merge 上不许产生提交"
+    assert _head(repo) == head_before, "HEAD 一动没动"
+    assert _current_branch(repo) == "main", "被拒的指令连分支都不许切"
+    assert "进行中的 git 操作" in said, "要说清是「有进行中的 git 操作」挡住的"
+    assert "MERGE_HEAD" in said, "要点名是哪个 marker"
+    assert "merge --abort" in said, "要告诉人怎么收场"
+
+
+def test_a_failing_pre_commit_hook_reports_the_hook_and_commits_nothing(tmp_path, monkeypatch):
+    """pre-commit hook 拒绝：报告 hook 的原话、零提交、且分支**已经切了**。
+
+    这是**执行期**错误（静态校验一条都没错：路径合法、分支合法），所以
+    `git switch` 已经发生。报告必须如实说「分支已经切到 X（需要你处理）」，
+    不能笼统写「仓库里没有半成品提交」—— 那会让人以为工作区没被动过。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    hook = repo / ".git" / "hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\necho 'qa hook refuses' >&2\nexit 1\n", encoding="utf-8")
+    hook.chmod(0o755)
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "被 hook 挡住", "paths": ["one.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "hook 拒绝后不许有提交"
+    assert "git commit 失败" in said, "要说明是提交这一步失败"
+    assert "qa hook refuses" in said, "报告要带上 hook 的原话，否则人不知道为什么失败"
+    assert "分支已经切到" in said, "执行期失败要如实说分支已经切了"
+
+
+def test_a_path_with_the_wrong_case_is_reported_not_silently_skipped(tmp_path, monkeypatch):
+    """N1（QA + team-lead 拍板）：大小写不符是「静默空操作」，不许报成「完成」。
+
+    Windows 上 `git add -- new.txt`（盘上是 `New.txt`）返回 0 却什么都没
+    staged。旧行为把这种「什么都没发生」报成「提交完成 · 无变化跳过」，而
+    人据此会对成员宣布「已提交」——工作区里却什么都没有。这是这条通道唯一
+    还能骗人的地方，所以它必须是错误，不是跳过。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "New.txt").write_text("new\n", encoding="utf-8")  # 盘上是 New.txt，未跟踪
+    before = _commit_count(repo)
+    files_before = set(
+        run_git("show", "--pretty=format:", "--name-only", "HEAD", cwd=repo).stdout.split()
+    )
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "大小写写错了", "paths": ["new.txt"]}]),
+    )
+
+    said = _said(client)
+    files_after = set(
+        run_git("show", "--pretty=format:", "--name-only", "HEAD", cwd=repo).stdout.split()
+    )
+    assert _commit_count(repo) == before, "大小写写错时不许产生提交"
+    assert files_after == files_before, "HEAD 的文件集合不许变"
+    assert "注意大小写" in said, "报错要点名是大小写问题"
+    assert "new.txt" in said, "要点名是哪条路径"
+    assert "静默什么都不做" in said, "要解释 git 为什么会这样"
+    assert "无变化跳过" not in said, "这不是「无变化」，是路径根本没命中"
+    assert "提交完成" not in said, "一个字节都没提交，不许写「完成」"
+    # 执行期才发现（先 add 才知道空操作），所以按已拍板的二分如实说分支已切。
+    assert "分支已经切到" in said
+
+
+def test_a_legitimate_no_change_is_still_skipped(tmp_path, monkeypatch):
+    """N1 的新检查不许误伤真正的「无变化」：文件已提交、内容未改、大小写正确。
+
+    末尾顺带覆盖反向用例：自己已改动并 staged、再声明自己 → 正常提交，
+    不许因为新检查被当成「找不到」。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "seed.txt 本来就没变", "paths": ["seed.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before, "真无变化就是跳过，不造空提交"
+    assert "无变化跳过" in said
+    assert "注意大小写" not in said, "大小写正确时不许误报"
+
+    # 反向用例：真的改了、也 staged 过，再声明自己 → 必须提交成功。
+    (repo / "seed.txt").write_text("seed changed\n", encoding="utf-8")
+    run_git("add", "seed.txt", cwd=repo)
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "这次真的有变化", "paths": ["seed.txt"]}]),
+        seq=33,
+    )
+    said = _said(client)
+    assert _commit_count(repo) == before + 1, "有变化的合法提交不许被新检查挡住"
+    assert "注意大小写" not in said
+    assert "无变化跳过" not in said
+
+
+def test_an_execution_failure_says_how_to_get_back(tmp_path, monkeypatch):
+    """执行期失败会把工作区留在新分支上 —— 报告必须给出「怎么回去」，且顺序可执行。
+
+    这是 P2-1 想防的事故换了个入口：人不知道自己在哪个分支，接着顺手
+    `git add` / `git commit`，改动就落到错分支。文案只说「怎么回去」，不写
+    「回滚 / 撤销」—— 实际什么都没被撤销，只是切了一次分支。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (repo / "debug.log").write_text("noise\n", encoding="utf-8")
+    run_git("add", ".gitignore", cwd=repo)
+    run_git("commit", "-m", "chore: ignore logs", cwd=repo)
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "被忽略规则挡住", "paths": ["debug.log"]}]),
+    )
+
+    said = _said(client)
+    assert _current_branch(repo) == "office-ui-and-admin-fixes", "执行期失败时分支已经切了"
+    assert _commit_count(repo) == before, "这条 commit 没落地"
+    assert "要回去" in said
+    assert "git switch -" in said
+    assert "git branch -D office-ui-and-admin-fixes" in said
+    # 顺序即正确性：分支正被 checkout 时 `branch -D` 会失败，写反了人就卡住。
+    assert said.index("git switch -") < said.index("git branch -D"), "必须先切走再删分支"
+    assert "刚建的、没有提交" in said, "要说明为什么这个分支可以删"
+    assert "回滚" not in said and "撤销" not in said, "什么都没被撤销，不许这么说"
+
+    # 有提交落地的那一类**不许**加这句：会让人以为已完成的工作要丢弃。
+    (repo / "one.txt").write_text("one\n", encoding="utf-8")
+    (repo / "debug2.log").write_text("noise\n", encoding="utf-8")
+    before2 = _commit_count(repo)
+    _worker_used, client2 = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(
+            repo,
+            [
+                {"message": "这条会落地", "paths": ["one.txt"]},
+                {"message": "这条被挡住", "paths": ["debug2.log"]},
+            ],
+        ),
+        seq=41,
+    )
+
+    said2 = _said(client2)
+    assert _commit_count(repo) == before2 + 1, "第一条已经落地"
+    assert "已完成的提交" in said2
+    assert "要回去" not in said2, "有落地提交时不许说「回去」，会被理解成丢弃"
+
+
+def test_a_path_whose_case_matches_the_file_on_disk_is_committed(tmp_path, monkeypatch):
+    """正例对照：大小写写对就必须提交成功（钉住 Windows 的大小写折叠）。
+
+    只测「写错被拒」会漏掉反向的可怕情形：如果哪天把路径比较写成大小写不一致，
+    结果会拒绝掉**每一个**名字带大写的文件（`README.md`、`Button.js`），而所有
+    小写名的用例都会照样通过 —— 没人会发现。所以这一条故意用大小写混合的名字，
+    断言它真能被提交，并且报告里不出现「注意大小写」。
+    """
+    monkeypatch.setenv("AP_ADMIN_COMMAND_ROOTS", str(tmp_path))
+    repo = _temp_git_repo(tmp_path)
+    (repo / "New.txt").write_text("hello\n", encoding="utf-8")
+    before = _commit_count(repo)
+
+    _worker_used, client = _run_admin_command(
+        tmp_path,
+        monkeypatch,
+        _commit_command(repo, [{"message": "大小写写对", "paths": ["New.txt"]}]),
+    )
+
+    said = _said(client)
+    assert _commit_count(repo) == before + 1, "大小写写对必须真的提交"
+    assert run_git("cat-file", "-e", "HEAD:New.txt", cwd=repo, check=False).returncode == 0
+    assert "注意大小写" not in said, "写对了不许报大小写"
+    assert "提交完成" in said

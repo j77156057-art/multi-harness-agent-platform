@@ -406,6 +406,9 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     allEvents: false,
     events: [],
     chatExpanded: false,
+    // 群聊里**我展开过**的那几条（message_id）。办公室每 15 秒整块重画一次，
+    // 不记下来，读到一半的长消息每 15 秒自己收回去一次。
+    chatOpen: new Set(),
     // 助手面板要不要滚到最新（刚进面板、刚发完一句时）。
     assistantScrollBottom: false,
     // 提问送不出去时的实话（空 = 没问题）。
@@ -3737,7 +3740,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     }
   }
 
-  /** 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。 */
+  /**
+   * 人给某个窗口挑了模型：存进平台登记，这件事就算处理过了。
+   *
+   * 返回**存上没有**（true/false）：调用方里「需要你处理」那页只管自己那块，
+   * 而管理员细化连续失败的弹窗要在真的存上之后才关门、记 dismissed —— 所以
+   * 结果得说出来。原有的 `void applyTroubleModel(...)` 调用不受影响。
+   */
   async function applyTroubleModel(button) {
     const harnessId = String(button.dataset.harness || '');
     const block = button.closest('.flat-alert') || button.closest('.flat-trouble');
@@ -3746,13 +3755,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const note = block ? block.querySelector(`[data-trouble-error="${harnessId}"]`) : null;
     if (!modelId) {
       if (note) note.textContent = '先选一个模型。';
-      return;
+      return false;
     }
     const entry = ((state.pool && state.pool.models) || []).find((item) => String(item.id) === modelId);
     const tier = entry ? String(entry.tier || '') : '';
     if (tier === 'metered') {
       const yes = await askPaidConsent(poolModelLabel(entry).label);
-      if (!yes) return;
+      if (!yes) return false;
     }
     button.disabled = true;
     try {
@@ -3775,9 +3784,11 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.availability = availability.availability;
       }
       render();
+      return true;
     } catch (error) {
       button.disabled = false;
       if (note) note.textContent = `没能存上：${String((error && error.message) || error)}`;
+      return false;
     }
   }
 
@@ -3794,6 +3805,183 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const dismissed = dismissedTroubles();
     return modelTroubleWindows().filter((entry) => !dismissed.has(troubleSignature(entry)));
   }
+
+  // ── 管理员细化连续失败：弹窗让人二选一 ──────────────────────────────
+  //
+  // 群里「管理员 Harness 细化失败」的消息**连着**出现（trailing 连续段，从最新
+  // 一条往前数、遇到任何别的消息即断 —— 与后端 admin/worker.py 的
+  // `_consecutive_refine_failures` 同一个口径）到第 3 次时，弹一个模态对话框：
+  // 改用窗口自带模型，或者从额度池里另换一个。连续 2 次时群里已经有文字警告
+  // （worker.py 里 streak>=2 补的那句）；弹窗打断人这件事留到第 3 次。
+  // 阈值做成常量：要调只改这一处。
+  const REFINE_FAIL_PREFIX = '管理员 Harness 细化失败';
+  const REFINE_FAIL_STREAK_MODAL = 3;
+
+  /**
+   * 本群最新的细化失败**连续段**。
+   *
+   * 数据源是办公室本来就在拉的群消息（`/messages?since_seq=0&limit=500`），
+   * 不加后端字段：失败消息落在本群最新的一小段里，500 条足够盖住一个连续段。
+   * 万一连续段真长过 500 条，数字停在 500 —— 照样过阈值，"要不要弹"这个判断
+   * 不受影响。后端那次计数带 `LIMIT 200`，是同一个折衷。
+   */
+  function refineFailureStreak() {
+    const ordered = [...(state.messages || [])].sort(
+      (a, b) => Number(a.created_seq || 0) - Number(b.created_seq || 0),
+    );
+    let streak = 0;
+    let newest = null;
+    for (let index = ordered.length - 1; index >= 0; index -= 1) {
+      const body = String(ordered[index].body || '');
+      if (!body.startsWith(REFINE_FAIL_PREFIX)) break;
+      streak += 1;
+      if (!newest) newest = { body, createdSeq: Number(ordered[index].created_seq || 0) };
+    }
+    return { streak, newest };
+  }
+
+  /**
+   * 最新那条失败里带的池模型尾注：`…（池模型 qoder/Qwen3.8-Flash）`。
+   * 取**最后一次**出现 —— streak>=2 的文案里模型名只出现在末段。旧消息没有
+   * 这个尾注（尾注是后来才加上的）就写「未知模型」：不猜，猜错更糟。
+   */
+  function refineFailureModel(body) {
+    const notes = [...String(body || '').matchAll(/（池模型\s*([^）]+)）/g)];
+    const last = notes[notes.length - 1];
+    return last ? last[1].trim() : '未知模型';
+  }
+
+  /**
+   * 这次弹窗的指纹，与「模型用不了」那套共用一个记忆（`TROUBLE_DISMISSED_KEY`）。
+   * 签名含 **连续次数** 与 **最新那条失败的 seq**：次数涨一 → 新的一件事；
+   * 换了模型又失败（新的一条失败消息）→ 新的一件事 —— 都要重新弹。
+   */
+  function refineFailureSignature(streak, createdSeq) {
+    return `refine-fail|${String(adminIdentity() || '')}|${streak}|${createdSeq}`;
+  }
+
+  /** 弹窗挂在 body 上（与任务书对话框同一理由：办公室每次重画不收走它）。 */
+  const refineFailDialog = document.createElement('dialog');
+  refineFailDialog.className = 'flat-dialog is-compact';
+  refineFailDialog.id = 'flatRefineFail';
+  refineFailDialog.setAttribute('aria-label', '管理员窗口连续细化失败');
+  document.body.append(refineFailDialog);
+
+  function openRefineFailDialog({ adminId, streak, newest, signature }) {
+    const model = refineFailureModel(newest.body);
+    // 复用「需要你处理」那页的件：`.flat-alert` 框、`troublePicker` 的分档下拉
+    // （按额度属主分组、标免费/付费/兜底）、`[data-trouble-error]` 报错行 ——
+    // 「就用这个池模型」走的还是 `applyTroubleModel` 本身（含付费档先问一遍）。
+    refineFailDialog.innerHTML = `
+      <header class="flat-dialog-head">
+        <div>
+          <h2>管理员窗口连续细化失败</h2>
+          <p class="flat-note">管理员窗口已连续细化失败 <b>${escape(String(streak))}</b> 次（池模型 <b>${escape(model)}</b>）。这条目标还压在队列里，平台会自动重试 —— 但模型不换，它就一直失败。</p>
+        </div>
+        <button type="button" class="flat-dialog-close" data-refine-close aria-label="关闭">×</button>
+      </header>
+      <div class="flat-dialog-list">
+        <div class="flat-alert">
+          <p class="flat-note"><b>改用窗口自带模型</b>：回到管理员窗口自己 CLI 配置里的那个模型，本机直连、不走额度池。立刻能动，用的还是它自己那份额度。</p>
+          <div class="flat-alert-pick">
+            <button type="button" data-refine-cli data-harness="${escape(adminId)}">改用窗口自带模型</button>
+          </div>
+          <p class="flat-note"><b>更换池模型</b>：从额度池里另挑一个，下一轮细化就按它跑。标了「付费」的会先再问你一次才用。</p>
+          <div class="flat-alert-pick">
+            <label>换成 ${troublePicker(adminId)}</label>
+            <button type="button" data-refine-pool data-harness="${escape(adminId)}">就用这个池模型</button>
+          </div>
+          <p class="flat-trouble-error" data-trouble-error="${escape(adminId)}"></p>
+        </div>
+        <div class="flat-dialog-actions">
+          <button type="button" data-refine-dismiss>知道了，稍后处理</button>
+        </div>
+      </div>`;
+    refineFailDialog.dataset.refineSignature = signature;
+    if (!refineFailDialog.open) refineFailDialog.showModal();
+  }
+
+  /**
+   * 每轮刷新读完群消息后查一次：够 3 次就弹。
+   * 弹过的（签名记住了）不再弹；次数涨了、或换了模型又失败 —— 签名变了，再弹。
+   */
+  function maybeShowRefineFailDialog() {
+    if (state.source === 'demo') return;
+    if (refineFailDialog.open) return;
+    const adminId = adminIdentity();
+    if (!adminId) return;
+    const { streak, newest } = refineFailureStreak();
+    if (!newest || streak < REFINE_FAIL_STREAK_MODAL) return;
+    const signature = refineFailureSignature(streak, newest.createdSeq);
+    if (dismissedTroubles().has(signature)) return;
+    openRefineFailDialog({ adminId, streak, newest, signature });
+  }
+
+  /** 二选一之一：管理员窗口回到自带模型（本机直连，mode `cli`）。 */
+  async function applyRefineFailCli(button) {
+    const adminId = adminIdentity();
+    const note = refineFailDialog.querySelector('[data-trouble-error]');
+    if (!adminId) {
+      if (note) note.textContent = '平台尚未配置管理员窗口，改不了。';
+      return;
+    }
+    button.disabled = true;
+    try {
+      await api('/model-selection', {
+        harness_id: adminId,
+        model_mode: 'cli',
+        paid_consent: false,
+      });
+      rememberTroubleDismissed(String(refineFailDialog.dataset.refineSignature || ''));
+      refineFailDialog.close();
+      // 名单里「当前使用」那个字样要跟着换，照 applyTroubleModel 的路子重读一遍。
+      const availability = await api('/availability').catch(() => null);
+      if (availability && Array.isArray(availability.availability)) {
+        state.availability = availability.availability;
+      }
+      state.memberNote = '管理员窗口已改用窗口自带模型：下一轮细化就按它跑。';
+      render();
+    } catch (error) {
+      button.disabled = false;
+      if (note) note.textContent = `没能存上：${String((error && error.message) || error)}`;
+    }
+  }
+
+  /** 二选一之二：换一个池模型 —— 存的动作照走 applyTroubleModel（含付费确认）。 */
+  async function applyRefineFailPool(button) {
+    const saved = await applyTroubleModel(button);
+    if (!saved) return;
+    rememberTroubleDismissed(String(refineFailDialog.dataset.refineSignature || ''));
+    refineFailDialog.close();
+    state.memberNote = '管理员窗口已登记新的池模型：下一轮细化就按它跑。';
+    render();
+  }
+
+  refineFailDialog.addEventListener('click', (event) => {
+    const cli = event.target.closest('[data-refine-cli]');
+    if (cli) {
+      void applyRefineFailCli(cli);
+      return;
+    }
+    const pool = event.target.closest('[data-refine-pool]');
+    if (pool) {
+      void applyRefineFailPool(pool);
+      return;
+    }
+    if (event.target.closest('[data-refine-dismiss]') || event.target.closest('[data-refine-close]')) {
+      refineFailDialog.close();
+      return;
+    }
+    // 点在遮罩上（对话框自己的空白处）也关 —— 关了记 dismissed，见 close。
+    if (event.target === refineFailDialog) refineFailDialog.close();
+  });
+
+  refineFailDialog.addEventListener('close', () => {
+    // 关掉（×、Esc、遮罩、知道了）都算"这条先不弹"：同一个签名不再打扰。
+    // 失败次数涨了、或换了模型又失败 —— 签名变了，还会再弹。
+    rememberTroubleDismissed(String(refineFailDialog.dataset.refineSignature || ''));
+    refineFailDialog.dataset.refineSignature = '';
+  });
 
   /**
    * 一条活的**任务书**：目标原文、验收标准、只允许改的路径。
@@ -7165,10 +7353,17 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    *
    * 改派那条消息里前后两个编号常常是**同一条活的两代**（接替关系），换出来的
    * 名字也就一样 —— 那就只留一个，别摆成"甲 → 甲"。
+   *
+   * `maxLength`：默认只留一句（摘要、左栏那一行用得上）。群聊那一栏传 `0` ——
+   * 那里的正文靠 4 行截断 + 「展开全文」来收敛，**不能先砍到 140 字**：一砍，
+   * 「展开全文」就永远展不出东西来（2026-10-29 的实测：真实长消息 1000+ 字，
+   * 砍到 140 字后连四行都填不满，折叠等于没做）。
    */
-  function readableMessageBody(message, { firstLineOnly = false } = {}) {
+  function readableMessageBody(message, { firstLineOnly = false, maxLength = 140 } = {}) {
     const raw = String((message && message.body) || '').trim();
     if (!raw) return '';
+    // 0 = 不截断（群聊要整段原文）。
+    const limit = Number(maxLength) > 0 ? Number(maxLength) : 0;
     const washed = translated(raw) || raw;
     let text = firstLineOnly ? washed.split('\n')[0].trim() : washed;
     // 任务号 → 任务名（人起的名字）
@@ -7209,7 +7404,112 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         (match, before) => `${before}${name}`,
       );
     }
-    return text.length > 140 ? `${text.slice(0, 140)}…` : text;
+    // `limit` 为 0 就是「整段都要」（群聊那一栏）：不能因为它小于长度就把正文砍空。
+    return limit > 0 && text.length > limit ? `${text.slice(0, limit)}…` : text;
+  }
+
+  /**
+   * 「同一件事」怎么认。
+   *
+   * 平台上同一次失败会被写成十几条独立消息：除了正文里那个时间戳，它们一字
+   * 不差。按字面比，一条都合并不掉（`collab-big-g1` 里那条
+   * `admin harness call exited 1` 就是 11 条，正文各带各的时间戳，21 天里
+   * 没人看得出它们是同一件事）。所以比较之前先把**唯一会变的那一段**抹平：
+   * ISO 时间戳换成占位符、连续空白压成一个空格。
+   *
+   * 只抹时间戳，**不抹 hex 也不抹数字** —— 这条是量出来的，不是省事：
+   * 把 `\b[0-9a-f]{7,}\b` 和 `\d+` 也归一化，全库会多合并 9 组，而那 9 组
+   * 是**真的不同**的事：
+   *
+   *   已向 qoder-member-1 派发任务… / 已向 qoder-member-2 派发任务…   （两个成员）
+   *   管理员 Harness 改派：FD-9431c1… → FD-554d39… / FD-2af478… → FD-9b32…  （两条不同的活）
+   *   回路闸门自检第 1 封 / 第 5 封                                     （两次不同的自检）
+   *
+   * 误合并会把两条不同的错误说成一条，比不合并更糟。宁可少合并。
+   *
+   * 全库实测：只抹时间戳 → 20 组被合并，其中 4 组原文不同（差异**只有**时间戳）；
+   * 再加 hex/数字 → 29 组，13 组原文不同（多出来的 9 组就是上面那类误合并）。
+   *
+   * 抹平只发生在**比较键**上 —— 屏幕上显示的仍然是原文。
+   */
+  function chatRepeatKey(message) {
+    const sender = `${(message && message.sender_type) || ''}:${(message && message.sender_id) || ''}`;
+    const body = String((message && message.body) || '')
+      .replace(/\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, '〈时间〉')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return `${sender}\u0000${body}`;
+  }
+
+  /**
+   * 相邻、同一发送者、同一件事 → 压成一条。
+   *
+   * 只合并**相邻**的：同一句话今天说一次、明天说一次是两次真事，中间隔着别的
+   * 消息就更不能并。也不跨发送者 —— 两个窗口都在报同一个错，那是两件事。
+   */
+  function collapseChatRepeats(messages) {
+    const rows = [];
+    for (const message of messages) {
+      const key = chatRepeatKey(message);
+      const at = String((message && message.created_at) || '').replace('T', ' ').slice(5, 16);
+      const last = rows[rows.length - 1];
+      if (last && last.key === key) {
+        last.items.push({ at, message });
+        continue;
+      }
+      rows.push({ key, message, items: [{ at, message }] });
+    }
+    return rows;
+  }
+
+  /**
+   * 「展开全文」只在正文**真被截断**时才出现 —— 所以必须在节点进了 DOM 之后量。
+   *
+   * 技术日志（`harness call exited` / `ERROR …` / `Traceback` 那些）默认就是收着的：
+   * 它们正是被 4 行 clamp 截住的那批消息，不需要再额外判断正文里有没有这些词。
+   *
+   * 列表收着的时候（`.flat-chat-list{display:none}`）量出来全是 0，那就先不量：
+   * 展开群聊会重画一次，那一帧再量。
+   *
+   * **已知前提（本轮不处理）**：这是**一次性**测量，只在重画后的那一帧跑。
+   * 所以窗口从宽拉窄、而这一屏又恰好没有重画时，原来没被截断的消息可能已经被
+   * 截断了却没有「展开全文」，反过来（变宽后不再截断的仍挂着按钮）也一样。
+   * 这批数据实测 1440 → 900 → 768 是 29 / 11 且双向对账 0 失配，没暴露出来。
+   * 要彻底解决得挂 resize 监听（或 `ResizeObserver`），那是另一个话题，
+   * 这里只把前提写清楚，不顺手加。
+   */
+  function armChatClamp(list) {
+    if (!list.clientHeight) return;
+    for (const item of list.querySelectorAll('.flat-msg')) {
+      const body = item.querySelector('p');
+      if (!body) continue;
+      const more = item.querySelector('.flat-msg-more');
+      if (body.scrollHeight <= body.clientHeight + 1) {
+        if (more) more.remove();
+        continue;
+      }
+      if (more) continue;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'flat-msg-more';
+      button.textContent = '展开全文';
+      button.setAttribute('aria-expanded', 'false');
+      body.after(button);
+    }
+  }
+
+  /** 重画之后，把我**展开过**的那几条照原样摊开。 */
+  function applyChatOpen(list) {
+    if (!state.chatOpen.size) return;
+    for (const item of list.querySelectorAll('.flat-msg')) {
+      const key = item.dataset.msgKey || '';
+      if (!key || !state.chatOpen.has(key)) continue;
+      item.classList.add('is-open');
+      const button = item.querySelector('.flat-msg-more');
+      if (!button) continue;
+      button.textContent = '收起';
+      button.setAttribute('aria-expanded', 'true');
+    }
   }
 
   /** 群聊：办公室的对话就在平台的群里（不是本地的假消息）。 */
@@ -7218,7 +7518,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
    *
    * 之前是把消息横着摆在一条 190px 的带子里，消息被切一半、还有一条
    * 横向滚动条——那不算“放在这里”。现在收成一条带子，需要看完整
-   * 历史时才展开（纵向滚动，每条三行）。
+   * 历史时才展开（纵向滚动）。正文默认 4 行，长了给「展开全文」；
+   * 同一个人连着说的几句只在第一句上写名字和时间；同一件事被报成
+   * 十几条的，压成一条「重复 N 次 · 展开」。
    */
   function chat() {
     const wrap = document.createElement('section');
@@ -7254,24 +7556,136 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     const groupMessages = state.messages.filter(
       (message) => !(Array.isArray(message.refs) ? message.refs : []).includes(DIRECT_REF),
     );
-    for (const message of groupMessages.slice(-40)) {
+    // 40 条真实消息里，同一次失败会被平台写成十几条 —— 先按「同一件事」压成组，
+    // 再取最后 40 组：重复刷屏挤不掉真实历史。
+    const rows = collapseChatRepeats(groupMessages).slice(-40);
+    // 「同一个人连着说」的上一句是谁（sender_type:sender_id）。组首才画 meta。
+    let prevSender = '';
+    for (const row of rows) {
+      // 一组 1 条时 `row.message` 就是那一条；多条时它是组里的第一条（拿人名用）。
+      const message = row.message;
       const item = document.createElement('article');
       const isHuman = message.sender_type === 'human';
       // 成员窗口提的「要改目标」：群里一眼要看见（这是等群主拍板的事）。
       const isGoalChange = (Array.isArray(message.refs) ? message.refs : []).includes(
         GOAL_CHANGE_REF,
       );
+      const senderKey = `${message.sender_type || ''}:${message.sender_id || ''}`;
+      const isCont = Boolean(prevSender) && prevSender === senderKey;
+      prevSender = senderKey;
       item.className =
-        'flat-msg' + (isHuman ? ' is-human' : '') + (isGoalChange ? ' is-goal-change' : '');
+        'flat-msg' +
+        (isHuman ? ' is-human' : '') +
+        (isGoalChange ? ' is-goal-change' : '') +
+        (isCont ? ' is-cont' : ' is-turn-start');
+      // 展开状态按 message_id 记：重画之后还认得出来是同一条。
+      item.dataset.msgKey = String(message.message_id || `${senderKey}#${row.items[0].at}`);
       const who = isHuman ? '你' : harnessName(message.sender_id) || '平台';
-      const at = String(message.created_at || '').replace('T', ' ').slice(5, 16);
-      const body = readableMessageBody(message) || message.body || '';
-      item.innerHTML = `<b>${escape(who)}</b><span class="flat-msg-at">${escape(at)}</span>${
-        isGoalChange ? '<em class="flat-msg-flag">要改目标</em>' : ''
-      }<p>${escape(body)}</p>`;
+      const body = readableMessageBody(message, { maxLength: 0 }) || message.body || '';
+      // meta（名字 + 时间）只留在这一轮的第一条上：40 条消息里一半的字是重复的名字。
+      const meta = isCont
+        ? ''
+        : `<b>${escape(who)}</b><span class="flat-msg-at">${escape(row.items[0].at)}</span>`;
+      const flag = isGoalChange ? '<em class="flat-msg-flag">要改目标</em>' : '';
+      const count = row.items.length;
+      // 重复组的展开状态也记在 `state.chatOpen` 里（前缀 `dup:` 区分）。
+      // 同一个界面上两个展开控件（「展开全文」和重复组的「展开」）必须一个脾气：
+      // 15 秒一重画，只保住一个、另一个自己收回去，用的人只会觉得是 bug。
+      const dupKey = `dup:${item.dataset.msgKey}`;
+      const dupOpen = count > 1 && state.chatOpen.has(dupKey);
+      const dup = count > 1 ? `<em class="flat-msg-dup">重复 ${count} 次</em>` : '';
+      const dupMore =
+        count > 1
+          ? `<button type="button" class="flat-msg-dup-more" aria-expanded="${String(
+              dupOpen,
+            )}">${dupOpen ? '收起' : '展开'}</button>`
+          : '';
+      // 合并掉的那几条：点「展开」才出现，只给时间 + 正文，不再重复 badge。
+      const dupList =
+        count > 1
+          ? `<div class="flat-msg-dup-list"${dupOpen ? '' : ' hidden'}>${row.items
+              .slice(1)
+              .map(
+                (entry) =>
+                  `<div class="flat-msg-dup-item"><span class="flat-msg-at">${escape(
+                    entry.at,
+                  )}</span><div class="flat-msg-dup-body">${escape(
+                    readableMessageBody(entry.message, { maxLength: 0 }) ||
+                      entry.message.body ||
+                      '',
+                  )}</div></div>`,
+              )
+              .join('')}</div>`
+          : '';
+      item.innerHTML = `${meta}${flag}${dup}${dupMore}<p>${escape(body)}</p>${dupList}`;
       list.append(item);
     }
+    // 点击用**委托**挂在列表上：40 条各挂一个 listener，重画一次就散一地。
+    list.addEventListener('click', (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+      const more = target.closest('.flat-msg-more');
+      if (more) {
+        const item = more.closest('.flat-msg');
+        if (!item) return;
+        const open = !item.classList.contains('is-open');
+        item.classList.toggle('is-open', open);
+        more.textContent = open ? '收起' : '展开全文';
+        more.setAttribute('aria-expanded', String(open));
+        const key = item.dataset.msgKey || '';
+        if (!key) return;
+        if (open) state.chatOpen.add(key);
+        else state.chatOpen.delete(key);
+        return;
+      }
+      const dupMore = target.closest('.flat-msg-dup-more');
+      if (dupMore) {
+        const item = dupMore.closest('.flat-msg');
+        const extra = item ? item.querySelector('.flat-msg-dup-list') : null;
+        if (!extra) return;
+        const open = Boolean(extra.hidden);
+        extra.hidden = !open;
+        dupMore.textContent = open ? '收起' : '展开';
+        dupMore.setAttribute('aria-expanded', String(open));
+        // 展开后追加的那几条落在滚动区**下方**：不滚一下，用户视角就是
+        // "点了没反应"（QA 实测：`scrollTop` 一直是 0，而第一条追加项在
+        // 底部 9257 那里）。只滚到「刚好露出第一条」，所以用 `nearest` ——
+        // `center` 会把这条上面的组头/正文顶出可视区，看着像跳了一段。
+        //
+        // 收起也必须处理：拿掉几千像素内容后，浏览器会把越界的 `scrollTop`
+        // **夹到新的上限**，观感就是"一点收起，页面被弹到列表最底部，刚才
+        // 那组不见了"（实测 5808 → 5437，而新的 maxScrollTop 正好 5437）。
+        // 把锚点钉回**用户刚点的那一组**（`item`，带 badge 和按钮的那个容器；
+        // 不是 `extra` —— 收起后它是隐藏的，滚它没意义）。
+        // 这跟"收起时不许滚"不矛盾：那条要禁的是**无条件滚到底**，而这里
+        // 恰好相反 —— 把人留在自己刚操作的地方。
+        if (open) {
+          if (extra.firstElementChild) {
+            extra.firstElementChild.scrollIntoView({ block: 'nearest' });
+          }
+        } else {
+          item.scrollIntoView({ block: 'nearest' });
+        }
+        // 和「展开全文」同一条心智：展开过的，重画之后还是展开的。
+        const key = item.dataset.msgKey || '';
+        if (!key) return;
+        if (open) state.chatOpen.add(`dup:${key}`);
+        else state.chatOpen.delete(`dup:${key}`);
+      }
+    });
     wrap.append(list);
+    // 「有没有被截断」只有进了 DOM 才量得出来：排到下一帧，这一屏画完再量。
+    requestAnimationFrame(() => {
+      if (!list.isConnected) return;
+      // 量之前先记住「刚才是不是贴在底部」。插「展开全文」会把内容撑高几十像素，
+      // 而把它拉到最底的那行代码（`chat-toggle` 处理器里）**已经跑过了** ——
+      // 撑高之后再没人把滚动条拉回去，用户看到的是"点开群聊停在倒数第三行"。
+      // 量完自己再钉一次，只在本来就贴着底的时候钉（人在翻历史就别抢他位置）。
+      const wasAtBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 4;
+      armChatClamp(list);
+      applyChatOpen(list);
+      if (wasAtBottom) list.scrollTop = list.scrollHeight;
+    });
     const form = document.createElement('form');
     form.className = 'flat-chat-form';
     const input = document.createElement('input');
@@ -8374,6 +8788,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
         state.errors.messages = '';
         // 只有成功才宣布“读到了”；失败保留旧消息，不把失败翻译成暂无消息。
         state.messagesLoaded = true;
+        // 群消息刚落地：管理员细化连续失败到阈值的话，该弹窗了
+        // （弹过的不再弹 —— 见 maybeShowRefineFailDialog 的签名记忆）。
+        maybeShowRefineFailDialog();
       }
       state.assistantRuns = runs.runs || [];
       // 助手此刻在干什么：读到就更新；读失败就**保留上一份**（不把失败说成

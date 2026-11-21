@@ -1,0 +1,1409 @@
+/* =============================================================================
+ * moyu-theme.css —— 暖纸 / 衬线 / 陶土橙 视觉覆盖层
+ *
+ * 定位：**只换质感，不换版式**。
+ *   · 不改任何 DOM 结构、不改 JS 逻辑、不改文案、不改字号阶梯（正文基准仍 14px）；
+ *   · 不增删 padding/margin 造成的布局位移（圆角、底色、描边、阴影、字体族除外）；
+ *   · 全文件 0 处 `!important`（被覆盖的规则里也没有需要对抗的 `!important`）。
+ *
+ * 加载顺序：由 `src/main.js` 在 `import './app-shell.css'` 之后引入，因此本文件
+ * 的白名单选择器与 app-shell.css 同权重时靠「后加载」取胜；对于 app-shell.css
+ * 里 `.ao-workspace .flat-*`（0,2,0）这类更具体的选择器，本文件统一用
+ * `.ao-workspace.flat-office .flat-*`（0,3,0）抬高一级，保证覆盖生效。
+ *
+ * ⚠️ 加载契约（改动前务必读完）：
+ *   1) 本文件必须排在各页面自己的 css **之后**。`src/main.js`（index）、
+ *      `src/outputs.js`、`src/direct-chat.js` 三处都是紧跟在页面 css 的下一行 import。
+ *   2) `outputs.js` / `direct-chat.js` 里写的是 `import './moyu-theme.css?page'`，
+ *      那个 `?page` **不是笔误**：同一份 CSS 被两个及以上 entry 引入时，Vite 会把它
+ *      抽成共享 chunk 并注入到各 entry 的 `<link>` **最前面**，于是本文件会被
+ *      页面 css 反压 —— 实测过：生产构建里 `--ao-accent` 会退回旧的 `#b0442b`、
+ *      整页暗角消失、topbar 又变回墨黑硬线（dev 模式不暴露这个问题）。
+ *      加上查询后缀让 module id 在每个 entry 里唯一，chunk 便是 entry 内的、
+ *      顺序排在该页 css 之后，级联才是对的。
+ *   3) 这两处若改成不带后缀的写法，必须同时确认 `dist/*.html` 里
+ *      `moyu-theme-*.css` 的 `<link>` 排在页面 css **之后**。
+ *
+ * 分层：令牌 → 底色 → 描边 → 圆角 → 阴影 → 排版 → 控件 → 状态色。
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------- 1. 令牌层
+   修的是：原配色是「冷灰绿 + 墨黑 + 朱橙」，底色平涂无层次、圆角 3px 冷硬。
+   这里把同一批语义令牌换成暖纸系；所有消费方（flex 布局里的 var() 引用）
+   自动跟随，无需逐条改。 */
+:root {
+  /* 浅色工作面：暖纸底 */
+  --ao-bg: #F7F2E9;
+  --ao-surface: #FBF6EE;
+  --ao-paper: #FFFDF9;
+  /* 描边：不再是墨色硬线，改为纸纤维感的低对比线 */
+  --ao-border: #E6DDCF;
+  --ao-border-strong: #D5C9B6;
+  /* 文字：暖墨，不是冷黑 */
+  --ao-text: #2B2621;
+  --ao-text-soft: #5B5348;
+  /* `#6F6659` 而不是更浅的 `#8B8175`：后者压在暖纸上只有 3.8:1，过不了
+     WCAG AA（仓库 scripts/verify-office-design.mjs 有此硬断言）。 */
+  --ao-text-faint: #6F6659;
+  /* 动作色：陶土橙**拆成两个令牌**，按用途分，而不是把整套橙压暗 ——
+     · --ao-accent     仅装饰/填充：进度与额度条、2px 竖条、badge 底、focus ring；
+     · --ao-accent-ink 一切「当文字用」的橙，以及承载浅色字的橙底按钮。
+     原因：`#C2623A` 配 `#FFF8F1` 只有 3.91:1，作文字/白字底过不了 AA；
+     作纯装饰则不需要满足文字对比度，保持原饱和度的质感。 */
+  --ao-accent: #C2623A;
+  --ao-accent-ink: #A9502C;
+  --ao-accent-hover: #96431F;
+  --ao-accent-soft: #F6E3D8;
+  --ao-on-accent: #FFF8F1;
+  /* 状态色：与橙色同一套「分用途」纪律 —— `--ao-live/warn/bad` 是**标记色**
+     （圆点、边框、竖条），`*-ink` 才是**文字色**。规格值 #4E8A62 / #A9702C
+     压在自家浅底上只有 3.7:1，作 11px 文字过不了 AA，故文字另给一档深色。 */
+  --ao-live: #4E8A62;
+  --ao-warn: #A9702C;
+  --ao-bad: #B4483F;
+  --ao-live-ink: #35704A;
+  --ao-warn-ink: #8A5A1C;
+  --ao-bad-ink: #A8423A;
+  /* 层级：10px 控件圆角 + 12px 面板圆角，柔和阴影取代粗边 */
+  --ao-radius: 10px;
+  --ao-shadow: 0 10px 28px rgba(43, 38, 33, .07);
+  --ao-line-soft: #EFE7DA;
+  /* 分色阶梯：面板 12px、胶囊 999px（新增别名，不改变原令牌语义） */
+  --ao-radius-card: 12px;
+  --ao-radius-pill: 999px;
+  /* 独立页面（outputs.css / direct-chat.css）引用的是 --ao-soft / --ao-faint。
+     历史教训：第一版我把 `--ao-faint` 写成旧的 `#8B8175`，直接和上面的
+     `--ao-text-faint: #6F6659` 打架 —— outputs/direct 两页的 10~14px 次级文字
+     因此只有 3.76:1（QA 实测），而门禁脚本只打开 index，抓不到。
+     outputs.css:234 / direct-chat.css:121 自己也定义了这两个名字，
+     同权重下靠本文件后加载覆盖。 */
+  /* outputs / direct 专用别名，必须与 --ao-text-faint 同值，否则这两页会单独掉出 AA */
+  --ao-soft: var(--ao-text-soft);
+  --ao-faint: var(--ao-text-faint);
+}
+
+/* 深色侧栏：从冷绿 #1c2420 换成暖褐，保证与暖纸底同色温。 */
+:root {
+  --ao-sidebar: #1D1916;
+  --ao-sidebar-hover: #2A211B;
+  --ao-sidebar-active: #33261E;
+  --ao-sidebar-ink: #F2E9D8;
+  --ao-sidebar-muted: #B4A996;
+}
+
+/* 修的是：app-shell.css 的商业版视觉层在 `.ao-workspace.flat-office` 上又写了
+   一遍局部令牌（朱橙 #b0442b / 冷绿 good 等），会盖掉 :root 的新值。同权重、
+   后加载，这里重新声明一次把工作面拉回暖纸系。 */
+.ao-workspace.flat-office {
+  --ao-line: var(--ao-border);
+  --ao-line-soft: #EFE7DA;
+  --ao-ink: var(--ao-text);
+  --ao-ink-soft: var(--ao-text-soft);
+  --ao-ink-faint: var(--ao-text-faint);
+  --ao-accent: #C2623A;
+  --ao-accent-ink: #A9502C;
+  --ao-accent-hover: #96431F;
+  --ao-accent-soft: #F6E3D8;
+  --ao-on-accent: #FFF8F1;
+  --ao-good: #4E8A62;
+  --ao-warn: #A9702C;
+  --ao-bad: #B4483F;
+}
+
+/* ---------------------------------------------------------------- 2. 底色层
+   修的是：整页是平涂纯色 `--ao-bg`，没有光也没有暗角，久了像 A4 打印纸。
+   这里给整页一层极轻的暖色暗角（中心偏上提亮、四周压暗），这是「质感」的
+   主要来源。`fixed` 保证滚动时不跟着跑，避免出现色带接缝。 */
+html,
+body,
+#app,
+.ao-app {
+  background: radial-gradient(140% 100% at 50% 0%, #FBF6EE 0%, #F3ECDF 100%) fixed;
+}
+
+/* 修的是：外壳与工作区各自铺了不透明底色，会把上面那层暗角整块遮掉。
+   让「工作区容器」透明，暗角才透得出来；真正的卡片自己仍是不透明纸面。 */
+.ao-workspace.flat-office,
+.ao-workspace.flat-office .flat-body,
+.ao-workspace.flat-office .flat-main,
+.flat-loading,
+.project-lobby,
+.outputs-body,
+.direct-body {
+  background: transparent;
+}
+
+/* 修的是：右侧运维栏原本是纯 surface 平涂，贴着透明主区会糊成一片。
+   给它纸面 + 左侧细描边，形成「工作纸 / 案头纸」的第二层。 */
+.ao-workspace.flat-office .flat-rail {
+  background: var(--ao-surface);
+  border-left: 1px solid var(--ao-border);
+}
+
+/* 修的是：任务行 hover 用的是偏冷的 #f8f6ef，跟暖底不搭。 */
+.ao-workspace.flat-office .flat-task:hover {
+  background: #FBF3E7;
+}
+
+/* 修的是：任务行的 selected 底色是冷白纸，与暖底割裂。 */
+.ao-workspace.flat-office .flat-task.is-selected {
+  background: var(--ao-paper);
+}
+
+/* 修的是：左栏（成员/会话）原有几处冷绿文字（#aab5ac、#8f9c92、#d3d9d3）在
+   新暖褐侧栏上偏灰绿。统一成侧栏暖墨/暖灰。 */
+.ao-workspace.flat-office .flat-convs {
+  border-right: 1px solid #2A211B;
+  background: var(--ao-sidebar);
+}
+
+.ao-workspace.flat-office .flat-convs-head {
+  color: var(--ao-sidebar-muted);
+}
+
+.ao-workspace.flat-office .flat-conv span {
+  color: var(--ao-sidebar-muted);
+}
+
+.ao-workspace.flat-office .flat-conv.is-on span {
+  color: var(--ao-sidebar-ink);
+}
+
+/* 修的是：顶部深色区里的小标题/引文/计数说明仍是冷绿灰，暖底上显脏。 */
+.ao-workspace.flat-office .flat-eyebrow {
+  color: var(--ao-sidebar-muted);
+}
+
+.ao-workspace.flat-office .flat-head-main p.flat-guide {
+  color: #E4DAC8;
+}
+
+.ao-workspace.flat-office .flat-head-main p.flat-today {
+  color: var(--ao-sidebar-muted);
+}
+
+/* 修的是：深色区里的强调字是荧光珊瑚 #ff9679，饱和度太高且对比不足。
+   换成提亮的陶土（#E9A585 在 #1D1916 上约 7.7:1，可读）。 */
+.ao-workspace.flat-office .flat-head-main p.flat-guide b,
+.ao-workspace.flat-office .flat-counts .is-review.has-value b {
+  color: #E9A585;
+}
+
+/* 修的是：失败计数同样是荧光粉红。 */
+.ao-workspace.flat-office .flat-counts .is-failed.has-value b {
+  color: #E5A79C;
+}
+
+/* 修的是：计数分隔线是冷绿 #465048。 */
+.ao-workspace.flat-office .flat-counts li,
+.ao-workspace.flat-office .flat-counts li.has-value,
+.ao-workspace.flat-office .flat-counts li.is-review.has-value,
+.ao-workspace.flat-office .flat-counts li.is-failed.has-value {
+  border-left-color: #3B2F26;
+  background: transparent;
+}
+
+/* 修的是：深色区下拉框是冷绿底 #29332d + 冷绿边，与暖褐侧栏两套色。 */
+.ao-workspace.flat-office .flat-source select {
+  border-color: #4B3D31;
+  border-radius: var(--ao-radius);
+  background: #2A211B;
+  color: var(--ao-sidebar-ink);
+}
+
+/* 修的是：深色区报错条是冷红底 #442c28 / #392824。 */
+.ao-workspace.flat-office .flat-error {
+  border-color: #7A4A3A;
+  border-radius: var(--ao-radius);
+  background: #3B2A23;
+  color: #F6D9CB;
+}
+
+.ao-workspace.flat-office .flat-error button {
+  border-color: #9A6653;
+  border-radius: var(--ao-radius);
+  color: #FFE6DF;
+}
+
+.ao-workspace.flat-office .flat-head .flat-domain-error {
+  border-left-color: var(--ao-accent);
+  background: #3B2A23;
+  color: #F6D9CB;
+}
+
+/* 修的是：`.flat-counts` 的「有大值」态原给白底块，在深色区里是一块突兀的补丁。 */
+
+/* ------------------------------------------------- 2b. 项目大厅（副栏深色块）
+   大厅不在 .ao-workspace 里，选择器权重只有 (0,1,0)，单列一组以便核对。 */
+
+/* 修的是：大厅的三张副栏卡片被「v3 编辑部层」改成了
+   `border-top: 2px solid var(--ao-text)` + 无底无圆角的通栏块 —— 那条 2px 墨线
+   正是「冷硬」最刺眼的一笔。降为 1px 柔和描边；因为它们左右没有内距
+   （`padding-inline: 0`），**不给底色**，否则悬停行会顶出圆角。 */
+.project-history,
+.project-platform,
+.project-tools {
+  border: 0;
+  border-top: 1px solid var(--ao-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 修的是：`.project-onboarding` 是 4px 陶土橙顶边 + 直角深色块，侧边冷绿
+   (#657269 / #b8c1b9 / #aeb8b0 / #48534b)。圆角与色温统一到暖褐。 */
+.project-onboarding {
+  border-radius: var(--ao-radius-card);
+  border-top-color: var(--ao-accent);
+}
+
+.project-onboarding > p,
+.project-lobby-steps p,
+.project-lobby-hint {
+  color: var(--ao-sidebar-muted);
+}
+
+.project-onboarding-status {
+  border-top-color: #3B2F26;
+}
+
+/* 修的是：三步指引的序号方块是 1px 直角 + 冷绿描边。改成暖色胶囊。 */
+.project-lobby-steps li > span {
+  border-color: #4B3D31;
+  border-radius: var(--ao-radius-pill);
+  color: #E9A585;
+}
+
+/* ---------------------------------------------------------------- 3. 描边层
+   修的是：`.ao-topbar` 用 `1px solid var(--ao-text)` 画了一条墨黑硬分隔线 ——
+   这是「编辑部冷硬感」最重的一笔。层级改由浅描边 + 阴影承担。 */
+.ao-topbar {
+  border-bottom: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+}
+
+/* 修的是：办公室头部与主区的分界同样是墨黑线（深色底上几乎看不见，却把
+   上下两块硬切开）。这里换成纸色细线，读作「纸的裁边」。 */
+.ao-workspace.flat-office .flat-head {
+  border-bottom: 1px solid var(--ao-border);
+}
+
+/* 修的是：筛选条用 2px 墨黑下框线兜底，像表格横杠。降为 1px 柔和线。 */
+.ao-workspace.flat-office .flat-filters {
+  border-bottom: 1px solid var(--ao-border);
+}
+
+/* 修的是：详情标题下的 2px 墨黑线。 */
+.ao-workspace.flat-office .flat-detail-head {
+  border-bottom: 1px solid var(--ao-border);
+}
+
+/* 修的是：右栏标题下的 2px 墨黑线。 */
+.ao-workspace.flat-office .flat-rail-head {
+  border-bottom: 1px solid var(--ao-border);
+}
+
+/* 修的是：分组标题与分页器用的是 --ao-border-strong（偏深）做分隔，太抢眼。 */
+.ao-workspace.flat-office .flat-group-head,
+.ao-workspace.flat-office .flat-pager {
+  border-bottom-color: var(--ao-border);
+  border-top-color: var(--ao-border);
+}
+
+/* 修的是：两个独立页面（交付物档案 / 私聊）各有 2px 墨黑横线 ——
+   outputs.css:237 `.outputs-head`、outputs.css:243 `.outputs-window`（border-top）、
+   direct-chat.css:108 `.direct-head`、direct-chat.css:143 `.direct-form`（border-top）。
+   它们是通栏结构线，同样降为 1px 暖描边。 */
+.outputs-head,
+.direct-head {
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.outputs-window {
+  border: 0;
+  border-top: 1px solid var(--ao-border);
+}
+
+.direct-form {
+  border-top: 1px solid var(--ao-border);
+}
+
+/* ---------------------------------------------------------------- 4. 圆角层
+   修的是：散落各处的 `border-radius: 2px / 3px` 是「表格软件」的直角冷感。
+   按三级阶梯收敛：面板 12px、控件 10px、胶囊 999px；表格/进度条保持直角。 */
+
+/* 面板级（12px）：右栏提示卡、产出块、切换器、血缘、活水线、对话框等。 */
+.ao-workspace.flat-office .flat-card-ask,
+.ao-workspace.flat-office .flat-card-trouble,
+.ao-workspace.flat-office .flat-card-waiting,
+.ao-workspace.flat-office .flat-card.flat-card-plan,
+.ao-workspace.flat-office .flat-brief,
+.ao-workspace.flat-office .flat-switcher,
+.ao-workspace.flat-office .flat-lineage,
+.ao-workspace.flat-office .flat-live,
+.ao-workspace.flat-office .flat-window,
+.ao-workspace.flat-office .flat-alert,
+.ao-workspace.flat-office .flat-inventory,
+.ao-workspace.flat-office .flat-pool-item,
+.ao-workspace.flat-office .flat-timeline,
+.ao-workspace.flat-office .flat-wtask,
+.ao-workspace.flat-office .flat-project-request,
+.ao-workspace.flat-office .flat-alloc-cand,
+.ao-workspace.flat-office .flat-experience,
+.ao-workspace.flat-office .flat-forensics,
+.ao-workspace.flat-office .flat-userkey,
+.ao-workspace.flat-office .flat-cred,
+#openingDialog,
+.opening-dialog,
+.flat-dialog,
+.agent-dialog,
+.agent-section,
+.agent-row,
+.outputs-window,
+.direct-shell,
+.project-empty-icon,
+.harness-card,
+.endpoint-row {
+  border-radius: var(--ao-radius-card);
+}
+
+/* 代码/引用块 12px，但保持「纸面」而不是「卡片」：它们在正文里连排。 */
+.ao-workspace.flat-office .flat-output {
+  border-radius: var(--ao-radius-card);
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+}
+
+/* 修的是：`.flat-live-steps li` 的右圆角 5px 与容器 12px 不配套。 */
+.ao-workspace.flat-office .flat-live-steps li {
+  border-radius: 0 8px 8px 0;
+  border-left-color: var(--ao-line-soft);
+  background: var(--ao-paper);
+}
+
+/* 控件级（10px）：按钮、输入框、下拉、tab。 */
+.ao-btn,
+.ao-topbar .admin-agent-launch,
+.primary,
+.project-new,
+.project-connect,
+.project-recover,
+.project-card-open,
+.project-card-remove,
+.project-card-rename,
+.project-instance-note,
+.ao-lobby-note,
+.flat-dialog-close,
+.agent-dialog button,
+.agent-input,
+.outputs-tools select,
+.outputs-tools button,
+.outputs-more,
+.direct-form input,
+.direct-form button,
+.relay-actions button,
+.flat-project-request-actions button,
+.flat-project-request-dialog .flat-dialog-actions button {
+  border-radius: var(--ao-radius);
+}
+
+/* 工作台内的控件（用 0,3,0 压过 app-shell 里那一串 `border-radius: 2px`）。 */
+.ao-workspace.flat-office .ao-btn,
+.ao-workspace.flat-office .flat-pager button,
+.ao-workspace.flat-office .flat-back,
+.ao-workspace.flat-office .flat-filters button,
+.ao-workspace.flat-office .flat-view button,
+.ao-workspace.flat-office .flat-sort select,
+.ao-workspace.flat-office .flat-switch,
+.ao-workspace.flat-office .flat-detail-actions button,
+.ao-workspace.flat-office .flat-chat-form input,
+.ao-workspace.flat-office .flat-chat-form button,
+.ao-workspace.flat-office .flat-start,
+.ao-workspace.flat-office .flat-assistant-input,
+.ao-workspace.flat-office .flat-assistant-presets button,
+.ao-workspace.flat-office .flat-assistant-form button,
+.ao-workspace.flat-office .flat-card-plan button,
+.ao-workspace.flat-office .flat-waiting-list button,
+.ao-workspace.flat-office .flat-alloc-sync button,
+.ao-workspace.flat-office .flat-project-requests-head > button,
+.ao-workspace.flat-office .flat-project-request-error button,
+.ao-workspace.flat-office .flat-domain-error button,
+.ao-workspace.flat-office .flat-agent-application-form input,
+.ao-workspace.flat-office .flat-agent-application-form > button {
+  border-radius: var(--ao-radius);
+}
+
+/* 修的是：输入框比按钮更「内地」，给 12px 让它像一张可写的小纸片。 */
+.ao-workspace.flat-office .flat-chat-form input,
+.ao-workspace.flat-office .flat-assistant-input {
+  border-radius: var(--ao-radius-card);
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+}
+
+/* 胶囊级（999px）：状态 chip、档位、徽标、头像、进度条轨道。 */
+.ao-workspace.flat-office .flat-chip,
+.ao-workspace.flat-office .flat-tier,
+.ao-workspace.flat-office .flat-group-mood,
+.ao-workspace.flat-office .flat-roster-tag,
+.ao-workspace.flat-office .flat-project-request-status,
+.ao-workspace.flat-office .flat-model-mark,
+.ao-user,
+.ao-mark,
+.ao-conn i,
+.project-card-status,
+.project-section-head > span,
+.outputs-tag,
+.relay-state,
+.relay-badge,
+.direct-recipient,
+.phone-agent-launch {
+  border-radius: var(--ao-radius-pill);
+}
+
+/* ---------------------------------------------------------------- 5. 阴影层
+   修的是：原来层级全靠边框和留白表达，纸面是平的。给「需要浮起来的纸」
+   一层极轻的暖阴影；`.flat-output` / 表格 / 分隔条不加阴影，避免噪点。 */
+.ao-workspace.flat-office .flat-card-ask,
+.ao-workspace.flat-office .flat-card-trouble,
+.ao-workspace.flat-office .flat-card-waiting,
+.ao-workspace.flat-office .flat-card.flat-card-plan,
+.ao-workspace.flat-office .flat-brief,
+.ao-workspace.flat-office .flat-switcher,
+.ao-workspace.flat-office .flat-lineage,
+.ao-workspace.flat-office .flat-live,
+.ao-workspace.flat-office .flat-window,
+.ao-workspace.flat-office .flat-alert,
+.ao-workspace.flat-office .flat-inventory,
+.ao-workspace.flat-office .flat-pool-item,
+.ao-workspace.flat-office .flat-timeline,
+.ao-workspace.flat-office .flat-wtask,
+.ao-workspace.flat-office .flat-project-request,
+.ao-workspace.flat-office .flat-alloc-cand,
+.ao-workspace.flat-office .flat-experience,
+.ao-workspace.flat-office .flat-forensics,
+.agent-section,
+.outputs-window,
+.direct-shell,
+#openingDialog,
+.opening-dialog,
+.flat-dialog {
+  box-shadow: var(--ao-shadow);
+}
+
+/* 修的是：这些块的底色原本是冷灰（#f7f8fa / #fbfcfd / #eae8e0 / #fff），
+   在暖纸底上像贴了块蓝灰色玻璃。统一成纸面。 */
+.ao-workspace.flat-office .flat-brief,
+.ao-workspace.flat-office .flat-switcher,
+.ao-workspace.flat-office .flat-lineage,
+.ao-workspace.flat-office .flat-live,
+.ao-workspace.flat-office .flat-window,
+.ao-workspace.flat-office .flat-alert,
+.ao-workspace.flat-office .flat-inventory,
+.ao-workspace.flat-office .flat-pool-item,
+.ao-workspace.flat-office .flat-timeline,
+.ao-workspace.flat-office .flat-wtask,
+.ao-workspace.flat-office .flat-project-request,
+.ao-workspace.flat-office .flat-alloc-cand,
+.ao-workspace.flat-office .flat-experience,
+.ao-workspace.flat-office .flat-forensics,
+.ao-workspace.flat-office .flat-chat-digest,
+.ao-workspace.flat-office .flat-assistant-turn {
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+/* 修的是：`.flat-dialog` 背景是纯白，与暖纸世界不同色温。 */
+.flat-dialog {
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+/* 修的是：模态遮罩是冷蓝墨 #17201b。改成暖墨，避免弹窗像浮在蓝色玻璃上。 */
+dialog::backdrop,
+#openingDialog::backdrop {
+  background: #241C16CC;
+}
+
+/* ---------------------------------------------------------------- 6. 排版层
+   修的是：全站正文用无衬线没问题，但**标题**也用无衬线，就丢了「印刷品」
+   的味道。`--ao-display`（Noto Serif SC 栈）本来就在令牌里，这里把它真正
+   用到标题上；字号阶梯一律不动。 */
+.ao-workspace.flat-office :is(h1, h2, h3),
+.ao-workspace.flat-office .flat-group-name,
+.ao-workspace.flat-office .flat-card h3,
+.ao-workspace.flat-office .flat-spec h3,
+.ao-workspace.flat-office .flat-chat-head h3,
+.ao-workspace.flat-office .flat-detail-head h2,
+.ao-workspace.flat-office .flat-rail-lead strong,
+.ao-workspace.flat-office .flat-counts b,
+.ao-workspace.flat-office .flat-dialog h2,
+.ao-workspace.flat-office .flat-dialog h3,
+.project-lobby h1,
+.project-section-head h2,
+.project-empty strong,
+.relay-head h1,
+.relay-card h2,
+.agent-head h2,
+.agent-section h3,
+.outputs-head h1,
+.outputs-window > header b,
+.outputs-item > header > b,
+.direct-head h1,
+.ao-brand-text strong {
+  font-family: var(--ao-display);
+}
+
+/* 修的是：上面那条 h1/h2/h3 通配会连带命中深色头部的主标题，把它染成暖墨
+   （深底深字）。这里原位把深色区标题色改回侧栏纸色，并把字重放轻一点。 */
+.ao-workspace.flat-office .flat-head h1 {
+  color: var(--ao-sidebar-ink);
+  font-weight: 700;
+}
+
+/* 修的是：正文行高偏紧（1.5），冷硬的一部分来自「密」。只调正文段落，
+   不动标题行高，且在滚动容器内，不会造成面板位移。 */
+.ao-workspace.flat-office .flat-summary,
+.ao-workspace.flat-office .flat-spec p,
+.ao-workspace.flat-office .flat-card p,
+.ao-workspace.flat-office .flat-msg p,
+.ao-workspace.flat-office .flat-assistant-text,
+.ao-workspace.flat-office .flat-note,
+.project-lobby-description,
+.relay-hint,
+.outputs-words,
+.direct-msg p {
+  line-height: 1.65;
+}
+
+/* 修的是：文内小标题用 #35404d（冷蓝灰）。 */
+.ao-workspace.flat-office .flat-spec h3 {
+  border-left-color: var(--ao-border-strong);
+  color: var(--ao-text);
+}
+
+/* 修的是：表格分隔线是冷灰 #eef0f3。表格本身保持直角（单元格不该有圆角）。 */
+.ao-workspace.flat-office .flat-table th,
+.ao-workspace.flat-office .flat-table td {
+  border-bottom: 1px solid var(--ao-line-soft);
+  border-radius: 0;
+}
+
+/* 修的是：行内 code 的底色是冷灰 #f1f3f5。 */
+.ao-workspace.flat-office .flat-spec code {
+  background: var(--ao-surface);
+  border-radius: 4px;
+}
+
+/* 修的是：选中文本用的是系统蓝。 */
+::selection {
+  background: var(--ao-accent-soft);
+  color: var(--ao-text);
+}
+
+/* ---------------------------------------------------------------- 7. 控件层
+   修的是：按钮原来是「透明底 + 描边」，全部同权，看不出主次。现在主按钮
+   实心陶土橙，次要按钮纸面 + 浅描边，hover 走 accent-soft。 */
+.ao-btn,
+.ao-topbar .admin-agent-launch {
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-btn:hover,
+.ao-topbar .admin-agent-launch:hover {
+  border-color: var(--ao-border-strong);
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* 修的是：右栏「查看申请与审批记录」这类按钮在样式表里只分了 `min-height`，
+   浏览器于是给了系统默认灰底深蓝边的原生按钮 —— 暖纸页面上像一块 OS 控件、
+   圆角也完全不跟随。这里给「卡片内的裸按钮」补一套次要按钮外观。
+   （放在主按钮组之前：`.flat-card-plan button` 稍后会用同权重覆盖成实心橙。） */
+.ao-workspace.flat-office .flat-card > button,
+.ao-workspace.flat-office .flat-card-fold > button,
+.ao-workspace.flat-office .flat-inline-actions button {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+  font: inherit;
+  font-size: 12px;
+}
+
+.ao-workspace.flat-office .flat-card > button:hover,
+.ao-workspace.flat-office .flat-card-fold > button:hover,
+.ao-workspace.flat-office .flat-inline-actions button:hover {
+  border-color: var(--ao-border-strong);
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* 主按钮：实心橙底 + 浅字 —— 底色**必须**用 `--ao-accent-ink`（#A9502C），
+   用装饰用的 #C2623A 配 #FFF8F1 只有 3.91:1。陶土橙只在这里、进度条、
+   选中态、badge 上出现。 */
+#aoStartBtn,
+.primary,
+.project-new.primary,
+.ao-workspace.flat-office .flat-chat-form button,
+.ao-workspace.flat-office .flat-start,
+.ao-workspace.flat-office .flat-card-plan button,
+.ao-workspace.flat-office .flat-project-request-actions button,
+.ao-workspace.flat-office .flat-agent-application-form > button,
+.direct-form button {
+  border: 1px solid var(--ao-accent-ink);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+#aoStartBtn:hover,
+.primary:hover,
+.ao-workspace.flat-office .flat-chat-form button:hover,
+.direct-form button:hover {
+  border-color: var(--ao-accent-hover);
+  background: var(--ao-accent-hover);
+}
+
+/* 修的是：次要按钮 hover 用的是 --ao-bg（整块变灰），现在用选中暖底。 */
+.ao-workspace.flat-office .flat-detail-actions button,
+.ao-workspace.flat-office .flat-pager button,
+.ao-workspace.flat-office .flat-back,
+.ao-workspace.flat-office .flat-view button,
+.ao-workspace.flat-office .flat-waiting-list button,
+.ao-workspace.flat-office .flat-alloc-sync button,
+.project-connect,
+.project-recover {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-detail-actions button:hover,
+.ao-workspace.flat-office .flat-pager button:hover,
+.ao-workspace.flat-office .flat-back:hover,
+.ao-workspace.flat-office .flat-view button:hover,
+.project-connect:hover,
+.project-recover:hover {
+  border-color: var(--ao-border-strong);
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* 修的是：`.flat-card-plan button[data-act="reject-plan"]` 是次动作，不能实心。 */
+.ao-workspace.flat-office .flat-card-plan button[data-act="reject-plan"] {
+  border-color: var(--ao-border-strong);
+  background: transparent;
+  color: var(--ao-text-soft);
+}
+
+/* 修的是：tab 用「墨色下划线」标记选中。改成暖色 pill + 陶土橙字，
+   并把那条绝对定位的下划线收掉（否则会从 1px 轨道下方探出来）。 */
+.ao-workspace.flat-office .flat-filters button {
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-filters button:hover {
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+.ao-workspace.flat-office .flat-filters button[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* 修的是：选中态 tab / 视图切换的底色是 accent-soft，橙字压在上面时
+   `--ao-accent-ink` 只有 4.37:1，仍差一点点；再降一档到 accent-hover（5.42:1）。 */
+.ao-workspace.flat-office .flat-view button[aria-pressed="true"] {
+  color: var(--ao-accent-hover);
+}
+
+.ao-workspace.flat-office .flat-filters button[aria-pressed="true"]::after {
+  display: none;
+}
+
+/* 修的是：侧栏选中行用的是 inset 3px 的荧光蓝条 + 冷蓝底。
+   改成「暖褐底 + 2px 陶土橙竖条」，这是橙色允许出现的选中态标记。 */
+.ao-workspace.flat-office .flat-conv.is-on {
+  border-color: transparent;
+  background: var(--ao-sidebar-active);
+  box-shadow: inset 2px 0 var(--ao-accent);
+}
+
+.ao-workspace.flat-office .flat-conv:focus-visible {
+  outline-color: var(--ao-accent);
+  outline-offset: -2px;
+}
+
+/* 修的是：任务行左侧 3px 竖条，降为 2px，与侧栏选中条同一套刻度。 */
+.ao-workspace.flat-office .flat-task {
+  border-left: 2px solid transparent;
+}
+
+/* 修的是：chip 本来是「无框纯文字 + 小方点」，10px 单字号，像终端输出。
+   改成 999px 胶囊 + 11px + 4/10 内距；状态色改为暖色系浅底。 */
+.ao-workspace.flat-office .flat-chip {
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius-pill);
+  background: var(--ao-surface);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-chip::before {
+  border-radius: var(--ao-radius-pill);
+}
+
+/* 修的是：状态色里仍有冷蓝（#2f5d8c）与冷灰（#6b7684）的分支。 */
+.ao-workspace.flat-office .flat-chip-ready,
+.ao-workspace.flat-office .flat-chip-queued,
+.ao-workspace.flat-office .flat-chip-draft,
+.ao-workspace.flat-office .flat-chip-accept-none {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-chip-claimed,
+.ao-workspace.flat-office .flat-chip-in_progress,
+.ao-workspace.flat-office .flat-chip-verifying {
+  border-color: #C6D6C9;
+  background: #EFF5F0;
+  color: var(--ao-live-ink);
+}
+
+.ao-workspace.flat-office .flat-chip-awaiting_review,
+.ao-workspace.flat-office .flat-chip-changes_requested,
+.ao-workspace.flat-office .flat-chip-escalated,
+.ao-workspace.flat-office .flat-chip-awaiting_human,
+.ao-workspace.flat-office .flat-chip-accept-retry {
+  border-color: #E2C79E;
+  background: #FBF2E3;
+  color: var(--ao-warn-ink);
+}
+
+.ao-workspace.flat-office .flat-chip-abandoned,
+.ao-workspace.flat-office .flat-chip-stale,
+.ao-workspace.flat-office .flat-chip-cancelled,
+.ao-workspace.flat-office .flat-chip-accept-abandoned {
+  border-color: #E3BFB9;
+  background: #FBEDEA;
+  color: var(--ao-bad-ink);
+}
+
+.ao-workspace.flat-office .flat-chip-merged,
+.ao-workspace.flat-office .flat-chip-approved,
+.ao-workspace.flat-office .flat-chip-accept-pass {
+  border-color: #C6DCCD;
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+/* 修的是：`#aoRefreshBtn` 原本无边框（像个裸字），现在是次要按钮。 */
+#aoRefreshBtn {
+  border-color: var(--ao-border);
+}
+
+/* 修的是：用户首字母块原来是墨黑方块 2px 圆角，硬。改胶囊 + 暖褐底。 */
+.ao-user {
+  border: 1px solid #3B2F26;
+  background: var(--ao-sidebar);
+  color: var(--ao-sidebar-ink);
+}
+
+/* 修的是：左上角标记块 2px 直角、纯 #fff 字。它是「橙底 + 浅字」，
+   所以底色走 `--ao-accent-ink`。 */
+.ao-mark {
+  border-radius: var(--ao-radius);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+/* 修的是：焦点环用的是新陶土橙（保留焦点环，只换色）。 */
+:focus-visible {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 3px;
+}
+
+.ao-workspace.flat-office input:focus-visible,
+.ao-workspace.flat-office select:focus-visible {
+  outline: 2px solid var(--ao-accent);
+  outline-offset: 2px;
+}
+
+/* 修的是：滚动条滑块是 --ao-border-strong（现在是暖棕），轨道透明；补上圆角。 */
+* {
+  scrollbar-color: var(--ao-border-strong) transparent;
+}
+
+/* ------------------------------------------- 7b. 陶土橙的两种用法（按用途拆分）
+   修的是：基础样式表里有 92 处 `var(--ao-accent)`，它们不分用途 —— 既作文字色，
+   也作进度条填充。令牌拆成「装饰橙 #C2623A / 文字橙 #A9502C」之后，
+   **凡是「橙当字用」或「橙底配浅字」的地方必须在覆盖层里显式指到 ink**，
+   否则会以 3.9:1 掉出 WCAG AA（仓库 scripts/verify-office-design.mjs 有硬断言）。
+   下面两组是逐条 grep（`var(--ao-accent)` / `background: var(--ao-accent)` /
+   `var(--ao-accent,` 带 fallback 的写法）后的人工分类结果。
+   装饰类（进度与额度填充、2px/3px 竖条、边框、focus ring、accent-color）不在此列，
+   它们继续吃 `--ao-accent`。 */
+
+/* (1) 橙当文字：文字链接、eyebrow/kicker、行内动作、图标、数字强调。
+   （选中态 tab / 视图切换不在此列 —— 它们的底色是 accent-soft，见上面对应规则。） */
+.ao-workspace.flat-office .flat-task-jump,
+.ao-workspace.flat-office .flat-icon,
+.ao-workspace.flat-office .flat-card h3 .flat-icon,
+.ao-workspace.flat-office .flat-node.is-current,
+.ao-workspace.flat-office .flat-firstrun-step h3 span,
+.ao-workspace.flat-office .flat-rail-lead.has-value strong,
+.ao-workspace.flat-office .flat-alloc-sync button,
+.ao-workspace.flat-office .flat-list a,
+.ao-workspace.flat-office .flat-assistant-expand,
+.ao-workspace.flat-office .flat-project-requests-head > button,
+.ao-workspace.flat-office .flat-project-request-actions button[data-act="open-reject-request"],
+.ao-workspace.flat-office .flat-experience-actions button[data-decision="confirm"],
+.project-empty-icon,
+.project-card-icon,
+.project-card-open,
+.project-platform-open,
+.project-tools-actions button,
+.project-recover,
+.project-member-option:has(input:checked) span,
+.project-create-mode:has(input:checked) b,
+.harness-state.installed,
+.harness-card-actions a,
+.harness-dialog button:hover,
+.project-lobby-copy .eyebrow,
+.project-lobby-ledger span:last-child,
+.outputs-said-head,
+.outputs-more-block > summary,
+.outputs-more,
+.direct-msg.is-mine .direct-meta,
+.relay-eyebrow,
+.phone-agent-launch,
+.agent-rules summary,
+.agent-more summary {
+  color: var(--ao-accent-ink);
+}
+
+/* (2) 橙底 + 浅字：基础样式表里写死、且没有走主题层按钮规则的那几个。
+   （其余实心主按钮已在「7. 控件层」里统一指到 ink。） */
+.harness-register-form button,
+.harness-base-form button,
+.model-connection-form button {
+  border-color: var(--ao-accent-ink);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+/* (3) 三条 kicker 的文字色在基础样式表里写了 `!important`，改选择器压不过去。
+   这里不动 `color`，而是就地改写**该元素自己的** `--ao-accent` 值 ——
+   自定义属性按元素继承，于是被 `!important` 钉住的 `color: var(--ao-accent)`
+   自然解析成 ink。全程零 `!important`。
+   被覆盖的原规则：
+     · src/app-shell.css:502    .ao-workspace .flat-card-kicker { color: var(--ao-accent) !important; }
+     · src/direct-chat.css:125  .direct-kicker           { color: var(--ao-accent) !important; }
+     · src/outputs.css:255      .outputs-kicker          { color: var(--ao-accent) !important; } */
+.ao-workspace.flat-office .flat-card-kicker,
+.direct-kicker,
+.outputs-kicker {
+  --ao-accent: var(--ao-accent-ink);
+}
+
+/* (4) 开工向导（`contributions/office-opening-phone`，不可改的那个文件）：
+   它用 `--oop-brand` 同时当「橙底」和「橙字」，且选中 chip 的底是冷蓝 #eaf1ff。
+   app-shell.css:136 已经把 `--oop-brand` 映射到 `var(--ao-accent)`，
+   于是「橙底 + 浅字」落到 3.91:1、「橙字 + 冷蓝底」落到 3.63:1。
+   这里把品牌变量指到 ink，并把冷蓝底换回暖色（选中态用 accent-soft + hover 档字）。 */
+#openingDialog .oop-root {
+  --oop-bg: var(--ao-surface);
+  --oop-card: var(--ao-surface);
+  --oop-ink: var(--ao-text);
+  --oop-sub: var(--ao-text-soft);
+  --oop-line: var(--ao-border-strong);
+  --oop-brand: var(--ao-accent-ink);
+  --oop-brand-ink: var(--ao-on-accent);
+}
+
+#openingDialog .oop-chip.on {
+  border-color: var(--ao-accent-ink);
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* ---------------------------------------------------------------- 8. 状态色层
+   修的是：轻提示条（instances / lobby note / direct note / outputs note）
+   是 #ead6be 边 + #fff8ed 底（偏黄），且带 2px 直角。统一成暖描边 + 柔和底。 */
+.ao-lobby-note,
+.project-instance-note {
+  border: 1px solid var(--ao-border);
+  border-left: 3px solid var(--ao-accent);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+/* 修的是：私聊页/产出页的说明段在「v3 层」里已经是「无底 + 仅左竖条」的引用体，
+   这里只把竖条收回陶土橙，不铺底色（橙色只做标记，不铺成面）。 */
+.direct-note,
+.outputs-note {
+  border-color: var(--ao-border);
+  border-left-color: var(--ao-accent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ao-text-soft);
+}
+
+/* 修的是：`.flat-group-mood` 是冷绿/冷红/冷白三色小标签。 */
+.ao-workspace.flat-office .flat-group-mood.is-busy {
+  border-color: #C6DCCD;
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+.ao-workspace.flat-office .flat-group-mood.is-waiting {
+  border-color: #E3BFB9;
+  background: #FBEDEA;
+  color: var(--ao-bad-ink);
+}
+
+.ao-workspace.flat-office .flat-group-mood.is-idle {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-faint);
+}
+
+/* 修的是：大厅项目卡状态徽标是冷绿 #edf7f1。 */
+.project-card-status {
+  border: 1px solid var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.project-card-status.scene {
+  border-color: #C6DCCD;
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+/* 修的是：`.project-card` 在暖底上 hover 是 --ao-bg（比底色更冷更深），
+   选中态又整块 accent-soft，两档都太重。 */
+.project-card {
+  border-bottom: 1px solid var(--ao-line-soft);
+  border-radius: var(--ao-radius);
+}
+
+.project-card:hover {
+  background: var(--ao-surface);
+}
+
+/* 修的是：选中项目卡。原「v3 编辑部层」（project-workspace.css:289）给的是
+   「纸面 + 内嵌 3px 陶土橙竖条」，我第一版把它改成了整块 accent-soft ——
+   于是卡上的「进入办公室」（`--ao-accent-ink`）压在同一色系的浅橙底上，
+   QA 实测只有 4.37:1。**这里回到原设计的纸面 + 竖条**：选中标记由竖条承担，
+   文字回到 4.79:1，配色纪律也更干净（橙色只做「标记」不做「面」）。 */
+.project-card[data-active="1"] {
+  background: var(--ao-paper);
+  box-shadow: inset 3px 0 var(--ao-accent);
+}
+
+/* 修的是：产出页状态标签（完成/卡住）是冷绿底 #eef8f2 / 冷红底 #fbf0f0。 */
+.outputs-tag {
+  border-radius: var(--ao-radius-pill);
+}
+
+.outputs-tag.is-done {
+  border-color: #C6DCCD;
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+.outputs-tag.is-stuck {
+  border-color: #E3BFB9;
+  background: #FBEDEA;
+  color: var(--ao-bad-ink);
+}
+
+/* 修的是：产出页/正文块底色是 --ao-bg（整块变深），在纸上像凹陷。 */
+.outputs-words,
+.outputs-raw,
+.outputs-more-block,
+.agent-preview,
+.agent-doc {
+  border-color: var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text);
+}
+
+/* 修的是：私聊页「我发的」气泡底是 #f6e8e1（旧软橙）。 */
+.direct-msg.is-mine p {
+  border-left: 3px solid var(--ao-accent);
+  border-radius: 0 var(--ao-radius) var(--ao-radius) 0;
+  background: var(--ao-accent-soft);
+  color: var(--ao-text);
+}
+
+/* 修的是：`.agent-row.is-stall / .is-escalate` 是偏黄的告警底。 */
+.agent-row.is-stall {
+  border-color: #E2C79E;
+  background: #FBF2E3;
+}
+
+.agent-row.is-escalate {
+  border-color: #E3BFB9;
+  background: #FBEDEA;
+}
+
+/* 修的是：`.agent-action-result` 是冷绿 #f0f7f2 / 冷红 #fdf3f1。 */
+.agent-action-result {
+  border-color: #C6DCCD;
+  border-radius: var(--ao-radius);
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+.agent-action-result.is-error {
+  border-color: #E3BFB9;
+  background: #FBEDEA;
+  color: var(--ao-bad-ink);
+}
+
+/* 修的是：`.relay-card` 用 `border-top: 2px solid var(--ao-text)` 当分隔，
+   像文档里的粗横杠。它 `padding-inline: 0`（内容通栏），所以只把墨色粗线降为
+   1px 柔和线，不铺底色 —— 铺了就变成「文字贴着卡片边」。 */
+.relay-card {
+  border: 0;
+  border-top: 1px solid var(--ao-border);
+  border-radius: 0;
+  background: transparent;
+  padding-inline: 0;
+}
+
+/* 修的是：`.relay-state` 的状态色与 `--ao-live/--ao-bad` 不一致。 */
+.relay-state-running {
+  border-color: #C6DCCD;
+  background: #EFF6F1;
+  color: var(--ao-live-ink);
+}
+
+.relay-state-stopped {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+/* ------------------------------------------------- 9. 冷色收口（复核后补充）
+   QA 复核在 `flat-office.css` 里又找出一批**同族冷蓝**（#2f5d8c 海军蓝 /
+   #eaf1f8 冷蓝底 / #cfe0ef 冷蓝边）。它们不是「橙色两种用法」的问题，而是
+   从来就没进过调色盘，所以 7b 的清单天然覆盖不到。逐条标出原始位置，
+   避免下一轮再靠肉眼排查：
+     flat-office.css:1211-1221  .flat-brief-summary（含 ::before）
+     flat-office.css:1532-1534  .flat-brief-action
+     flat-office.css:1543-1553  .flat-brief-action button
+     flat-office.css:1752/1767  .flat-switch:hover / .flat-switch.is-on
+     flat-office.css:834        .flat-node.is-current（冷蓝边）
+     flat-office.css:1369       .flat-thread-msg.is-mine（冷蓝左竖条）
+     flat-office.css:1323-1337  .flat-field textarea + :focus
+     flat-office.css:1397-1405  .flat-dialog-form button
+     flat-office.css:1944-1963  .flat-userkey-ask button（含 approve 主操作）
+     flat-office.css:1978-1985  .flat-userkeys-form button
+     flat-office.css:629-640    .flat-pulse 心跳点 + @keyframes flat-pulse
+   注意：`.flat-dialog` 挂在 **body** 上，不跟着 `.ao-workspace` 重画，
+   所以这组里凡属对话框的选择器都不能加 `.ao-workspace` 前缀。 */
+
+/* 任务书顶上那句人话：冷蓝底(#eaf1f8) + 冷蓝边(#cfe0ef) + 深蓝字(#24486b)。
+   按「橙色只做标记不做正文」的纪律拆开：**连续说明文字回墨**（`--ao-text`），
+   只有 `::before` 那个「这份方案讲的是：」的**标记**留在 `--ao-accent-hover`。
+   底仍是 `--ao-accent-soft`（一块浅橙「面」由语义决定，不是装饰）。 */
+.ao-workspace.flat-office .flat-brief-summary {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius-card);
+  background: var(--ao-accent-soft);
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-brief-summary::before {
+  color: var(--ao-accent-hover);
+}
+
+/* 「请管理员派单」这条批量入口：同样三件套（边/底/字）。
+   注意它**也是正文**（`另有 <b>N</b> 条任务尚未领取。` + 一个真按钮 + 一段补充说明），
+   所以块色回墨；只有 `<b>` 那个计数是「标记」留橙；真按钮走 ink 实心。 */
+.ao-workspace.flat-office .flat-brief-action {
+  border: 1px solid var(--ao-border);
+  border-radius: var(--ao-radius-card);
+  background: var(--ao-accent-soft);
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-brief-action b {
+  color: var(--ao-accent-hover);
+}
+
+.ao-workspace.flat-office .flat-brief-action button {
+  border-color: var(--ao-accent-ink);
+  border-radius: var(--ao-radius);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+.ao-workspace.flat-office .flat-brief-action button:hover {
+  border-color: var(--ao-accent-hover);
+  background: var(--ao-accent-hover);
+}
+
+/* 详情页任务切换器：未选中是纸面、选中是暖橙底（原来选中是冷蓝 #eaf1f8，
+   1440×900 下可见约 1 万 px²，暖纸页里非常跳）。 */
+.ao-workspace.flat-office .flat-switch {
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+}
+
+.ao-workspace.flat-office .flat-switch:hover {
+  background: var(--ao-bg);
+}
+
+.ao-workspace.flat-office .flat-switch.is-on {
+  border-color: var(--ao-accent);
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+/* 选中卡内的次级说明原本是 `--ao-ink-faint`，压在 accent-soft 上只有 4.54:1
+   （过线但紧贴门禁）。按规格统一到 `--ao-accent-hover`：压在 accent-soft 上
+   5.42:1，既满足「字 accent-hover」也留出余量。 */
+.ao-workspace.flat-office .flat-switch.is-on span {
+  color: var(--ao-accent-hover);
+}
+
+/* 血缘链路里「当前节点」的冷蓝边。 */
+.ao-workspace.flat-office .flat-node.is-current {
+  border-color: var(--ao-border-strong);
+  background: var(--ao-accent-soft);
+}
+
+/* 「我发的」那条群消息的左竖条：冷蓝 → 陶土橙（装饰，用装饰档）。 */
+.ao-workspace.flat-office .flat-thread-msg.is-mine {
+  border-left-color: var(--ao-accent);
+}
+
+/* 表单域：纯白底 + 冷蓝 focus 环。字段标签本身也吃 flat-office.css:1318/1343 的
+   冷墨 #3d4652，这里一并回暖（`.flat-field` / `.flat-check` 在 body 上的对话框里，
+   不加 `.ao-workspace` 前缀）。 */
+.flat-field,
+.flat-check {
+  color: var(--ao-text-soft);
+}
+
+/* 「项目申请」对话框（`.flat-project-request-dialog`）的 textarea 原来两个选择器
+   都不匹配它 —— base 的 `flat-office.css:2762` 只给了 border-color/background，
+   圆角仍由 `flat-office.css:1321 .flat-field textarea` 的 5px 兜底，字色也还是
+   那句里的冷墨 `#1f2732`。这里把它的容器类补进同一组，特异度与 base 相同
+   （0,2,1）、主题层后加载，因此能压过 base，不需要 !important。 */
+.ao-workspace.flat-office .flat-field textarea,
+.flat-dialog-form .flat-field textarea,
+.flat-project-request-dialog .flat-field textarea {
+  border-color: var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-field textarea:focus {
+  outline: 2px solid var(--ao-accent-soft);
+  border-color: var(--ao-accent-ink);
+}
+
+/* 与管理员对话的发送按钮（挂在 body 上的对话框）。 */
+.flat-dialog-form button {
+  border-color: var(--ao-accent-ink);
+  border-radius: var(--ao-radius);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+/* 额度密钥：中性按钮 + 「批准」主操作，原来都是海军蓝。 */
+.ao-workspace.flat-office .flat-userkey-ask button {
+  border-color: var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-userkey-ask button[data-act="approve-user-key"],
+.ao-workspace.flat-office .flat-userkeys-form button {
+  border-color: var(--ao-accent-ink);
+  border-radius: var(--ao-radius);
+  background: var(--ao-accent-ink);
+  color: var(--ao-on-accent);
+}
+
+.ao-workspace.flat-office .flat-userkeys-add > summary {
+  color: var(--ao-accent-ink);
+}
+
+.ao-workspace.flat-office .flat-userkeys-form label {
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-userkeys-form input {
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+/* 「它正在做」的呼吸点：点本身是装饰，走装饰档；蓝色光晕在
+   `@keyframes flat-pulse` 里写死成 rgba(47,93,140,.45)，改用同名 keyframes
+   覆盖（CSS 里后声明的同名 keyframes 生效，不需要 `!important`）。 */
+.ao-workspace.flat-office .flat-pulse {
+  background: var(--ao-accent);
+}
+
+@keyframes flat-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(194, 98, 58, .45); }
+  70% { box-shadow: 0 0 0 7px rgba(194, 98, 58, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(194, 98, 58, 0); }
+}
+
+/* ------------------------- 9b. 「浅橙底上的橙字」再降一档（复核补充）
+   这类组合用 `--ao-accent-ink` 只有 4.37:1（ink #A9502C 压 accent-soft
+   #F6E3D8），差一点点过不了 AA；统一降到 `--ao-accent-hover`（5.42:1）。
+   QA 复核实测：选中项目卡上的「进入办公室」= 4.37 —— 这是**常用状态**
+   （`agent-office.active-project.v1` 一旦写过，回大厅那张卡就带 data-active）。 */
+.project-card[data-active="1"] .project-card-open,
+.project-recover:hover,
+.harness-state.installed,
+.harness-dialog button:hover,
+.phone-agent-launch,
+.ao-workspace.flat-office .flat-firstrun-step h3 span,
+.ao-workspace.flat-office .flat-node.is-current {
+  color: var(--ao-accent-hover);
+}
+
+/* `.flat-card-kicker` 只出现在 `accent-soft` 底的方案卡上，同样降到 hover 档。 */
+.ao-workspace.flat-office .flat-card-kicker {
+  --ao-accent: var(--ao-accent-hover);
+}
+
+/* ------------------------- 9c. 冷灰「系统默认控件」收口（复核补充，来源可查）
+   这一类不是冷蓝也不是橙，而是 `#cdd3da / #f1f3f5 / #fbfcfd / #5b6673` 系列
+   冷灰，出现在「看起来像浏览器默认按钮/输入框」的块上。按原文件行号列清：
+     flat-office.css:1069-1075  .flat-chat-toggle（冷灰边 + 纯白底）
+     flat-office.css:1292-1296  .flat-dialog-close（同上，对话框挂在 body 上）
+     flat-office.css:1387-1393  .flat-dialog-form input（同上）
+     flat-office.css:2964-2970  .flat-experience-load（+ 2983 :hover #f2f4f6）
+     outputs.css:108-114        .outputs-tag（未分状态的兜底：冷灰字/边/白底）
+     direct-chat.css:64         .direct-msg b（冷灰发言人名）
+   对话框与独立页面的选择器都不加 `.ao-workspace` 前缀（不在该容器内）。 */
+.ao-workspace.flat-office .flat-chat-toggle {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-chat-toggle:hover {
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+.flat-dialog-close {
+  border-color: var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.flat-dialog-form input {
+  border-color: var(--ao-border);
+  border-radius: var(--ao-radius);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-experience-load {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-experience-load:hover {
+  background: var(--ao-accent-soft);
+  color: var(--ao-accent-hover);
+}
+
+.outputs-tag {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+.direct-msg b {
+  color: var(--ao-text-soft);
+}
+
+/* ------------------------- 9d. 冷色清扫的剩余 6 处（`grep` 全量分类后补）
+   我把主理人给的那条 grep（eaf1f8|cfe0ef|eef4fb|f1f3f5|dbe4ee|2f5d8c|eaf1ff|
+   e3e6ea|1c2430）逐行解析成「文件:行 → 选择器 → 声明」再分类，结论见交付报告。
+   61 处属「已有同名覆盖」、4 处是 `var(--ao-line, #e3e6ea)` 的兜底值（运行时
+   取到的是暖色的 `--ao-line`）、2 处已被上游的后置规则改写为 `border-color`，
+   剩下这 6 处是真正还冷着的可见表面，逐个补： */
+/* flat-office.css:983 额度/进度条轨道是冷灰 #f1f3f5（轨道只改底色，圆角保持胶囊） */
+.ao-workspace.flat-office .flat-gauge {
+  border-color: var(--ao-border);
+  background: var(--ao-line-soft);
+}
+
+/* flat-office.css:1485 任务书表格行的左侧 3px 冷灰竖条 */
+.ao-workspace.flat-office .flat-brief-task {
+  border-left-color: var(--ao-border-strong);
+}
+
+/* flat-office.css:1512 任务书表格的取值列是冷墨 #1c2430 */
+.ao-workspace.flat-office .flat-brief-task dd {
+  color: var(--ao-text);
+}
+
+/* flat-office.css:1978 额度密钥表单的下拉框文字是冷墨 */
+.ao-workspace.flat-office .flat-userkeys-form select {
+  border-color: var(--ao-border);
+  background: var(--ao-paper);
+  color: var(--ao-text);
+}
+
+/* flat-office.css:2133 平台助手的预设提示按钮：冷蓝边 #dbe4ee */
+.ao-workspace.flat-office .flat-assistant .flat-assistant-presets button {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text-soft);
+}
+
+/* relay-workspace.css:12 转接工作区的整体文字是冷墨 #1c2430 */
+.relay-workspace {
+  color: var(--ao-text);
+}
+
+/* ------------------------------------------------ 9e. 独立入口页的 placeholder
+   修的是：`app-shell.css:58` 那条 `input::placeholder, textarea::placeholder
+   { color: var(--ao-text-faint) }` 只随主壳加载。`outputs.html` / `direct.html`
+   走独立 Vite entry（只引各自的 `outputs.css` / `direct-chat.css` + 本覆盖层），
+   **不加载 app-shell.css**，于是这两页的 placeholder 回落成浏览器默认灰
+   `#757575`（`rgb(117,117,117)`），在新暖底上明显偏冷偏亮。
+   容器类名取自两个 entry 的 `<body>`：`body.outputs-body` / `body.direct-body`
+   （见 outputs.html / direct.html，样式定义分别在 outputs.css:7、direct-chat.css:8）。
+   特异度 (0,1,2) 足以压过任何裸元素选择器；`opacity: 1` 照抄 app-shell.css:58，
+   抵消 Firefox 默认的 0.54 透明。 */
+body.outputs-body input::placeholder,
+body.outputs-body textarea::placeholder,
+body.direct-body input::placeholder,
+body.direct-body textarea::placeholder {
+  color: var(--ao-text-faint);
+  opacity: 1;
+}

@@ -115,7 +115,14 @@ CODEX_CASE = HarnessCase(
     name="codex",
     cls=CodexAdapter,
     registration=CODEX_REGISTRATION,
-    flags=["exec", "--json", "--skip-git-repo-check", "--full-auto"],
+    flags=[
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "--full-auto",
+        "-c",
+        "features.memories=false",
+    ],
     stdout=CODEX_OUT,
     session_id="cx-1",
 )
@@ -771,12 +778,17 @@ def test_codex_sandbox_argv_per_platform(tmp_path, monkeypatch):
     # The work order travels on stdin ("-"), not in argv: Windows caps the
     # command line at 32,767 characters and the administrator's review prompt
     # (which carries the whole diff) does not fit.
+    # ``features.memories=false``: headless refine/review needs no
+    # memory generation; its phase2 job spams stderr with "no such table:
+    # jobs" on every start, polluting AdminHarnessError diagnostics.
     assert posix.command(order, tmp_path) == [
         _codex_binary(),
         "exec",
         "--json",
         "--skip-git-repo-check",
         "--full-auto",
+        "-c",
+        "features.memories=false",
         "-",
     ]
     assert nt.command(order, tmp_path) == [
@@ -786,6 +798,8 @@ def test_codex_sandbox_argv_per_platform(tmp_path, monkeypatch):
         "--skip-git-repo-check",
         "--sandbox",
         "danger-full-access",
+        "-c",
+        "features.memories=false",
         "-",
     ]
     assert nt.sandbox_mode() == "danger-full-access"
@@ -798,6 +812,8 @@ def test_codex_sandbox_argv_per_platform(tmp_path, monkeypatch):
         "--json",
         "--skip-git-repo-check",
         "--full-auto",
+        "-c",
+        "features.memories=false",
         "-",
     ]
 
@@ -809,8 +825,26 @@ def test_codex_sandbox_argv_per_platform(tmp_path, monkeypatch):
         "--skip-git-repo-check",
         "--sandbox",
         "danger-full-access",
+        "-c",
+        "features.memories=false",
         "-",
     ]
+
+
+def test_codex_review_command_keeps_the_memories_override(tmp_path):
+    """review_command reuses command(); the memories override must survive it,
+    so the reviewer never emits the phase2 "no such table: jobs" stderr noise."""
+    order = "review this attempt"
+    nt = CodexAdapter(client=None, platform="nt")
+    posix = CodexAdapter(client=None, platform="posix")
+    for adapter in (nt, posix):
+        argv = adapter.review_command(order, tmp_path)
+        assert argv[argv.index("-c") : argv.index("-c") + 2] == [
+            "-c",
+            "features.memories=false",
+        ]
+        # The work order still travels on stdin, after the override.
+        assert argv[-1] == "-"
 
 
 def test_opencode_launch_shim_per_platform(tmp_path, monkeypatch):
@@ -1461,6 +1495,12 @@ def test_the_subprocess_runner_kills_the_whole_process_tree(tmp_path):
     The child spawns a grandchild that keeps writing a marker file; after the
     deadline kill, the marker must stop changing. Without a tree kill the
     grandchild survives and the marker keeps advancing.
+
+    Timing constraint: the tree kill must land only AFTER the grandchild has
+    written the marker once -- otherwise a slow-spawning grandchild is reaped
+    together with the child and the marker never appears, so the assertion
+    premise does not hold. The child therefore waits (bounded) for the marker
+    before sleeping, and the kill timeout is generous.
     """
     marker = tmp_path / "marker.txt"
     grand = tmp_path / "grand.py"
@@ -1474,8 +1514,15 @@ def test_the_subprocess_runner_kills_the_whole_process_tree(tmp_path):
     )
     child = tmp_path / "child.py"
     child.write_text(
-        "import subprocess, sys, time\n"
+        "import pathlib, subprocess, sys, time\n"
+        f"marker = pathlib.Path({str(marker)!r})\n"
         f"subprocess.Popen([sys.executable, {str(grand)!r}, {str(marker)!r}])\n"
+        "# Wait (bounded) until the grandchild has written the marker once:\n"
+        "# the tree kill must happen after that, or it can reap the\n"
+        "# not-yet-started grandchild and the marker would never appear.\n"
+        "deadline = time.monotonic() + 20\n"
+        "while not marker.exists() and time.monotonic() < deadline:\n"
+        "    time.sleep(0.05)\n"
         "time.sleep(60)\n",
         encoding="utf-8",
     )
@@ -1485,12 +1532,12 @@ def test_the_subprocess_runner_kills_the_whole_process_tree(tmp_path):
         runner.run(
             [sys.executable, str(child)],
             cwd=tmp_path,
-            timeout_seconds=0.6,
+            timeout_seconds=2.0,
             on_tick=lambda: None,
             tick_interval_seconds=0.2,
         )
 
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 30
     while not marker.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert marker.exists(), "the grandchild never started"
