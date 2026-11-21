@@ -14,6 +14,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,6 +25,13 @@ from app.db.connection import _lock_file, _unlock_file
 from app.git.branch import is_integration_ref
 
 INTEGRATION_BRANCH = "integration"
+
+#: Windows 上 ``open("a+b")`` 在另一进程已持有/正在锁该文件时会先抛
+#: PermissionError——和 ``app/db/connection.py::_lock_file`` 注释里写的是
+#: 同一个坑，那里只在 ``msvcrt.locking`` 阶段重试；重试必须补在 open 这一层。
+#: 所以这里同样在调用侧做有界重试（deadline + 轮询），超时后抛清晰异常。
+_ENSURE_LOCK_OPEN_TIMEOUT_S = 5.0
+_ENSURE_LOCK_OPEN_POLL_S = 0.1
 
 #: Git needs an identity to create the repository's first commit. Scoped to this
 #: process, never written to any config file.
@@ -168,7 +176,22 @@ class CanonicalRepo:
         """
         lock_path = self.path.with_name(self.path.name + ".ensure.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        handle = lock_path.open("a+b")
+        # Windows 坑：另一进程持有该锁文件时，open("a+b") 本身就先抛
+        # PermissionError，根本轮不到 ``msvcrt.locking`` 的重试阶段。原因与
+        # ``app/db/connection.py::_lock_file`` 的注释一致——必须在调用侧重试。
+        deadline = time.monotonic() + _ENSURE_LOCK_OPEN_TIMEOUT_S
+        while True:
+            try:
+                handle = lock_path.open("a+b")
+                break
+            except PermissionError as exc:
+                if time.monotonic() >= deadline:
+                    raise GitError(
+                        f"could not open the ensure lock {lock_path} within "
+                        f"{_ENSURE_LOCK_OPEN_TIMEOUT_S}s: it appears to be "
+                        f"held by another process ({exc})"
+                    ) from exc
+                time.sleep(_ENSURE_LOCK_OPEN_POLL_S)
         try:
             _lock_file(handle)
             yield

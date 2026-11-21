@@ -196,3 +196,27 @@ def test_canonical_repo_initialization_is_safe_for_parallel_workers(tmp_path):
         worker.join(timeout=30)
     assert all(worker.exitcode == 0 for worker in workers)
     assert CanonicalRepo(Path(repo_path)).ref_commit("refs/heads/integration")
+
+
+def test_canonical_ensure_lock_open_retries_past_permission_error(tmp_path, monkeypatch):
+    """Windows: another process holding the ensure lock makes ``open("a+b")``
+    itself raise PermissionError before ``msvcrt.locking`` is ever reached
+    (same pitfall documented in ``app/db/connection.py::_lock_file``), so
+    ``_ensure_lock`` must retry the open instead of failing outright.
+    """
+    real_open = Path.open
+    calls = {"failed_opens": 0}
+
+    def flaky_open(self, mode="r", *args, **kwargs):
+        if self.name.endswith(".ensure.lock") and calls["failed_opens"] == 0:
+            calls["failed_opens"] += 1
+            raise PermissionError(13, "simulated: held by another process")
+        return real_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", flaky_open)
+
+    repo = CanonicalRepo(tmp_path / "canonical.git")
+    repo.ensure()
+
+    assert calls["failed_opens"] == 1  # one failure, then the retry succeeded
+    assert repo.ref_commit("refs/heads/integration")
