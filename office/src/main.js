@@ -26,6 +26,7 @@ import { isAdministratorHarness, isInstanceWindow, isPlatformAssistantHarness } 
 import { openingCandidateWindows } from './opening-candidates.js';
 // 终端面板按需 import（见下面「终端」按钮）；这里不静态引入 xterm。
 import './app-shell.css';
+import './moyu-theme.css';
 import { formal } from './formal-api.js';
 const $ = (selector) => document.querySelector(selector);
 

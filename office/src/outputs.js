@@ -8,6 +8,9 @@
 // 数据来自平台的 `/tasks/{id}/output`（每一次 attempt 的 CLI 输出尾巴）。
 // 页面本身只读，不发任何写。
 import './outputs.css';
+// 视觉覆盖层：必须排在页面自己的 css **之后**（同权重、后加载者胜），
+// 否则 outputs.css 顶部那两段 `:root` 会反压主题层的令牌。
+import './moyu-theme.css?page';
 import { DONE_STATES, FAILED_STATES, outcomeLabel, stateLabel } from './state-labels.js';
 import { escapeHtml } from './html-escape.js';
 import { headlineText, parseTranscript, readableText, shortenPath } from './cli-transcript.js';
