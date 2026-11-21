@@ -36,6 +36,7 @@ import httpx
 
 from app.adapter import presence
 from app.adapter.harnesses.cli import ProviderRoute
+from app.admin import commands as admin_commands
 from app.admin.experience import ExperienceStore, ExperienceStoreError
 from app.admin.service import AdminHarnessError, AdminService, task_category_for_spec
 from app.config import settings
@@ -67,6 +68,16 @@ REASSIGN_TARGET_REF = "reassign-to:"
 CANCEL_REF = "task-cancelled"
 #: The machine-readable part of that message: "task-cancelled-json:{...}".
 CANCEL_JSON_REF = "task-cancelled-json:"
+#: A human hands the administrator a **structured operation** (v1: ``commit``).
+#: The body is JSON; the worker executes it with deterministic code, no model
+#: call in the loop. Why: the administrator's model channel decides *what* to
+#: do, but repository write access must not pass through a model -- a model can
+#: turn "commit these files" into ``git add -A``. The human authorises a repo,
+#: a branch and an explicit path list; :mod:`app.admin.commands` validates and
+#: runs it. It has to run **here** (the main workspace), because the task model
+#: is worktree-isolated: a member's worktree cannot see the main checkout's
+#: uncommitted files.
+ADMIN_COMMAND_REF = admin_commands.ADMIN_COMMAND_REF
 #: The task states a re-point may act on: the work is not deliverable from
 #: there (failed) or not progressing (lease lost).
 REASSIGNABLE_STATES = ("abandoned", "stale", "ready", "changes_requested")
@@ -74,6 +85,11 @@ REASSIGNABLE_STATES = ("abandoned", "stale", "ready", "changes_requested")
 #: platform's review lease is the authority; this is only a local backoff so a
 #: competing/refused review does not hammer the CLI.
 REVIEW_RETRY_SECONDS = 300.0
+#: How many times a failed answer (question via the model channel) is retried
+#: with backoff before the administrator gives up and says so. Same philosophy
+#: as ``goal_retry``: the asker's question must not disappear because one CLI
+#: call died -- but a permanently dead channel must not retry forever either.
+ANSWER_RETRY_MAX_ATTEMPTS = 5
 
 
 @dataclass
@@ -106,6 +122,12 @@ class WorkerState:
     #: A request is a *message*, and messages are replayed on every poll: the
     #: same request must not re-point the task twice.
     handled_request_seqs: list[int] = field(default_factory=list)
+    #: ``command_id`` values of the admin commands already executed. The same
+    #: instruction re-sent (a retry from the office, a replayed message with new
+    #: seq) must not commit twice; ``seq`` alone cannot guard that because a
+    #: retry is a *new* message. Kept short: the id is for accidental replays,
+    #: not an audit log.
+    handled_command_ids: list[str] = field(default_factory=list)
     #: The last goal the administrator worked on.  Kept so that the owner's
     #: answer to a member's "the goal has to change" can be handled (the
     #: answer re-refines that goal instead of being dropped).
@@ -130,6 +152,13 @@ class WorkerState:
     #: content).  It stays here until the channel works again: the owner's
     #: request must not disappear because one CLI call died.
     goal_retry: dict[str, Any] | None = None
+    #: 回答（中继提问 / 私信提问）在**模型通道**上失败的队列。与 goal_retry
+    #: 同一个哲学：提问的人不能因为一次 CLI 调用挂掉就丢了问题。key 是
+    #: ``str(seq)``，值带 question / asker / attempts / retry_after /
+    #: last_error，到期由 ``retry_failed_answers`` 退避重试。seq 同时留在
+    #: ``handled_request_seqs`` 里：那里防的是 poll 循环对重放消息的重复
+    #: 处理，重试由这个队列驱动、不走 poll 解析 —— 两条防线各管各的。
+    answer_retry: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> WorkerState:
@@ -151,6 +180,7 @@ class WorkerState:
                     str(k): int(v) for k, v in (data.get("reassign_counts") or {}).items()
                 },
                 handled_request_seqs=[int(x) for x in data.get("handled_request_seqs") or []],
+                handled_command_ids=[str(x) for x in data.get("handled_command_ids") or []],
                 pending_circulation=data.get("pending_circulation"),
                 pending_refinement=data.get("pending_refinement"),
                 last_goal=data.get("last_goal"),
@@ -161,6 +191,11 @@ class WorkerState:
                 circulation_rounds_done=int(data.get("circulation_rounds_done") or 0),
                 pending_allocation=data.get("pending_allocation"),
                 goal_retry=data.get("goal_retry"),
+                answer_retry={
+                    str(k): dict(v)
+                    for k, v in (data.get("answer_retry") or {}).items()
+                    if isinstance(v, dict)
+                },
             )
         except (OSError, ValueError, TypeError):
             # A corrupt cursor must not replay every historical goal. Start
@@ -405,6 +440,109 @@ class AdminWorker:
         self.state.save(self.state_path)
         self.handle_goal(payload, force=True)
 
+    def retry_failed_answers(self, now: float | None = None) -> None:
+        """Try again the answers that died on the model channel.
+
+        Same philosophy as ``retry_failed_goal``: the asker's question must
+        not disappear because one CLI call died.  A failed answer waits in
+        ``answer_retry`` and is retried here once its backoff has passed; a
+        success clears the entry (the answer itself was posted by
+        ``admin.answer``), a repeated failure re-enters the queue with a
+        longer backoff until ``ANSWER_RETRY_MAX_ATTEMPTS`` is spent.
+
+        The seq stays marked in ``handled_request_seqs`` on success and on
+        failure alike: the poll loop must not re-process the same replayed
+        message, and the retry queue -- not the poll parse -- drives the
+        re-answer.  ``now`` is injectable so tests can pin the backoff clock.
+        """
+        if self.dry_run:
+            # dry_run 不调模型也不发消息（与两个回答入口一致）。dry_run 也
+            # 不会产生队列条目，这只是防御。
+            return
+        now = time.time() if now is None else now
+        due = sorted(
+            (
+                key
+                for key, item in self.state.answer_retry.items()
+                if now >= float(item.get("retry_after") or 0.0)
+            ),
+            key=int,
+        )
+        for key in due:
+            item = self.state.answer_retry.get(key)
+            if not item:
+                continue
+            question = str(item.get("question") or "")
+            asker = str(item.get("asker") or "")
+            try:
+                self.admin.answer(
+                    question=question,
+                    group_id=self.group_id,
+                    asker=asker,
+                    route=self.pool_route("answer"),
+                )
+            except Exception as exc:  # noqa: BLE001 - same contract as the first try
+                self._record_answer_failure(seq=int(key), question=question, asker=asker, exc=exc)
+            else:
+                self.state.answer_retry.pop(key, None)
+                self.state.save(self.state_path)
+
+    def _record_answer_failure(
+        self, *, seq: int, question: str, asker: str, exc: Exception
+    ) -> None:
+        """Queue a failed answer for backoff retry, and keep the asker informed.
+
+        mark-before-call stays as it is: it guards the poll loop against
+        re-processing the same replayed message.  The retry does NOT go
+        through the poll parse -- it is driven by ``answer_retry`` instead --
+        which is why the seq stays in ``handled_request_seqs`` while the
+        question waits in the queue.
+
+        The first failure is still announced (the asker must hear that their
+        question failed -- silence would claim work that did not happen;
+        2026-11-21 collab-big-g1 lost three queued questions exactly because
+        a failed answer was marked once and then dropped).  Later retries
+        stay quiet so a long channel outage does not flood the private
+        thread.  Once the attempts are spent, one final message says the
+        automatic retrying stopped and the question needs a resend.
+        """
+        now = time.time()
+        key = str(seq)
+        prior = self.state.answer_retry.get(key) or {}
+        attempts = int(prior.get("attempts") or 0) + 1
+        last_error = f"{type(exc).__name__}: {exc}"[:400]
+        if attempts >= ANSWER_RETRY_MAX_ATTEMPTS:
+            # 放弃：条目移除，只发这一条收尾。seq 保留在 handled_request_seqs
+            # 里（poll 循环不会再碰它）；通道恢复后由人重发。
+            self.state.answer_retry.pop(key, None)
+            self.state.save(self.state_path)
+            self._post_direct_message(
+                asker,
+                f"这个问题重试 {ANSWER_RETRY_MAX_ATTEMPTS} 次仍未答上"
+                f"（最后原因：{last_error}），已停止自动重试；"
+                "通道恢复后请重发，或让管理员人工回答。",
+            )
+            return
+        self.state.answer_retry[key] = {
+            "question": question,
+            "asker": asker,
+            "harness": self.admin_harness_id,
+            "attempts": attempts,
+            "retry_after": now + min(self.GOAL_RETRY_SECONDS * attempts, 300.0),
+            "last_error": last_error,
+        }
+        self.state.save(self.state_path)
+        if attempts == 1:
+            # 只在第 1 次失败时说话：失败必须让人听见，但退避重试不该刷屏
+            # （那次事故里 35 秒刷了 4 条「没有答上来」）。
+            self._post_direct_message(
+                asker,
+                "这一条没有答上来（模型通道失败）。\n"
+                f"原因：{last_error}\n"
+                f"我会自动重试（最多 {ANSWER_RETRY_MAX_ATTEMPTS} 次）；"
+                "重试期间不用重发问题。",
+            )
+
     # --------------------------------------------------------------- 额度池
 
     def pool_route(self, purpose: str) -> ProviderRoute | None:
@@ -532,6 +670,11 @@ class AdminWorker:
                 payload = _goal_payload(message)
                 if payload:
                     self.handle_goal(payload)
+                continue
+            if ADMIN_COMMAND_REF in refs:
+                # 结构化操作指令（v1: commit）。只有人类能走到这里 —— 上面
+                # 非 human 的消息已经 continue 了；handler 里会再断言一次。
+                self.handle_admin_command(message, seq=seq)
                 continue
             if REASSIGN_REQUEST_REF in refs:
                 self.handle_reassign_request(message, seq=seq)
@@ -731,12 +874,9 @@ class AdminWorker:
                 route=self.pool_route("answer"),
             )
         except Exception as exc:  # noqa: BLE001 - the asker must hear the failure
-            self._post_direct_message(
-                asker,
-                "这一条没有答上来。\n"
-                f"原因：{type(exc).__name__}: {exc}\n"
-                "（不是你的问题；可以稍后重发，或者直接找管理员。）",
-            )
+            # 失败要让人听见（第 1 次），但问题不能就此丢失：进重试队列，
+            # 带退避自动重试（见 _record_answer_failure）。
+            self._record_answer_failure(seq=seq, question=body, asker=asker, exc=exc)
 
     def handle_direct_message(self, message: dict[str, Any], *, seq: int) -> None:
         """Answer a private question from the owner, in the same private channel.
@@ -776,13 +916,37 @@ class AdminWorker:
             # Never silence the owner. A failure is reported as a failure,
             # privately and in plain words -- a canned "收到" would claim work
             # that did not happen. The type is kept so a 500 or a secret-scan
-            # block is not misreported as "the model was busy".
-            self._post_direct_message(
-                sender,
-                "这一条没有答上来。\n"
-                f"原因：{type(exc).__name__}: {exc}\n"
-                "（不是你的问题；可以稍后重发，或者让管理员人工回答。）",
-            )
+            # block is not misreported as "the model was busy". And the
+            # question itself must not disappear with the failure: it goes to
+            # the retry queue with backoff (same philosophy as goal_retry).
+            self._record_answer_failure(seq=seq, question=body, asker=sender, exc=exc)
+
+    def _consecutive_refine_failures(self) -> int:
+        """How many of the group's most recent messages are refine failures.
+
+        Counts the trailing run of messages that start with the same prefix the
+        failure report posts (newest first, by ``created_seq``), stopping at the
+        first message that is anything else.  The caller adds 1 for the failure
+        it is about to post now.  Without a platform database there is no
+        history to look at (fake-client unit tests): the run is then empty.
+
+        The ``LIMIT`` keeps a pathological message history from turning this
+        into a full-table scan; a streak longer than that would be reported
+        every time anyway, so the exact number stops mattering long before.
+        """
+        if self.database is None:
+            return 0
+        rows = self.database.read(
+            "SELECT body FROM task_messages WHERE group_id = ?"
+            " ORDER BY created_seq DESC LIMIT 200",
+            (self.group_id,),
+        )
+        streak = 0
+        for row in rows:
+            if not str(row["body"] or "").startswith("管理员 Harness 细化失败"):
+                break
+            streak += 1
+        return streak
 
     def handle_goal(self, payload: dict[str, Any] | None, *, force: bool = False) -> None:
         if not payload:
@@ -837,6 +1001,7 @@ class AdminWorker:
             self.state.pending_goal = None
             self.state.save(self.state_path)
             return
+        route = self.pool_route("refine")
         try:
             result = self.admin.refine(
                 requirement=payload["goal"],
@@ -845,7 +1010,7 @@ class AdminWorker:
                 answers=payload.get("answers") or [],
                 members=payload.get("members") or None,
                 project_name=payload.get("project_name"),
-                route=self.pool_route("refine"),
+                route=route,
             )
         except AdminHarnessError as exc:
             # The administrator's own model failed.  Do not create a task from
@@ -858,10 +1023,26 @@ class AdminWorker:
             # flaky call -- the platform said "failed" and then never tried
             # again.  The goal waits here and is retried once the channel is
             # back (with a backoff, so a broken channel is not hammered).
-            self._post_admin_message(
+            # Say which model failed and how many times in a row this has
+            # happened: a pool model that the human configured has no automatic
+            # fallback (admin/service.py's ``_invoke_model`` -- "there is no
+            # fallback model"), so "the channel will recover" is not something
+            # the platform guarantees.  After repeated failures the message has
+            # to point at the actual fix: switch the pool model.
+            model_note = f"（池模型 {route.model}）" if route is not None else "（本机直连模型）"
+            streak = self._consecutive_refine_failures() + 1
+            message = (
                 f"管理员 Harness 细化失败：{exc}；未分派任何任务。"
                 "这条目标仍然在队列里，通道恢复后会自动重试。"
             )
+            if streak >= 2:
+                message += (
+                    f"已连续失败 {streak} 次{model_note}；"
+                    "若持续失败，请给管理员窗口换一个池模型——这不是等通道恢复能解决的。"
+                )
+            else:
+                message += model_note
+            self._post_admin_message(message)
             print(json.dumps({"goal_error": str(exc), "seq": seq}, ensure_ascii=False), flush=True)
             self.state.goal_retry = {
                 **payload,
@@ -1765,6 +1946,106 @@ class AdminWorker:
             flush=True,
         )
 
+    # ------------------------------------------------ structured admin commands
+
+    def handle_admin_command(self, message: dict[str, Any], *, seq: int) -> None:
+        """Execute a human's structured operation (v1: ``commit``).
+
+        This is the one place where the administrator writes to a repository,
+        and it deliberately does **not** call the model: the human sends a JSON
+        instruction naming the repo, the branch, and the exact paths, and
+        :mod:`app.admin.commands` validates and runs it. The model channel stays
+        on the "decide" side (refine / review / answer); repository write access
+        never becomes a model tool, so no model can widen ``paths`` into
+        ``git add -A`` or move a commit onto ``main``.
+
+        Failure is always reported, never raised: a malformed instruction is a
+        person's typo, and it must come back as a sentence they can fix rather
+        than as a traceback that stops the loop.
+
+        ``seq`` and ``command_id`` are both marked **before** execution. That is
+        the same mark-before-call discipline as the rest of the worker: a
+        replayed message must not commit the same files twice, and a partial
+        failure must not re-commit the part that already landed when the human
+        retries.
+        """
+        # Not trusting the dispatcher: only a human authorises a repository
+        # write. (poll_messages already filters, this is the second lock.)
+        if _sender_type(message) != "human":
+            print(
+                json.dumps(
+                    {"admin_command_ignored": "sender is not human", "seq": seq},
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            return
+        if seq in self.state.handled_request_seqs:
+            return
+        try:
+            payload = admin_commands.parse_admin_command(str(message.get("body") or ""))
+        except admin_commands.CommandError as exc:
+            self._mark_admin_command(seq, None)
+            self._post_admin_message(f"指令格式不对：{exc}")
+            print(
+                json.dumps(
+                    {"admin_command_rejected": str(exc)[:300], "seq": seq}, ensure_ascii=False
+                ),
+                flush=True,
+            )
+            return
+
+        command_id = payload.get("command_id")
+        if command_id and command_id in self.state.handled_command_ids:
+            self._mark_admin_command(seq, None)
+            # Not silent: after a partial failure the human's first instinct is
+            # to resend the same instruction, and silence reads as "the platform
+            # is broken". Say it was already run and how to really retry.
+            self._post_admin_message(
+                f"指令 {command_id} 已经执行过（或正在执行），这条重发的忽略了。"
+                "对照上面那条提交报告就知道做到哪一步了；确实要再来一次，换一个新的 "
+                "command_id。"
+            )
+            print(
+                json.dumps({"admin_command_duplicate": command_id, "seq": seq}, ensure_ascii=False),
+                flush=True,
+            )
+            return
+
+        # Marked before the git calls: a crash mid-run must not make the same
+        # instruction run again from the top on the next poll. A **dry run** is
+        # deliberately excluded from the command_id list -- "preview the plan,
+        # then run it without the flag" is the natural sequence, and burning the
+        # id on the preview made the real run die as a silent duplicate (QA P2-3).
+        plan_only = self.dry_run or bool(payload.get("dry_run"))
+        self._mark_admin_command(seq, None if plan_only else command_id)
+        report = admin_commands.run_admin_command(payload, dry_run=True if self.dry_run else None)
+        self._post_admin_message(admin_commands.render_report(report))
+        print(
+            json.dumps(
+                {
+                    "admin_command": payload["action"],
+                    "branch": report.branch,
+                    "dry_run": report.dry_run,
+                    "commits": [item.commit[:8] for item in report.landed],
+                    "skipped": [item.message for item in report.commits if item.skipped],
+                    "error": report.error[:300],
+                    "seq": seq,
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+
+    def _mark_admin_command(self, seq: int, command_id: str | None) -> None:
+        """Record the message (and the command id, when given) as handled."""
+        self.state.handled_request_seqs.append(seq)
+        self.state.handled_request_seqs = self.state.handled_request_seqs[-200:]
+        if command_id:
+            self.state.handled_command_ids.append(command_id)
+            self.state.handled_command_ids = self.state.handled_command_ids[-50:]
+        self.state.save(self.state_path)
+
     # ------------------------------------------------------ re-point requests
 
     def handle_reassign_request(self, message: dict[str, Any], *, seq: int) -> None:
@@ -2404,6 +2685,7 @@ class AdminWorker:
 def run_once(worker: AdminWorker) -> None:
     worker.poll_messages()
     worker.retry_failed_goal()
+    worker.retry_failed_answers()
     worker.start_circulation()
     worker.resume_dispatch()
     worker.collect_circulation()

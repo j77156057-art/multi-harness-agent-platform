@@ -605,6 +605,46 @@ def test_refine_reports_stdout_when_the_cli_fails_quietly_on_stderr(tmp_path):
         _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
 
 
+def test_refine_failure_detail_leads_with_the_structured_stdout_cause(tmp_path):
+    """复盘 10-29~11-17 的群消息：真原因是 stdout JSONL 末尾的
+    ``turn.failed``（stream disconnected），但旧实现把 stderr 尾放在最前，
+    codex memories 后台任务的 "no such table: jobs" 噪音行恰好占住 400 字符
+    窗口，把真原因挤出了群消息。现在 detail 以 turn.failed 的完整 message
+    开头，且 memories 噪音行被过滤掉。"""
+    chain = _admin_chain(tmp_path)
+    stdout = (
+        '{"type":"thread.started"}\n'
+        '{"type":"item.completed","item":{"type":"agent_message","text":"half done"}}\n'
+        '{"type":"turn.failed","error":{"message":"stream disconnected before completion: upstream reset"}}\n'
+    )
+    stderr = (
+        "2026-10-29T15:58:41.864935Z ERROR codex_memories_write::phase2::job: "
+        "failed to claim job: error returned from database: (code: 1) no such table: jobs"
+    )
+    runner = ScriptedRunner(stdout=stdout, returncode=1, stderr=stderr)
+    with pytest.raises(AdminHarnessError) as caught:
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    detail = str(caught.value)
+    # 真原因在最前面，且完整（不被尾部截断）。
+    assert detail.startswith(
+        "admin harness call exited 1: stream disconnected before completion: upstream reset"
+    )
+    # memories 噪音不再出现。
+    assert "memories" not in detail
+
+
+def test_refine_failure_detail_falls_back_without_structured_events(tmp_path):
+    """stdout 不是 JSONL / 没有失败事件时退回旧行为：stderr 尾在前、stdout 尾在后，
+    不抛新异常。"""
+    chain = _admin_chain(tmp_path)
+    runner = ScriptedRunner(stdout="not jsonl at all", returncode=1, stderr="boom")
+    with pytest.raises(AdminHarnessError, match="exited 1: boom") as caught:
+        _refine_service(chain, runner).refine(requirement="x", group_id=DEFAULT_GROUP)
+    # 旧顺序保留：stderr 尾在前，stdout 尾在后。
+    detail = str(caught.value)
+    assert detail.index("boom") < detail.index("not jsonl at all")
+
+
 def test_refine_refuses_more_tasks_than_allowed(tmp_path):
     chain = _admin_chain(tmp_path)
     two = {"tasks": [SPEC["tasks"][0], {**SPEC["tasks"][0], "title": "再来一个"}]}

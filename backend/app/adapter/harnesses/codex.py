@@ -168,6 +168,16 @@ class CodexAdapter(CliHarness):
                 "-c",
                 f'{server}.bearer_token_env_var="{mcp_config.TOKEN_ENV}"',
             ]
+        # memories 生成是交互场景的功能；无头的细化/评审不需要它。codex
+        # 0.130.0-alpha.5 每次（无头）启动都会跑 memories 的 phase2 后台任务，
+        # 往 stderr 打一条 "no such table: jobs"（codex 侧自身的 DB 问题，与
+        # 本平台无关），污染 AdminHarnessError 的诊断信息。实测（2026-11-20，
+        # 本机真实运行，见 tests/test_real_adapters.py 的 memories 断言）：
+        # ``memories.generate_memories=false`` 与顶层 ``memories=false`` 都
+        # **压不住**这条噪音，唯一生效的是特性开关 ``features.memories=false``
+        # （等价 ``--disable memories``）。用 -c 内联关闭，不改用户的
+        # ~/.codex/config.toml。
+        argv += ["-c", "features.memories=false"]
         # The work order is on stdin (``-``): argv has a hard length limit on
         # Windows, and a review prompt with the whole diff does not fit.
         argv.append("-")

@@ -229,6 +229,83 @@ def _answer_text(adapter: Any, stdout: str) -> str:
     return stdout
 
 
+#: stderr 里已知无害的噪音标记。codex 每次启动都会跑 memories 后台任务，
+#: 它在自己的 DB 上报 ``no such table: jobs``（codex 侧自身问题，与本平台
+#: 无关，成功运行里同样出现且不阻塞 turn）。这些行不携带诊断价值。
+_STDERR_NOISE_MARKERS: tuple[str, ...] = ("codex_memories_write",)
+
+
+def _structured_failure_message(stdout: str) -> str | None:
+    """The ``message`` of the last structured failure event on stdout JSONL.
+
+    Codex reports real provider/stream failures as a final
+    ``{"type":"turn.failed","error":{"message":"..."}}`` (or ``{"type":"error"}``)
+    event on **stdout**, while stderr carries unrelated background noise. The
+    message is returned whole: it is the actual cause and must survive the
+    tail-truncation below. ``None`` when stdout holds no parseable failure
+    event -- the caller then falls back to the raw-channel tails.
+    """
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") not in ("turn.failed", "error"):
+            continue
+        message = event.get("message")
+        if not (isinstance(message, str) and message.strip()):
+            error = event.get("error")
+            if isinstance(error, dict):
+                message = error.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
+    return None
+
+
+def _noise_free_tail(text: str, *, limit: int) -> str:
+    """The last ``limit`` characters of ``text`` minus known noise lines.
+
+    Noise lines are dropped **before** truncation, so a noisy channel cannot
+    push the informative tail out of the window (that is exactly how the
+    memories claim-failure line once crowded the real cause out of a group
+    message).
+    """
+    cleaned = "\n".join(
+        line
+        for line in text.splitlines()
+        if not any(marker in line for marker in _STDERR_NOISE_MARKERS)
+    ).strip()
+    return cleaned[-limit:] if cleaned else ""
+
+
+def _failure_detail(run: Any) -> str:
+    """Build the diagnostic detail for a failed admin harness call.
+
+    **stdout 优先**：10-29 至 11-17 的多次细化失败里，群消息只显示
+    ``no such table: jobs``，而真原因是 stdout JSONL 末尾的
+    ``turn.failed``（``stream disconnected before completion``）。旧实现把
+    stderr 尾放在最前，codex memories 后台任务的噪音行恰好占住尾部，
+    把真原因挤出了 400 字符窗口。现在先取 stdout 里最后一条结构化失败
+    事件的 message（完整、不被截断），噪音行再从 stderr/stdout 尾部过滤
+    掉；stdout 没有可解析的失败事件时退回旧的“stderr 尾 + stdout 尾”
+    行为，不抛新异常。
+    """
+    parts: list[str] = []
+    structured = _structured_failure_message(run.stdout)
+    if structured:
+        parts.append(structured)
+    stderr_tail = _noise_free_tail(run.stderr, limit=400)
+    if stderr_tail:
+        parts.append(stderr_tail)
+    stdout_tail = _noise_free_tail(run.stdout, limit=800)
+    if stdout_tail:
+        parts.append(stdout_tail)
+    return "\n".join(parts)
+
+
 def _validate_answer(answer: str, *, question: str, tasks: list[dict[str, Any]]) -> str:
     """统一记录并执行事实校验；拒绝时不让矛盾回答进入私聊。"""
     try:
@@ -1023,12 +1100,9 @@ class AdminService:
         finally:
             adapter.cleanup_work_order()
         if run.returncode != 0:
-            # Codex reports stream/provider failures on stdout JSONL, not
-            # stderr; keep both tails so the group message is diagnosable.
-            detail = "\n".join(
-                part for part in (run.stderr.strip()[-400:], run.stdout.strip()[-800:]) if part
+            raise AdminHarnessError(
+                f"admin harness call exited {run.returncode}: {_failure_detail(run)}"
             )
-            raise AdminHarnessError(f"admin harness call exited {run.returncode}: {detail}")
         payload = extract_json_object(_answer_text(adapter, run.stdout))
         model = {
             # Keep the registered adapter name (``qoderclicn-print`` etc.) so
