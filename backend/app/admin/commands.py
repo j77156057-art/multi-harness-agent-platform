@@ -220,15 +220,20 @@ def _within(child: Path, parent: Path) -> bool:
 def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     """Run git in ``repo`` through the platform's sanitised runner.
 
-    ``app.git.repo.run_git`` neutralises ``commit.gpgsign`` / ``core.quotepath``
-    through the environment, but **not** ``core.autocrlf``: on Windows the
-    working tree is CRLF while history is LF, so a commit that does not apply the
-    same normalisation stores CRLF blobs and turns a 40-line change into a
-    whole-file rewrite. It happens quietly -- the files are correct on disk and
-    every test passes -- so the pin is here rather than left to whichever
-    ``~/.gitconfig`` the worker process happened to inherit. ``autocrlf=true``
-    converts CRLF to LF on add and leaves LF untouched, which is exactly what a
-    developer's own commit does in this repository.
+    ``app.git.repo.run_git`` neutralises ``core.quotepath`` and sets
+    ``GIT_CONFIG_NOSYSTEM=1``. That last one only covers **system** config:
+    a rule in ``~/.gitconfig`` still applies, so ``commit.gpgsign`` is *not*
+    neutralised here -- a developer who signs every commit will make this path
+    ask for a signature too. ``core.autocrlf`` has the same gap and that one is
+    silent: on Windows the working tree is CRLF while history is LF, so a commit
+    that does not apply the normalisation stores CRLF blobs and turns a 40-line
+    change into a whole-file rewrite. Files stay correct on disk, every test
+    passes, and the only trace is a 17k-line diff nobody reads. That is why the
+    pin is below rather than left to whichever ``~/.gitconfig`` the worker
+    process happened to inherit -- do not remove it on the assumption that the
+    shared runner already handles line endings. ``autocrlf=true`` converts CRLF
+    to LF on add and leaves LF untouched, which is exactly what a developer's own
+    commit does in this repository.
 
     It takes no stdin, which is why the commit message goes through a temporary
     file (``-F``) rather than ``-F -``: same immunity to Windows quoting, no
