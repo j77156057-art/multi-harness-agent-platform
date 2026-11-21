@@ -1115,17 +1115,161 @@
 .flat-msg b { font-size: 11px; color: var(--ao-ink-soft); font-weight: 600; }
 .flat-msg-at { margin-left: 8px; font-size: 11px; color: var(--ao-ink-faint); }
 
+/* 换人说话才需要分界：一条细线 + 12px 留白。同一个人连着说的几句仍是一条
+   竖线里的连续内容，挨着就行 —— 40 条消息靠这个才看得出「谁在说、说了几段」。
+   左右两条边不冲突：border-top 归分界，border-left 归说话人。 */
+.flat-msg.is-turn-start {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ao-line-soft);
+}
+
+.flat-msg.is-turn-start:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* 接着上一条（同一个人）：名字和时间已经在上一条写过了，不再重复；分界线也
+   只给 `.is-turn-start` —— 连续的那几条本来就在同一段里。 */
+
 .flat-msg p {
   margin: 1px 0 0;
   font-size: 12px;
-  line-height: 1.5;
+  /* 行高按「读一段话」来，不按「塞进一行」来：1.5 在 12px 上太挤。 */
+  line-height: 1.7;
+  /* 只有正文限宽，容器仍占满 —— 一行 70 个字是能不回行读到底的上限。 */
+  max-width: 70ch;
   color: var(--ao-ink);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* 展开之后不再截断：`-webkit-box` 换成 `block`，clamp 才会真的失效。 */
+.flat-msg.is-open p {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.flat-msg-more,
+.flat-msg-dup-more {
+  margin: 2px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ao-accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.flat-msg-more:hover,
+.flat-msg-dup-more:hover { text-decoration: underline; }
+
+/* 「重复 N 次」：一条灰片，跟着 meta 走在同一行，不占正文的宽度。 */
+.flat-msg-dup {
+  margin: 0 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--ao-ink-soft);
+  background: var(--ao-line-soft);
+}
+
+.flat-msg-dup-more { margin: 0 0 0 2px; }
+
+/* 被合并掉的那几条：展开后挂在下面，左边一条虚线表示「是同一条的其余几次」。 */
+.flat-msg-dup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 8px;
+  border-left: 1px dashed var(--ao-line-soft);
+}
+
+.flat-msg-dup-list[hidden] { display: none; }
+
+.flat-msg-dup-item { min-width: 0; }
+
+/* 这里**不吃** `.flat-msg p` 的 clamp：合并进来的另一条本来就是要看全的。 */
+.flat-msg-dup-body {
+  margin: 0;
+  font-size: inherit;
+  line-height: 1.7;
+  max-width: 70ch;
+  color: var(--ao-ink);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* ---------------------------------------------------------------- 阅读层（把被覆盖掉的数拿回来）
+
+   办公室的样式是三层叠出来的：`flat-office.css` → `app-shell.css`（商业版视觉层）
+   → `moyu-theme.css`（暖纸）。后两层各自又把群聊正文改了一道：
+
+     app-shell.css:250  .ao-workspace .flat-chat-list { gap: 20px }
+     app-shell.css:251  .ao-workspace .flat-msg       { padding: 0 0 0 14px }   ← 顺手把 padding-top 抹成 0
+     app-shell.css:253  .ao-workspace .flat-msg p     { font-size: 14px; line-height: 1.75 }
+     moyu-theme.css:572 .ao-workspace.flat-office .flat-msg p { line-height: 1.65 }
+
+   这些是**换肤层**的结论（同一个值还管着别的面板），不该为了群聊去改那两个文件。
+   所以这里按**具体度**把群聊需要的那几个数拿回来：不改它们，也不用 !important。
+   字号不在这里动 —— 换肤层的 14px 是字号阶梯，照用。
+
+   选择器为什么要串到 `.flat-chat-list`：moyu-theme 那条是
+   `.ao-workspace.flat-office .flat-msg p`（3 类 + 1 元素），跟这里平级，而它后
+  加载 —— 平级比不过"后写的"。再多串一层容器，比它多一个类，才真的赢。 */
+.ao-workspace.flat-office .flat-chat-list .flat-msg p {
+  /* 1.7 行高 + 一行 70 字（1ch 跟着字号走，换肤改字号时仍是 70 字）。 */
+  line-height: 1.7;
+  max-width: 70ch;
+}
+
+.ao-workspace.flat-office .flat-chat-list .flat-msg.is-open p {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+/* 间距要分成两种：组内挨紧（6px），组间 12px + 12px + 一条细线。
+   换肤层的 20px 是「一条条独立消息」的节奏 —— 分组之后那个节奏就不对了。 */
+.ao-workspace.flat-office .flat-chat-list { gap: 0; }
+
+.ao-workspace.flat-office .flat-msg.is-turn-start {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ao-line-soft);
+}
+
+.ao-workspace.flat-office .flat-msg.is-turn-start:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.ao-workspace.flat-office .flat-msg.is-cont { margin-top: 6px; }
+.ao-workspace.flat-office .flat-msg.is-cont:first-child { margin-top: 0; }
+
+/* 「你」说的那一组要看得出来。
+   `app-shell.css:251` 把所有 `.flat-msg` 的 `border-left` 归了零，于是
+   `.flat-msg.is-human` 那条朱橙边也一起没了 —— 换成暖纸底之后，"谁是人"
+   这件事在屏幕上彻底消失，这是本轮的语义损失，不是换肤口味问题，所以在
+   阅读层把它补回来（仍然不动 app-shell / moyu-theme）。
+
+   为什么给**整组**（不只组首）：连着几条都是「你」的时候，只在组首画一小段
+   竖线，看着像画漏了；整组一条竖线在 6px 的组内间距里仍然是连续的一段，
+   读完就知道"这几句都是我说的"。左边归说话人、上边归分界，两条边不打架。
+   `padding-left: 12px` 是配 2px 边用：2 + 12 = 换肤层原本的 14px 缩进。 */
+.ao-workspace.flat-office .flat-chat-list .flat-msg.is-human {
+  border-left: 2px solid var(--ao-accent);
+  padding-left: 12px;
 }
 
 .flat-chat-form {
@@ -1259,6 +1403,24 @@
 
 .flat-dialog.is-compact[open] {
   grid-template-rows: auto auto auto;
+}
+
+/* 遮罩：对话框浮在页面上，底下那一屏还是满亮的，看着像两个东西并排。
+   加一圈 100vmax 的**阴影**当遮罩 —— 不改 DOM、不加挡点击的元素：阴影只负责
+   画，点别处照旧能操作（「与管理员对话」本来就是非模态的，P2-8 的结论）。
+   不用 `backdrop-filter`：阴影自己模糊不了。
+
+   选择器写 `dialog.flat-dialog` 是因为 `moyu-theme.css` 后加载、用
+   `.flat-dialog{box-shadow:var(--ao-shadow)}` 换掉了整个 box-shadow 值 ——
+   这里按**具体度**赢，而不是靠 `!important`，也不去动主题层。
+
+   只给**非模态**的那些（`:not(:modal)`）：模态对话框（`showModal()`）本来就有
+   `::backdrop`，再叠一层阴影会黑到看不清；办公室真正"浮在页面上"的是
+   「与管理员对话」，它走的是 `show()`，没有 backdrop。 */
+dialog.flat-dialog:not(:modal) {
+  box-shadow:
+    0 18px 48px rgba(20, 30, 45, 0.2),
+    0 0 0 100vmax rgb(43 38 33 / 0.28);
 }
 
 .flat-dialog::backdrop { background: rgba(20, 28, 38, .38); }
