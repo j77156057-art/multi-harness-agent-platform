@@ -53,8 +53,16 @@ def run_git(
     """Run git with a sanitised environment.
 
     The ambient git configuration is deliberately not trusted: a developer's
-    ``commit.gpgsign`` or ``core.autocrlf`` would otherwise change what the
-    tester asserts about.
+    ``commit.gpgsign`` would otherwise change what the tester asserts about.
+    ``core.autocrlf`` is handled explicitly below rather than inherited -- it is
+    the one setting that is worth pinning for *every* caller, because getting it
+    wrong is silent (see the pin's comment).
+
+    Note that ``GIT_CONFIG_NOSYSTEM=1`` only disables **system** config; a rule
+    in ``~/.gitconfig`` still applies. Everything this function must not inherit
+    has to be pinned here by name. This is not theoretical: on this machine
+    ``core.autocrlf=true`` came from the system layer, so turning that layer off
+    silently left the platform with no line-ending policy at all.
     """
     env = dict(os.environ)
     env.update(
@@ -67,28 +75,71 @@ def run_git(
             "GIT_COMMITTER_EMAIL": "scheduler@localhost",
         }
     )
-    # ``core.quotepath=false``: by default git *quotes* non-ASCII paths in
-    # status/diff output ("docs/\350\207\250...") and quotes paths with spaces.
-    # The scope check then compared an escaped path against the raw authorized
-    # one and refused every task whose path was not plain ASCII -- a member that
-    # wrote exactly the right file was told it had written outside its scope.
-    # Appending to any GIT_CONFIG_* the caller already set keeps both.
+    # Caller-supplied environment goes on **before** the pins are numbered, and
+    # that order is load-bearing: a caller that brings its own
+    # ``GIT_CONFIG_COUNT``/``GIT_CONFIG_KEY_*`` (tests do) would otherwise
+    # overwrite the count after the pins were written and take every pin with it
+    # -- ``core.autocrlf`` would read back empty and index 0's ``core.quotepath``
+    # would be replaced. Applied first, the caller's pairs keep their indices and
+    # the pins are appended after them.
+    if env_extra:
+        env.update(env_extra)
+    # Pinned through ``GIT_CONFIG_*`` instead of ``-c`` so that a caller which
+    # already exports its own ``GIT_CONFIG_*`` keeps theirs: the pairs are
+    # appended at the caller's count, not overwriting index 0.
     config_count = 0
     try:
         config_count = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
     except ValueError:
         config_count = 0
-    env["GIT_CONFIG_COUNT"] = str(config_count + 1)
-    env[f"GIT_CONFIG_KEY_{config_count}"] = "core.quotepath"
-    env[f"GIT_CONFIG_VALUE_{config_count}"] = "false"
+    pins: list[tuple[str, str]] = [
+        # ``core.quotepath=false``: by default git *quotes* non-ASCII paths in
+        # status/diff output ("docs/\350\207\250...") and quotes paths with
+        # spaces. The scope check then compared an escaped path against the raw
+        # authorized one and refused every task whose path was not plain ASCII
+        # -- a member that wrote exactly the right file was told it had written
+        # outside its scope.
+        ("core.quotepath", "false"),
+        # ``core.autocrlf=true``: the pin for the 2026-11-21 incident. A commit
+        # made through the admin-command channel stored 20 files as CRLF blobs
+        # while history was LF, which turned a ~40-line change into a 17.5k-line
+        # whole-file rewrite of ``flat-office.js``. Nothing else pointed at it:
+        # the file *contents* on disk were right and all 63 tests were green --
+        # the only trace was a diff size nobody reads.
+        #
+        # Why it happened even though the developer had ``core.autocrlf=true``:
+        # that setting lives in the **system** config on this machine
+        # (``PortableGit/etc/gitconfig``), and ``GIT_CONFIG_NOSYSTEM=1`` below
+        # turns the system layer off. So the worker process saw *no* autocrlf at
+        # all -- the human's own ``git commit`` normalised and the platform's
+        # ``git add`` did not. That is the whole mechanism; the pin restores the
+        # behaviour the developer already believed they had.
+        #
+        # Which values reproduce it (measured, not assumed -- get this wrong and
+        # the next person tests the pin with the wrong value, sees no bug, and
+        # deletes it): ``false``, or unset with no layer supplying ``true``.
+        # ``input`` does **not** reproduce it: ``input`` also converts CRLF to LF
+        # on add, it only skips the LF-to-CRLF worktree conversion on checkout,
+        # so a CRLF file still lands as an LF blob. ``true`` is what this
+        # repository already uses, so the pin changes no line ending anyone had.
+        #
+        # It lives here, not at the call sites, because the call sites keep
+        # multiplying: pinning it in the admin-command helper fixed one of the
+        # four paths that commit (the member worktree in ``adapter/fake.py``, the
+        # formal worker's commit, and the canonical seed commit were all still
+        # exposed). Do not delete this on the assumption that some caller pins
+        # it, and do not assume a caller is covered because *it* looks careful.
+        ("core.autocrlf", "true"),
+    ]
     if os.name == "nt":
         # 临时 init/clone 出来的仓库不继承任何 per-repo 配置；深根下对象路径
         # 会超 MAX_PATH，统一在环境层开扩展长度路径。
-        env[f"GIT_CONFIG_KEY_{config_count + 1}"] = "core.longpaths"
-        env[f"GIT_CONFIG_VALUE_{config_count + 1}"] = "true"
-        env["GIT_CONFIG_COUNT"] = str(config_count + 2)
-    if env_extra:
-        env.update(env_extra)
+        pins.append(("core.longpaths", "true"))
+    for key, value in pins:
+        env[f"GIT_CONFIG_KEY_{config_count}"] = key
+        env[f"GIT_CONFIG_VALUE_{config_count}"] = value
+        config_count += 1
+    env["GIT_CONFIG_COUNT"] = str(config_count)
     proc = subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd else None,

@@ -220,27 +220,35 @@ def _within(child: Path, parent: Path) -> bool:
 def _git(repo: Path, *args: str, check: bool = False) -> subprocess.CompletedProcess[str]:
     """Run git in ``repo`` through the platform's sanitised runner.
 
-    ``app.git.repo.run_git`` neutralises ``core.quotepath`` and sets
-    ``GIT_CONFIG_NOSYSTEM=1``. That last one only covers **system** config:
-    a rule in ``~/.gitconfig`` still applies, so ``commit.gpgsign`` is *not*
-    neutralised here -- a developer who signs every commit will make this path
-    ask for a signature too. ``core.autocrlf`` has the same gap and that one is
-    silent: on Windows the working tree is CRLF while history is LF, so a commit
-    that does not apply the normalisation stores CRLF blobs and turns a 40-line
-    change into a whole-file rewrite. Files stay correct on disk, every test
-    passes, and the only trace is a 17k-line diff nobody reads. That is why the
-    pin is below rather than left to whichever ``~/.gitconfig`` the worker
-    process happened to inherit -- do not remove it on the assumption that the
-    shared runner already handles line endings. ``autocrlf=true`` converts CRLF
-    to LF on add and leaves LF untouched, which is exactly what a developer's own
-    commit does in this repository.
+    ``app.git.repo.run_git`` is the single place that pins git configuration:
+    ``core.quotepath=false``, and ``core.autocrlf=true`` (plus
+    ``core.longpaths`` on Windows). Line endings are therefore handled one level
+    down, not here -- this helper deliberately does **not** repeat
+    ``-c core.autocrlf=true``: two pins in two places is how one of them
+    eventually gets edited and the other does not.
+
+    Why the pin matters, and why it is not "just" a formatting nicety: on
+    2026-11-21 a commit made through this channel stored 20 files as CRLF blobs
+    while history was LF, turning a ~40-line change into a 17.5k-line whole-file
+    rewrite. The files on disk were correct, every test passed, and the only
+    trace was a diff size nobody reads. Do not remove the pin from ``run_git``
+    on the assumption that a caller handles line endings, and do not re-add it
+    here on the assumption that the shared runner forgot it -- if a caller ever
+    bypasses ``run_git``, fix that caller instead.
+
+    ``GIT_CONFIG_NOSYSTEM=1`` only covers **system** config: a rule in
+    ``~/.gitconfig`` still applies, so ``commit.gpgsign`` is *not* neutralised
+    -- a developer who signs every commit will make this path ask for a
+    signature too. ``core.autocrlf`` used to be exposed to the same gap; it is
+    the one that is silent, which is why it is pinned in ``run_git`` while
+    ``gpgsign`` is only documented here.
 
     It takes no stdin, which is why the commit message goes through a temporary
     file (``-F``) rather than ``-F -``: same immunity to Windows quoting, no
     change to a shared helper.
     """
     try:
-        return run_git("-c", "core.autocrlf=true", *args, cwd=repo, check=check)
+        return run_git(*args, cwd=repo, check=check)
     except OSError as exc:  # git is not on PATH, or the drive is gone
         raise CommandError(f"无法运行 git：{exc}") from exc
 
