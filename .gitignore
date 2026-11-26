@@ -65,3 +65,7 @@ canonical.git.ensure.lock
 # 里面的路径都是本机绝对路径、截图也是本机屏幕，只对当次排查有意义；
 # 结论回填 docs/ 或任务卡，目录本身不入库。
 /evidence/
+
+# 设计参考图（墨屿皮肤截图，2026-11-20）：office 主题的视觉基准，不是产出。
+# 令牌数值已落在 office/src/moyu-theme.css 注释里，图留在本机即可。
+/deliverables/
