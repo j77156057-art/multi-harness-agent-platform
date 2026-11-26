@@ -233,9 +233,12 @@ function countBy(tasks) {
 }
 
 export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, onAddMember }) {
+  //: 当前项目在存储里的标识。草稿与视图状态都按它分区 —— 换项目后旧的那份
+  //: 不该被读出来（办公室只挂载一次，切项目不重载页面，sessionStorage 同一份）。
+  const scopeKey = () => String(((projectOf && projectOf()) || {}).id || '');
   // 「刚才看到哪一页」在重载之后接上：筛选、排序、每页条数、第几页、看的哪个
   // 会话、哪些折叠卡片开着。没存过就是 `{}`，下面每一项各自的默认值原样生效。
-  const restoredView = readViewState();
+  const restoredView = readViewState(scopeKey());
   /**
    * 这个窗口现在**正在干活**吗。
    *
@@ -436,7 +439,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
   //
   // 落盘的只有**不是凭据**的那几格（`session-state.js` 里按字段名和内容双档过滤）：
   // `userkey-key` 永远不写。刷新之后地址还在、只补 key 就够了。
-  const drafts = { fields: readDrafts(), focus: '', start: 0, end: 0 };
+  const drafts = { fields: readDrafts(scopeKey()), focus: '', start: 0, end: 0 };
 
   // 打一封字就落一次盘太浪费；攒 250 毫秒。落盘写的是**整份**记忆，所以删掉的那格
   // 自然跟着消失（不需要单独的删除路径）。
@@ -446,14 +449,14 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
     if (draftSaveTimer) return;
     draftSaveTimer = setTimeout(() => {
       draftSaveTimer = null;
-      writeDrafts(drafts.fields);
+      writeDrafts(drafts.fields, scopeKey());
     }, 250);
   }
 
   /** 提交成功后把这一格真正忘掉：内存 + 存储。 */
   function dropDraft(name) {
     delete drafts.fields[name];
-    forgetDraft(name);
+    forgetDraft(name, scopeKey());
   }
 
   /** 重画之前：把用户填过的东西存下来（值 + 光标位置）。 */
@@ -531,7 +534,7 @@ export function mountFlatOffice({ root, project: projectOf, onStart, onStatus, o
       view: state.view,
       openFolds: [...state.openFolds],
       closedFolds: [...state.closedFolds],
-    });
+    }, scopeKey());
   }
 
   /**
@@ -8784,6 +8787,40 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 人点了刷新 → 顺手**重探一遍**池子（新增的免费额度、变成收费的额度都要知道）。
     // 平时 15 秒的自动刷新不探：探一次要问二十几个上游。
     const wantProbe = Boolean(options && options.probe);
+    // 换项目时，上一份「正在看哪条活 / 哪个窗口」不能跟过来。
+    //
+    // 办公室实例只挂载一次（main.js：`if (!office && !officePending)`），切项目
+    // 只换 activeProject，state 始终是同一个对象。实测（2026-11-26）：从「大项目
+    // 协作」切到「协作演练」后，页面标题已经换成新项目，中间却还停在上一个项目的
+    // 任务详情上 —— 等于把 A 区的东西摆进 B 区。读接口那边每个查询都带 group_id，
+    // 数据没有串；串的是**界面自己的记忆**。
+    const scopeId = String(((projectOf && projectOf()) || {}).id || '');
+    if (state.projectId && scopeId && state.projectId !== scopeId) {
+      state.selected = null;
+      state.view = { kind: 'tasks', id: null };
+      state.events = [];
+      state.allEvents = false;
+      state.chatOpen = new Set();
+      // 按窗口缓存的任务书属于上一个项目，留着会在新项目里被误命中。
+      state.windowSpecs = {};
+      state.plan = null;
+      state.briefSummary = '';
+      state.briefSummaryFor = '';
+      state.error = null;
+      state.memberNote = '';
+      // 输入框里的半句话也属于上一个项目：换成这个项目自己的（多半是空的）。
+      // 实测（2026-11-26）：不换的话，A 项目群聊里打的字会原样出现在 B 项目的
+      // 输入框里 —— 存储已经按项目分好了，但这份内存副本是挂载时读的一次。
+      drafts.fields = readDrafts(scopeId);
+      drafts.focus = '';
+      // 还得多一步：DOM 里那几个输入框仍留着上一个项目的字，而每次重画前的
+      // `captureDrafts()` 会把它们**原样写回** drafts.fields —— 上面这行等于白做。
+      // 先把 DOM 清空，captureDrafts 再跑就是写空值。
+      root.querySelectorAll('[data-draft]').forEach((field) => {
+        field.value = '';
+      });
+    }
+    if (scopeId) state.projectId = scopeId;
     let probed = null;
     if (wantProbe) {
       probed = await api('/pool/probe', {}).catch(() => null);

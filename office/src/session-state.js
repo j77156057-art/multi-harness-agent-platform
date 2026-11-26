@@ -32,6 +32,14 @@
 const DRAFT_KEY = 'agent-office.drafts.v1';
 const VIEW_KEY = 'agent-office.view.v1';
 
+//: 这份记忆属于哪个项目。
+//:
+//: 办公室实例只挂载一次（main.js：`if (!office && !officePending)`），切项目不
+//: 重载页面，sessionStorage 还是同一份。没有这个字段时，A 项目里打开的任务详情、
+//: 筛选、写到一半的草稿，会在 B 项目里原地复活 —— 数据接口每个查询都带 group_id，
+//: 串的不是数据，是界面的记忆。
+const SCOPE_FIELD = '__scope';
+
 // 字段名里出现这些**词**（按 - 和 _ 拆开算）就当凭据。
 const SECRET_WORDS = new Set([
   'key',
@@ -119,8 +127,12 @@ export function isPersistableDraft(name, value) {
   return !looksLikeSecret(value);
 }
 
-/** 读草稿：`{[名字]: 值}`，坏的/凭据的一律丢掉。 */
-export function readDrafts() {
+/** 读草稿：`{[名字]: 值}`，坏的/凭据的一律丢掉。
+ *
+ * `scope` 是这份草稿属于哪个项目。传了就只读同项目的 —— 否则 A 项目群聊里
+ * 写到一半的那句话，会在 B 项目的输入框里原地复活（办公室实例只挂载一次，
+ * 切项目不重载页面，sessionStorage 也是同一个）。不传（测试用）不校验。 */
+export function readDrafts(scope = '') {
   const store = storage();
   if (!store) return {};
   try {
@@ -128,8 +140,11 @@ export function readDrafts() {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const storedScope = typeof parsed[SCOPE_FIELD] === 'string' ? parsed[SCOPE_FIELD] : '';
+    if (scope && storedScope && storedScope !== scope) return {};
     const kept = {};
     for (const [name, value] of Object.entries(parsed)) {
+      if (name === SCOPE_FIELD) continue;
       if (isPersistableDraft(name, value)) kept[name] = value;
     }
     return kept;
@@ -139,18 +154,20 @@ export function readDrafts() {
 }
 
 /** 写草稿：只写能落盘的那几格；一格都不剩就把键删掉（别留个空壳）。 */
-export function writeDrafts(fields) {
+export function writeDrafts(fields, scope = '') {
   const store = storage();
   if (!store) return false;
   try {
     const kept = {};
     for (const [name, value] of Object.entries(fields || {})) {
+      if (name === SCOPE_FIELD) continue;
       if (isPersistableDraft(name, value)) kept[name] = value;
     }
     if (!Object.keys(kept).length) {
       store.removeItem(DRAFT_KEY);
       return true;
     }
+    if (scope) kept[SCOPE_FIELD] = String(scope);
     store.setItem(DRAFT_KEY, JSON.stringify(kept));
     return true;
   } catch {
@@ -160,14 +177,14 @@ export function writeDrafts(fields) {
 }
 
 /** 忘掉一格草稿（提交成功后调用，否则重画会把刚发出去的话又填回输入框）。 */
-export function forgetDraft(name) {
+export function forgetDraft(name, scope = '') {
   const store = storage();
   if (!store || !name) return;
   try {
-    const kept = readDrafts();
+    const kept = readDrafts(scope);
     if (!(name in kept)) return;
     delete kept[name];
-    writeDrafts(kept);
+    writeDrafts(kept, scope);
   } catch {
     // 忘不掉最坏就是重画时又填回去，下次提交还会再忘一遍。
   }
@@ -207,7 +224,7 @@ function foldList(raw) {
  * 读视图状态：只返回**认得出来**的字段，认不出的直接不带 —— 调用方保留自己的默认值。
  * 没存过就返回 `{}`（等价于"按默认摆"）。
  */
-export function readViewState() {
+export function readViewState(scope = '') {
   const store = storage();
   if (!store) return {};
   try {
@@ -215,6 +232,9 @@ export function readViewState() {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    // 项目对不上就当没存：宁可回到默认视图，也不要把上一个项目的位置带过来。
+    const storedScope = typeof parsed[SCOPE_FIELD] === 'string' ? parsed[SCOPE_FIELD] : '';
+    if (scope && storedScope && storedScope !== scope) return {};
     const kept = {};
     if (VIEW_FILTERS.has(parsed.filter)) kept.filter = parsed.filter;
     if (VIEW_SORTS.has(parsed.sort)) kept.sort = parsed.sort;
@@ -239,11 +259,13 @@ export function readViewState() {
 }
 
 /** 写视图状态；写失败不影响界面。 */
-export function writeViewState(viewState) {
+export function writeViewState(viewState, scope = '') {
   const store = storage();
   if (!store) return false;
   try {
-    store.setItem(VIEW_KEY, JSON.stringify(viewState || {}));
+    const payload = { ...(viewState || {}) };
+    if (scope) payload[SCOPE_FIELD] = String(scope);
+    store.setItem(VIEW_KEY, JSON.stringify(payload));
     return true;
   } catch {
     return false;
