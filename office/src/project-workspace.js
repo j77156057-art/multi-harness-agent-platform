@@ -104,15 +104,14 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
         <header class="project-lobby-copy">
           <p class="project-instance-note" data-instance-note hidden></p>
           <p class="project-instance-note" data-lobby-error role="alert" hidden></p>
-          <div class="project-lobby-heading"><div><p class="eyebrow">AGENT OFFICE / PROJECTS</p><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">从目标到合入，让每个 Agent 的交付都有据可查。</p><div class="project-lobby-ledger" aria-label="交付流程"><span>目标</span><i></i><span>执行</span><i></i><span>验证</span><i></i><span>合入</span></div></div>
+          <div class="project-lobby-heading"><div><h1 id="projectLobbyTitle">项目空间</h1><p class="project-lobby-description">从目标到合入，让每个 Agent 的交付都有据可查。</p><div class="project-lobby-ledger" aria-label="交付流程"><span>目标</span><i></i><span>执行</span><i></i><span>验证</span><i></i><span>合入</span></div></div>
             <div class="project-lobby-actions"><button type="button" class="project-connect" data-open-connections><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>连接工作窗口</button><button type="button" class="project-new primary" data-new-project><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新建项目</span></button></div>
           </div>
         </header>
         <div class="project-lobby-side">
           <section class="project-history" aria-labelledby="projectHistoryTitle"><div class="project-section-head"><div><h2 id="projectHistoryTitle">项目历史</h2><p>继续上次的工作，或开启一段新的协作。</p></div><span data-count>0 个项目</span></div><div class="project-history-list" data-history><div class="project-empty" data-empty><span class="project-empty-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M7 15a3 3 0 0 1 3-3h10l4 5h14a3 3 0 0 1 3 3v17a3 3 0 0 1-3 3H10a3 3 0 0 1-3-3V15Z"/><path d="M7 23h34M19 31h10"/></svg></span><strong>还没有项目</strong><span>点击「新建项目」，添加成员并设定第一个目标。</span><button type="button" class="project-recover" data-recover-project hidden></button></div></div></section>
           <section class="project-platform" data-platform hidden aria-labelledby="projectPlatformTitle">
-            <div class="project-section-head"><div><h2 id="projectPlatformTitle">平台上已有的项目</h2><p>来自正式平台的协作项目。</p></div><span data-platform-count></span></div>
-            <p class="project-platform-note">直接打开已有项目，无需重新创建。</p>
+            <div class="project-section-head"><div><h2 id="projectPlatformTitle">平台上已有的项目</h2><p>来自正式平台的协作项目，直接打开即可，无需重新创建。</p></div><span data-platform-count></span></div>
             <div class="project-platform-list" data-platform-list></div>
           </section>
           <section class="project-tools" aria-labelledby="projectToolsTitle">
@@ -424,7 +423,14 @@ export function mountProjectWorkspace({ root, onOpenProject, members = [] }) {
       if (fold.open) opened.add(key);
       else closed.add(key);
     }
-    toolsSummary.textContent = [summaryLine(payload), drivenLine(payload)].filter(Boolean).join(' ');
+    // 两句都带「16 个」时连读绕口（"下面是 16 个…；这 16 个都能…"）。
+    // 还没探测的那档合并成一句；探过的两句话说的不是同一件事，保留拼接。
+    const summary = summaryLine(payload);
+    const driven = drivenLine(payload);
+    toolsSummary.textContent =
+      guidanceOnly(payload) && driven
+        ? `下面是 ${payload.installers.length} 个 Harness CLI 的官方安装方式，装上登录后都能在本平台接任务；这台机器还没探测。`
+        : [summary, driven].filter(Boolean).join(' ');
     // 分组默认收起（`OPEN_STATUSES` = 未安装、装了但读不到版本）；「还没探测」
     // 那一组不展开 —— 十六个 CLI 全没查过的时候，展开就是一整屏文字，而人现在
     // 该做的是点「探测这台机器」，不是逐条读安装命令。

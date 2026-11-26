@@ -50,7 +50,7 @@ dialog:not([open]) { display: none !important; }
 .project-card-confirm { grid-column: 1 / -1; display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--ao-border); border-radius: 8px; background: var(--ao-surface); }.project-card-confirm p { margin: 0 0 2px; color: var(--ao-text-soft); font-size: 12px; line-height: 1.6; }
 .project-card-confirm button { justify-self: start; border: 1px solid var(--ao-border); border-radius: 6px; padding: 6px 10px; background: var(--ao-bg); color: var(--ao-text-soft); font-size: 12px; cursor: pointer; }
 .project-card-confirm button:hover { border-color: var(--ao-border-strong); color: var(--ao-text); }
-.project-platform-note { margin: 16px 0 4px; font-size: 13px; color: var(--ao-text-soft); line-height: 1.6; }.project-platform-list { display: grid; gap: 0; padding-top: 4px; }
+.project-platform-list { display: grid; gap: 0; padding-top: 4px; }
 .project-platform-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; min-height: 76px; padding: 14px 8px; border-bottom: 1px solid var(--ao-line-soft); border-radius: 6px; }
 .project-platform-item:last-child { border-bottom: 0; }
 .project-platform-item:hover { background: var(--ao-bg); }
