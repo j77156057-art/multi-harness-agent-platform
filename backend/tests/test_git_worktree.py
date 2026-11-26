@@ -35,7 +35,10 @@ def test_the_directory_id_is_short_and_the_branch_carries_the_identity(tmp_path)
     item = seed_and_claim(fixture)
     worktree = provision(fixture, task_id="T-1", attempt_id=item.attempt_id)
 
-    assert worktree.path.parent == fixture.rest / "wt"
+    # 工作树按项目分一层目录（wt/<group>/<id>）：物理 id 仍然是短的 4 位，
+    # 但父目录是群标识 —— 二十几个项目的活平铺在同一个 wt/ 下时，人分不出
+    # 哪个目录属于谁（2026-11-26 改）。
+    assert worktree.path.parent == fixture.rest / "wt" / "g1"
     assert len(worktree.path.name) == 4, "R10 §14 asks for a short physical id"
     assert worktree.branch == f"agent/g1/harness-1/T-1/{item.attempt_id}"
     parsed = parse_branch(worktree.branch)

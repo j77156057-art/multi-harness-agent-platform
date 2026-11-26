@@ -313,7 +313,12 @@ class WorktreeManager:
                 )
 
             self.root.mkdir(parents=True, exist_ok=True)
-            path, gitdir = self._unique_paths(conn, attempt_id)
+            # 工作树按**项目**分一层目录（`wt/<group>/<id>`）。原来所有项目的活
+            # 平铺在 `wt/` 下 —— 二十几个同级目录，人分不出哪个属于哪个项目，
+            # 回收时也只能靠 DB 反查。分支名本来就带 group，目录跟上就是了。
+            if group_short:
+                (self.root / group_short).mkdir(parents=True, exist_ok=True)
+            path, gitdir = self._unique_paths(conn, attempt_id, group_short)
             self._create(path, gitdir, branch, base_commit)
             workspace_id = f"ws-{uuid.uuid4().hex}"
             conn.execute(
@@ -331,12 +336,19 @@ class WorktreeManager:
                 gitdir=gitdir,
             )
 
-    def _unique_paths(self, conn: sqlite3.Connection, attempt_id: str) -> tuple[Path, Path]:
-        """Pick a short directory id that no other attempt holds."""
+    def _unique_paths(
+        self, conn: sqlite3.Connection, attempt_id: str, group_short: str = ""
+    ) -> tuple[Path, Path]:
+        """Pick a short directory id that no other attempt holds.
+
+        ``group_short`` 把工作树放进 `wt/<group>/` 里；传空就仍然平铺在
+        `wt/` 下（老调用方与测试保持原行为）。
+        """
+        base = self.root / group_short if group_short else self.root
         for length in range(4, 12):
             candidate = short_id(attempt_id, length=length)
-            path = self.root / candidate
-            gitdir = self.root / f"{candidate}.git"
+            path = base / candidate
+            gitdir = base / f"{candidate}.git"
             taken = conn.execute(
                 "SELECT 1 FROM workspaces WHERE path = ? AND status = 'active'", (str(path),)
             ).fetchone()

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -260,6 +261,18 @@ def _inline(text: str) -> str:
     return escaped
 
 
+def _safe_dir_name(name: str) -> str:
+    """一个能当目录名的群标识；认不出的返回空（调用方就平铺，不猜）。
+
+    `group_id` 来自数据库，正常形如 `collab-big-g1`；这里仍过一遍白名单 ——
+    手填的群名若带 `..` 或路径分隔符，不加这道会把文件写到 exports 之外。
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", str(name or "").strip()).strip("-.")
+    if not cleaned or cleaned in {".", ".."}:
+        return ""
+    return cleaned[:80]
+
+
 def build_document(
     database: Database,
     *,
@@ -285,7 +298,16 @@ def build_document(
         rounds=rounds,
     )
     html_text = render_html(markdown_text, title=title)
+    # 方案文档按**群**分目录。
+    #
+    # 原来所有项目的方案平铺在 `exports/plans/` 下（实测 72 个文件、36 份方案），
+    # 清理和交付时只能靠 DB 反查归属；两个项目的方案在同一个目录里挨着，人一眼
+    # 分不出哪个是哪个项目的。group_id 就在 plans 行里，分一层目录即可 —— 文件
+    # 名、正文格式、DB 里存的绝对路径都不变，所以**旧记录仍指向旧位置**，不用迁移。
     directory = Path(export_dir or settings.export_dir) / "plans"
+    group_dir = _safe_dir_name(str(plan.get("group_id") or ""))
+    if group_dir:
+        directory = directory / group_dir
     directory.mkdir(parents=True, exist_ok=True)
     revision = len(rounds)
     stem = f"plan-{plan_id}-r{revision}"

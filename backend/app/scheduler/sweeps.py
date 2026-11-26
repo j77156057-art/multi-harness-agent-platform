@@ -1550,6 +1550,27 @@ def _orphan_roots(database: Database) -> list[Path]:
     return roots
 
 
+def _worktree_candidates_in(root: Path, active: set[str]) -> list[Path]:
+    """根目录下的**工作树**，展开一层"按项目分组"的目录。
+
+    工作树从 2026-11-26 起放进 `wt/<group>/<id>`。分组目录自己没有 `.git`，
+    不展开的话它会以 "git status failed" 的身份被当成孤儿报一轮 —— 而真正的
+    残留（下一层）永远清不到。
+    """
+    out: list[Path] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir() or entry.is_symlink() or entry.name.endswith(".git"):
+            continue
+        owned = os.path.normcase(os.path.abspath(str(entry))) in active
+        if not owned and not (entry / ".git").exists():
+            for sub in sorted(entry.iterdir()):
+                if sub.is_dir() and not sub.is_symlink() and not sub.name.endswith(".git"):
+                    out.append(sub)
+            continue
+        out.append(entry)
+    return out
+
+
 def _recycle_orphan_worktrees(
     database: Database, roots: list[Path]
 ) -> tuple[list[str], list[dict[str, str]]]:
@@ -1574,7 +1595,7 @@ def _recycle_orphan_worktrees(
     for root in roots:
         if not root.exists() or not root.is_dir():
             continue
-        for child in sorted(root.iterdir()):
+        for child in _worktree_candidates_in(root, active):
             if not child.is_dir() or child.is_symlink() or child.name.endswith(".git"):
                 continue
             if os.path.normcase(os.path.abspath(str(child))) in active:
@@ -1621,7 +1642,11 @@ def _recycle_orphan_worktrees(
                         }
                     )
                     continue
-            gitdir = root / f"{child.name}.git"
+            # gitdir 与工作树是**兄弟**，不是都挂在根目录下：工作树从 2026-11-26
+            # 起放在 `wt/<group>/<id>`，它的 `.git` 也在同一个 group 目录里。
+            # 按 root 拼会算出一个不存在的路径（`wt/<id>.git`），孤儿回收于是
+            # 只删目录、把 git 目录留在盘上（测试 test_orphan_… 抓到过）。
+            gitdir = child.parent / f"{child.name}.git"
             _force_rmtree(child)
             if gitdir.exists() and not gitdir.is_symlink():
                 _force_rmtree(gitdir)
