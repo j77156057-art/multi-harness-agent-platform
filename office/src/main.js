@@ -147,10 +147,15 @@ function paintConnection({ connected, online, offline } = {}) {
   }
   connection.classList.add('is-live');
   connection.classList.remove('is-offline');
+  // 只报"有谁在跑"。「N 个没在跑」里绝大多数是**从未加入本项目**的登记窗口
+  // （2026-11-26 走查：8 个在跑 · 15 个没在跑），它对当天的决定没有帮助，
+  // 却和在线数一样响。没在跑的清单在右栏「可执行成员」里，要看去那里。
   const windows =
     online === undefined
       ? ''
-      : ` · 窗口 ${online} 个在跑${offline ? ` · ${offline} 个没在跑` : ''}`;
+      : online > 0
+        ? ` · 窗口 ${online} 个在跑`
+        : ' · 没有窗口在跑';
   connectionText.textContent = `已连接平台${windows}`;
 }
 

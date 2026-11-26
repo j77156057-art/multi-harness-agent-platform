@@ -1407,3 +1407,13 @@ body.direct-body textarea::placeholder {
   color: var(--ao-text-faint);
   opacity: 1;
 }
+
+/* 「待你决策 · 0 件」不该摆成一个大零（2026-11-26 信息分层走查）：
+   0 的时候它是本轮最响的元素，却什么都没说。降级成普通字号 + 淡墨，
+   让人一眼读到"没什么要你拍的"，而不是先被一个 0 撞一下。 */
+.ao-workspace.flat-office .flat-rail-lead.is-zero strong {
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--ao-text-faint);
+  opacity: 1;
+}

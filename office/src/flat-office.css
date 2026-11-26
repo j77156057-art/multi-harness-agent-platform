@@ -471,6 +471,20 @@
   cursor: pointer;
 }
 
+/* 每一行都挂一条「看最后一次输出」= 八九条重复链接，读列表时和正文抢注意力。
+   默认收起，鼠标停在这条活上（或它正被选中）才出现：动作还在，噪音没了。
+   只用 opacity —— 链接本身仍可点、仍能被键盘到达，不改变命中区域。 */
+.flat-task .flat-task-jump {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.flat-task:hover .flat-task-jump,
+.flat-task:focus-within .flat-task-jump,
+.flat-task.is-selected .flat-task-jump {
+  opacity: 1;
+}
+
 /* 分页 */
 
 .flat-pager {
@@ -3261,4 +3275,68 @@ dialog.flat-dialog:not(:modal) {
   border: 1px solid currentColor;
   border-radius: 999px;
   cursor: pointer;
+}
+
+/* 方案全文：在右栏里就地展开，不跳页也不弹层。
+   限高 + 内部滚动 —— 一份方案正文可能上千字，展开把下面所有卡推走，人就
+   失去了位置感；在卡片内滚，位置不变。 */
+.flat-plan-full {
+  margin: 6px 0 2px;
+}
+
+.flat-plan-full > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ao-accent);
+  list-style: none;
+}
+
+.flat-plan-full > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 三角用边框画，不用 ▸ 字形：这个字形在部分 Windows 字体里落成小圆点，
+   看起来像"一句没写完的话"。 */
+.flat-plan-full > summary::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 5px;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform: translateY(-1px);
+  transition: transform 0.12s ease;
+}
+
+.flat-plan-full[open] > summary::before {
+  transform: rotate(90deg) translateX(1px);
+}
+
+.flat-plan-body {
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.035);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.flat-plan-body :is(h3, h4, h5, h6) {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.flat-plan-body p {
+  margin: 0 0 6px;
+}
+
+.flat-plan-body ul {
+  margin: 0 0 6px;
+  padding-left: 16px;
 }

@@ -809,6 +809,94 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   // ------------------------------------------------ 任务书 / 成员动态
 
   /** 任务书：方案定稿的正文（人看的那一份）。 */
+  /** 方案的标题；平台默认写「方案定稿」—— 那句没有信息量，当它不存在。 */
+  function planTitleOf(plan) {
+    const document = (plan && plan.document) || {};
+    const title = String(document.title || '').trim();
+    return title && title !== '方案定稿' ? title : '';
+  }
+
+  /**
+   * 一句话说清这份方案要干什么：取正文里第一条任务的标题。
+   *
+   * 任务标题形如「大项目协作 · 大项目 · Pi CLI 第二轮复盘真实经历落盘」，前两段
+   * 是项目名（也就是方案标题），和卡片上的上下文重复 —— 去掉它，只留那句真正
+   * 区分这条活的话。取不到就退回方案标题，再取不到就不摆这一行。
+   */
+  function planHeadline(plan) {
+    const document = (plan && plan.document) || {};
+    const markdown = String(document.markdown || '');
+    const heading = /^###\s+(?:\d+[.、]\s*)?(.+)$/m.exec(markdown);
+    let headline = heading ? heading[1].trim() : '';
+    // 任务标题是「项目名 · 项目标题 · 这条活的名字」。前两段说的是"哪个项目"，
+    // 页头和这张卡的上下文已经交代过了；只留最后一段，否则一行里同一个项目名
+    // 出现两次（实测：「大项目协作 · 大项目 · Pi CLI 第二轮复盘真实经历落盘」）。
+    // 少于三段就原样保留 —— 不知道结构的时候不猜。
+    const segments = headline
+      .split('·')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    if (segments.length >= 3 && segments[0] === String(projectName() || '').trim()) {
+      headline = segments[segments.length - 1];
+    }
+    return headline || planTitleOf(plan);
+  }
+
+  /**
+   * 方案正文（markdown）-> 右栏里能读的 HTML。
+   *
+   * 只认四种行：标题、列表项、空行、正文段。不做行内解析（`**粗**`、反引号
+   * 原样留着）—— 这是一份要人批准的文件，**保真**比好看重要：把 `**` 抠掉
+   * 反而让人分不清哪句是原文。
+   *
+   * 每行都先 escape 再包标签：正文来自管理员模型，不能让它往页面里塞标签。
+   */
+  function planMarkdownHtml(plan) {
+    const markdown = String(((plan || {}).document || {}).markdown || '');
+    if (!markdown.trim()) return '<p class="flat-note">这份方案还没有正文。</p>';
+    const out = [];
+    // 行内只认两种标记：`**粗**` 与 `` `代码` ``。先 escape 再套标签 —— 正文来自
+    // 管理员模型，替换只发生在已转义的文本上，塞不进标签。
+    const inline = (text) =>
+      escape(text)
+        .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+    let inList = false;
+    const closeList = () => {
+      if (inList) {
+        out.push('</ul>');
+        inList = false;
+      }
+    };
+    for (const raw of markdown.split(/\r?\n/)) {
+      const line = raw.trimEnd();
+      if (!line.trim()) {
+        closeList();
+        continue;
+      }
+      const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+      if (heading) {
+        closeList();
+        const level = Math.min(6, heading[1].length + 2);
+        out.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+        continue;
+      }
+      const item = /^[-*]\s+(.*)$/.exec(line);
+      if (item) {
+        if (!inList) {
+          out.push('<ul>');
+          inList = true;
+        }
+        out.push(`<li>${inline(item[1])}</li>`);
+        continue;
+      }
+      closeList();
+      out.push(`<p>${inline(line)}</p>`);
+    }
+    closeList();
+    return out.join('');
+  }
+
   function taskBrief() {
     const plan = state.plan && state.plan.draft ? state.plan.draft : null;
     const doc = plan && plan.document ? plan.document : null;
@@ -1114,16 +1202,21 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     return { text: '空闲', kind: 'is-idle' };
   }
 
-  /** 这一堆的数：手上几条、交上去等审几条、已完成几条、未完成几条。 */
+  /** 这一堆的数：手上几条、交上去等审几条。
+   *
+   * 只报**还要动作**的那几档。以前这里还挂着「已完成 N 条 · 未完成 N 条」——
+   * 那是**本组内**的计数，却和页头按全项目算的「未完成 24 / 完成了 12」并排
+   * 出现，同一个屏两套数（2026-11-26 走查实测：5 条 vs 12 条）。而且每行自带
+   * 状态 chip，这两个数在组头是重复的。
+   */
   function groupFacts(group) {
     const bits = [];
     if (group.active) bits.push(`进行中 ${group.active} 条`);
     if (group.waiting) bits.push(`待领取 ${group.waiting} 条`);
     if (group.submitted) bits.push(`已交、等审核 ${group.submitted} 条`);
-    if (group.done) bits.push(`已完成 ${group.done} 条`);
-    if (group.failed) bits.push(`未完成 ${group.failed} 条`);
-    // 什么数都没有（全是领不了的草案）时也得说一句，否则标题下面空着。
-    if (!bits.length) bits.push(`共 ${group.tasks.length} 条，都还没到能领的时候`);
+    // 什么数都没有时只说条数：以前写「都还没到能领的时候」，但这一堆里可能有
+    // 已完成、已放弃的（它们不需要谁去领），那句话是错的。
+    if (!bits.length) bits.push(`共 ${group.tasks.length} 条`);
     return bits.join(' · ');
   }
 
@@ -1744,31 +1837,43 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     // 自相矛盾（2026-11-01 完整流程自检实测）。
     const toReview = Math.max(0, Number(counts.review || 0) - waitingOnMe);
     const guide = waitingOnMe
-      ? `有 <b>${waitingOnMe}</b> 条任务需要你处理${
-          toReview ? `，另有 ${toReview} 条已提交、等待审核` : ''
-        }${working ? `，还有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
+      ? `有 <b>${waitingOnMe}</b> 条任务需要你处理${toReview ? `，另有 ${toReview} 条等待审核` : ''}。`
       : toReview
-        ? `有 <b>${toReview}</b> 条任务已提交、等待审核${working ? `，另有 ${working} 条任务正在执行` : ''}。可在任务表中查看。`
+        ? `有 <b>${toReview}</b> 条任务已提交、等待审核${working ? `，另有 ${working} 条正在执行` : ''}。`
         : working
-          ? `有 <b>${working}</b> 条任务正在执行${counts.done ? `，其中 ${counts.done} 条已完成` : ''}。暂无需要你处理的任务。`
+          ? `有 <b>${working}</b> 条任务正在执行${counts.done ? `，其中 ${counts.done} 条已完成` : ''}。`
           : emptyProject
-            ? '当前项目尚无任务。可在顶部「开工配置」中描述目标，管理员将据此细化并分派任务。'
-            : '本项目暂无需要你处理的任务。可选择一条任务查看详情，或在左侧选择窗口查看其当前状态。';
+            ? '当前项目尚无任务。顶部「开工配置」可以写下目标，管理员据此细化并分派。'
+            : '没有需要你处理的任务。';
+    // 计数条只列**有值**的那几档：七格里五格是 0 的时候，它占掉整行宽度却什么
+    // 也没说（2026-11-26 走查实测：1/0/0/0/0/24/12，中间四个 0 在视觉上最响）。
+    const totalTasks = (state.tasks || []).length;
+    const countItems = [
+      ['草案', counts.draft, ''],
+      ['待领取', counts.waiting, ''],
+      ['执行中', counts.active, ''],
+      ['待处理', counts.review, 'is-review'],
+      ['待协助', counts.help, ''],
+      ['未完成', counts.failed, 'is-failed'],
+      ['完成了', counts.done, ''],
+    ].filter(([, value]) => Number(value) > 0);
     wrap.innerHTML = `
       <div class="flat-head-main">
-        <span class="flat-eyebrow">DELIVERY LEDGER / 项目交付台账</span>
         <h1>${escape(projectName())}</h1>
         <p class="flat-guide">${guide}</p>
         <p class="flat-today">${escape(todayStory())}</p>
       </div>
       <ul class="flat-counts">
-        ${counts.draft ? `<li><span>草案</span><b>${counts.draft}</b></li>` : ''}
-        <li class="${counts.waiting ? 'has-value' : ''}"><span>待领取</span><b>${counts.waiting}</b></li>
-        <li class="${counts.active ? 'has-value' : ''}"><span>执行中</span><b>${counts.active}</b></li>
-        <li class="is-review ${counts.review ? 'has-value' : ''}"><span>待处理</span><b>${counts.review}</b></li>
-        <li class="${counts.help ? 'has-value' : ''}"><span>待协助</span><b>${counts.help}</b></li>
-        <li class="is-failed ${counts.failed ? 'has-value' : ''}"><span>未完成</span><b>${counts.failed}</b></li>
-        <li class="${counts.done ? 'has-value' : ''}"><span>完成了</span><b>${counts.done}</b></li>
+        ${
+          countItems.length
+            ? countItems
+                .map(
+                  ([label, value, cls]) =>
+                    `<li class="${cls} has-value"><span>${label}</span><b>${value}</b></li>`,
+                )
+                .join('')
+            : `<li class="is-quiet"><span>任务</span><b>${totalTasks}</b></li>`
+        }
       </ul>
       <div class="flat-source">
         <label for="flatSourceSelect" title="现在看的是哪一份数据：正式平台上的，还是本机的样例">看的数据</label>
@@ -2069,7 +2174,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       // 「最近一次尝试 …（执行中）」）。
       const status = String(info.last_task_status || info.last_attempt_status);
       const label = STATE_LABEL[status] || status;
-      return RUNNING_STATUSES.has(status) ? '执行中' : `上一轮：${label}`;
+      if (RUNNING_STATUSES.has(status)) return '执行中';
+      // 「上一轮：已完成」是噪音：做完了就是空闲，六个窗口各写一遍同一句话，
+      // 却没有一个字能帮人做决定（2026-11-26 走查）。只有**没做成**才值得
+      // 挂在名字下面 —— 那说明这个窗口刚栽过，下一轮可能要人看一眼。
+      if (DONE_STATES.has(status)) return '空闲';
+      return `上一轮：${label}`;
     }
     if (mine.length) return `手上有 ${mine.length} 条任务`;
     if (info && info.status === 'offline') return '进程没在跑';
@@ -3816,6 +3926,13 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   // 阈值做成常量：要调只改这一处。
   const REFINE_FAIL_PREFIX = '管理员 Harness 细化失败';
   const REFINE_FAIL_STREAK_MODAL = 3;
+  //: 一条失败消息多久之后就不再算"现在正在失败"。
+  //:
+  //: 连续段只看消息，不看时间，于是**恢复之后弹窗还挂着**：2026-11-26 走查实测
+  //: 群里最后一条失败停在凌晨 01:58，下午三点页面照样弹「已连续失败 360 次」，
+  //: 而管理员早就用新模型细化成功了。过期的告警比没有告警更坏 —— 它让人一直
+  //: 在对的地方找个已经不在的问题，还挡住整页。
+  const REFINE_FAIL_RECENT_MS = 2 * 60 * 60 * 1000;
 
   /**
    * 本群最新的细化失败**连续段**。
@@ -3835,7 +3952,12 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
       const body = String(ordered[index].body || '');
       if (!body.startsWith(REFINE_FAIL_PREFIX)) break;
       streak += 1;
-      if (!newest) newest = { body, createdSeq: Number(ordered[index].created_seq || 0) };
+      if (!newest)
+        newest = {
+          body,
+          createdSeq: Number(ordered[index].created_seq || 0),
+          at: String(ordered[index].created_at || ''),
+        };
     }
     return { streak, newest };
   }
@@ -3912,6 +4034,9 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
     if (!adminId) return;
     const { streak, newest } = refineFailureStreak();
     if (!newest || streak < REFINE_FAIL_STREAK_MODAL) return;
+    // 只有"现在还在失败"才值得打断人：最新一条失败超过两小时就当已恢复。
+    const newestAt = Date.parse(String(newest.at || ''));
+    if (!Number.isFinite(newestAt) || Date.now() - newestAt > REFINE_FAIL_RECENT_MS) return;
     const signature = refineFailureSignature(streak, newest.createdSeq);
     if (dismissedTroubles().has(signature)) return;
     openRefineFailDialog({ adminId, streak, newest, signature });
@@ -5773,6 +5898,20 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
   function reasonText(reason) {
     const text = String(reason || '').trim();
     if (!text) return '';
+    // 先认**已知的机器句式**，再问平台。顺序不能反：平台的译文缓存里可能就存着
+    // 原文（它同样没处理这条），那样整句带着 40 位 sha 直接透到列表上。
+    // 2026-11-26 走查：同一条原因重复 6 行，每行拖一个 sha，行高是别人的两倍。
+    if (/no committed change against base/i.test(text)) {
+      return '这一轮没提交任何改动（说了内容，但改动没落到工作树）';
+    }
+    if (/uncommitted changes?:/i.test(text)) {
+      return '这一轮有改动没提交（工作树里还留着未提交的文件）';
+    }
+    // `平台接收了这个窗口的交付：…` 这层前缀是投递链路的说法，人只需要后半句。
+    const delivered = /^平台接收了这个窗口的交付[：:]\s*/.exec(text);
+    if (delivered) {
+      return reasonText(text.slice(delivered[0].length));
+    }
     const fromPlatform = translated(text);
     if (fromPlatform) return fromPlatform;
     // 成员 worker 包过的失败原因：`retryable failure (CliFailed): the harness CLI
@@ -7217,43 +7356,56 @@ const RUNNING_STATUSES = new Set(['claimed', 'in_progress', 'verifying']);
 
     wrap.innerHTML = `
       <header class="flat-rail-head">
-        <p>OPERATIONS / 运维现状</p>
-        <div class="flat-rail-lead${decisions ? ' has-value' : ''}"><strong>${decisions}</strong><span>件待你决策</span></div>
+        <p class="flat-rail-kicker">待你决策</p>
+        <div class="flat-rail-lead${decisions ? ' has-value' : ' is-zero'}"><strong>${decisions}</strong><span>${decisions ? '件' : '件 · 暂无'}</span></div>
         <ul class="flat-rail-ledger" aria-label="运维摘要">
-          <li><span>待领取</span><b>${unclaimed.length}</b></li>
-          <li><span>成员求助</span><b>${helps.length}</b></li>
           <li><span>可执行成员</span><b>${usable.length}</b></li>
         </ul>
       </header>
       ${askCard()}
       ${waitingCard()}
-      <section class="flat-card flat-project-requests-summary">
+      ${
+        // 没有待批的申请时，这张卡只有「暂无申请」四个字 —— 一块常驻的空白。
+        // 真有申请要人批才出现（历史记录在顶部「项目列表」里看）。
+        requestCounts.pending > 0
+          ? `<section class="flat-card flat-project-requests-summary">
         <h3>${cardIcon('stamp')}项目创建申请</h3>
         <p class="flat-note">${escape(requestSummary)}</p>
         <button type="button" data-act="open-project-requests">查看申请与审批记录</button>
-      </section>
+      </section>`
+          : ''
+      }
       ${plan ? `<section class="flat-card flat-card-plan">
         <p class="flat-card-kicker">需要你决策</p>
         <h3>${cardIcon('stamp')}待批准的方案</h3>
-        <p>方案 ${escape(plan.plan_id)} · ${escape((plan.document || {}).tasks || 0)} 条任务</p>
-        <p class="flat-note" title="${escape((plan.document || {}).markdown_path || '')}">${escape(
-          translated((plan.document || {}).markdown_path) || fileNameOf((plan.document || {}).markdown_path),
-        )}</p>
+        ${
+          // 以前这三行是「方案 plan-667c… · 1 条任务」+「plan-667c…-1.md」：
+          // 两个机器标识，没有一句说这份方案**要做什么**。批不批，人得先知道批什么。
+          // 现在给第一条任务的名字（去掉与方案标题重复的前缀），机器号不出现在卡上。
+          planHeadline(plan)
+            ? `<p><b>${escape(planHeadline(plan))}</b></p>`
+            : ''
+        }
+        <p class="flat-note">${escape((plan.document || {}).tasks || 0)} 条任务${
+          planTitleOf(plan) ? ` · ${escape(planTitleOf(plan))}` : ''
+        }</p>
+        <details class="flat-plan-full" data-fold="plan-full"${
+          state.openFolds.has('plan-full') ? ' open' : ''
+        }>
+          <summary>查看方案全文</summary>
+          <div class="flat-plan-body">${planMarkdownHtml(plan)}</div>
+        </details>
         <button type="button" data-act="approve-plan">批准，开始做</button>
         <button type="button" data-act="reject-plan" title="驳回方案：退回管理员修订后重新提交">驳回方案</button>
       </section>` : ''}
       ${
-        // 空项目里这张卡只剩"0 条任务 / 暂无方案正文"—— 中间栏已经把同一句话说过了，
-        // 摆在这里只是多一块噪音。有方案或有活的时候才有信息量。
-        brief.planId || (state.tasks || []).length
+        // 有方案正文才摆这张卡；只有任务数时，中间的任务表已经把同一件事说完了。
+        brief.planId
           ? `<section class="flat-card flat-card-brief">
                <h3>${cardIcon('brief')}待办事项</h3>
-               ${brief.planId
-                 ? `<p><b>${escape(brief.title)}</b></p>
-                    <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条尚未领取）` : ''}</p>
-                    <button type="button" data-act="open-brief">查看全部待办</button>`
-                 : `<p class="flat-note">${(state.tasks || []).length} 条任务</p>
-                    <p class="flat-empty">暂无方案正文。</p>`}
+               <p><b>${escape(brief.title)}</b></p>
+               <p class="flat-note">${(state.tasks || []).length} 条任务${unclaimed.length ? `（${unclaimed.length} 条尚未领取）` : ''}</p>
+               <button type="button" data-act="open-brief">查看全部待办</button>
              </section>`
           : ''
       }
