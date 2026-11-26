@@ -762,13 +762,16 @@ class PoolService:
         credential = upstream.credential_value()
         headers = _upstream_headers(upstream, credential, accept="text/event-stream")
         body = dict(payload)
-        body["model"] = route.upstream_model
-        body["stream"] = True
         if upstream.protocol == ANTHROPIC:
-            if target == "chat":
-                body, _ = openai_to_anthropic(body)
-            else:
-                body, _ = openai_to_anthropic(chat_to_responses(body))
+            if target == "responses":
+                # 调用方说 Responses、上游只会 chat 协议：先把 Responses 请求
+                # **降级**成 chat，再翻成 Anthropic。这里以前调的是反方向的
+                # ``chat_to_responses`` —— 于是发出去的 body 只有 ``input``、
+                # 没有 ``messages``，上游一律 400（2026-11-26 实测："Invalid
+                # input: expected array, received undefined", param=messages）。
+                # 同一个 400 也让 codex 经池子做 refine/review 时"流断开"。
+                body = _responses_to_chat(body)
+            body, _ = openai_to_anthropic(body)
             url = upstream.base_url + "/v1/messages"
         elif upstream.protocol == OPENAI_RESPONSES:
             if target == "chat":
@@ -776,8 +779,14 @@ class PoolService:
             url = upstream.base_url + "/responses"
         else:
             if target == "responses":
-                body = chat_to_responses(body)
+                # 与上面 Anthropic 那条同一个方向：Responses 调用方 → chat 上游，
+                # 必须 **降级** 成 chat（``messages``），不是升级成 Responses。
+                body = _responses_to_chat(body)
             url = upstream.base_url + "/chat/completions"
+        # 转换函数返回的是新 dict，``model`` 与 ``stream`` 要在转换之后落定，
+        # 否则被上游 model id 覆盖或干脆丢掉（上游于是回非流式）。
+        body["model"] = route.upstream_model
+        body["stream"] = True
         return url, body, headers
 
     def _upstream_lines(
@@ -1517,31 +1526,129 @@ def _now() -> str:
 
 
 def _responses_to_chat(payload: dict[str, Any]) -> dict[str, Any]:
-    """OpenAI Responses request -> OpenAI chat request (best effort)."""
+    """OpenAI Responses request -> OpenAI chat request.
+
+    codex CLI 只说 Responses（``instructions`` + ``input`` + Responses 形状的
+    ``tools``），而池子里多数上游只会 chat（``messages``）。这里把请求**降级**
+    过去，并且**保留工具**：codex 全部工作都靠 tools，丢了工具它会以为自己
+    没有手，转而回答"我没有权限执行"。
+
+    2026-11-26 之前这里只转 role/content，``tools`` 整块丢掉；流式路径更把
+    方向弄反了（把 Responses 请求再往 Responses 转），于是 codex 经池子的每次
+    refine/review 都以 ``stream disconnected`` 收场 —— 上游收到的是没有
+    ``messages`` 的 body，回 400 "Invalid input: expected array"。
+    """
     messages: list[dict[str, Any]] = []
     instructions = payload.get("instructions")
     if isinstance(instructions, str) and instructions.strip():
         messages.append({"role": "system", "content": instructions})
+
+    def _text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict):
+                    piece = block.get("text")
+                    if isinstance(piece, str) and piece:
+                        parts.append(piece)
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "\n".join(parts)
+        return "" if content is None else str(content)
+
     raw_input = payload.get("input")
     if isinstance(raw_input, str):
         messages.append({"role": "user", "content": raw_input})
     elif isinstance(raw_input, list):
         for item in raw_input:
-            if isinstance(item, dict):
-                role = str(item.get("role") or "user")
-                content = item.get("content")
-                if isinstance(content, list):
-                    text = "\n".join(
-                        str(block.get("text") or "")
-                        for block in content
-                        if isinstance(block, dict) and block.get("text")
-                    )
+            if isinstance(item, str):
+                messages.append({"role": "user", "content": item})
+                continue
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type") or "")
+            if kind == "function_call":
+                # Responses 里 function_call 是独立 item；chat 协议要求它挂在
+                # assistant 消息的 tool_calls 上。同一轮的连续多次调用必须并进
+                # **同一条** assistant 消息，否则上游判 tool_calls 顺序不合法。
+                call = {
+                    "id": str(item.get("call_id") or item.get("id") or "call_relay"),
+                    "type": "function",
+                    "function": {
+                        "name": str(item.get("name") or ""),
+                        "arguments": (
+                            item.get("arguments")
+                            if isinstance(item.get("arguments"), str)
+                            else json.dumps(item.get("arguments") or {}, ensure_ascii=False)
+                        ),
+                    },
+                }
+                if messages and messages[-1].get("role") == "assistant" and "_open" in messages[-1]:
+                    messages[-1]["tool_calls"].append(call)
                 else:
-                    text = str(content or "")
-                messages.append({"role": role, "content": text})
+                    messages.append(
+                        {"role": "assistant", "content": "", "tool_calls": [call], "_open": True}
+                    )
+                continue
+            if kind == "function_call_output":
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": str(item.get("call_id") or ""),
+                        "content": _text(item.get("output")) or "(tool result)",
+                    }
+                )
+                continue
+            messages.append(
+                {"role": str(item.get("role") or "user"), "content": _text(item.get("content"))}
+            )
+    for message in messages:
+        message.pop("_open", None)
+
     body: dict[str, Any] = {"model": payload.get("model"), "messages": messages}
+    tools = payload.get("tools")
+    if isinstance(tools, list):
+        converted: list[dict[str, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, dict) or str(tool.get("type") or "function") != "function":
+                # web_search / computer 这类 hosted tool 在 chat 上游没有对应物：
+                # 跳过，而不是塞进去让上游 400。
+                continue
+            name = str(tool.get("name") or "")
+            if not name:
+                continue
+            converted.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": name,
+                        "description": str(tool.get("description") or ""),
+                        "parameters": tool.get("parameters")
+                        or {"type": "object", "properties": {}},
+                    },
+                }
+            )
+        if converted:
+            body["tools"] = converted
+            choice = payload.get("tool_choice")
+            if isinstance(choice, str) and choice in {"auto", "none", "required"}:
+                body["tool_choice"] = choice
+            elif isinstance(choice, dict) and choice.get("name"):
+                body["tool_choice"] = {
+                    "type": "function",
+                    "function": {"name": str(choice["name"])},
+                }
+    if payload.get("parallel_tool_calls") is not None:
+        body["parallel_tool_calls"] = bool(payload["parallel_tool_calls"])
     if payload.get("max_output_tokens"):
         body["max_tokens"] = int(payload["max_output_tokens"])
+    for key in ("temperature", "top_p"):
+        if payload.get(key) is not None:
+            body[key] = payload[key]
+    if payload.get("stream"):
+        body["stream"] = True
     return body
 
 

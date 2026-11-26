@@ -824,17 +824,40 @@ def responses_stream_to_openai_stream(lines: Iterator[str], *, model: str) -> It
 
 
 def chat_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iterator[str]:
-    """OpenAI chat SSE -> OpenAI Responses SSE."""
+    """OpenAI chat SSE -> OpenAI Responses SSE.
+
+    两条都是 Responses 客户端（codex）真正依赖的东西，缺一条它就会"看不见"：
+
+    * **正文要落进结尾的 ``response.completed``**。只发 delta、completed 里
+      留空字符串时，客户端累积不到任何内容，渲染成空回合（2026-11-26 实测：
+      流通了，但 ``output[0].content[0].text`` 是 ``""``）。
+    * **``tool_calls`` 要变成 ``function_call`` 条目**。chat 上游把工具调用放
+      在 ``delta.tool_calls``（参数是分片字符串），Responses 里它是独立的
+      output item + ``function_call_arguments`` 事件。以前整块没翻译，于是
+      codex 经池子永远收不到工具调用 —— 它以为自己没有手，只能说话。
+
+    文本仍然是实时转发的；工具参数在结尾统一成组发出（参数是分片累加出来的，
+    客户端按条目消费，不需要逐字实时）。
+    """
     import json as _json
 
+    counter = {"n": 0}
+
     def event(kind: str, **fields: Any) -> str:
-        payload = {"type": kind, "sequence_number": 0, **fields}
+        payload = {"type": kind, "sequence_number": counter["n"], **fields}
+        counter["n"] += 1
         return f"event: {kind}\ndata: {_json.dumps(payload, ensure_ascii=False)}\n\n"
 
     yield event(
         "response.created",
         response={"id": "resp_pool", "object": "response", "status": "in_progress", "model": model},
     )
+
+    text_parts: list[str] = []
+    message_index: int | None = None
+    next_output_index = 0
+    #: chat 的 tool_calls 按 index 分片到达；这里按 index 累积成完整调用。
+    calls: dict[int, dict[str, Any]] = {}
     for raw in lines:
         raw = raw.strip()
         if not raw.startswith("data:"):
@@ -849,15 +872,88 @@ def chat_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iter
         choices = data.get("choices") or []
         if not choices or not isinstance(choices[0], dict):
             continue
-        piece = _text_of((choices[0].get("delta") or {}).get("content"))
+        delta = choices[0].get("delta") or {}
+        piece = _text_of(delta.get("content"))
         if piece:
+            text_parts.append(piece)
+            if message_index is None:
+                message_index = next_output_index
+                next_output_index += 1
+                yield event(
+                    "response.output_item.added",
+                    output_index=message_index,
+                    item=responses_message_item(),
+                )
             yield event(
                 "response.output_text.delta",
                 delta=piece,
                 item_id="msg_pool",
-                output_index=0,
+                output_index=message_index,
                 content_index=0,
             )
+        for call in delta.get("tool_calls") or []:
+            if not isinstance(call, dict):
+                continue
+            try:
+                slot = int(call.get("index") or 0)
+            except (TypeError, ValueError):
+                slot = 0
+            state = calls.setdefault(
+                slot,
+                {
+                    "call_id": str(call.get("id") or f"call_relay_{slot}"),
+                    "name": "",
+                    "arguments": "",
+                },
+            )
+            if call.get("id"):
+                state["call_id"] = str(call["id"])
+            function = call.get("function") if isinstance(call.get("function"), dict) else {}
+            if function.get("name"):
+                state["name"] = str(function["name"])
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                state["arguments"] += arguments
+
+    text = "".join(text_parts)
+    output: list[dict[str, Any]] = []
+    if message_index is not None:
+        yield event(
+            "response.output_text.done",
+            text=text,
+            item_id="msg_pool",
+            output_index=message_index,
+            content_index=0,
+        )
+        yield event(
+            "response.output_item.done",
+            output_index=message_index,
+            item=responses_message_item(text),
+        )
+        output.append(responses_message_item(text))
+    for slot in sorted(calls):
+        state = calls[slot]
+        item = function_call_item(
+            call_id=state["call_id"], name=state["name"] or "tool", arguments=state["arguments"]
+        )
+        output_index = next_output_index
+        next_output_index += 1
+        yield event("response.output_item.added", output_index=output_index, item={**item, "status": "in_progress"})
+        if state["arguments"]:
+            yield event(
+                "response.function_call_arguments.delta",
+                item_id=item["id"],
+                output_index=output_index,
+                delta=state["arguments"],
+            )
+        yield event(
+            "response.function_call_arguments.done",
+            item_id=item["id"],
+            output_index=output_index,
+            arguments=state["arguments"],
+        )
+        yield event("response.output_item.done", output_index=output_index, item=item)
+        output.append(item)
     yield event(
         "response.completed",
         response={
@@ -865,13 +961,7 @@ def chat_stream_to_responses_stream(lines: Iterator[str], *, model: str) -> Iter
             "object": "response",
             "status": "completed",
             "model": model,
-            "output": [
-                {
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": ""}],
-                }
-            ],
+            "output": output,
         },
     )
 
@@ -886,6 +976,20 @@ def responses_message_item(text: str = "", *, status: str = "") -> dict[str, Any
         "content": [{"type": "output_text", "text": text}] if text else [],
     }
     return item
+
+
+def function_call_item(
+    *, call_id: str, name: str, arguments: str = "", status: str = "completed"
+) -> dict[str, Any]:
+    """The function_call output item of a Responses stream."""
+    return {
+        "id": f"fc_{call_id}",
+        "type": "function_call",
+        "call_id": call_id,
+        "name": name,
+        "arguments": arguments,
+        "status": status,
+    }
 
 
 def responses_stream_events(text: str, *, model: str) -> Iterator[str]:

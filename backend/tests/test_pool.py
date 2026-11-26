@@ -625,6 +625,154 @@ def test_a_chat_stream_becomes_a_responses_stream():
     assert any("response.completed" in line for line in events)
 
 
+def test_a_chat_stream_lands_its_text_in_the_completed_response():
+    """delta 转发之外，``response.completed`` 里要带**全文**。
+
+    2026-11-26 之前 completed 的 output 是空字符串：流是通的，codex 却渲染成
+    空回合（它按 completed 的 output 组装最终消息）。
+    """
+    from app.pool.translate import chat_stream_to_responses_stream
+
+    lines = iter(
+        [
+            'data: {"choices":[{"index":0,"delta":{"content":"2+2"}}]}',
+            'data: {"choices":[{"index":0,"delta":{"content":"等于4"}}]}',
+            "data: [DONE]",
+        ]
+    )
+    events = list(chat_stream_to_responses_stream(lines, model="m"))
+    payloads = [
+        json.loads(event.split("data: ", 1)[1])
+        for event in events
+        if "data: " in event
+    ]
+    completed = [item for item in payloads if item["type"] == "response.completed"][-1]
+    message = completed["response"]["output"][0]
+    assert message["type"] == "message"
+    assert message["content"][0]["text"] == "2+2等于4"
+
+
+def test_a_chat_stream_with_tool_calls_becomes_function_call_items():
+    """chat 的 delta.tool_calls 分片 -> Responses 的 function_call 条目。
+
+    不翻译这一块，codex 经池子永远收不到工具调用（它"以为自己没有手"）。
+    """
+    from app.pool.translate import chat_stream_to_responses_stream
+
+    lines = iter(
+        [
+            'data: {"choices":[{"index":0,"delta":{"content":"checking "}}]}',
+            'data: {"choices":[{"index":0,"delta":{"tool_calls":'
+            '[{"index":0,"id":"call_a","function":{"name":"shell","arguments":"{\\"cmd\\":"}}]}}]}',
+            'data: {"choices":[{"index":0,"delta":{"tool_calls":'
+            '[{"index":0,"function":{"arguments":"\\"ls\\"}"}}]}}]}',
+            "data: [DONE]",
+        ]
+    )
+    events = list(chat_stream_to_responses_stream(lines, model="m"))
+    payloads = [
+        json.loads(event.split("data: ", 1)[1])
+        for event in events
+        if "data: " in event
+    ]
+    completed = [item for item in payloads if item["type"] == "response.completed"][-1]
+    output = completed["response"]["output"]
+    message = next(item for item in output if item["type"] == "message")
+    assert message["content"][0]["text"] == "checking "
+    call = next(item for item in output if item["type"] == "function_call")
+    assert call["call_id"] == "call_a"
+    assert call["name"] == "shell"
+    assert call["arguments"] == '{"cmd":"ls"}'
+    kinds = [item["type"] for item in payloads]
+    assert "response.function_call_arguments.done" in kinds
+    assert kinds.count("response.output_item.done") >= 2
+
+
+def test_a_responses_request_is_downgraded_to_chat_with_its_tools():
+    """codex 只说 Responses；chat 上游只认 messages —— 降级必须带上工具。
+
+    2026-11-26 之前的降级只搬 role/content：``tools`` 整块丢掉（codex 于是
+    "以为自己没有手"），流式路径更把方向弄反了。这里把三件事钉住：没有
+    ``input`` 残留、连续的 function_call 并进同一条 assistant、工具定义到达。
+    """
+    from app.pool.service import _responses_to_chat
+
+    body = _responses_to_chat(
+        {
+            "model": "deepseek/deepseek-v4-flash",
+            "instructions": "be brief",
+            "input": [
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "read a.txt"}],
+                },
+                {"type": "function_call", "call_id": "c1", "name": "shell", "arguments": '{"cmd":"ls"}'},
+                {"type": "function_call", "call_id": "c2", "name": "shell", "arguments": '{"cmd":"cat a.txt"}'},
+                {"type": "function_call_output", "call_id": "c1", "output": "a.txt"},
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "shell",
+                    "description": "run a command",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "tool_choice": "auto",
+            "max_output_tokens": 128,
+            "stream": True,
+            "store": False,
+            "reasoning": {"effort": "medium"},
+        }
+    )
+
+    assert "input" not in body
+    assert body["messages"][0] == {"role": "system", "content": "be brief"}
+    assert body["messages"][1]["content"] == "read a.txt"
+    # 同一轮的两次调用必须在一条 assistant 消息里（上游按顺序校验 tool_calls）。
+    call_turn = body["messages"][2]
+    assert call_turn["role"] == "assistant"
+    assert [call["id"] for call in call_turn["tool_calls"]] == ["c1", "c2"]
+    assert body["messages"][3] == {"role": "tool", "tool_call_id": "c1", "content": "a.txt"}
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "shell",
+                "description": "run a command",
+                "parameters": {"type": "object"},
+            },
+        }
+    ]
+    assert body["tool_choice"] == "auto"
+    assert body["max_tokens"] == 128
+    assert body["stream"] is True
+    # Responses 专有字段不能漏给 chat 上游（会被判 400）。
+    assert "store" not in body
+    assert "reasoning" not in body
+
+
+def test_a_responses_stream_to_a_chat_upstream_sends_messages_not_input():
+    """流式路径的方向：Responses 调用方 → chat 上游 = 降级，不是升级。"""
+    from app.pool.service import PoolService, Route
+    from app.pool.sources import Upstream
+
+    upstream = Upstream(name="chatty", protocol="openai_chat", base_url="http://127.0.0.1:1/v1")
+    route = Route(upstream=upstream, model="m", upstream_model="m-up")
+    url, body, headers = PoolService()._stream_setup(
+        route, {"model": "m", "input": "hello", "stream": True}, target="responses"
+    )
+
+    assert url.endswith("/chat/completions")
+    assert "input" not in body
+    assert body["messages"] == [{"role": "user", "content": "hello"}]
+    # 转换函数返回新 dict，model/stream 必须在转换之后落定。
+    assert body["model"] == "m-up"
+    assert body["stream"] is True
+    assert headers.get("Accept") == "text/event-stream"
+
+
 def test_a_responses_request_reaches_a_cli_slot_as_a_question():
     from app.pool.service import _messages_of
 
