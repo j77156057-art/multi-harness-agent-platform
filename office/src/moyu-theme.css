@@ -32,13 +32,14 @@
    这里把同一批语义令牌换成暖纸系；所有消费方（flex 布局里的 var() 引用）
    自动跟随，无需逐条改。 */
 :root {
-  /* 浅色工作面：暖纸底 */
-  --ao-bg: #F7F2E9;
-  --ao-surface: #FBF6EE;
-  --ao-paper: #FFFDF9;
-  /* 描边：不再是墨色硬线，改为纸纤维感的低对比线 */
-  --ao-border: #E6DDCF;
-  --ao-border-strong: #D5C9B6;
+  /* 浅色工作面：白。原来是暖纸 #F7F2E9，主体改为纯白后，文字仍用暖墨、
+     强调色仍是陶土橙 —— 白纸 + 陶土是同一套语言，不需要把整页变冷。 */
+  --ao-bg: #FFFFFF;
+  --ao-surface: #FFFFFF;
+  --ao-paper: #FFFFFF;
+  /* 描边：白底上不能用暖米线（会显脏），换成中性浅灰 */
+  --ao-border: #E4E4E4;
+  --ao-border-strong: #CFCFCF;
   /* 文字：暖墨，不是冷黑 */
   --ao-text: #2B2621;
   --ao-text-soft: #5B5348;
@@ -66,8 +67,8 @@
   --ao-bad-ink: #A8423A;
   /* 层级：10px 控件圆角 + 12px 面板圆角，柔和阴影取代粗边 */
   --ao-radius: 10px;
-  --ao-shadow: 0 10px 28px rgba(43, 38, 33, .07);
-  --ao-line-soft: #EFE7DA;
+  --ao-shadow: 0 10px 28px rgba(20, 20, 20, .06);
+  --ao-line-soft: #F0F0F0;
   /* 分色阶梯：面板 12px、胶囊 999px（新增别名，不改变原令牌语义） */
   --ao-radius-card: 12px;
   --ao-radius-pill: 999px;
@@ -96,7 +97,7 @@
    后加载，这里重新声明一次把工作面拉回暖纸系。 */
 .ao-workspace.flat-office {
   --ao-line: var(--ao-border);
-  --ao-line-soft: #EFE7DA;
+  --ao-line-soft: #F0F0F0;
   --ao-ink: var(--ao-text);
   --ao-ink-soft: var(--ao-text-soft);
   --ao-ink-faint: var(--ao-text-faint);
@@ -118,7 +119,7 @@ html,
 body,
 #app,
 .ao-app {
-  background: radial-gradient(140% 100% at 50% 0%, #FBF6EE 0%, #F3ECDF 100%) fixed;
+  background: radial-gradient(140% 100% at 50% 0%, #FFFFFF 0%, #F6F6F6 100%) fixed;
 }
 
 /* 修的是：外壳与工作区各自铺了不透明底色，会把上面那层暗角整块遮掉。
@@ -1416,4 +1417,72 @@ body.direct-body textarea::placeholder {
   font-weight: 500;
   color: var(--ao-text-faint);
   opacity: 1;
+}
+
+/* ---------------------------------------------------------------- 头部改白
+   原来的头部是整页唯一一块深色（商业版皮肤里 `background: var(--ao-sidebar)`），
+   配浅色字。主体底色改成白之后，它成了全屏最重的一块：白内容上方压着一块深褐，
+   眼睛先被它撞一下，而它承载的信息（项目名 + 一句话 + 四个数）并不比其他区域重要。
+
+   改白之后，层次靠 1px 描边和 28px 的字号撑，不靠色块。字色全部换成正文的暖墨系，
+   `待处理/未完成` 的强调改用 `*-ink` 档（白底上原来那两档浅红浅橙过不了 AA）。
+   本条追加在本文件**末尾**：`.flat-head h1` 的旧覆盖在文件中部，同权重靠后加载取胜。 */
+.ao-workspace.flat-office .flat-head {
+  background: var(--ao-surface);
+  color: var(--ao-text);
+  border-bottom: 1px solid var(--ao-border);
+}
+
+.ao-workspace.flat-office .flat-head-main h1 {
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-head-main p.flat-guide {
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-head-main p.flat-guide b {
+  color: var(--ao-accent-ink);
+}
+
+.ao-workspace.flat-office .flat-head-main p.flat-today {
+  color: var(--ao-text-faint);
+}
+
+.ao-workspace.flat-office .flat-counts li {
+  border-left-color: var(--ao-border);
+}
+
+.ao-workspace.flat-office .flat-counts li.has-value,
+.ao-workspace.flat-office .flat-counts li.is-review.has-value,
+.ao-workspace.flat-office .flat-counts li.is-failed.has-value {
+  border-color: var(--ao-border);
+  background: transparent;
+}
+
+.ao-workspace.flat-office .flat-counts span {
+  color: var(--ao-text-soft);
+}
+
+.ao-workspace.flat-office .flat-counts li b,
+.ao-workspace.flat-office .flat-counts li.has-value b {
+  color: var(--ao-text);
+}
+
+.ao-workspace.flat-office .flat-counts .is-review.has-value b {
+  color: var(--ao-warn-ink);
+}
+
+.ao-workspace.flat-office .flat-counts .is-failed.has-value b {
+  color: var(--ao-bad-ink);
+}
+
+.ao-workspace.flat-office .flat-source {
+  color: var(--ao-text-faint);
+}
+
+.ao-workspace.flat-office .flat-source select {
+  border-color: var(--ao-border);
+  background: var(--ao-surface);
+  color: var(--ao-text);
 }
