@@ -75,7 +75,7 @@ NO_ATTEMPT = None
 
 
 class RejectCode(StrEnum):
-    """Rejection codes. Names mirror docs/prep/MVP-08/error-codes.md."""
+    """Rejection codes. Names mirror docs/prep/MVP-08/error-codes.md (internal design doc, not in this repo)."""
 
     TASK_NOT_FOUND = "claim.task_not_found"
     TASK_NOT_READY = "claim.task_not_ready"
@@ -89,7 +89,7 @@ class RejectCode(StrEnum):
     IDEMPOTENCY_CONFLICT = "idempotency.conflict"
     HARNESS_INELIGIBLE = "claim.harness_ineligible"
     #: §39 硬规则 2 的强制口径：所在群开着分配门禁时，没有"已 accepted 的分配"就
-    #: 不能开第一份 attempt。名字与 docs/prep/MVP-08/error-codes.md 对齐。
+    #: 不能开第一份 attempt。名字与 docs/prep/MVP-08/error-codes.md（内部设计稿，未入库）对齐。
     NOT_AUTHORIZED = "claim.not_authorized"
 
 

@@ -1,6 +1,6 @@
 """Uniform error envelope and domain-exception mapping (MVP-08).
 
-Codes are the ones defined in ``docs/prep/MVP-08/error-codes.md``. The envelope
+Codes mirror the ones in ``docs/prep/MVP-08/error-codes.md`` (internal design doc, not in this repo). The envelope
 is::
 
     {"error": {"code", "message", "retryable", "task_id"?, "seq"?, "details"?}}

@@ -15,7 +15,7 @@
 管理员**必须是窗口身份**（``<base>-member|window-<slot>``）：细化通道由这个身份解析
 （``AdminService._model_channel``），解析不出 CLI 的身份会 fail closed。``office-admin``
 这类模型身份因此不能当管理员——它是平台 Agent（界面叫「平台助手」）的模型身份，
-不占 harness 槽位（见 ``docs/prep/PLATFORM-AGENT-MODEL-IDENTITY/R10-FIX-15-DRAFT.md``）。
+不占 harness 槽位（出处：内部设计稿 docs/prep/PLATFORM-AGENT-MODEL-IDENTITY/R10-FIX-15-DRAFT.md，未随本仓库分发，别去找）。
 """
 
 from app.admin.service import AdminHarnessError, AdminService, RefinedTask

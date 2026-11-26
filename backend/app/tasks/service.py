@@ -55,7 +55,7 @@ class NotFound(LookupError):
 class Conflict(RuntimeError):
     """The request is valid but the current state forbids it.
 
-    ``code`` names the specific wire code from docs/prep/MVP-08/error-codes.md;
+    ``code`` names the specific wire code from docs/prep/MVP-08/error-codes.md (internal design doc, not in this repo);
     without one the API layer falls back to a generic ``request.conflict``.
     """
 

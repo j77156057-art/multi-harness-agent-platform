@@ -62,7 +62,7 @@ _LANDING_HTML = """<!doctype html>
 
 #: Hostnames accepted in the Host header. R10 §5 binds v1 to localhost; checking
 #: the header as well is what stops a DNS-rebinding page from driving the
-#: scheduler through the browser (docs/prep/MVP-08/README.md D-6).
+#: scheduler through the browser (docs/prep/MVP-08/README.md D-6 -- internal design doc, not in this repo).
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
 

@@ -1,7 +1,7 @@
 """MVP-08 REST routes.
 
 Path naming follows R10 §7 / §21 so an Adapter maps verb to path tail with no
-translation table (see docs/prep/MVP-08/README.md §2). Read endpoints answer from
+translation table (see docs/prep/MVP-08/README.md §2 -- internal design doc, not in this repo). Read endpoints answer from
 the projections; the event stream is the incremental cursor.
 """
 

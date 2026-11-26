@@ -8,7 +8,7 @@
 "只有已 accepted 的分配才构成 §11 Claim 的授权"。全局强制会让存量任务一次性全部
 不可领取，连带把已经跑通的合并链和 ``test_real_adapters`` 全打红 —— 那不是把规则
 做实，那是换掉领取机制。取舍记录在
-``docs/prep/ALLOCATION-CIRCULATION-01/R10-FIX-13-DRAFT.md`` §10。
+``docs/prep/ALLOCATION-CIRCULATION-01/R10-FIX-13-DRAFT.md`` §10（内部设计稿，未入库）。
 """
 
 from __future__ import annotations
