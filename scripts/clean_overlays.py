@@ -293,11 +293,18 @@ def cmd_list(args: argparse.Namespace) -> int:
             print(f"{run_dir.name}  <manifest missing or broken>")
             continue
         items = manifest.get("items") or []
+        mode = manifest.get("mode")
         held = sum(1 for item in items if item.get("moved"))
-        size = sum(int(item.get("bytes") or 0) for item in items if item.get("moved"))
+        if mode == "purge":
+            # purge 批次的 moved 记的是"这一项处理成功"，文件其实已经删了：
+            # 报 27K 会让人以为回收区还占着空间、还能 restore。
+            size = 0
+            state = f"purged={held}/{len(items)} (deleted, not restorable)"
+        else:
+            size = sum(int(item.get("bytes") or 0) for item in items if item.get("moved"))
+            state = f"moved={held}/{len(items)}"
         print(
-            f"{run_dir.name}  mode={manifest.get('mode')}  "
-            f"moved={held}/{len(items)}  {size / 1024:.0f}K  "
+            f"{run_dir.name}  mode={mode}  {state}  {size / 1024:.0f}K  "
             f"failures={len(manifest.get('failures') or [])}"
         )
     return 0
