@@ -1,7 +1,6 @@
 -- MVP-08 验收遗留 3b：消息 refs 落库。
 --
--- 背景：docs/prep/MVP-08/openapi.yaml（内部设计稿，未随本仓库分发）的
--- post_message 请求体与 Message schema
+-- 背景：docs/prep/MVP-08/openapi.yaml 的 post_message 请求体与 Message schema
 -- 都声明 refs: string[]，但 001 的 task_messages 没有该列 —— POST 接收后
 -- 只在响应里回显，从不持久化，GET 永远读不回，引用信息静默丢失。
 --
