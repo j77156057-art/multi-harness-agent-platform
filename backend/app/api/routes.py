@@ -1927,13 +1927,20 @@ def human_merge(
     attempt_id = task["current_attempt_id"]
     if not attempt_id:
         raise ApiError("merge.no_attempt", 409, f"{body.task_id} has no current attempt")
+    # 归档的 workspace 不等于分支不存在：任务交付后 worktree 会被回收
+    # （status=archived），但它的分支还留在 canonical 里等合并。只认 active 的话，
+    # 人一旦在评审期间回收了工作树，这条活就永远合不了（实测 2026-11-27：
+    # FD-05f2860bc495958e 评审通过两天后合并被 merge.no_branch 拒）。
+    # 优先 active（还在写的优先合最新的），没有就退到最近一条有分支的记录；
+    # 分支是否真的存在由下面的 ref_commit 校验兜底。
     workspace = database.read(
-        "SELECT branch FROM workspaces WHERE attempt_id = ? AND status = 'active'"
-        " ORDER BY rowid DESC LIMIT 1",
+        "SELECT branch FROM workspaces"
+        " WHERE attempt_id = ? AND branch IS NOT NULL AND branch <> ''"
+        " ORDER BY (status = 'active') DESC, rowid DESC LIMIT 1",
         (str(attempt_id),),
     )
     if not workspace:
-        raise ApiError("merge.no_branch", 409, f"no active workspace for {attempt_id}")
+        raise ApiError("merge.no_branch", 409, f"no workspace ever recorded a branch for {attempt_id}")
     branch = str(workspace[0]["branch"])
 
     repo = getattr(request.app.state, "canonical_repo", None) or CanonicalRepo.from_settings()

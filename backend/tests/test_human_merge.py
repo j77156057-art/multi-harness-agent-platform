@@ -206,3 +206,37 @@ def test_a_task_that_has_not_passed_review_cannot_be_merged(tmp_path, monkeypatc
     assert response.status_code == 409, response.text
     assert response.json()["error"]["code"] == "merge.not_approved"
     assert status_of(chain) == "awaiting_review"
+
+
+def test_an_archived_workspace_can_still_be_merged(tmp_path, monkeypatch):
+    """工作树回收之后，分支仍在 canonical，人还能合。
+
+    实测复现（2026-11-27）：FD-05f2860bc495958e 在 11-25 交付并被批准，
+    两天后点确认合入，平台报 `merge.no_branch` —— 因为查询只认
+    `status='active'`，而工作树早被回收成 `archived`。分支还好好躺在
+    canonical 里，归档不该等于"这条活永远合不了"。
+
+    这里把 workspace 直接改成 archived，模拟同一条路径；合并应当照常成功。
+    """
+    monkeypatch.setattr(settings, "auth_mode", "enforce")
+    chain = approve(build_chain(tmp_path))
+    with chain.database.transaction() as conn:
+        conn.execute(
+            "UPDATE workspaces SET status = 'archived' WHERE attempt_id = ?",
+            (chain.attempt_id,),
+        )
+    token = _human(chain)
+
+    response = _post_merge(
+        _client(chain),
+        token,
+        {
+            "task_id": chain.task_id,
+            "decided_by": OPERATOR,
+            "confirm_commit": chain.head_commit,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "merged"
+    assert status_of(chain) == "merged"
